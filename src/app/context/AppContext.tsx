@@ -1,0 +1,1930 @@
+import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo, useCallback } from 'react';
+import { useSSE } from '../hooks/useSSE';
+import { usePushNotifications } from '../hooks/usePushNotifications';
+import { v4 as uuidv4 } from 'uuid';
+import { useAuth } from './AuthContext';
+import { useBusiness } from './BusinessContext';
+import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
+import { logActivityRequest } from '../lib/authApi';
+import {
+  bulkCreateVehiclesRequest,
+  createVehicleRequest,
+  deleteVehicleRequest,
+  listVehiclesRequest,
+  updateVehicleRequest,
+} from '../lib/vehicleApi';
+import {
+  createClientRequest,
+  createLeadRequest,
+  deleteClientRequest,
+  deleteLeadRequest,
+  listClientsRequest,
+  listLeadsRequest,
+  updateClientRequest,
+  updateLeadRequest,
+} from '../lib/crmApi';
+import {
+  createNotificationRequest,
+  listNotificationsRequest,
+  markAllNotificationsReadRequest,
+  markNotificationReadRequest,
+  type NotificationLevel,
+  type NotificationRecord,
+} from '../lib/notificationApi';
+import {
+  createParkingZone,
+  type CreateParkingZoneInput,
+  type ParkingZone,
+} from '../lib/parkingZones';
+import {
+  listSalesRecords,
+  createSaleInCouch,
+  updateSaleInCouch,
+  deleteSaleInCouch,
+} from '../lib/salesApi';
+import type { SaleRecord } from '../lib/salesTypes';
+import {
+  listDocumentsRequest,
+  createDocumentRequest,
+  updateDocumentRequest,
+  deleteDocumentRequest,
+  type DocumentRecord,
+} from '../lib/documentsApi';
+import {
+  listParkingZonesRequest,
+  saveParkingZoneRequest,
+  deleteParkingZoneRequest,
+  createParkingZoneRequest,
+} from '../lib/locationsApi';
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export type PriceChangeReasonCategory =
+  | 'market_adjustment'
+  | 'client_negotiation'
+  | 'time_in_stock'
+  | 'competitor_price'
+  | 'manager_decision'
+  | 'error_correction'
+  | 'other';
+
+export interface PriceHistoryEntry {
+  id: string;
+  date: string;
+  userId: string;
+  userName: string;
+  oldPrice: number | null;
+  newPrice: number | null;
+  reason: string;
+  reasonCategory?: PriceChangeReasonCategory;
+  priceVariation?: number | null;
+}
+
+export type CommercialStatus = 'preparation' | 'ready' | 'published' | 'reserved' | 'sold';
+
+export interface VehiclePublicationChannel {
+  channelId: string;
+  channelName: string;
+  url: string;
+  publishedAt: string | null;
+  unpublishedAt: string | null;
+  active: boolean;
+  notes: string;
+}
+
+export interface CommercialStatusHistoryEntry {
+  id: string;
+  date: string;
+  userId: string;
+  userName: string;
+  fromStatus: string;
+  toStatus: string;
+  reason: string;
+}
+
+export interface WarrantyClaim {
+  id: string;
+  date: string;
+  description: string;
+  resolved: boolean;
+}
+
+export interface Warranty {
+  id: string;
+  type: 'factory' | 'own';
+  provider: string;
+  startDate?: string;
+  endDate?: string;
+  coverage: string;
+  claims: WarrantyClaim[];
+}
+
+export type CostCategory = 'preparacion' | 'itv' | 'limpieza' | 'fotos' | 'publicidad' | 'otro';
+
+export interface AssociatedCost {
+  id: string;
+  category: CostCategory;
+  description: string;
+  amount: number;
+  date: string;
+}
+
+export type PreparationExpenseType = 'taller' | 'limpieza' | 'pintura' | 'transporte' | 'gestoria' | 'combustible' | 'itv' | 'otro';
+export type PreparationExpenseStatus = 'pendiente' | 'revisado' | 'validado' | 'rechazado';
+
+export interface PreparationExpense {
+  id: string;
+  type: 'preparation_expense';
+  user_id: string;
+  business_id?: string;
+  vehicleId: string;
+  vehiclePlate: string;
+  vehicleLabel: string;
+  expenseType: PreparationExpenseType;
+  amount: number;
+  date: string;
+  supplierId?: string;
+  supplierName?: string;
+  documentId?: string;
+  documentName?: string;
+  ocrData?: Record<string, unknown>;
+  notes?: string;
+  status: PreparationExpenseStatus;
+  validatedBy?: string;
+  validatedAt?: string;
+  rejectionReason?: string;
+  invoiceNumber?: string;
+  paymentId?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VehicleWorkshopRepair {
+  id: string;
+  concept: string;
+  date: string;
+  amount: number;
+  status: 'pending' | 'in_progress' | 'done';
+  workshop: string;
+  notes: string;
+}
+
+export interface VehicleChecklistItem {
+  id: string;
+  task: string;
+  done: boolean;
+  category: string;
+}
+
+export interface Vehicle {
+  id: string;
+  _rev?: string;
+  type?: string;
+  user_id?: string;
+  active?: boolean;
+  registrationPlate: string;
+  brand: string;
+  model: string;
+  version?: string;
+  year: number;
+  color: string;
+  fuelType?: 'gasolina' | 'diesel' | 'hibrido' | 'electrico' | 'glp' | 'otro';
+  mileage?: number;
+  vin?: string;
+  transmission?: 'manual' | 'automatico' | 'semiauto';
+  doors?: number;
+  power?: number;
+  bodyType?: 'sedan' | 'suv' | 'familiar' | 'coupe' | 'cabrio' | 'furgon' | 'pickup' | 'otro';
+  purchasePrice: number;
+  salePrice?: number;
+  purchaseDate?: string;
+  origin?: 'particular' | 'empresa' | 'subasta' | 'permuta' | 'otro';
+  supplierName?: string;
+  status: 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido';
+  location?: string;
+  daysInStock: number;
+  images?: string[];
+  notes?: string;
+  priceHistory?: PriceHistoryEntry[];
+  warranties?: Warranty[];
+  associatedCosts?: AssociatedCost[];
+  preparationCostTotal?: number;
+  estimatedMargin?: number | null;
+  totalCosts?: number;
+  margin?: number | null;
+  marginPercent?: number | null;
+  workshopRepairs?: VehicleWorkshopRepair[];
+  workshopChecklist?: VehicleChecklistItem[];
+  assignedTo?: string | null;
+  assignedToName?: string | null;
+  assignedAt?: string | null;
+  stockAlertSentAt?: string | null;
+  lowMarginAlertSentAt?: string | null;
+  noPhotosAlertSentAt?: string | null;
+  incompleteDataAlertSentAt?: string | null;
+  workCenterId?: string;
+  workCenterName?: string;
+
+  commercialDescription?: string;
+  commercialStatus?: CommercialStatus;
+  published?: boolean;
+  publishedAt?: string | null;
+  featured?: boolean;
+  minimumSalePrice?: number | null;
+  assignedCommercialId?: string | null;
+  assignedCommercialName?: string | null;
+  publicationChannels?: VehiclePublicationChannel[];
+  estimatedMargin?: number | null;
+  totalPreparationCost?: number | null;
+  marginPercentage?: number | null;
+  commercialStatusHistory?: CommercialStatusHistoryEntry[];
+
+  createdAt: Date;
+  updatedAt?: Date;
+  soldAt?: Date;
+}
+
+export type TradeInCondition = 'excelente' | 'bueno' | 'regular' | 'malo';
+export type TradeInStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface TradeIn {
+  id: string;
+  _rev?: string;
+  type?: string;
+  user_id?: string;
+  business_id?: string;
+  linkedVehicleId?: string;
+  brand: string;
+  model: string;
+  version?: string;
+  year: number;
+  mileage?: number;
+  color: string;
+  fuelType?: string;
+  registrationPlate?: string;
+  vin?: string;
+  condition: TradeInCondition;
+  estimatedValue: number;
+  acceptedValue?: number;
+  notes?: string;
+  status: TradeInStatus;
+  appraiserUserId?: string;
+  appraiserName?: string;
+  createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface LeadInteraction {
+  id: string;
+  type: 'call' | 'email' | 'meeting' | 'note' | 'appointment';
+  title: string;
+  description: string;
+  date: string;
+  user: string;
+}
+
+export interface Lead {
+  id: string;
+  _rev?: string;
+  type?: 'lead';
+  user_id?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  source: string;
+  status: 'new' | 'contacted' | 'appointment' | 'reserved' | 'negotiation' | 'won' | 'lost';
+  interestedVehicle?: string;
+  vehicleInterest?: string;
+  vehicleInterestId?: string;
+  budget?: string;
+  notes?: string;
+  responsible?: string;
+  branch_id?: string;
+  tags?: string[];
+  interactions?: LeadInteraction[];
+  score?: number;
+  lastContact?: Date;
+  convertedAt?: Date;
+  convertedToClientId?: string;
+  convertedToClientName?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  referrer?: string;
+  landing_page?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface ConsentHistoryEntry {
+  timestamp: string;
+  type: 'dataProcessing' | 'commercial' | 'thirdParty';
+  value: boolean;
+  method: 'web' | 'phone' | 'presential' | 'email' | 'written';
+  user?: string;
+}
+
+export interface GdprRecord {
+  deletionRequested: boolean;
+  deletionRequestedAt?: string;
+  deletionCompletedAt?: string;
+  dataExportRequestedAt?: string;
+  consentHistory: ConsentHistoryEntry[];
+}
+
+export type ClientType = 'particular' | 'empresa';
+
+export type PaymentMethod =
+  | 'efectivo'
+  | 'tarjeta'
+  | 'transferencia'
+  | 'domiciliacion'
+  | 'bizum'
+  | 'cheque'
+  | 'pagare'
+  | 'confirming'
+  | 'otro';
+
+export interface ClientAddress {
+  id: string;
+  label?: string;
+  street: string;
+  city?: string;
+  postalCode?: string;
+  state?: string;
+  country?: string;
+  isPrimary?: boolean;
+  isDefault?: boolean;
+  notes?: string;
+  usageCount?: number;
+  lastUsedAt?: string | null;
+}
+
+export type ClientCreatedFrom = 'crm' | 'tpv' | 'pedido' | 'presupuesto' | 'factura' | 'vertical' | 'import' | 'web';
+
+export interface ClientStats {
+  totalOrders: number;
+  lastOrderDate: string | null;
+  orderFrequencyDays: number;
+  favoriteAddressId: string | null;
+  totalSpent: number;
+  createdFrom: ClientCreatedFrom;
+}
+
+export type LoyaltyLevel = 'bronze' | 'silver' | 'gold' | 'platinum';
+
+export interface ClientLoyalty {
+  enrolled: boolean;
+  enrolledAt: string | null;
+  points: number;
+  level: LoyaltyLevel;
+  totalVisits: number;
+}
+
+export interface Client {
+  id: string;
+  _rev?: string;
+  type?: 'client';
+  user_id?: string;
+  clientType?: ClientType;
+  name: string;
+  phone: string;
+  phonePrefix?: string;
+  email: string;
+  dni?: string;
+  legalName?: string;
+  fiscalId?: string;
+  fiscalAddress?: string;
+  fiscalCity?: string;
+  fiscalPostalCode?: string;
+  fiscalCountry?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  status: 'active' | 'inactive';
+  commercialStatus?: string;
+  responsible?: string;
+  branch_id?: string;
+  notes?: string;
+  defaultPaymentMethod?: PaymentMethod | '';
+  tags?: string[];
+  consents?: {
+    dataProcessing: boolean;
+    commercial: boolean;
+    thirdParty: boolean;
+  };
+  gdpr?: GdprRecord;
+  vehiclesPurchased?: string[];
+  vehiclesSold?: string[];
+  documentsCount?: number;
+  contacts?: Array<{
+    id: string;
+    name: string;
+    role?: string;
+    phone?: string;
+    email?: string;
+  }>;
+  addresses?: ClientAddress[];
+  socialLinks?: Array<{
+    platform: string;
+    url: string;
+  }>;
+  interactions?: Array<{
+    id: string;
+    type: 'call' | 'email' | 'meeting' | 'note';
+    title: string;
+    description: string;
+    date: string;
+    user: string;
+  }>;
+  documentsList?: Array<{
+    id: string;
+    name: string;
+    date: string;
+    status: string;
+  }>;
+  referralCode?: string;
+  stats?: ClientStats;
+  loyalty?: ClientLoyalty;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface Sale {
+  id: string;
+  _id?: string;
+  _rev?: string;
+  vehicleId: string;
+  clientId: string;
+  salePrice: number;
+  downPayment?: number;
+  financingAmount?: number;
+  notes?: string;
+  status: 'pending' | 'completed' | 'cancelled';
+  saleDate: Date;
+  deliveryDate?: Date;
+  createdAt: Date;
+}
+
+export interface Document {
+  id: string;
+  _id?: string;
+  _rev?: string;
+  name: string;
+  type: string;
+  status: 'pending' | 'signed' | 'sent';
+  relatedTo?: string;
+  relatedToId?: string;
+  templateId?: string;
+  notes?: string;
+  expiresAt?: string;
+  createdAt: Date;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  capacity: number;
+  currentVehicles: number;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
+export interface AppNotification {
+  id: string;
+  _rev?: string;
+  user_id: string;
+  level: NotificationLevel;
+  category: string;
+  title: string;
+  message: string;
+  entityId?: string;
+  entityType?: string;
+  route?: string;
+  metadata?: Record<string, unknown>;
+  read: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type SubscriptionStatus =
+  | 'trial_active'
+  | 'trial_expiring'
+  | 'trial_expired'
+  | 'subscription_active'
+  | 'payment_failed'
+  | 'grace_period'
+  | 'suspended';
+
+export interface Subscription {
+  status: SubscriptionStatus;
+  planName: string;
+  selectedPlanId?: string;
+  trialEndsAt?: Date;
+  currentPeriodStart?: Date;
+  currentPeriodEnd?: Date;
+  gracePeriodEndsAt?: Date;
+  lastPaymentAt?: Date;
+  cancelAtPeriodEnd: boolean;
+}
+
+// ─── Context Type ─────────────────────────────────────────────────────────────
+
+export interface AppContextType {
+  vehicles: Vehicle[];
+  isLoadingVehicles: boolean;
+  isLoadingClients: boolean;
+  parkingZones: ParkingZone[];
+  leads: Lead[];
+  clients: Client[];
+  notifications: AppNotification[];
+  sales: Sale[];
+  documents: Document[];
+  locations: Location[];
+  user: User | null;
+  subscription: Subscription;
+  canAccessFeature: () => boolean;
+  canPerformCriticalAction: () => boolean;
+  getAccessRestrictionMessage: () => string | null;
+  addVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>) => Promise<Vehicle | void>;
+  addVehiclesBulk: (vehicles: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>[]) => Promise<Vehicle[]>;
+  updateVehicle: (id: string, updates: Partial<Vehicle>, priceChangeReason?: string, priceChangeReasonCategory?: PriceChangeReasonCategory) => Promise<void>;
+  deleteVehicle: (id: string) => Promise<void>;
+  addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'status'>) => Promise<Lead | void>;
+  updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
+  deleteLead: (id: string) => Promise<void>;
+  addClient: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<Client | void>;
+  updateClient: (id: string, updates: Partial<Client>) => Promise<void>;
+  deleteClient: (id: string) => Promise<void>;
+  createNotification: (notification: {
+    level?: NotificationLevel;
+    category?: string;
+    title: string;
+    message: string;
+    entityId?: string;
+    entityType?: string;
+    route?: string;
+    metadata?: Record<string, unknown>;
+    read?: boolean;
+    createdAt?: string;
+  }) => Promise<AppNotification | null>;
+  markNotificationAsRead: (id: string, read?: boolean) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  addSale: (sale: Omit<Sale, 'id' | 'createdAt' | 'status' | 'saleDate'>) => Promise<void>;
+  updateSale: (id: string, updates: Partial<Sale>) => Promise<void>;
+  deleteSale: (id: string) => Promise<void>;
+  addDocument: (document: Omit<Document, 'id' | 'createdAt'>) => Promise<void>;
+  updateDocument: (id: string, updates: Partial<Document>) => Promise<void>;
+  deleteDocument: (id: string) => Promise<void>;
+  addLocation: (location: Omit<Location, 'id'>) => void;
+  addParkingZone: (zone: CreateParkingZoneInput) => void;
+  updateLocation: (id: string, updates: Partial<Location>) => void;
+  deleteLocation: (id: string) => void;
+  getStats: () => {
+    totalVehicles: number;
+    vehiclesAvailable: number;
+    vehiclesReserved: number;
+    vehiclesSold: number;
+    totalLeads: number;
+    activeSales: number;
+    pendingDocuments: number;
+    totalStockValue: number;
+  };
+}
+
+// ─── HMR-safe singleton context ───────────────────────────────────────────────
+// Store the context on globalThis so it survives React Fast Refresh reloads.
+// This prevents the "used outside Provider" error caused by HMR creating a new
+// context object identity while the old Provider is still in the React tree.
+
+const CONTEXT_KEY = '__udar_app_ctx__';
+
+function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> {
+  const g = globalThis as any;
+  if (!g[CONTEXT_KEY]) {
+    const defaultStats = () => ({
+      totalVehicles: 0, vehiclesAvailable: 0, vehiclesReserved: 0,
+      vehiclesSold: 0, totalLeads: 0, activeSales: 0, pendingDocuments: 0, totalStockValue: 0,
+    });
+    const defaultCtx: AppContextType = {
+      vehicles: [], isLoadingVehicles: true, isLoadingClients: true, parkingZones: [], leads: [], clients: [], notifications: [], sales: [], documents: [], locations: [], user: null,
+      subscription: { status: 'trial_active', planName: 'Basic', cancelAtPeriodEnd: false },
+      canAccessFeature: () => true,
+      canPerformCriticalAction: () => true,
+      getAccessRestrictionMessage: () => null,
+      addVehicle: async () => undefined,
+      addVehiclesBulk: async () => [],
+      updateVehicle: async () => {},
+      deleteVehicle: async () => {},
+      addLead: async () => undefined, updateLead: async () => {}, deleteLead: async () => {},
+      addClient: async () => undefined, updateClient: async () => {}, deleteClient: async () => {},
+      createNotification: async () => null,
+      markNotificationAsRead: async () => {},
+      markAllNotificationsAsRead: async () => {},
+      addSale: async () => {}, updateSale: async () => {}, deleteSale: async () => {},
+      addDocument: async () => {}, updateDocument: async () => {}, deleteDocument: async () => {},
+      addLocation: () => {}, addParkingZone: () => {}, updateLocation: () => {}, deleteLocation: () => {},
+      getStats: defaultStats,
+    };
+    g[CONTEXT_KEY] = createContext<AppContextType>(defaultCtx);
+  }
+  return g[CONTEXT_KEY];
+}
+
+const AppContext = getOrCreateContext();
+
+// ─── Date Deserializers ───────────────────────────────────────────────────────
+
+function deserializeVehicle(v: any): Vehicle {
+  return {
+    ...v,
+    createdAt: new Date(v.createdAt),
+    updatedAt: v.updatedAt ? new Date(v.updatedAt) : undefined,
+    soldAt: v.soldAt ? new Date(v.soldAt) : undefined,
+  };
+}
+function deserializeLead(l: any): Lead {
+  return {
+    ...l,
+    createdAt: new Date(l.createdAt),
+    updatedAt: l.updatedAt ? new Date(l.updatedAt) : undefined,
+    lastContact: l.lastContact ? new Date(l.lastContact) : undefined,
+    convertedAt: l.convertedAt ? new Date(l.convertedAt) : undefined,
+  };
+}
+function deserializeClient(c: any): Client {
+  return {
+    ...c,
+    createdAt: new Date(c.createdAt),
+    updatedAt: c.updatedAt ? new Date(c.updatedAt) : undefined,
+    consents: c.consents || { dataProcessing: false, commercial: false, thirdParty: false },
+    tags: c.tags || [],
+    gdpr: c.gdpr || { deletionRequested: false, consentHistory: [] },
+    vehiclesPurchased: c.vehiclesPurchased || [],
+    vehiclesSold: c.vehiclesSold || [],
+    documentsCount: c.documentsCount || 0,
+    interactions: c.interactions || [],
+    documentsList: c.documentsList || [],
+  };
+}
+function deserializeSale(s: any): Sale {
+  return { ...s, createdAt: new Date(s.createdAt), saleDate: new Date(s.saleDate), deliveryDate: s.deliveryDate ? new Date(s.deliveryDate) : undefined };
+}
+function deserializeDocument(d: any): Document {
+  return { ...d, createdAt: new Date(d.createdAt) };
+}
+
+function deserializeNotification(notification: NotificationRecord): AppNotification {
+  return {
+    ...notification,
+    metadata: notification.metadata || {},
+    route: notification.route || '',
+    entityId: notification.entityId || '',
+    entityType: notification.entityType || '',
+    updatedAt: notification.updatedAt || notification.createdAt,
+  };
+}
+
+function deserializeSubscription(subscription?: PersistedBillingSubscription | null): Subscription {
+  if (!subscription) {
+    return {
+      status: 'trial_active',
+      planName: 'Basic',
+      selectedPlanId: 'basic',
+      trialEndsAt: new Date(Date.now() + 14 * 86400000),
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 14 * 86400000),
+      gracePeriodEndsAt: new Date(Date.now() + 17 * 86400000),
+      lastPaymentAt: undefined,
+      cancelAtPeriodEnd: false,
+    };
+  }
+
+  return {
+    status: subscription.status,
+    planName: subscription.planName,
+    selectedPlanId: subscription.selectedPlanId,
+    trialEndsAt: subscription.trialEndsAt ? new Date(subscription.trialEndsAt) : undefined,
+    currentPeriodStart: subscription.currentPeriodStart ? new Date(subscription.currentPeriodStart) : undefined,
+    currentPeriodEnd: subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd) : undefined,
+    gracePeriodEndsAt: subscription.gracePeriodEndsAt ? new Date(subscription.gracePeriodEndsAt) : undefined,
+    lastPaymentAt: subscription.lastPaymentAt ? new Date(subscription.lastPaymentAt) : undefined,
+    cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
+  };
+}
+
+// ─── Demo seed ────────────────────────────────────────────────────────────────
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const { user: authUser } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const scopeKey = currentBusiness?.business_id
+    ? `b:${currentBusiness.business_id}`
+    : authUser?.user_id
+      ? `u:${authUser.user_id}`
+      : 'guest';
+  const vehiclesStorageKey = `udar-vehicles:${scopeKey}`;
+  const parkingZonesStorageKey = `udar-parking-zones:${scopeKey}`;
+  const leadsStorageKey = `udar-leads:${scopeKey}`;
+  const clientsStorageKey = `udar-clients:${scopeKey}`;
+  const notificationsStorageKey = `udar-notifications:${scopeKey}`;
+
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
+  const [isLoadingClients, setIsLoadingClients] = useState(true);
+  const [parkingZones, setParkingZones] = useState<ParkingZone[]>(() => []);
+
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    try {
+      const saved = localStorage.getItem('udar-leads:guest');
+      if (saved) return JSON.parse(saved).map(deserializeLead);
+      return [
+        {
+          id: 'LEAD-001',
+          type: 'lead',
+          name: 'Carlos Martínez Ruiz',
+          phone: '654 321 789',
+          email: 'carlos.martinez@email.com',
+          source: 'Sitio web',
+          status: 'new',
+          vehicleInterest: 'BMW Serie 3 2020',
+          vehicleInterestId: '',
+          budget: '28.000€',
+          notes: 'Solicitó financiación a 48 meses.',
+          responsible: 'Juan García',
+          createdAt: new Date('2024-03-07'),
+        },
+        {
+          id: 'LEAD-002',
+          type: 'lead',
+          name: 'Laura Fernández López',
+          phone: '622 555 444',
+          email: 'laura.fernandez@email.com',
+          source: 'Referido',
+          status: 'contacted',
+          vehicleInterest: 'Audi A4 2019',
+          vehicleInterestId: '',
+          budget: '25.000€',
+          notes: 'Quiere ver dos opciones este fin de semana.',
+          responsible: 'María López',
+          createdAt: new Date('2024-03-06'),
+        },
+        {
+          id: 'LEAD-003',
+          type: 'lead',
+          name: 'Miguel Sánchez Torres',
+          phone: '611 222 333',
+          email: 'miguel.sanchez@email.com',
+          source: 'Llamada telefónica',
+          status: 'appointment',
+          vehicleInterest: 'Mercedes C-Class 2021',
+          vehicleInterestId: '',
+          budget: '35.000€',
+          notes: 'Cita agendada para revisión de vehículo.',
+          responsible: 'Carlos Ruiz',
+          createdAt: new Date('2024-03-05'),
+        },
+      ];
+    } catch { return []; }
+  });
+
+  const [clients, setClients] = useState<Client[]>(() => {
+    try {
+      const saved = localStorage.getItem('udar-clients:guest');
+      if (saved) return JSON.parse(saved).map(deserializeClient);
+      // Si no hay clientes guardados, crear algunos de ejemplo
+      return [
+        {
+          id: 'CLIENT-001',
+          name: 'Carlos Martínez González',
+          phone: '+34 612 345 678',
+          email: 'carlos.martinez@email.com',
+          dni: '12345678A',
+          address: 'Calle Mayor 123',
+          city: 'Madrid',
+          postalCode: '28013',
+          status: 'active' as const,
+          responsible: 'Juan García',
+          notes: 'Cliente preferente',
+          consents: { dataProcessing: true, commercial: true, thirdParty: false },
+          documentsCount: 3,
+          interactions: [
+            {
+              id: 'INT-001',
+              type: 'note',
+              title: 'Seguimiento premium',
+              description: 'Solicita propuestas de SUV premium con entrega inmediata.',
+              date: '2024-03-01T10:00:00.000Z',
+              user: 'Juan García',
+            },
+          ],
+          documentsList: [
+            { id: 'DOC-001', name: 'Contrato marco', date: '2024-01-15', status: 'Firmado' },
+            { id: 'DOC-002', name: 'DNI cliente', date: '2024-01-15', status: 'Validado' },
+            { id: 'DOC-003', name: 'Justificante transferencia', date: '2024-01-18', status: 'Recibido' },
+          ],
+          createdAt: new Date('2024-01-15'),
+        },
+        {
+          id: 'CLIENT-002',
+          name: 'Laura Fernández Ruiz',
+          phone: '+34 623 456 789',
+          email: 'laura.fernandez@email.com',
+          dni: '23456789B',
+          address: 'Avenida de la Constitución 45',
+          city: 'Barcelona',
+          postalCode: '08001',
+          status: 'active' as const,
+          responsible: 'María López',
+          consents: { dataProcessing: true, commercial: false, thirdParty: false },
+          documentsCount: 1,
+          documentsList: [
+            { id: 'DOC-004', name: 'Reserva firmada', date: '2024-02-10', status: 'Firmado' },
+          ],
+          createdAt: new Date('2024-02-10'),
+        },
+        {
+          id: 'CLIENT-003',
+          name: 'Miguel Sánchez Pérez',
+          phone: '+34 634 567 890',
+          email: 'miguel.sanchez@email.com',
+          dni: '34567890C',
+          status: 'active' as const,
+          responsible: 'Carlos Ruiz',
+          notes: 'Interesado en SUV',
+          consents: { dataProcessing: true, commercial: true, thirdParty: false },
+          createdAt: new Date('2024-03-05'),
+        },
+        {
+          id: 'CLIENT-004',
+          name: 'Ana Rodríguez López',
+          phone: '+34 645 678 901',
+          email: 'ana.rodriguez@email.com',
+          dni: '45678901D',
+          address: 'Plaza España 8',
+          city: 'Valencia',
+          postalCode: '46001',
+          status: 'active' as const,
+          responsible: 'Juan García',
+          consents: { dataProcessing: true, commercial: false, thirdParty: false },
+          createdAt: new Date('2024-01-20'),
+        },
+        {
+          id: 'CLIENT-005',
+          name: 'David García Moreno',
+          phone: '+34 656 789 012',
+          email: 'david.garcia@email.com',
+          dni: '56789012E',
+          status: 'active' as const,
+          responsible: 'María López',
+          notes: 'Cliente corporativo',
+          consents: { dataProcessing: true, commercial: true, thirdParty: true },
+          createdAt: new Date('2024-02-28'),
+        },
+      ];
+    } catch { return []; }
+  });
+
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem('udar-notifications:guest');
+      return saved ? JSON.parse(saved).map(deserializeNotification) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+
+  const [locations, setLocations] = useState<Location[]>([]);
+
+  const [user, setUser] = useState<User | null>(null);
+
+  const [subscription, setSubscription] = useState<Subscription>({
+    status: 'trial_active',
+    planName: 'Basic',
+    selectedPlanId: 'basic',
+    trialEndsAt: new Date(Date.now() + 30 * 86400000),
+    currentPeriodStart: new Date(),
+    currentPeriodEnd: new Date(Date.now() + 30 * 86400000),
+    gracePeriodEndsAt: new Date(Date.now() + 30 * 86400000),
+    lastPaymentAt: undefined,
+    cancelAtPeriodEnd: false,
+  });
+
+
+  useEffect(() => {
+    if (!authUser) {
+      setUser(null);
+      setSubscription(deserializeSubscription(null));
+      return;
+    }
+
+    setUser({
+      id: authUser.user_id,
+      name: authUser.fullName || `${authUser.firstName} ${authUser.lastName}`.trim(),
+      email: authUser.email,
+      role: authUser.role,
+    });
+    setSubscription(deserializeSubscription(authUser.subscription));
+  }, [authUser]);
+
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      setVehicles([]);
+      setIsLoadingVehicles(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingVehicles(true);
+
+    listVehiclesRequest(authUser.user_id, currentBusiness?.business_id || null)
+      .then((response) => {
+        if (cancelled) return;
+        setVehicles((response.vehicles || []).map(deserializeVehicle));
+        setIsLoadingVehicles(false);
+      })
+      .catch((error) => {
+        console.error('Error loading vehicles from CouchDB:', error);
+        try {
+          const saved = localStorage.getItem(vehiclesStorageKey);
+          if (saved && !cancelled) {
+            setVehicles(JSON.parse(saved).map(deserializeVehicle));
+          }
+        } catch (storageError) {
+          console.error('Error loading vehicle cache:', storageError);
+        }
+        if (!cancelled) setIsLoadingVehicles(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.user_id, currentBusiness?.business_id]);
+
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem('udar-leads:guest');
+        if (saved) {
+          setLeads(JSON.parse(saved).map(deserializeLead));
+        }
+      } catch (storageError) {
+        console.error('Error loading guest leads:', storageError);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    listLeadsRequest(authUser.user_id)
+      .then((items) => {
+        if (!cancelled) {
+          setLeads(items);
+        }
+      })
+      .catch((error) => {
+        console.error('Error loading leads from CouchDB:', error);
+        try {
+          const saved = localStorage.getItem(`udar-leads:${authUser.user_id}`);
+          if (saved && !cancelled) {
+            setLeads(JSON.parse(saved).map(deserializeLead));
+          }
+        } catch (storageError) {
+          console.error('Error loading lead cache:', storageError);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.user_id]);
+
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem('udar-clients:guest');
+        if (saved) {
+          setClients(JSON.parse(saved).map(deserializeClient));
+        }
+      } catch (storageError) {
+        console.error('Error loading guest clients:', storageError);
+      }
+      setIsLoadingClients(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingClients(true);
+
+    listClientsRequest(authUser.user_id)
+      .then((items) => {
+        if (!cancelled) {
+          setClients(items);
+          setIsLoadingClients(false);
+        }
+      })
+      .catch((error) => {
+        console.error('Error loading clients from CouchDB:', error);
+        try {
+          const saved = localStorage.getItem(`udar-clients:${authUser.user_id}`);
+          if (saved && !cancelled) {
+            setClients(JSON.parse(saved).map(deserializeClient));
+          }
+        } catch (storageError) {
+          console.error('Error loading client cache:', storageError);
+        }
+        if (!cancelled) setIsLoadingClients(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.user_id]);
+
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem('udar-notifications:guest');
+        setNotifications(saved ? JSON.parse(saved).map(deserializeNotification) : []);
+      } catch (storageError) {
+        console.error('Error loading guest notifications:', storageError);
+        setNotifications([]);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    listNotificationsRequest(authUser.user_id)
+      .then((response) => {
+        if (!cancelled) {
+          setNotifications((response.notifications || []).map(deserializeNotification));
+        }
+      })
+      .catch((error) => {
+        console.error('Error loading notifications:', error);
+        try {
+          const saved = localStorage.getItem(`udar-notifications:${authUser.user_id}`);
+          if (saved && !cancelled) {
+            setNotifications(JSON.parse(saved).map(deserializeNotification));
+          } else if (!cancelled) {
+            setNotifications([]);
+          }
+        } catch (storageError) {
+          console.error('Error loading notification cache:', storageError);
+          if (!cancelled) {
+            setNotifications([]);
+          }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.user_id]);
+
+  // ─── Load sales from CouchDB ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem('udar-sales');
+        if (saved) setSales(JSON.parse(saved).map(deserializeSale));
+      } catch { /* ignore */ }
+      return;
+    }
+
+    let cancelled = false;
+    listSalesRecords()
+      .then((records) => {
+        if (cancelled) return;
+        const mapped: Sale[] = records.map((r: SaleRecord) => ({
+          id: r.id,
+          _id: r._id,
+          _rev: r._rev,
+          vehicleId: r.vehicleId,
+          clientId: r.clientId,
+          salePrice: r.totalPrice,
+          downPayment: r.depositPaid,
+          financingAmount: r.financingAmount,
+          notes: r.notes,
+          status: r.stage === 'delivered' || r.stage === 'sold' ? 'completed' :
+                  r.stage === 'interested' || r.stage === 'reserved' || r.stage === 'documentation' ? 'pending' : 'pending',
+          saleDate: new Date(r.createdAt),
+          createdAt: new Date(r.createdAt),
+        }));
+        setSales(mapped);
+      })
+      .catch((err) => {
+        console.error('Error loading sales from CouchDB:', err);
+        try {
+          const saved = localStorage.getItem('udar-sales');
+          if (saved && !cancelled) setSales(JSON.parse(saved).map(deserializeSale));
+        } catch { /* ignore */ }
+      });
+    return () => { cancelled = true; };
+  }, [authUser?.user_id]);
+
+  // ─── Load documents from CouchDB ─────────────────────────────────────────
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem('udar-documents');
+        if (saved) setDocuments(JSON.parse(saved).map(deserializeDocument));
+      } catch { /* ignore */ }
+      return;
+    }
+
+    let cancelled = false;
+    listDocumentsRequest(authUser.user_id)
+      .then((records: DocumentRecord[]) => {
+        if (cancelled) return;
+        const mapped: Document[] = records.map((r) => ({
+          id: r.id,
+          _id: r._id,
+          _rev: r._rev,
+          name: r.name,
+          type: r.docType,
+          status: r.status,
+          relatedTo: r.relatedTo,
+          relatedToId: r.relatedToId,
+          templateId: r.templateId,
+          notes: r.notes,
+          expiresAt: r.expiresAt,
+          createdAt: new Date(r.createdAt),
+        }));
+        setDocuments(mapped);
+      })
+      .catch((err) => {
+        console.error('Error loading documents from CouchDB:', err);
+        try {
+          const saved = localStorage.getItem('udar-documents');
+          if (saved && !cancelled) setDocuments(JSON.parse(saved).map(deserializeDocument));
+        } catch { /* ignore */ }
+      });
+    return () => { cancelled = true; };
+  }, [authUser?.user_id]);
+
+  // ─── Load parking zones from CouchDB ─────────────────────────────────────
+  useEffect(() => {
+    if (!authUser?.user_id) {
+      try {
+        const saved = localStorage.getItem(parkingZonesStorageKey);
+        setParkingZones(saved ? JSON.parse(saved) : []);
+      } catch {
+        setParkingZones([]);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    listParkingZonesRequest(authUser.user_id)
+      .then((zones) => {
+        if (!cancelled) setParkingZones(zones);
+      })
+      .catch((err) => {
+        console.error('Error loading parking zones from CouchDB:', err);
+        if (!cancelled) {
+          try {
+            const saved = localStorage.getItem(parkingZonesStorageKey);
+            setParkingZones(saved ? JSON.parse(saved) : []);
+          } catch {
+            setParkingZones([]);
+          }
+        }
+      });
+    return () => { cancelled = true; };
+  }, [authUser?.user_id, parkingZonesStorageKey]);
+
+  useEffect(() => { localStorage.setItem(vehiclesStorageKey, JSON.stringify(vehicles)); }, [vehicles, vehiclesStorageKey]);
+  useEffect(() => { localStorage.setItem(leadsStorageKey, JSON.stringify(leads)); }, [leads, leadsStorageKey]);
+  useEffect(() => { localStorage.setItem(clientsStorageKey, JSON.stringify(clients)); }, [clients, clientsStorageKey]);
+  useEffect(() => { localStorage.setItem(notificationsStorageKey, JSON.stringify(notifications)); }, [notifications, notificationsStorageKey]);
+
+  const canAccessFeature = () =>
+    ['trial_active', 'trial_expiring', 'subscription_active'].includes(subscription.status);
+
+  const canPerformCriticalAction = () =>
+    ['trial_active', 'trial_expiring', 'subscription_active'].includes(subscription.status);
+
+  const getAccessRestrictionMessage = (): string | null => {
+    switch (subscription.status) {
+      case 'trial_expired': return 'Tu periodo de prueba ha expirado. Actualiza tu suscripción para continuar.';
+      case 'suspended': return 'Cuenta suspendida. Actualiza tu método de pago para restaurar el acceso.';
+      case 'payment_failed': return 'Error en el pago. Algunas funciones están limitadas hasta que actualices tu método de pago.';
+      case 'grace_period': return 'Periodo de gracia activo. Funcionalidad limitada. Actualiza tu pago para restaurar el acceso completo.';
+      default: return null;
+    }
+  };
+
+  const createNotification = async (notification: {
+    level?: NotificationLevel;
+    category?: string;
+    title: string;
+    message: string;
+    entityId?: string;
+    entityType?: string;
+    route?: string;
+    metadata?: Record<string, unknown>;
+    read?: boolean;
+    createdAt?: string;
+  }): Promise<AppNotification | null> => {
+    if (!authUser?.user_id) {
+      const localNotification: AppNotification = {
+        id: `notification-${uuidv4()}`,
+        user_id: '',
+        level: notification.level || 'info',
+        category: notification.category || 'system',
+        title: notification.title,
+        message: notification.message,
+        entityId: notification.entityId || '',
+        entityType: notification.entityType || '',
+        route: notification.route || '',
+        metadata: notification.metadata || {},
+        read: Boolean(notification.read),
+        createdAt: notification.createdAt || new Date().toISOString(),
+        updatedAt: notification.createdAt || new Date().toISOString(),
+      };
+      setNotifications((prev) => [localNotification, ...prev]);
+      return localNotification;
+    }
+
+    try {
+      const response = await createNotificationRequest(authUser.user_id, notification);
+      if (!response.notification) {
+        return null;
+      }
+
+      const nextNotification = deserializeNotification(response.notification);
+      setNotifications((prev) => {
+        const withoutCurrent = prev.filter((item) => item.id !== nextNotification.id);
+        return [nextNotification, ...withoutCurrent];
+      });
+      return nextNotification;
+    } catch {
+      return null;
+    }
+  };
+
+  const markNotificationAsRead = async (id: string, read = true) => {
+    if (!id) {
+      return;
+    }
+
+    if (!authUser?.user_id) {
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === id
+            ? { ...notification, read, updatedAt: new Date().toISOString() }
+            : notification,
+        ),
+      );
+      return;
+    }
+
+    try {
+      const response = await markNotificationReadRequest(authUser.user_id, id, read);
+      if (response.notification) {
+        const nextNotification = deserializeNotification(response.notification);
+        setNotifications((prev) =>
+          prev.map((notification) => (notification.id === id ? nextNotification : notification)),
+        );
+      }
+    } catch {
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === id
+            ? { ...notification, read, updatedAt: new Date().toISOString() }
+            : notification,
+        ),
+      );
+    }
+  };
+
+  const markAllNotificationsAsRead = async () => {
+    if (!authUser?.user_id) {
+      setNotifications((prev) =>
+        prev.map((notification) => ({
+          ...notification,
+          read: true,
+          updatedAt: new Date().toISOString(),
+        })),
+      );
+      return;
+    }
+
+    try {
+      await markAllNotificationsReadRequest(authUser.user_id);
+    } catch { /* silent */ }
+    setNotifications((prev) =>
+      prev.map((notification) => ({
+        ...notification,
+        read: true,
+        updatedAt: new Date().toISOString(),
+      })),
+    );
+  };
+
+  const trackActivity = (payload: {
+    type: string;
+    action: string;
+    entityId?: string;
+    entityLabel?: string;
+    metadata?: Record<string, unknown>;
+  }) => {
+    if (!authUser?.user_id) {
+      return;
+    }
+
+    void logActivityRequest({
+      actorUserId: authUser.user_id,
+      actorName: authUser.fullName,
+      targetUserId: authUser.user_id,
+      ...payload,
+    }).catch((error) => {
+      console.error('Error logging activity:', error);
+    });
+  };
+
+  const addVehicle = async (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>) => {
+    if (!authUser?.user_id) {
+      const localVehicle: Vehicle = {
+        ...vehicle,
+        id: `VEH-${Date.now()}`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        daysInStock: 0,
+      };
+      setVehicles(prev => [localVehicle, ...prev]);
+      return localVehicle;
+    }
+
+    const response = await createVehicleRequest(authUser.user_id, vehicle, currentBusiness?.business_id || null);
+    if (response.vehicle) {
+      const createdVehicle = deserializeVehicle(response.vehicle);
+      setVehicles(prev => [createdVehicle, ...prev]);
+      return createdVehicle;
+    }
+  };
+
+  const addVehiclesBulk = async (nextVehicles: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>[]) => {
+    if (nextVehicles.length === 0) {
+      return [];
+    }
+
+    if (!authUser?.user_id) {
+      const createdVehicles = nextVehicles.map((vehicle, index) => ({
+        ...vehicle,
+        id: `VEH-${Date.now()}-${index}`,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        daysInStock: 0,
+      }));
+      setVehicles(prev => [...createdVehicles, ...prev]);
+      return createdVehicles;
+    }
+
+    const response = await bulkCreateVehiclesRequest(authUser.user_id, nextVehicles, currentBusiness?.business_id || null);
+    const createdVehicles = (response.vehicles || []).map(deserializeVehicle);
+    setVehicles(prev => [...createdVehicles, ...prev]);
+    return createdVehicles;
+  };
+
+  const updateVehicle = async (id: string, updates: Partial<Vehicle>, priceChangeReason?: string, priceChangeReasonCategory?: PriceChangeReasonCategory) => {
+    if (!authUser?.user_id) {
+      setVehicles(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
+      return;
+    }
+
+    const response = await updateVehicleRequest(authUser.user_id, id, updates, priceChangeReason, priceChangeReasonCategory);
+    if (response.vehicle) {
+      const nextVehicle = deserializeVehicle(response.vehicle);
+      setVehicles(prev => prev.map(v => v.id === id ? nextVehicle : v));
+    }
+  };
+
+  const deleteVehicle = async (id: string) => {
+    if (!authUser?.user_id) {
+      setVehicles(prev => prev.filter(v => v.id !== id));
+      return;
+    }
+
+    await deleteVehicleRequest(authUser.user_id, id);
+    setVehicles(prev => prev.filter(v => v.id !== id));
+  };
+
+  const addLead = async (lead: Omit<Lead, 'id' | 'createdAt' | 'status'>) => {
+    const nextLead: Lead = {
+      ...lead,
+      id: `lead-${uuidv4()}`,
+      type: 'lead',
+      user_id: authUser?.user_id || '',
+      status: 'new',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (!authUser?.user_id) {
+      setLeads(prev => [nextLead, ...prev]);
+      return nextLead;
+    }
+
+    const { lead: createdLead } = await createLeadRequest(authUser.user_id, nextLead);
+    if (createdLead) {
+      setLeads(prev => [createdLead, ...prev]);
+      trackActivity({
+        type: 'client',
+        action: `Añadió lead ${createdLead.name}`,
+        entityId: createdLead.id,
+        entityLabel: createdLead.name,
+      });
+      void createNotification({
+        level: 'info',
+        category: 'lead',
+        title: 'Nueva consulta',
+        message: createdLead.vehicleInterest
+          ? `${createdLead.name} interesado en ${createdLead.vehicleInterest}`
+          : `${createdLead.name} ha entrado como nuevo lead`,
+        entityId: createdLead.id,
+        entityType: 'lead',
+        route: `/saas/clients?tab=leads&leadId=${encodeURIComponent(createdLead.id)}`,
+      }).catch((error) => {
+        console.error('Error creating lead notification:', error);
+      });
+      return createdLead;
+    }
+  };
+
+  const updateLead = async (id: string, updates: Partial<Lead>) => {
+    const currentLead = leads.find(l => l.id === id);
+    if (!currentLead) {
+      return;
+    }
+
+    const nextLead = { ...currentLead, ...updates, updatedAt: new Date() };
+
+    if (!authUser?.user_id) {
+      setLeads(prev => prev.map(l => l.id === id ? nextLead : l));
+      return;
+    }
+
+    const savedLead = await updateLeadRequest(authUser.user_id, nextLead);
+    if (savedLead) {
+      setLeads(prev => prev.map(l => l.id === id ? savedLead : l));
+      trackActivity({
+        type: 'client',
+        action: `Actualizó lead ${savedLead.name}`,
+        entityId: savedLead.id,
+        entityLabel: savedLead.name,
+      });
+    }
+  };
+
+  const deleteLead = async (id: string) => {
+    const currentLead = leads.find(l => l.id === id);
+    if (!currentLead) {
+      return;
+    }
+
+    if (!authUser?.user_id) {
+      setLeads(prev => prev.filter(l => l.id !== id));
+      return;
+    }
+
+    await deleteLeadRequest(authUser.user_id, currentLead);
+    setLeads(prev => prev.filter(l => l.id !== id));
+    trackActivity({
+      type: 'client',
+      action: `Eliminó lead ${currentLead.name}`,
+      entityId: currentLead.id,
+      entityLabel: currentLead.name,
+    });
+  };
+
+  const addClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
+    const nextClient: Client = {
+      ...client,
+      id: `client-${uuidv4()}`,
+      type: 'client',
+      user_id: authUser?.user_id || '',
+      consents: client.consents || { dataProcessing: false, commercial: false, thirdParty: false },
+      vehiclesPurchased: client.vehiclesPurchased || [],
+      vehiclesSold: client.vehiclesSold || [],
+      documentsCount: client.documentsCount || 0,
+      interactions: client.interactions || [],
+      documentsList: client.documentsList || [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (!authUser?.user_id) {
+      setClients(prev => [nextClient, ...prev]);
+      return nextClient;
+    }
+
+    const { client: createdClient } = await createClientRequest(authUser.user_id, nextClient);
+    if (createdClient) {
+      setClients(prev => [createdClient, ...prev]);
+      trackActivity({
+        type: 'client',
+        action: `Añadió cliente ${createdClient.name}`,
+        entityId: createdClient.id,
+        entityLabel: createdClient.name,
+      });
+      return createdClient;
+    }
+  };
+
+  const updateClient = async (id: string, updates: Partial<Client>) => {
+    const currentClient = clients.find(c => c.id === id);
+    if (!currentClient) {
+      return;
+    }
+
+    const nextClient: Client = {
+      ...currentClient,
+      ...updates,
+      consents: {
+        dataProcessing: updates.consents?.dataProcessing ?? currentClient.consents?.dataProcessing ?? false,
+        commercial: updates.consents?.commercial ?? currentClient.consents?.commercial ?? false,
+        thirdParty: updates.consents?.thirdParty ?? currentClient.consents?.thirdParty ?? false,
+      },
+      vehiclesPurchased: updates.vehiclesPurchased || currentClient.vehiclesPurchased || [],
+      vehiclesSold: updates.vehiclesSold || currentClient.vehiclesSold || [],
+      interactions: updates.interactions || currentClient.interactions || [],
+      documentsList: updates.documentsList || currentClient.documentsList || [],
+      documentsCount:
+        updates.documentsCount ??
+        updates.documentsList?.length ??
+        currentClient.documentsCount ??
+        currentClient.documentsList?.length ??
+        0,
+      updatedAt: new Date(),
+    };
+
+    if (!authUser?.user_id) {
+      setClients(prev => prev.map(c => c.id === id ? nextClient : c));
+      return;
+    }
+
+    const savedClient = await updateClientRequest(authUser.user_id, nextClient);
+    if (savedClient) {
+      setClients(prev => prev.map(c => c.id === id ? savedClient : c));
+      trackActivity({
+        type: 'client',
+        action: `Actualizó ficha de cliente ${savedClient.name}`,
+        entityId: savedClient.id,
+        entityLabel: savedClient.name,
+      });
+    }
+  };
+
+  const deleteClient = async (id: string) => {
+    const currentClient = clients.find(c => c.id === id);
+    if (!currentClient) {
+      return;
+    }
+
+    if (!authUser?.user_id) {
+      setClients(prev => prev.filter(c => c.id !== id));
+      return;
+    }
+
+    await deleteClientRequest(authUser.user_id, currentClient);
+    setClients(prev => prev.filter(c => c.id !== id));
+    trackActivity({
+      type: 'client',
+      action: `Eliminó cliente ${currentClient.name}`,
+      entityId: currentClient.id,
+      entityLabel: currentClient.name,
+    });
+  };
+
+  const addSale = async (sale: Omit<Sale, 'id' | 'createdAt' | 'status' | 'saleDate'>) => {
+    const vehicle = vehicles.find(v => v.id === sale.vehicleId);
+    const client = clients.find(c => c.id === sale.clientId);
+    let nextSale: Sale;
+
+    if (authUser?.user_id) {
+      try {
+        const record = await createSaleInCouch({
+          vehicleId: sale.vehicleId,
+          vehicleName: vehicle ? `${vehicle.brand} ${vehicle.model}` : sale.vehicleId,
+          vehiclePlate: vehicle?.registrationPlate || '',
+          vehicleYear: vehicle?.year,
+          vehicleMileage: vehicle?.mileage,
+          vehicleFuel: vehicle?.fuelType,
+          purchasePrice: vehicle?.purchasePrice || 0,
+          clientId: sale.clientId,
+          clientName: client?.name || sale.clientId,
+          clientPhone: client?.phone || '',
+          clientEmail: client?.email || '',
+          stage: 'reserved',
+          totalPrice: sale.salePrice,
+          depositPaid: sale.downPayment || 0,
+          financingAmount: sale.financingAmount || 0,
+          responsible: authUser.fullName || authUser.firstName || 'Sin asignar',
+          notes: sale.notes || '',
+        });
+        nextSale = {
+          ...sale,
+          id: record.id,
+          _id: record._id,
+          _rev: record._rev,
+          status: 'pending',
+          saleDate: new Date(record.createdAt),
+          createdAt: new Date(record.createdAt),
+        };
+      } catch (err) {
+        console.error('Error creating sale in CouchDB:', err);
+        nextSale = { ...sale, id: `SALE-${Date.now()}`, status: 'pending', saleDate: new Date(), createdAt: new Date() };
+      }
+    } else {
+      nextSale = { ...sale, id: `SALE-${Date.now()}`, status: 'pending', saleDate: new Date(), createdAt: new Date() };
+    }
+
+    setSales(prev => [...prev, nextSale]);
+    updateVehicle(sale.vehicleId, { status: 'reserved' });
+    trackActivity({ type: 'sale', action: `Creó venta ${nextSale.id}`, entityId: nextSale.id, entityLabel: nextSale.id });
+    void createNotification({
+      level: 'info', category: 'sale', title: 'Venta creada',
+      message: `Se ha registrado la operación ${nextSale.id}`,
+      entityId: nextSale.id, entityType: 'sale', route: `/saas/sales/${encodeURIComponent(nextSale.id)}`,
+    }).catch((error) => { console.error('Error creating sale notification:', error); });
+  };
+
+  const updateSale = async (id: string, updates: Partial<Sale>) => {
+    setSales(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+    trackActivity({
+      type: 'sale', action: `Actualizó venta ${id}`, entityId: id, entityLabel: id,
+      metadata: { status: updates.status || '' },
+    });
+    if (updates.status === 'completed') {
+      const sale = sales.find(s => s.id === id);
+      if (sale) {
+        updateVehicle(sale.vehicleId, { status: 'sold', soldAt: new Date() });
+        updateLead(sale.clientId, { status: 'won' });
+        void createNotification({
+          level: 'success', category: 'sale', title: 'Venta completada',
+          message: `La venta ${id} se ha marcado como completada`,
+          entityId: id, entityType: 'sale', route: `/saas/sales/${encodeURIComponent(id)}`,
+        }).catch((error) => { console.error('Error creating completed sale notification:', error); });
+      }
+    }
+    if (updates.status === 'cancelled') {
+      const sale = sales.find(s => s.id === id);
+      if (sale) updateVehicle(sale.vehicleId, { status: 'available' });
+    }
+  };
+
+  const deleteSale = async (id: string) => {
+    const sale = sales.find(s => s.id === id);
+    if (sale && sale.status !== 'completed') updateVehicle(sale.vehicleId, { status: 'available' });
+    setSales(prev => prev.filter(s => s.id !== id));
+    if (authUser?.user_id && sale?._id) {
+      try {
+        const fullRecord = { _id: sale._id!, _rev: sale._rev, type: 'sale' as const, id: sale.id } as Parameters<typeof deleteSaleInCouch>[0];
+        await deleteSaleInCouch(fullRecord);
+      } catch (err) {
+        console.error('Error deleting sale from CouchDB:', err);
+      }
+    }
+    trackActivity({ type: 'sale', action: `Eliminó venta ${id}`, entityId: id, entityLabel: id });
+  };
+
+  const addDocument = async (document: Omit<Document, 'id' | 'createdAt'>) => {
+    let nextDocument: Document;
+
+    if (authUser?.user_id) {
+      try {
+        const record = await createDocumentRequest(authUser.user_id, {
+          user_id: authUser.user_id,
+          name: document.name,
+          docType: document.type,
+          status: document.status,
+          relatedTo: document.relatedTo,
+          relatedToId: document.relatedToId,
+          templateId: document.templateId,
+        });
+        nextDocument = {
+          id: record.id,
+          _id: record._id,
+          _rev: record._rev,
+          name: record.name,
+          type: record.docType,
+          status: record.status,
+          relatedTo: record.relatedTo,
+          relatedToId: record.relatedToId,
+          templateId: record.templateId,
+          createdAt: new Date(record.createdAt),
+        };
+      } catch (err) {
+        console.error('Error creating document in CouchDB:', err);
+        nextDocument = { ...document, id: `DOC-${Date.now()}`, createdAt: new Date() };
+      }
+    } else {
+      nextDocument = { ...document, id: `DOC-${Date.now()}`, createdAt: new Date() };
+    }
+
+    setDocuments(prev => [...prev, nextDocument]);
+    trackActivity({ type: 'document', action: `Generó documento ${nextDocument.name}`, entityId: nextDocument.id, entityLabel: nextDocument.name });
+    void createNotification({
+      level: nextDocument.status === 'pending' ? 'warning' : 'info',
+      category: 'document',
+      title: nextDocument.status === 'pending' ? 'Documento pendiente' : 'Documento generado',
+      message: nextDocument.name,
+      entityId: nextDocument.id,
+      entityType: 'document',
+      route: `/saas/documents/${encodeURIComponent(nextDocument.id)}`,
+    }).catch((error) => { console.error('Error creating document notification:', error); });
+  };
+
+  const updateDocument = async (id: string, updates: Partial<Document>) => {
+    const current = documents.find(d => d.id === id);
+    const nextDocument = current ? { ...current, ...updates } : null;
+    setDocuments(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
+
+    if (authUser?.user_id && nextDocument?._id) {
+      try {
+        const record: DocumentRecord = {
+          _id: nextDocument._id!,
+          _rev: nextDocument._rev,
+          type: 'document',
+          id: nextDocument.id,
+          user_id: authUser.user_id,
+          name: nextDocument.name,
+          docType: nextDocument.type,
+          status: nextDocument.status,
+          relatedTo: nextDocument.relatedTo,
+          relatedToId: nextDocument.relatedToId,
+          templateId: nextDocument.templateId,
+          createdAt: nextDocument.createdAt.toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        const saved = await updateDocumentRequest(record);
+        setDocuments(prev => prev.map(d => d.id === id ? { ...d, _rev: saved._rev } : d));
+      } catch (err) {
+        console.error('Error updating document in CouchDB:', err);
+      }
+    }
+
+    trackActivity({ type: 'document', action: `Actualizó documento ${updates.name || id}`, entityId: id, entityLabel: updates.name || id });
+    if (updates.status === 'pending' || updates.status === 'signed') {
+      void createNotification({
+        level: updates.status === 'signed' ? 'success' : 'warning',
+        category: 'document',
+        title: updates.status === 'signed' ? 'Documento firmado' : 'Documento pendiente',
+        message: updates.name || id,
+        entityId: id,
+        entityType: 'document',
+        route: `/saas/documents/${encodeURIComponent(id)}`,
+      }).catch((error) => { console.error('Error creating document status notification:', error); });
+    }
+  };
+
+  const deleteDocument = async (id: string) => {
+    const current = documents.find(d => d.id === id);
+    setDocuments(prev => prev.filter(d => d.id !== id));
+    if (authUser?.user_id && current?._id) {
+      try {
+        const record: DocumentRecord = {
+          _id: current._id!,
+          _rev: current._rev,
+          type: 'document',
+          id: current.id,
+          user_id: authUser.user_id,
+          name: current.name,
+          docType: current.type,
+          status: current.status,
+          createdAt: current.createdAt.toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await deleteDocumentRequest(record);
+      } catch (err) {
+        console.error('Error deleting document from CouchDB:', err);
+      }
+    }
+    trackActivity({ type: 'document', action: `Eliminó documento ${current?.name || id}`, entityId: id, entityLabel: current?.name || id });
+  };
+
+  const addLocation = (location: Omit<Location, 'id'>) =>
+    setLocations(prev => [...prev, { ...location, id: `LOC-${Date.now()}` }]);
+
+  const addParkingZone = (zone: CreateParkingZoneInput) => {
+    if (authUser?.user_id) {
+      createParkingZoneRequest(authUser.user_id, zone)
+        .then((created) => {
+          setParkingZones(prev => [...prev, created]);
+        })
+        .catch((err) => {
+          console.error('Error creating parking zone in CouchDB:', err);
+          setParkingZones(prev => [...prev, createParkingZone(zone)]);
+        });
+    } else {
+      setParkingZones(prev => [...prev, createParkingZone(zone)]);
+    }
+  };
+
+  const updateLocation = (id: string, updates: Partial<Location>) =>
+    setLocations(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
+
+  const deleteLocation = (id: string) =>
+    setLocations(prev => prev.filter(l => l.id !== id));
+
+  const getStats = () => ({
+    totalVehicles: vehicles.length,
+    vehiclesAvailable: vehicles.filter(v => v.status === 'available').length,
+    vehiclesReserved: vehicles.filter(v => v.status === 'reserved').length,
+    vehiclesSold: vehicles.filter(v => v.status === 'sold').length,
+    totalLeads: leads.filter(l => l.status !== 'won' && l.status !== 'lost').length,
+    activeSales: sales.filter(s => s.status === 'pending').length,
+    pendingDocuments: documents.filter(d => d.status === 'pending').length,
+    totalStockValue: vehicles.filter(v => v.status === 'available').reduce((sum, v) => sum + v.purchasePrice, 0),
+  });
+
+  // ─── RT-01: SSE — actualizaciones en tiempo real ──────────────────────────
+  const sseToken = useMemo(() => {
+    if (!authUser?.user_id) return null;
+    return typeof window !== 'undefined'
+      ? localStorage.getItem('udar_access_token')
+      : null;
+  }, [authUser?.user_id]);
+
+  const handleSSENotification = useCallback((data: unknown) => {
+    const n = data as AppNotification;
+    if (!n?.id) return;
+    setNotifications((prev) => {
+      if (prev.some((x) => x.id === n.id)) return prev;
+      return [deserializeNotification(n), ...prev];
+    });
+  }, []);
+
+  const handleVehicleUpdated = useCallback((data: unknown) => {
+    const v = data as Vehicle;
+    if (!v?.id) return;
+    setVehicles((prev) =>
+      prev.map((x) => (x.id === v.id ? deserializeVehicle(v) : x)),
+    );
+  }, []);
+
+  const handleLeadCreated = useCallback((data: unknown) => {
+    const l = data as Lead;
+    if (!l?.id) return;
+    setLeads((prev) => {
+      if (prev.some((x) => x.id === l.id)) return prev;
+      return [deserializeLead(l), ...prev];
+    });
+  }, []);
+
+  const sseHandlers = useMemo(() => ({
+    notification: handleSSENotification,
+    vehicle_updated: handleVehicleUpdated,
+    lead_created: handleLeadCreated,
+  }), [handleSSENotification, handleVehicleUpdated, handleLeadCreated]);
+
+  useSSE({
+    userId: authUser?.user_id ?? null,
+    token: sseToken,
+    businessId: currentBusiness?.business_id ?? null,
+    handlers: sseHandlers,
+    enabled: Boolean(authUser?.user_id),
+  });
+
+  // RT-02: Web Push — suscripción a notificaciones cuando la app está cerrada
+  usePushNotifications({
+    userId: authUser?.user_id ?? null,
+    token: sseToken,
+  });
+
+  const value: AppContextType = {
+    vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
+    canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
+    addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
+    addLead, updateLead, deleteLead,
+    addClient, updateClient, deleteClient,
+    createNotification, markNotificationAsRead, markAllNotificationsAsRead,
+    addSale, updateSale, deleteSale,
+    addDocument, updateDocument, deleteDocument,
+    addLocation, addParkingZone, updateLocation, deleteLocation,
+    getStats,
+  };
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useApp(): AppContextType {
+  return useContext(AppContext);
+}

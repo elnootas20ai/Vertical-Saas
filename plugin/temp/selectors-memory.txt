@@ -1,0 +1,4 @@
+# Formato:
+# BINDING|id|name|mode|selector|sourceField|renderAs|parentSelector|itemSelector
+BINDING|titulo-main|Titulo principal|single|#root h1|title|text||
+BINDING|lista-items|Lista principal|list|#root ul|items|text|#root ul|li

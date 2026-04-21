@@ -1,0 +1,913 @@
+/**
+ * dark-mode.css
+ *
+ * Overrides y correcciones para el modo oscuro.
+ * Complementa las variables definidas en theme.css.
+ *
+ * Estrategia:
+ *  - Se usa la clase .dark (aplicada por next-themes en <html>) como selector raíz.
+ *  - Se corrigen elementos nativos del navegador (select, option, input date, etc.)
+ *    que no heredan las custom properties de CSS automáticamente.
+ *  - Se garantiza la coherencia visual en portales de Radix UI (Select, DropdownMenu,
+ *    Popover, Dialog, Sheet, etc.) que renderizan fuera del árbol React.
+ *  - Se asegura contraste WCAG 2.1 AA en todos los textos interactivos.
+ */
+
+/* ── 1. color-scheme: indica al navegador el esquema de color activo ─────── */
+/* Esto hace que los elementos nativos (scrollbars, selects, inputs) usen
+   automáticamente los colores del sistema para el modo claro/oscuro.         */
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* ── 2. Selects y opciones nativos ──────────────────────────────────────── */
+/* Los <select> / <option> nativos no heredan custom properties en todos los
+   navegadores; forzamos colores explícitos. Al estar fuera de @layer, estas
+   reglas prevalecen sobre utilidades Tailwind que estén en un @layer.         */
+.dark select {
+  background-color: oklch(0.205 0 0);
+  color: oklch(0.985 0 0);
+  border-color: oklch(0.32 0 0);
+}
+
+.dark select option {
+  background-color: oklch(0.205 0 0);
+  color: oklch(0.985 0 0);
+}
+
+.dark select option:checked,
+.dark select option:hover {
+  background-color: oklch(0.269 0 0);
+  color: oklch(0.985 0 0);
+}
+
+/* ── 3. Inputs de tipo fecha, hora y color ──────────────────────────────── */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"],
+.dark input[type="month"],
+.dark input[type="week"] {
+  color-scheme: dark;
+  background-color: oklch(0.205 0 0);
+  color: oklch(0.985 0 0);
+}
+
+.dark input[type="color"] {
+  background-color: oklch(0.205 0 0);
+  border-color: oklch(0.32 0 0);
+}
+
+/* ── 3b. Autofill / autocomplete ────────────────────────────────────────── */
+/* Chrome/Edge rellenan el fondo con amarillo por defecto; lo corregimos.    */
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark textarea:-webkit-autofill,
+.dark select:-webkit-autofill {
+  -webkit-text-fill-color: oklch(0.985 0 0);
+  -webkit-box-shadow: 0 0 0px 1000px oklch(0.205 0 0) inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* ── 4. Portales de Radix UI ────────────────────────────────────────────── */
+/* Los portales de Radix (Select, DropdownMenu, Popover, Tooltip, etc.)
+   renderizan en document.body. Como next-themes añade .dark a <html>,
+   los portales heredan las custom properties por cascada.                   */
+
+/* Contenedor raíz de todos los portales de Radix */
+body > [data-radix-popper-content-wrapper],
+body > [data-radix-portal] {
+  color-scheme: inherit;
+}
+
+/* Select */
+[data-radix-popper-content-wrapper] [data-slot="select-content"],
+.dark [data-slot="select-content"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+/* DropdownMenu */
+[data-radix-popper-content-wrapper] [data-slot="dropdown-menu-content"],
+[data-radix-popper-content-wrapper] [data-slot="dropdown-menu-sub-content"],
+.dark [data-slot="dropdown-menu-content"],
+.dark [data-slot="dropdown-menu-sub-content"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+/* Popover */
+[data-radix-popper-content-wrapper] [data-slot="popover-content"],
+.dark [data-slot="popover-content"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+/* Tooltip */
+[data-radix-popper-content-wrapper] [data-slot="tooltip-content"],
+.dark [data-slot="tooltip-content"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+/* Command palette (cmdk) */
+[data-radix-popper-content-wrapper] [data-slot="command"],
+.dark [data-slot="command"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+}
+
+/* Hover/focus states en items */
+.dark [data-slot="select-item"]:focus,
+.dark [data-slot="select-item"][data-highlighted],
+.dark [data-slot="dropdown-menu-item"]:focus,
+.dark [data-slot="dropdown-menu-item"][data-highlighted],
+.dark [data-slot="dropdown-menu-checkbox-item"]:focus,
+.dark [data-slot="dropdown-menu-checkbox-item"][data-highlighted],
+.dark [data-slot="dropdown-menu-radio-item"]:focus,
+.dark [data-slot="dropdown-menu-radio-item"][data-highlighted] {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+/* ── 5. Transición suave al cambiar de tema ─────────────────────────────── */
+/* Se activa añadiendo .theme-transitioning al <html> durante ~300 ms.       */
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.2s ease,
+    fill 0.2s ease,
+    stroke 0.2s ease,
+    box-shadow 0.2s ease !important;
+}
+
+/* ── 6. ProseMirror / TipTap en modo oscuro ─────────────────────────────── */
+.dark .ProseMirror {
+  color: oklch(0.985 0 0);
+  caret-color: oklch(0.985 0 0);
+}
+
+.dark .ProseMirror p.is-editor-empty:first-child::before {
+  color: oklch(0.55 0 0);
+}
+
+.dark .ProseMirror a {
+  color: oklch(0.7 0.15 250);
+}
+
+.dark .ProseMirror code {
+  background-color: oklch(0.25 0 0);
+  color: oklch(0.9 0.08 200);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.3em;
+}
+
+.dark .ProseMirror blockquote {
+  border-left-color: oklch(0.45 0 0);
+  color: oklch(0.75 0 0);
+}
+
+.dark .ProseMirror hr {
+  border-color: oklch(0.32 0 0);
+}
+
+/* ── 7. Scrollbars en modo oscuro (Webkit) ───────────────────────────────── */
+.dark ::-webkit-scrollbar {
+  background-color: oklch(0.18 0 0);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background-color: oklch(0.35 0 0);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(0.45 0 0);
+}
+
+/* ── 8. Tablas nativas ───────────────────────────────────────────────────── */
+.dark table {
+  border-color: oklch(0.32 0 0);
+}
+
+.dark th {
+  background-color: oklch(0.205 0 0);
+  color: oklch(0.985 0 0);
+}
+
+.dark td {
+  color: oklch(0.9 0 0);
+  border-color: oklch(0.269 0 0);
+}
+
+/* ── 9. Código resaltado (highlight) ─────────────────────────────────────── */
+.dark mark,
+.dark ::highlight(search-results) {
+  background-color: oklch(0.5 0.15 80);
+  color: oklch(0.98 0 0);
+}
+
+/* ── 10. Mejoras de accesibilidad: focus visible en modo oscuro ──────────── */
+.dark :focus-visible {
+  outline-color: oklch(0.708 0 0);
+}
+
+/* ── 11. Corrección para dropdowns dentro de modales (z-index + theme) ───── */
+/* Cuando un Select o DropdownMenu se abre dentro de un Dialog/Sheet,
+   el portal se eleva al body pero debe mantener los colores del tema.        */
+.dark [data-slot="select-content"],
+.dark [data-slot="dropdown-menu-content"],
+.dark [data-slot="dropdown-menu-sub-content"],
+.dark [data-slot="popover-content"],
+.dark [data-slot="context-menu-content"],
+.dark [data-slot="command"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+/* ── 12. Calendar (Radix/DayPicker) ─────────────────────────────────────── */
+.dark [data-slot="calendar"] {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  border-color: var(--border);
+}
+
+.dark [data-slot="calendar"] button[name="day"]:hover,
+.dark [data-slot="calendar"] button[data-selected] {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.dark [data-slot="calendar"] button[data-today]:not([data-selected]) {
+  background-color: oklch(0.28 0 0);
+  color: oklch(0.85 0 0);
+}
+
+/* ── 13. Dialog y Sheet ──────────────────────────────────────────────────── */
+.dark [data-slot="dialog-content"],
+.dark [data-slot="sheet-content"] {
+  background-color: var(--card);
+  color: var(--card-foreground);
+  border-color: var(--border);
+}
+
+/* Overlay semitransparente: no necesita sobreescritura ya que usa rgba */
+
+/* ── 14. Alert / Banner boxes con colores hardcoded ─────────────────────── */
+/* Las alertas de seguridad/advertencia con bg-amber-50 necesitan ajuste     */
+.dark .bg-amber-50 {
+  background-color: oklch(0.28 0.04 85);
+}
+.dark .text-amber-700 {
+  color: oklch(0.82 0.12 85);
+}
+.dark .border-amber-200 {
+  border-color: oklch(0.38 0.08 85);
+}
+
+/* ── 15. Hover sobre filas de tabla ─────────────────────────────────────── */
+.dark [data-slot="table-row"]:hover,
+.dark tr:hover {
+  background-color: oklch(0.22 0 0);
+}
+
+/* ── 16. Badges de estado con colores semánticos ────────────────────────── */
+/* Los badges suelen usar clases como bg-green-100 text-green-800;
+   en modo oscuro necesitamos más luminosidad.                                */
+.dark .bg-green-100  { background-color: oklch(0.27 0.06 145); }
+.dark .text-green-800 { color: oklch(0.85 0.12 145); }
+.dark .bg-red-100   { background-color: oklch(0.26 0.07 25); }
+.dark .text-red-800  { color: oklch(0.82 0.14 25); }
+.dark .bg-blue-100  { background-color: oklch(0.26 0.05 255); }
+.dark .text-blue-800 { color: oklch(0.82 0.12 255); }
+.dark .bg-yellow-100  { background-color: oklch(0.27 0.06 95); }
+.dark .text-yellow-800 { color: oklch(0.85 0.12 95); }
+
+/* ── 17. Elevación (sombras) en modo oscuro ──────────────────────────── */
+.dark [data-slot="dialog-content"],
+.dark [data-slot="alert-dialog-content"],
+.dark [data-slot="sheet-content"] {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 16px 48px -8px rgba(0, 0, 0, 0.55),
+    0 4px 12px -2px rgba(0, 0, 0, 0.35);
+}
+
+.dark [data-slot="select-content"],
+.dark [data-slot="dropdown-menu-content"],
+.dark [data-slot="dropdown-menu-sub-content"],
+.dark [data-slot="popover-content"],
+.dark [data-slot="context-menu-content"],
+.dark [data-slot="hover-card-content"],
+.dark [data-slot="menubar-content"],
+.dark [data-slot="menubar-sub-content"],
+.dark [data-slot="navigation-menu-content"] {
+  box-shadow:
+    0 0 0 1px var(--border),
+    0 8px 32px -4px rgba(0, 0, 0, 0.5),
+    0 2px 8px -2px rgba(0, 0, 0, 0.3);
+}
+
+.dark [data-slot="tooltip-content"] {
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* ── 18. Divisores y separadores globales ────────────────────────────── */
+.dark .divide-gray-50 > :not(:first-child) {
+  border-color: oklch(0.24 0.005 260);
+}
+
+.dark .divide-gray-100 > :not(:first-child) {
+  border-color: oklch(0.24 0.005 260);
+}
+
+.dark .divide-gray-200 > :not(:first-child) {
+  border-color: oklch(0.27 0.005 260);
+}
+
+.dark .divide-slate-100 > :not(:first-child),
+.dark .divide-slate-200 > :not(:first-child) {
+  border-color: oklch(0.27 0.005 260);
+}
+
+/* ── 19. Ring offset para focus en fondos oscuros ────────────────────── */
+.dark .ring-offset-white,
+.dark .ring-offset-2 {
+  --tw-ring-offset-color: var(--background);
+}
+
+/* ── 20. Placeholder globales ────────────────────────────────────────── */
+.dark ::placeholder {
+  color: oklch(0.50 0.005 260);
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: oklch(0.50 0.005 260);
+}
+
+/* ── 21. Badges semánticos adicionales ───────────────────────────────── */
+.dark .bg-orange-50  { background-color: oklch(0.26 0.05 60); }
+.dark .text-orange-700 { color: oklch(0.82 0.12 60); }
+.dark .border-orange-200 { border-color: oklch(0.35 0.07 60); }
+
+.dark .bg-purple-50  { background-color: oklch(0.25 0.05 300); }
+.dark .text-purple-700 { color: oklch(0.80 0.12 300); }
+.dark .border-purple-200 { border-color: oklch(0.35 0.07 300); }
+
+.dark .bg-emerald-50  { background-color: oklch(0.25 0.05 160); }
+.dark .text-emerald-700 { color: oklch(0.80 0.12 160); }
+.dark .border-emerald-200 { border-color: oklch(0.35 0.07 160); }
+
+.dark .bg-sky-50  { background-color: oklch(0.25 0.05 240); }
+.dark .text-sky-700 { color: oklch(0.80 0.12 240); }
+.dark .border-sky-200 { border-color: oklch(0.35 0.07 240); }
+
+.dark .bg-rose-50  { background-color: oklch(0.25 0.06 15); }
+.dark .text-rose-700 { color: oklch(0.80 0.14 15); }
+.dark .border-rose-200 { border-color: oklch(0.35 0.08 15); }
+
+.dark .bg-indigo-50  { background-color: oklch(0.25 0.05 280); }
+.dark .text-indigo-700 { color: oklch(0.80 0.12 280); }
+.dark .border-indigo-200 { border-color: oklch(0.35 0.07 280); }
+
+.dark .bg-violet-50  { background-color: oklch(0.25 0.06 300); }
+.dark .text-violet-700 { color: oklch(0.80 0.12 300); }
+
+.dark .bg-teal-50  { background-color: oklch(0.25 0.05 175); }
+.dark .text-teal-700 { color: oklch(0.80 0.12 175); }
+
+.dark .bg-cyan-50  { background-color: oklch(0.25 0.05 210); }
+.dark .text-cyan-700 { color: oklch(0.80 0.12 210); }
+
+.dark .bg-lime-50  { background-color: oklch(0.25 0.05 125); }
+.dark .text-lime-700 { color: oklch(0.80 0.12 125); }
+
+.dark .bg-pink-50  { background-color: oklch(0.25 0.06 350); }
+.dark .text-pink-700 { color: oklch(0.80 0.14 350); }
+
+/* ── 22. Overrides para bg-*-100 comunes en modo oscuro ──────────────── */
+.dark .bg-amber-100 { background-color: oklch(0.28 0.05 80); }
+.dark .bg-red-50    { background-color: oklch(0.24 0.06 20); }
+.dark .bg-blue-50   { background-color: oklch(0.24 0.05 255); }
+.dark .bg-green-50  { background-color: oklch(0.24 0.05 150); }
+.dark .bg-yellow-50 { background-color: oklch(0.25 0.05 90); }
+.dark .bg-orange-100 { background-color: oklch(0.28 0.05 60); }
+
+/* ── 23. Hover sobre fondos claros — corrección global ───────────────── */
+/* Muchos componentes usan hover:bg-gray-50 sin dark:hover:bg-*;
+   esta regla asegura un hover visible en modo oscuro.                    */
+.dark .hover\:bg-gray-50:hover {
+  background-color: oklch(0.22 0.005 260) !important;
+}
+.dark .hover\:bg-gray-50\/80:hover {
+  background-color: oklch(0.22 0.005 260 / 0.8) !important;
+}
+.dark .hover\:bg-gray-50\/50:hover {
+  background-color: oklch(0.22 0.005 260 / 0.5) !important;
+}
+
+/* ── 24. Fondos semitransparentes blancos ─────────────────────────────── */
+.dark .bg-white\/80 {
+  background-color: oklch(0.175 0.005 260 / 0.8);
+}
+.dark .bg-white\/60 {
+  background-color: oklch(0.175 0.005 260 / 0.6);
+}
+.dark .bg-white\/50 {
+  background-color: oklch(0.175 0.005 260 / 0.5);
+}
+
+/* ── 25. Bordes slate sin variante dark ──────────────────────────────── */
+.dark .border-slate-100 {
+  border-color: oklch(0.24 0.005 260);
+}
+.dark .border-slate-200 {
+  border-color: oklch(0.27 0.005 260);
+}
+.dark .border-slate-300 {
+  border-color: oklch(0.32 0.005 260);
+}
+
+/* ── 26. Texto slate sin variante dark ───────────────────────────────── */
+.dark .text-slate-800 {
+  color: oklch(0.88 0.005 260);
+}
+.dark .text-slate-700 {
+  color: oklch(0.82 0.005 260);
+}
+.dark .text-slate-600 {
+  color: oklch(0.72 0.005 260);
+}
+.dark .text-slate-500 {
+  color: oklch(0.62 0.005 260);
+}
+.dark .text-slate-400 {
+  color: oklch(0.55 0.005 260);
+}
+.dark .text-slate-900 {
+  color: oklch(0.95 0.005 260);
+}
+
+/* ── Hover sobre slate-50 sin variante dark ─────────────────────────── */
+.dark .hover\:bg-slate-50:hover {
+  background-color: oklch(0.22 0.005 260) !important;
+}
+.dark .hover\:bg-slate-50\/50:hover {
+  background-color: oklch(0.22 0.005 260 / 0.5) !important;
+}
+.dark .bg-slate-50\/50 {
+  background-color: oklch(0.22 0.005 260 / 0.5);
+}
+
+/* ── 27. Fondos slate sin variante dark ──────────────────────────────── */
+.dark .bg-slate-50 {
+  background-color: oklch(0.22 0.005 260);
+}
+.dark .bg-slate-100 {
+  background-color: oklch(0.22 0.005 260);
+}
+
+/* ── 28. Fondos grises claros huérfanos ──────────────────────────────── */
+.dark .bg-gray-50 {
+  background-color: oklch(0.175 0.005 260);
+}
+.dark .bg-gray-100 {
+  background-color: oklch(0.22 0.005 260);
+}
+.dark .bg-gray-200 {
+  background-color: oklch(0.24 0.005 260);
+}
+.dark .bg-gray-300 {
+  background-color: oklch(0.27 0.005 260);
+}
+
+/* ── 28b. Texto gris sin variante dark ─────────────────────────────── */
+/* Tonos muy claros: en modo oscuro siguen siendo secundarios pero legibles */
+.dark .text-gray-200 {
+  color: oklch(0.45 0.005 260);
+}
+.dark .text-gray-300 {
+  color: oklch(0.50 0.005 260);
+}
+.dark .text-gray-900 {
+  color: oklch(0.93 0.005 260);
+}
+.dark .text-gray-800 {
+  color: oklch(0.88 0.005 260);
+}
+.dark .text-gray-700 {
+  color: oklch(0.82 0.005 260);
+}
+.dark .text-gray-600 {
+  color: oklch(0.72 0.005 260);
+}
+.dark .text-gray-500 {
+  color: oklch(0.62 0.005 260);
+}
+.dark .text-gray-400 {
+  color: oklch(0.55 0.005 260);
+}
+
+/* ── 28c. Bordes grises sin variante dark ──────────────────────────── */
+.dark .border-gray-100 {
+  border-color: oklch(0.24 0.005 260);
+}
+.dark .border-gray-200 {
+  border-color: oklch(0.27 0.005 260);
+}
+.dark .border-gray-300 {
+  border-color: oklch(0.32 0.005 260);
+}
+.dark .border-gray-400 {
+  border-color: oklch(0.38 0.005 260);
+}
+
+/* ── 28d. Hover sobre grises sin variante dark ─────────────────────── */
+.dark .hover\:bg-gray-100:hover {
+  background-color: oklch(0.22 0.005 260) !important;
+}
+.dark .hover\:bg-gray-200:hover {
+  background-color: oklch(0.24 0.005 260) !important;
+}
+.dark .hover\:text-gray-700:hover {
+  color: oklch(0.82 0.005 260) !important;
+}
+.dark .hover\:text-gray-900:hover {
+  color: oklch(0.93 0.005 260) !important;
+}
+.dark .hover\:border-gray-300:hover {
+  border-color: oklch(0.35 0.005 260) !important;
+}
+.dark .hover\:border-gray-400:hover {
+  border-color: oklch(0.40 0.005 260) !important;
+}
+
+/* ── 28e. Estados disabled en modo oscuro ──────────────────────────── */
+.dark .disabled\:bg-gray-200:disabled {
+  background-color: oklch(0.24 0.005 260) !important;
+}
+.dark .disabled\:text-gray-400:disabled {
+  color: oklch(0.50 0.005 260) !important;
+}
+
+/* ── 28f. Bordes semánticos sin variante dark ─────────────────────── */
+.dark .border-blue-100 {
+  border-color: oklch(0.28 0.05 260);
+}
+.dark .border-blue-200 {
+  border-color: oklch(0.30 0.06 260);
+}
+.dark .border-blue-300 {
+  border-color: oklch(0.35 0.08 260);
+}
+.dark .border-green-100 {
+  border-color: oklch(0.28 0.05 150);
+}
+.dark .border-green-200 {
+  border-color: oklch(0.30 0.06 150);
+}
+.dark .border-green-300 {
+  border-color: oklch(0.35 0.08 150);
+}
+.dark .border-red-100 {
+  border-color: oklch(0.28 0.05 25);
+}
+.dark .border-red-200 {
+  border-color: oklch(0.30 0.06 25);
+}
+.dark .border-red-300 {
+  border-color: oklch(0.35 0.08 25);
+}
+.dark .border-amber-300 {
+  border-color: oklch(0.38 0.08 85);
+}
+.dark .border-yellow-200 {
+  border-color: oklch(0.35 0.07 95);
+}
+.dark .border-purple-300 {
+  border-color: oklch(0.38 0.07 300);
+}
+.dark .border-emerald-300 {
+  border-color: oklch(0.35 0.07 160);
+}
+
+/* ── 28g. Texto semántico oscuro sin variante dark ─────────────────── */
+.dark .text-blue-900 {
+  color: oklch(0.82 0.12 260);
+}
+.dark .text-green-900 {
+  color: oklch(0.82 0.12 150);
+}
+.dark .text-red-900 {
+  color: oklch(0.82 0.14 25);
+}
+.dark .text-yellow-900 {
+  color: oklch(0.85 0.12 95);
+}
+.dark .text-amber-900 {
+  color: oklch(0.85 0.12 85);
+}
+.dark .text-blue-700 {
+  color: oklch(0.80 0.12 260);
+}
+.dark .text-green-700 {
+  color: oklch(0.80 0.12 150);
+}
+.dark .text-red-700 {
+  color: oklch(0.80 0.14 25);
+}
+.dark .text-emerald-600 {
+  color: oklch(0.75 0.14 160);
+}
+.dark .text-red-600 {
+  color: oklch(0.72 0.16 25);
+}
+.dark .text-blue-600 {
+  color: oklch(0.72 0.14 260);
+}
+.dark .text-amber-600 {
+  color: oklch(0.78 0.12 85);
+}
+
+/* ── 28h. bg-white genérico para superficies (cards, modales, etc.) ── */
+.dark .bg-white {
+  background-color: oklch(0.175 0.005 260);
+}
+.dark .hover\:bg-white:hover {
+  background-color: oklch(0.22 0.005 260) !important;
+}
+
+/* Preserve white for toggle/switch thumb indicators */
+.dark .bg-white.rounded-full.transition-transform {
+  background-color: white;
+}
+.dark .bg-white.rounded-full.shadow-sm.transform {
+  background-color: white;
+}
+
+/* ── 28i. Hover/bg sobre fondos semánticos claros ────────────────────── */
+.dark .hover\:bg-red-100:hover {
+  background-color: oklch(0.28 0.07 25) !important;
+}
+.dark .hover\:bg-blue-100:hover {
+  background-color: oklch(0.28 0.06 260) !important;
+}
+.dark .hover\:bg-green-100:hover {
+  background-color: oklch(0.28 0.06 150) !important;
+}
+.dark .hover\:bg-amber-100:hover {
+  background-color: oklch(0.30 0.06 80) !important;
+}
+
+/* ── 28j. Colores de texto semántico huérfanos ───────────────────────── */
+.dark .text-emerald-800 { color: oklch(0.80 0.12 160); }
+.dark .text-emerald-400 { color: oklch(0.68 0.16 160); }
+.dark .text-red-400 { color: oklch(0.68 0.18 25); }
+.dark .text-red-500 { color: oklch(0.70 0.18 25); }
+.dark .text-blue-400 { color: oklch(0.68 0.16 260); }
+.dark .text-blue-500 { color: oklch(0.70 0.16 260); }
+.dark .text-green-400 { color: oklch(0.68 0.16 150); }
+.dark .text-green-500 { color: oklch(0.70 0.16 150); }
+.dark .text-amber-400 { color: oklch(0.74 0.14 80); }
+.dark .text-amber-500 { color: oklch(0.76 0.14 80); }
+.dark .text-orange-500 { color: oklch(0.74 0.14 55); }
+.dark .text-orange-600 { color: oklch(0.72 0.14 55); }
+.dark .text-purple-500 { color: oklch(0.70 0.14 300); }
+.dark .text-purple-600 { color: oklch(0.72 0.14 300); }
+.dark .text-violet-500 { color: oklch(0.70 0.14 300); }
+.dark .text-violet-600 { color: oklch(0.72 0.14 300); }
+.dark .text-indigo-500 { color: oklch(0.70 0.14 280); }
+.dark .text-indigo-600 { color: oklch(0.72 0.14 280); }
+
+/* ── 28k. bg-white variantes de opacidad adicionales ─────────────────── */
+/* Solo opacidades altas que se usan como superficies sobre fondos claros.
+   Opacidades bajas (bg-white/20, /30, /40) se usan intencionalmente sobre
+   fondos con color/gradiente y NO deben sobreescribirse.                   */
+.dark .bg-white\/95 {
+  background-color: oklch(0.175 0.005 260 / 0.95);
+}
+.dark .bg-white\/90 {
+  background-color: oklch(0.175 0.005 260 / 0.9);
+}
+.dark .bg-white\/70 {
+  background-color: oklch(0.175 0.005 260 / 0.7);
+}
+
+/* ── 29. Focus rings en oscuro — corrección del ring-offset ──────────── */
+.dark .focus\:ring-blue-500:focus {
+  --tw-ring-color: oklch(0.60 0.20 260);
+}
+.dark .focus\:ring-blue-400:focus {
+  --tw-ring-color: oklch(0.65 0.18 260);
+}
+.dark .focus\:ring-amber-200:focus {
+  --tw-ring-color: oklch(0.55 0.12 80);
+}
+
+/* ── 30. Hover sobre blue-50 sin variante dark ───────────────────────── */
+.dark .hover\:bg-blue-50:hover {
+  background-color: oklch(0.24 0.06 260);
+}
+.dark .hover\:bg-blue-50\/50:hover {
+  background-color: oklch(0.24 0.06 260 / 0.5);
+}
+
+/* ── 31. bg-emerald-100 y bg-*-100 globales ──────────────────────────── */
+.dark .bg-emerald-100 { background-color: oklch(0.27 0.06 160); }
+.dark .bg-violet-100  { background-color: oklch(0.27 0.06 300); }
+.dark .bg-indigo-100  { background-color: oklch(0.27 0.06 280); }
+.dark .bg-sky-100     { background-color: oklch(0.27 0.06 240); }
+.dark .bg-rose-100    { background-color: oklch(0.27 0.06 15); }
+.dark .bg-teal-100    { background-color: oklch(0.27 0.06 175); }
+.dark .bg-cyan-100    { background-color: oklch(0.27 0.06 210); }
+.dark .bg-pink-100    { background-color: oklch(0.27 0.06 350); }
+.dark .bg-purple-100  { background-color: oklch(0.27 0.06 300); }
+.dark .bg-lime-100    { background-color: oklch(0.27 0.06 125); }
+.dark .bg-orange-100  { background-color: oklch(0.28 0.05 60); }
+
+/* ── 32. Gradientes claros sin variante dark ──────────────────────────── */
+/* Los gradient stops claros (from-*-50, to-*-100, via-white) necesitan
+   valores oscuros para mantener un matiz sutil en modo dark.              */
+.dark .from-gray-50    { --tw-gradient-from: oklch(0.175 0.005 260); }
+.dark .from-slate-50   { --tw-gradient-from: oklch(0.175 0.005 260); }
+.dark .from-violet-50  { --tw-gradient-from: oklch(0.20 0.03 300); }
+.dark .from-blue-50    { --tw-gradient-from: oklch(0.20 0.03 260); }
+.dark .from-purple-50  { --tw-gradient-from: oklch(0.20 0.03 300); }
+.dark .from-amber-50   { --tw-gradient-from: oklch(0.22 0.03 80); }
+.dark .from-green-50   { --tw-gradient-from: oklch(0.20 0.03 150); }
+.dark .from-cyan-50    { --tw-gradient-from: oklch(0.20 0.03 210); }
+.dark .from-rose-50    { --tw-gradient-from: oklch(0.20 0.03 15); }
+
+.dark .to-gray-100    { --tw-gradient-to: oklch(0.22 0.005 260); }
+.dark .to-slate-50    { --tw-gradient-to: oklch(0.175 0.005 260); }
+.dark .to-violet-100  { --tw-gradient-to: oklch(0.24 0.04 300); }
+.dark .to-purple-100  { --tw-gradient-to: oklch(0.24 0.04 300); }
+.dark .to-blue-100    { --tw-gradient-to: oklch(0.24 0.04 260); }
+.dark .to-cyan-100    { --tw-gradient-to: oklch(0.24 0.04 210); }
+.dark .to-amber-100   { --tw-gradient-to: oklch(0.25 0.04 80); }
+
+.dark .via-white { --tw-gradient-via: oklch(0.19 0.005 260); }
+
+/* ── 33. Ring colors claros sin variante dark ────────────────────────── */
+.dark .ring-blue-100 {
+  --tw-ring-color: oklch(0.30 0.08 260);
+}
+.dark .ring-blue-200 {
+  --tw-ring-color: oklch(0.35 0.10 260);
+}
+.dark .ring-amber-100 {
+  --tw-ring-color: oklch(0.32 0.08 80);
+}
+.dark .ring-amber-200 {
+  --tw-ring-color: oklch(0.38 0.10 80);
+}
+.dark .ring-violet-100 {
+  --tw-ring-color: oklch(0.30 0.08 300);
+}
+.dark .ring-violet-200 {
+  --tw-ring-color: oklch(0.35 0.10 300);
+}
+.dark .ring-gray-200 {
+  --tw-ring-color: oklch(0.27 0.005 260);
+}
+.dark .hover\:ring-gray-200:hover {
+  --tw-ring-color: oklch(0.27 0.005 260) !important;
+}
+.dark .focus\:ring-blue-50:focus {
+  --tw-ring-color: oklch(0.25 0.06 260);
+}
+.dark .focus\:ring-blue-300:focus {
+  --tw-ring-color: oklch(0.45 0.12 260);
+}
+
+/* ── 34. Shadow colors claros sin variante dark ──────────────────────── */
+.dark .shadow-blue-100 {
+  --tw-shadow-color: oklch(0.20 0.04 260 / 0.3);
+}
+.dark .shadow-blue-200 {
+  --tw-shadow-color: oklch(0.25 0.06 260 / 0.4);
+}
+.dark .shadow-blue-300 {
+  --tw-shadow-color: oklch(0.30 0.08 260 / 0.4);
+}
+.dark .shadow-violet-200 {
+  --tw-shadow-color: oklch(0.25 0.06 300 / 0.4);
+}
+.dark .shadow-amber-200 {
+  --tw-shadow-color: oklch(0.28 0.06 80 / 0.4);
+}
+
+/* ── 34b. hover:brightness en modo oscuro ────────────────────────────── */
+.dark .hover\:brightness-95:hover {
+  filter: brightness(1.08) !important;
+}
+
+/* ── 35. Bordes semánticos adicionales sin variante dark ─────────────── */
+.dark .border-violet-100 {
+  border-color: oklch(0.28 0.05 300);
+}
+.dark .border-violet-200 {
+  border-color: oklch(0.32 0.06 300);
+}
+.dark .border-violet-300 {
+  border-color: oklch(0.38 0.08 300);
+}
+.dark .hover\:border-violet-200:hover {
+  border-color: oklch(0.35 0.06 300) !important;
+}
+.dark .hover\:border-violet-300:hover {
+  border-color: oklch(0.40 0.08 300) !important;
+}
+.dark .border-rose-300 {
+  border-color: oklch(0.35 0.08 15);
+}
+.dark .border-rose-400 {
+  border-color: oklch(0.42 0.10 15);
+}
+.dark .border-cyan-200 {
+  border-color: oklch(0.30 0.06 210);
+}
+.dark .border-cyan-300 {
+  border-color: oklch(0.35 0.08 210);
+}
+
+/* ── 36. Texto violeta/rose/indigo sin variante dark ─────────────────── */
+.dark .text-violet-900 { color: oklch(0.85 0.12 300); }
+.dark .text-violet-800 { color: oklch(0.82 0.12 300); }
+.dark .text-violet-700 { color: oklch(0.78 0.12 300); }
+.dark .text-rose-600   { color: oklch(0.72 0.14 15); }
+.dark .text-rose-700   { color: oklch(0.78 0.14 15); }
+.dark .text-rose-900   { color: oklch(0.85 0.12 15); }
+.dark .text-cyan-700   { color: oklch(0.78 0.12 210); }
+.dark .text-indigo-700 { color: oklch(0.78 0.12 280); }
+.dark .text-indigo-800 { color: oklch(0.82 0.12 280); }
+
+/* ── 37. Hovers semánticos adicionales sin variante dark ──────────────── */
+.dark .hover\:bg-violet-50:hover {
+  background-color: oklch(0.27 0.04 300) !important;
+}
+.dark .hover\:bg-violet-100:hover {
+  background-color: oklch(0.30 0.06 300) !important;
+}
+.dark .hover\:bg-rose-50:hover {
+  background-color: oklch(0.27 0.04 15) !important;
+}
+
+/* ── 38. Ring-offset para fondos oscuros ─────────────────────────────── */
+.dark .ring-offset-1,
+.dark .ring-offset-2 {
+  --tw-ring-offset-color: var(--background);
+}
+
+/* ── 39. Focus border colors sin variante dark ───────────────────────── */
+.dark .focus\:border-violet-400:focus {
+  border-color: oklch(0.55 0.14 300);
+}
+.dark .focus\:border-blue-400:focus {
+  border-color: oklch(0.55 0.14 260);
+}
+.dark .focus\:border-blue-500:focus {
+  border-color: oklch(0.55 0.18 260);
+}
+
+/* ── 40. Imprimir siempre en modo claro ────────────────────────────────── */
+@media print {
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+    --card: #ffffff;
+    --card-foreground: #000000;
+    --popover: #ffffff;
+    --popover-foreground: #000000;
+    --primary: #030213;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #030213;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #f1f5f9;
+    --accent-foreground: #030213;
+    --border: rgba(0, 0, 0, 0.15);
+    --input-background: #f3f3f5;
+    color-scheme: light;
+  }
+
+  .dark {
+    --background: #ffffff;
+    --foreground: #000000;
+    color-scheme: light;
+  }
+}

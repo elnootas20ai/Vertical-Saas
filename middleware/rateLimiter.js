@@ -1,0 +1,261 @@
+/**
+ * B-09 / I-06: Rate limiting granular por plan + protección contra abuso interno.
+ *
+ * Capas de protección:
+ *
+ *   1. Auth (por IP):
+ *      Login          → 10 intentos / 15 min
+ *      Registro       → 5 cuentas   / 1 h
+ *      Recuperación   → 5 solicitudes / 1 h
+ *
+ *   2. Burst por usuario autenticado (I-06):
+ *      Todos los planes → 30 req / 10 s
+ *      Frena ráfagas de automatización aunque el usuario tenga cuota diaria disponible.
+ *      Uso: app.use('/api/...', requireAuth, burstLimiter, planAwareLimiter, router)
+ *
+ *   3. Cuota por plan (por usuario autenticado o IP si no hay auth):
+ *      Trial / Basic  → 100 req / min
+ *      Pro / Business → 1 000 req / min
+ *      Enterprise     → 2 000 req / min
+ *
+ *   4. Operaciones costosas — sensitiveOpLimiter (I-06):
+ *      10 req / min por usuario, independiente del plan.
+ *      Aplicar en: AI calls, generación de PDF, exportaciones bulk, replicación.
+ *      Uso: app.use('/api/calls/...', requireAuth, sensitiveOpLimiter, callsRouter)
+ *
+ *   5. Tracker de abuso (I-06):
+ *      Registra cuántas veces un usuario/IP dispara un rate limit.
+ *      Log de warning tras 5 violaciones, error tras 20. Sin bloqueo automático
+ *      (el bloqueo duro debe hacerse en el balanceador/firewall externo).
+ */
+
+import rateLimit from 'express-rate-limit';
+import logger    from './logger.js';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  return typeof forwarded === 'string'
+    ? forwarded.split(',')[0].trim()
+    : req.socket?.remoteAddress || 'unknown';
+}
+
+function getUserKey(req) {
+  const userId = req.authUser?.user_id;
+  return userId ? `user:${userId}` : `ip:${getClientIp(req)}`;
+}
+
+function getPlanTier(req) {
+  const plan = String(req.authUser?.subscription?.planName || '').toLowerCase();
+  if (plan === 'enterprise') return 'enterprise';
+  if (['pro', 'business', 'profesional'].includes(plan)) return 'pro';
+  return 'trial'; // Basic, trial_active, desconocido → trial
+}
+
+// ─── I-06: Abuse tracker ──────────────────────────────────────────────────────
+
+/**
+ * Mapa en memoria: clave → { violations, firstAt, lastAt, lastUrl }
+ * Se limpia automáticamente cada 30 minutos para evitar crecimiento ilimitado.
+ */
+const _abuseMap = new Map();
+
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [key, entry] of _abuseMap) {
+    if (entry.lastAt < cutoff) _abuseMap.delete(key);
+  }
+}, 30 * 60 * 1000);
+
+function trackViolation(req) {
+  const key  = getUserKey(req);
+  const now  = Date.now();
+  const prev = _abuseMap.get(key) ?? { violations: 0, firstAt: now, lastAt: now, lastUrl: '' };
+
+  prev.violations++;
+  prev.lastAt  = now;
+  prev.lastUrl = req.originalUrl;
+  _abuseMap.set(key, prev);
+
+  const v = prev.violations;
+  if (v === 5 || v % 20 === 0) {
+    const level = v >= 20 ? 'error' : 'warn';
+    logger[level](
+      {
+        tag:        'ABUSE',
+        key,
+        violations: v,
+        url:        req.originalUrl,
+        method:     req.method,
+        ip:         getClientIp(req),
+        userId:     req.authUser?.user_id,
+      },
+      `Posible abuso de API detectado: ${v} violaciones de rate limit`,
+    );
+  }
+}
+
+/** Devuelve las entradas de abuso activas (para el endpoint /health o administración). */
+export function getAbuseStats() {
+  return Array.from(_abuseMap.entries()).map(([key, entry]) => ({ key, ...entry }));
+}
+
+// ─── Auth limiters (por IP) ───────────────────────────────────────────────────
+
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiados intentos. Inténtalo de nuevo en 15 minutos.' } },
+});
+
+export const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiados registros desde esta IP. Inténtalo en una hora.' } },
+});
+
+export const recoverLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiadas solicitudes de recuperación. Inténtalo en una hora.' } },
+});
+
+// ─── I-06: Burst limiter (todos los usuarios autenticados) ────────────────────
+
+/**
+ * Limiter de ráfaga corto: 30 requests en 10 segundos por usuario/IP.
+ * Evita que un usuario, aunque tenga cuota de plan suficiente,
+ * dispare decenas de requests en paralelo de forma abusiva.
+ *
+ * Montar ANTES de planAwareLimiter:
+ *   app.use('/api/...', requireAuth, burstLimiter, planAwareLimiter, router)
+ */
+export const burstLimiter = rateLimit({
+  windowMs: 10 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getUserKey,
+  handler(req, res, next, options) {
+    trackViolation(req);
+    res.status(options.statusCode).json({
+      ok: false,
+      success: false,
+      error: {
+        code:    'BURST_LIMIT_EXCEEDED',
+        message: 'Demasiadas peticiones en muy poco tiempo. Reduce la frecuencia de solicitudes.',
+        retryAfterMs: options.windowMs,
+      },
+    });
+  },
+});
+
+// ─── Plan limiters (por usuario o IP) ────────────────────────────────────────
+
+const _trialLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getUserKey,
+  handler(req, res, next, options) {
+    trackViolation(req);
+    res.status(options.statusCode).json({
+      ok: false, success: false,
+      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Límite del plan Trial alcanzado: 100 peticiones/min. Actualiza a Pro para mayor capacidad.' },
+    });
+  },
+});
+
+const _proLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getUserKey,
+  handler(req, res, next, options) {
+    trackViolation(req);
+    res.status(options.statusCode).json({
+      ok: false, success: false,
+      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Límite del plan Pro alcanzado: 1 000 peticiones/min.' },
+    });
+  },
+});
+
+const _enterpriseLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 2000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getUserKey,
+  handler(req, res, next, options) {
+    trackViolation(req);
+    res.status(options.statusCode).json({
+      ok: false, success: false,
+      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Límite del plan Enterprise alcanzado: 2 000 peticiones/min.' },
+    });
+  },
+});
+
+// API pública v1 (legacy, por IP)
+export const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiadas peticiones. Inténtalo en un momento.' } },
+});
+
+/**
+ * Middleware dinámico que selecciona el limiter correcto según el plan del usuario.
+ * Requiere que requireAuth haya corrido antes (req.authUser disponible).
+ */
+export function planAwareLimiter(req, res, next) {
+  const tier = getPlanTier(req);
+  switch (tier) {
+    case 'enterprise': return _enterpriseLimiter(req, res, next);
+    case 'pro':        return _proLimiter(req, res, next);
+    default:           return _trialLimiter(req, res, next);
+  }
+}
+
+// ─── I-06: Sensitive operations limiter ───────────────────────────────────────
+
+/**
+ * Limiter para operaciones costosas (IA, generación de PDF, exportaciones bulk,
+ * replicación CouchDB): 10 operaciones / minuto por usuario autenticado.
+ *
+ * Uso:
+ *   app.post('/api/calls/process/:id', requireAuth, sensitiveOpLimiter, handler)
+ *   app.get('/api/backup/export/:db',  requireAuth, sensitiveOpLimiter, handler)
+ */
+export const sensitiveOpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getUserKey,
+  handler(req, res, next, options) {
+    trackViolation(req);
+    res.status(options.statusCode).json({
+      ok: false,
+      success: false,
+      error: {
+        code:    'SENSITIVE_OP_LIMIT_EXCEEDED',
+        message: 'Límite de operaciones costosas alcanzado: 10 por minuto. Vuelve a intentarlo en breve.',
+        retryAfterMs: options.windowMs,
+      },
+    });
+  },
+});

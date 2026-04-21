@@ -1,0 +1,1879 @@
+import {
+  getDeliveryDbName,
+  getCatalogDbName,
+  buildDeliveryOrderDocument,
+  sanitizeDeliveryOrder,
+  listDeliveryOrdersByUser,
+  buildCatalogItemDocument,
+  sanitizeCatalogItem,
+  listCatalogItemsByUser,
+  buildSupplierDocument,
+  sanitizeSupplier,
+  listSuppliersByUser,
+  buildPurchaseInvoiceDocument,
+  sanitizePurchaseInvoice,
+  listPurchaseInvoicesByUser,
+  generateExpenseFromInvoice,
+  generateInputTaxFromInvoice,
+  createDocumentFromInvoice,
+  buildDriverCashSessionDocument,
+  sanitizeDriverCashSession,
+  listDriverCashSessionsByUser,
+  buildTpvRegisterSessionDocument,
+  sanitizeTpvRegisterSession,
+  listTpvRegisterSessionsByUser,
+  buildPointOfSaleDocument,
+  sanitizePointOfSale,
+  listPointsOfSaleByUser,
+  buildScaleDeviceDocument,
+  sanitizeScaleDevice,
+  listScaleDevicesByUser,
+  buildDeliveryConfigDocument,
+  sanitizeDeliveryConfig,
+  buildDriverDocument,
+  sanitizeDriver,
+  listDriversByUser,
+  buildRepartoConfigDocument,
+  sanitizeRepartoConfig,
+  ensureDatabase,
+  getDocument,
+  putDocument,
+  getAllDocuments,
+  bulkPutDocuments,
+  softDeleteDocument,
+  findAccountByUserId,
+  logAccountActivity,
+  getFinanceDbName,
+  buildFinanceDocument,
+} from '../services/couchdb.js';
+import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
+import { recordMovement } from '../services/stockMovementService.js';
+import { deductOrderByRecipe } from '../services/recipeStockService.js';
+import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
+import logger from '../services/logger.js';
+
+function badRequest(res, error) {
+  return res.status(400).json({ ok: false, error });
+}
+
+async function ensureDeliveryOrderOwner(req, userId, orderId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, orderId);
+  if (!doc || doc.type !== 'delivery_order' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+async function ensureCatalogItemOwner(req, userId, itemId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, itemId);
+  if (!doc || doc.type !== 'catalog_item' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+async function ensureSupplierOwner(req, userId, supplierId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, supplierId);
+  if (!doc || doc.type !== 'supplier' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+async function ensurePurchaseInvoiceOwner(req, userId, invoiceId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, invoiceId);
+  if (!doc || doc.type !== 'purchase_invoice' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+// ─── DELIVERY ORDERS ─────────────────────────────────────────────────────────
+
+export async function listDeliveryOrders(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const orders = await listDeliveryOrdersByUser(req, userId);
+    return res.json({ ok: true, orders: orders.map(sanitizeDeliveryOrder) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar pedidos delivery' });
+  }
+}
+
+export async function createDeliveryOrder(req, res) {
+  try {
+    const { userId } = req.params;
+    const { order } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!order || typeof order !== 'object') return badRequest(res, 'Falta el objeto order en el body');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildDeliveryOrderDocument(userId, order);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'delivery_order',
+      action: `Creó pedido ${doc.orderNumber} — ${doc.customerName}`,
+      entityId: doc._id,
+      entityLabel: `${doc.orderNumber} ${doc.customerName}`.trim(),
+      metadata: { status: doc.status, channel: doc.channel },
+    });
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastToUser(userId, 'delivery_order_created', sanitized);
+    triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
+    return res.status(201).json({ ok: true, order: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear pedido delivery' });
+  }
+}
+
+export async function updateDeliveryOrder(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { order } = req.body || {};
+    if (!order || typeof order !== 'object') return badRequest(res, 'Faltan datos del pedido');
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const doc = buildDeliveryOrderDocument(userId, { ...existing, ...order }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'delivery_order',
+      action: `Actualizó pedido ${doc.orderNumber} → ${doc.status}`,
+      entityId: doc._id,
+      entityLabel: `${doc.orderNumber} ${doc.customerName}`.trim(),
+      metadata: { status: doc.status },
+    });
+
+    if (doc.status === 'delivered' && existing.status !== 'delivered') {
+      try {
+        const orderItems = (doc.items || [])
+          .filter(item => (item.catalogItemId || item.productId) && item.quantity)
+          .map(item => ({
+            catalogItemId: item.catalogItemId || item.productId || '',
+            quantity: Number(item.quantity || 0),
+          }));
+        if (orderItems.length > 0) {
+          const result = await deductOrderByRecipe(req, userId, {
+            orderId: doc._id,
+            orderType: 'delivery_order',
+            items: orderItems,
+            performedBy: 'system',
+          });
+          if (result.warnings.length > 0) {
+            logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: result.warnings }, 'Advertencias al descontar stock por receta');
+          }
+        }
+      } catch (err) {
+        logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error descontando stock por receta delivery');
+      }
+    }
+
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastToUser(userId, 'delivery_order_updated', sanitized);
+    if (doc.status !== existing.status) {
+      triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
+    }
+    return res.json({ ok: true, order: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar pedido delivery' });
+  }
+}
+
+export async function removeDeliveryOrder(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await softDeleteDocument(req, db, orderId);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'delivery_order',
+      action: `Eliminó pedido ${existing.orderNumber}`,
+      entityId: existing._id,
+      entityLabel: existing.orderNumber,
+      metadata: {},
+    });
+    return res.json({ ok: true, id: orderId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar pedido delivery' });
+  }
+}
+
+// ─── CANCEL ORDER ────────────────────────────────────────────────────────────
+
+export async function cancelDeliveryOrder(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { cancelReason } = req.body || {};
+    if (!cancelReason || String(cancelReason).trim().length < 10) {
+      return badRequest(res, 'El motivo de cancelación es obligatorio (mínimo 10 caracteres)');
+    }
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (existing.status === 'entregado') {
+      return badRequest(res, 'No se puede cancelar un pedido ya entregado');
+    }
+    if (existing.status === 'cancelled') {
+      return badRequest(res, 'El pedido ya está cancelado');
+    }
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const now = new Date().toISOString();
+    const db = getDeliveryDbName();
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...existing,
+      status: 'cancelled',
+      cancelReason: String(cancelReason).trim(),
+      cancelledAt: now,
+      cancelledBy: account.fullName || userId,
+      stageHistory: [
+        ...(existing.stageHistory || []),
+        { status: 'cancelled', date: now, user: account.fullName || 'Sistema', notes: String(cancelReason).trim() },
+      ],
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'delivery_order', action: `Canceló pedido ${doc.orderNumber}: ${cancelReason}`,
+      entityId: doc._id, entityLabel: doc.orderNumber, metadata: { cancelReason },
+    });
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastToUser(userId, 'delivery_order_cancelled', { order: sanitized, reason: cancelReason });
+    triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: 'cancelled', previousStatus: existing.status }).catch(() => null);
+    return res.json({ ok: true, order: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
+  }
+}
+
+// ─── REOPEN ORDER ────────────────────────────────────────────────────────────
+
+export async function reopenDeliveryOrder(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { notes } = req.body || {};
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (existing.status !== 'cancelled' && existing.status !== 'entregado') {
+      return badRequest(res, 'Solo se pueden reabrir pedidos cancelados o entregados');
+    }
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const now = new Date().toISOString();
+    const db = getDeliveryDbName();
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...existing,
+      status: 'nuevo',
+      reopenedAt: now,
+      reopenedBy: account.fullName || userId,
+      stageHistory: [
+        ...(existing.stageHistory || []),
+        { status: 'nuevo', date: now, user: account.fullName || 'Sistema', notes: `Pedido reabierto${notes ? `: ${notes}` : ''}` },
+      ],
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'delivery_order', action: `Reabrió pedido ${doc.orderNumber}`,
+      entityId: doc._id, entityLabel: doc.orderNumber, metadata: {},
+    });
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastToUser(userId, 'delivery_order_reopened', sanitized);
+    return res.json({ ok: true, order: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al reabrir pedido' });
+  }
+}
+
+// ─── REGISTER PAYMENT ────────────────────────────────────────────────────────
+
+export async function registerPayment(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { paymentMethod, paidAmount } = req.body || {};
+    if (!paymentMethod) return badRequest(res, 'Falta el método de pago');
+    if (!paidAmount || Number(paidAmount) <= 0) return badRequest(res, 'El importe debe ser mayor que 0');
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const now = new Date().toISOString();
+    const newPaid = Number(existing.paidAmount || 0) + Number(paidAmount);
+    const total = Number(existing.totalAmount || 0);
+    const paymentStatus = newPaid >= total ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
+    const db = getDeliveryDbName();
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...existing,
+      paymentMethod,
+      paidAmount: newPaid,
+      paidAt: now,
+      paymentStatus,
+      stageHistory: [
+        ...(existing.stageHistory || []),
+        { status: existing.status, date: now, user: account.fullName || 'Sistema', notes: `Cobro registrado: ${paymentMethod} — ${Number(paidAmount).toFixed(2)}€` },
+      ],
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'delivery_order', action: `Cobro ${Number(paidAmount).toFixed(2)}€ en ${doc.orderNumber}`,
+      entityId: doc._id, entityLabel: doc.orderNumber,
+      metadata: { paymentMethod, paidAmount: newPaid, paymentStatus },
+    });
+
+    // CAJA-03/10: auto-register transaction on open TPV register session
+    try {
+      const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+      const openSession = allSessions.find(s => s.status === 'open');
+      if (openSession) {
+        const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const registerTx = {
+          id: txId,
+          type: 'sale',
+          paymentMethod: paymentMethod || 'efectivo',
+          amount: Number(paidAmount),
+          description: `Pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
+          orderId: doc._id,
+          orderNumber: doc.orderNumber || '',
+          channel: doc.channel || '',
+          date: now,
+          registeredBy: account.fullName || 'Sistema',
+        };
+        const updatedTxs = [...(openSession.transactions || []), registerTx];
+        const salesByChannel = {};
+        for (const t of updatedTxs) {
+          if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
+        }
+        const linkedOrderIds = [...(openSession.linkedOrderIds || [])];
+        if (!linkedOrderIds.includes(doc._id)) linkedOrderIds.push(doc._id);
+        const sessionDoc = buildTpvRegisterSessionDocument(userId, {
+          ...openSession,
+          transactions: updatedTxs,
+          salesByChannel,
+          linkedOrderIds,
+        }, openSession);
+        await putDocument(req, db, sessionDoc._id, sessionDoc);
+        broadcastToUser(userId, 'tpv_session_updated', sanitizeTpvRegisterSession({ ...sessionDoc, _rev: openSession._rev }));
+      }
+    } catch (regErr) {
+      console.error('[CAJA] Error auto-registering in TPV session:', regErr?.message);
+    }
+
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastToUser(userId, 'delivery_payment_registered', sanitized);
+    return res.json({ ok: true, order: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al registrar cobro' });
+  }
+}
+
+// ─── FILTER ORDERS ───────────────────────────────────────────────────────────
+
+export async function filterDeliveryOrders(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    let orders = await listDeliveryOrdersByUser(req, userId);
+    orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
+
+    const { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search } = req.query;
+    if (channel) orders = orders.filter((o) => o.channel === channel);
+    if (salesPointId) orders = orders.filter((o) => o.salesPointId === salesPointId);
+    if (status) orders = orders.filter((o) => o.status === status);
+    if (deliveryType) orders = orders.filter((o) => o.deliveryType === deliveryType);
+    if (clientId) orders = orders.filter((o) => o.clientId === clientId);
+    if (dateFrom) orders = orders.filter((o) => o.createdAt >= dateFrom);
+    if (dateTo) orders = orders.filter((o) => o.createdAt <= dateTo);
+    if (search) {
+      const q = String(search).toLowerCase();
+      orders = orders.filter((o) =>
+        (o.orderNumber || '').toLowerCase().includes(q) ||
+        (o.customerName || '').toLowerCase().includes(q) ||
+        (o.customerPhone || '').toLowerCase().includes(q) ||
+        (o.customerAddress || '').toLowerCase().includes(q)
+      );
+    }
+
+    orders.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const total = orders.length;
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const offset = Number(req.query.offset) || 0;
+    orders = orders.slice(offset, offset + limit);
+    return res.json({ ok: true, orders, total });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al filtrar pedidos' });
+  }
+}
+
+// ─── CLIENT ORDER HISTORY ────────────────────────────────────────────────────
+
+export async function clientOrderHistory(req, res) {
+  try {
+    const { userId, clientId } = req.params;
+    if (!userId || !clientId) return badRequest(res, 'Falta userId o clientId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    let orders = await listDeliveryOrdersByUser(req, userId);
+    orders = orders
+      .map(sanitizeDeliveryOrder)
+      .filter((o) => o && o.clientId === clientId)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    return res.json({ ok: true, orders });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener historial de cliente' });
+  }
+}
+
+// ─── CATALOG ITEMS ───────────────────────────────────────────────────────────
+
+export async function listCatalogItems(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const filterModule = req.query.module || undefined;
+    const items = await listCatalogItemsByUser(req, userId, { module: filterModule });
+    return res.json({ ok: true, items: items.map(sanitizeCatalogItem) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar artículos' });
+  }
+}
+
+export async function createCatalogItem(req, res) {
+  try {
+    const { userId } = req.params;
+    const { item } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!item || typeof item !== 'object') return badRequest(res, 'Falta el objeto item en el body');
+    if (!item.name) return badRequest(res, 'Falta el nombre del artículo');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const doc = buildCatalogItemDocument(userId, item);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'catalog_item',
+      action: `Añadió artículo ${doc.sku} — ${doc.name}`,
+      entityId: doc._id,
+      entityLabel: doc.name,
+      metadata: { category: doc.category },
+    });
+    return res.status(201).json({ ok: true, item: sanitizeCatalogItem({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear artículo' });
+  }
+}
+
+export async function bulkCreateCatalogItems(req, res) {
+  try {
+    const { userId } = req.params;
+    const { items } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(items) || items.length === 0) return badRequest(res, 'Falta el array items en el body');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+
+    const docs = items
+      .filter(item => item && typeof item === 'object' && item.name)
+      .map(item => buildCatalogItemDocument(userId, item));
+
+    if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
+
+    const results = await bulkPutDocuments(req, db, docs);
+
+    const created = [];
+    const errors = [];
+    results.forEach((result, idx) => {
+      if (result.ok) {
+        created.push(sanitizeCatalogItem({ ...docs[idx], _rev: result.rev }));
+      } else {
+        errors.push({ index: idx, name: docs[idx]?.name, error: result.error || result.reason });
+      }
+    });
+
+    if (created.length > 0) {
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'catalog_item',
+        action: `Importación masiva: ${created.length} artículo(s) creado(s)`,
+        entityId: created[0]._id,
+        entityLabel: `Importación de ${created.length} artículos`,
+        metadata: { count: created.length, module: docs[0]?.module },
+      });
+    }
+
+    return res.status(201).json({
+      ok: true,
+      created: created.length,
+      errors: errors.length,
+      items: created,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error en importación masiva' });
+  }
+}
+
+export async function updateCatalogItem(req, res) {
+  try {
+    const { userId, itemId } = req.params;
+    const { item } = req.body || {};
+    if (!item || typeof item !== 'object') return badRequest(res, 'Faltan datos del artículo');
+    const existing = await ensureCatalogItemOwner(req, userId, itemId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Artículo no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getCatalogDbName();
+    const doc = buildCatalogItemDocument(userId, { ...existing, ...item }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const stockChanged = Number(existing.stockQuantity || 0) !== Number(doc.stockQuantity || 0);
+    if (stockChanged) triggerReactiveAlert(userId, 'stock_updated', { itemId: doc._id }).catch(() => null);
+    return res.json({ ok: true, item: sanitizeCatalogItem({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar artículo' });
+  }
+}
+
+export async function removeCatalogItem(req, res) {
+  try {
+    const { userId, itemId } = req.params;
+    const existing = await ensureCatalogItemOwner(req, userId, itemId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Artículo no encontrado' });
+    const db = getCatalogDbName();
+    await softDeleteDocument(req, db, itemId);
+    return res.json({ ok: true, id: itemId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar artículo' });
+  }
+}
+
+// ─── SUPPLIERS ───────────────────────────────────────────────────────────────
+
+export async function listSuppliers(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const suppliers = await listSuppliersByUser(req, userId);
+    return res.json({ ok: true, suppliers: suppliers.map(sanitizeSupplier) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar proveedores' });
+  }
+}
+
+export async function createSupplier(req, res) {
+  try {
+    const { userId } = req.params;
+    const { supplier } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!supplier || typeof supplier !== 'object') return badRequest(res, 'Falta el objeto supplier');
+    if (!supplier.name) return badRequest(res, 'Falta el nombre del proveedor');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const doc = buildSupplierDocument(userId, supplier);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.status(201).json({ ok: true, supplier: sanitizeSupplier({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear proveedor' });
+  }
+}
+
+export async function updateSupplier(req, res) {
+  try {
+    const { userId, supplierId } = req.params;
+    const { supplier } = req.body || {};
+    if (!supplier || typeof supplier !== 'object') return badRequest(res, 'Faltan datos del proveedor');
+    const existing = await ensureSupplierOwner(req, userId, supplierId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Proveedor no encontrado' });
+    const db = getCatalogDbName();
+    const doc = buildSupplierDocument(userId, { ...existing, ...supplier }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, supplier: sanitizeSupplier({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar proveedor' });
+  }
+}
+
+export async function removeSupplier(req, res) {
+  try {
+    const { userId, supplierId } = req.params;
+    const existing = await ensureSupplierOwner(req, userId, supplierId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Proveedor no encontrado' });
+    const db = getCatalogDbName();
+    await softDeleteDocument(req, db, supplierId);
+    return res.json({ ok: true, id: supplierId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar proveedor' });
+  }
+}
+
+// ─── PURCHASE INVOICES ───────────────────────────────────────────────────────
+
+export async function listPurchaseInvoices(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const invoices = await listPurchaseInvoicesByUser(req, userId);
+    return res.json({ ok: true, invoices: invoices.map(sanitizePurchaseInvoice) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar facturas' });
+  }
+}
+
+export async function createPurchaseInvoice(req, res) {
+  try {
+    const { userId } = req.params;
+    const { invoice } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!invoice || typeof invoice !== 'object') return badRequest(res, 'Falta el objeto invoice');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const doc = buildPurchaseInvoiceDocument(userId, invoice);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.status(201).json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear factura' });
+  }
+}
+
+export async function updatePurchaseInvoice(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const { invoice } = req.body || {};
+    if (!invoice || typeof invoice !== 'object') return badRequest(res, 'Faltan datos de la factura');
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    const db = getCatalogDbName();
+    const doc = buildPurchaseInvoiceDocument(userId, { ...existing, ...invoice }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar factura' });
+  }
+}
+
+export async function removePurchaseInvoice(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    const db = getCatalogDbName();
+    await softDeleteDocument(req, db, invoiceId);
+    return res.json({ ok: true, id: invoiceId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar factura' });
+  }
+}
+
+// ─── PURCHASE INVOICE: VALIDATE / REJECT / DUPLICATE / PDF ──────────────────
+
+export async function validatePurchaseInvoice(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+
+    const currentStatus = existing.validationStatus || existing.status || 'pending_validation';
+    if (currentStatus !== 'pending_validation' && currentStatus !== 'pending') {
+      return res.status(400).json({ ok: false, error: `No se puede validar una factura en estado "${currentStatus}"` });
+    }
+
+    const db = getCatalogDbName();
+    const now = new Date().toISOString();
+
+    const updates = {
+      status: 'validated',
+      validationStatus: 'validated',
+      validatedAt: now,
+      validatedBy: userId,
+    };
+
+    let linkedExpenseId = existing.linkedExpenseId || '';
+    let linkedTaxEntryId = existing.linkedTaxEntryId || '';
+    let linkedDocumentId = existing.linkedDocumentId || '';
+
+    try {
+      const expense = await generateExpenseFromInvoice(req, userId, { ...existing, ...updates });
+      linkedExpenseId = expense._id;
+    } catch (err) {
+      console.error('[validateInvoice] Error generating expense:', err.message);
+    }
+
+    try {
+      const taxEntry = await generateInputTaxFromInvoice(req, userId, { ...existing, ...updates });
+      linkedTaxEntryId = taxEntry._id;
+    } catch (err) {
+      console.error('[validateInvoice] Error generating tax entry:', err.message);
+    }
+
+    if (existing.pdfUrl) {
+      try {
+        const docRecord = await createDocumentFromInvoice(req, userId, existing);
+        linkedDocumentId = docRecord._id;
+      } catch (err) {
+        console.error('[validateInvoice] Error creating document:', err.message);
+      }
+    }
+
+    const doc = buildPurchaseInvoiceDocument(userId, {
+      ...existing,
+      ...updates,
+      linkedExpenseId,
+      linkedTaxEntryId,
+      linkedDocumentId,
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al validar factura' });
+  }
+}
+
+export async function rejectPurchaseInvoice(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+
+    const currentStatus = existing.validationStatus || existing.status;
+    if (currentStatus !== 'validated') {
+      return res.status(400).json({ ok: false, error: `Solo se puede rechazar una factura validada (estado actual: "${currentStatus}")` });
+    }
+
+    const db = getCatalogDbName();
+    const doc = buildPurchaseInvoiceDocument(userId, {
+      ...existing,
+      status: 'pending_validation',
+      validationStatus: 'pending_validation',
+      validatedAt: '',
+      validatedBy: '',
+    }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al rechazar factura' });
+  }
+}
+
+export async function checkDuplicateInvoice(req, res) {
+  try {
+    const { userId } = req.params;
+    const { invoiceNumber, supplierId, supplierName } = req.body || {};
+    if (!invoiceNumber) return res.json({ ok: true, duplicate: false });
+
+    const invoices = await listPurchaseInvoicesByUser(req, userId);
+    const normalizedNum = String(invoiceNumber).trim().toLowerCase().replace(/\s+/g, '');
+
+    const match = invoices.find((inv) => {
+      const invNum = String(inv.invoiceNumber || '').trim().toLowerCase().replace(/\s+/g, '');
+      if (invNum !== normalizedNum) return false;
+      if (supplierId && inv.supplierId) return inv.supplierId === supplierId;
+      if (supplierName && inv.supplierName) {
+        return inv.supplierName.toLowerCase().trim() === String(supplierName).toLowerCase().trim();
+      }
+      return true;
+    });
+
+    if (match) {
+      return res.json({ ok: true, duplicate: true, existingInvoice: sanitizePurchaseInvoice(match) });
+    }
+    return res.json({ ok: true, duplicate: false });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al comprobar duplicados' });
+  }
+}
+
+export async function uploadInvoicePdf(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No se ha recibido ningún archivo' });
+
+    const db = getCatalogDbName();
+    const attachmentName = req.file.originalname || 'factura.pdf';
+    const contentType = req.file.mimetype || 'application/pdf';
+
+    const latestDoc = await getDocument(req, db, invoiceId);
+    const currentRev = latestDoc?._rev || existing._rev;
+
+    const nano = req.app?.locals?.nano || req.nano;
+    const couchDb = nano.use(db);
+    await couchDb.attachment.insert(invoiceId, attachmentName, req.file.buffer, contentType, { rev: currentRev });
+
+    const updatedDoc = await getDocument(req, db, invoiceId);
+    const pdfUrl = `/api/delivery/invoices/${userId}/${invoiceId}/pdf`;
+
+    const doc = buildPurchaseInvoiceDocument(userId, {
+      ...updatedDoc,
+      pdfUrl,
+      pdfFilename: attachmentName,
+    }, updatedDoc);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al subir PDF' });
+  }
+}
+
+export async function getInvoicePdf(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+    const existing = await ensurePurchaseInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+
+    const db = getCatalogDbName();
+    const doc = await getDocument(req, db, invoiceId);
+    if (!doc || !doc._attachments) {
+      return res.status(404).json({ ok: false, error: 'No hay documento adjunto' });
+    }
+
+    const attachmentName = Object.keys(doc._attachments)[0];
+    if (!attachmentName) return res.status(404).json({ ok: false, error: 'No hay documento adjunto' });
+
+    const nano = req.app?.locals?.nano || req.nano;
+    const couchDb = nano.use(db);
+    const stream = await couchDb.attachment.get(invoiceId, attachmentName);
+
+    const contentType = doc._attachments[attachmentName].content_type || 'application/pdf';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${attachmentName}"`);
+
+    if (Buffer.isBuffer(stream)) {
+      return res.send(stream);
+    }
+    stream.pipe(res);
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener PDF' });
+  }
+}
+
+// ─── DRIVER CASH SESSIONS ───────────────────────────────────────────────────
+
+async function ensureDriverCashSessionOwner(req, userId, sessionId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, sessionId);
+  if (!doc || doc.type !== 'driver_cash_session' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+export async function listDriverCashSessions(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const sessions = await listDriverCashSessionsByUser(req, userId);
+    return res.json({ ok: true, sessions: sessions.map(sanitizeDriverCashSession) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar sesiones de caja' });
+  }
+}
+
+export async function createDriverCashSession(req, res) {
+  try {
+    const { userId } = req.params;
+    const { session } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!session || typeof session !== 'object') return badRequest(res, 'Falta el objeto session en el body');
+    if (!session.driverName) return badRequest(res, 'Falta el nombre del repartidor');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const existingSessions = await listDriverCashSessionsByUser(req, userId);
+    const alreadyOpen = existingSessions.find(
+      s => s.driverName === session.driverName && s.status === 'open' && !s.deletedAt
+    );
+    if (alreadyOpen) {
+      return res.status(409).json({
+        ok: false,
+        error: `${session.driverName} ya tiene una caja abierta desde ${alreadyOpen.openedAt}`,
+        existingSessionId: alreadyOpen._id,
+      });
+    }
+
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildDriverCashSessionDocument(userId, session);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'driver_cash_session',
+      action: `Abrió caja repartidor ${doc.driverName} — ${doc.initialFloat.toFixed(2)}€`,
+      entityId: doc._id,
+      entityLabel: doc.driverName,
+      metadata: { initialFloat: doc.initialFloat },
+    });
+    triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'driver', action: 'opened' }).catch(() => null);
+    return res.status(201).json({ ok: true, session: sanitizeDriverCashSession({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear sesión de caja' });
+  }
+}
+
+export async function updateDriverCashSession(req, res) {
+  try {
+    const { userId, sessionId } = req.params;
+    const { session } = req.body || {};
+    if (!session || typeof session !== 'object') return badRequest(res, 'Faltan datos de la sesión');
+    const existing = await ensureDriverCashSessionOwner(req, userId, sessionId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja no encontrada' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const doc = buildDriverCashSessionDocument(userId, { ...existing, ...session }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const wasClosed = (doc.status === 'closed' || doc.status === 'pending_review') && existing.status === 'open';
+    const wasReopened = doc.status === 'open' && (existing.status === 'closed' || existing.status === 'pending_review');
+    const action = wasClosed
+      ? `Cerró caja repartidor ${doc.driverName} — Diferencia: ${doc.difference.toFixed(2)}€`
+      : wasReopened
+        ? `Reabrió caja repartidor ${doc.driverName}`
+        : `Actualizó caja repartidor ${doc.driverName}`;
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'driver_cash_session',
+      action,
+      entityId: doc._id,
+      entityLabel: doc.driverName,
+      metadata: { status: doc.status, ...(wasClosed ? { difference: doc.difference, expectedCash: doc.expectedCash, actualCash: doc.actualCash } : {}) },
+    });
+    triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'driver', action: doc.status }).catch(() => null);
+
+    // CAJA-12: when driver session closes, register cash_in on open TPV register
+    if (wasClosed) {
+      try {
+        const allTpvSessions = await listTpvRegisterSessionsByUser(req, userId);
+        const openTpvSession = allTpvSessions.find(s => s.status === 'open');
+        if (openTpvSession) {
+          const driverCashCollected = (doc.transactions || [])
+            .filter(t => t.paymentMethod === 'efectivo' && (t.type === 'cobro' || t.type === 'collection'))
+            .reduce((s, t) => s + (t.amount || 0), 0);
+          if (driverCashCollected > 0) {
+            const cashInTx = {
+              id: `tx-driver-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              type: 'cash_in',
+              paymentMethod: 'efectivo',
+              amount: driverCashCollected,
+              description: `Liquidación repartidor: ${doc.driverName}`,
+              linkedDeliveryOrderId: doc._id,
+              date: new Date().toISOString(),
+              registeredBy: account.fullName || 'Sistema',
+            };
+            const updatedTxs = [...(openTpvSession.transactions || []), cashInTx];
+            const tpvDoc = buildTpvRegisterSessionDocument(userId, { ...openTpvSession, transactions: updatedTxs }, openTpvSession);
+            await putDocument(req, db, tpvDoc._id, tpvDoc);
+          }
+        }
+      } catch (tpvErr) {
+        console.error('[CAJA-12] Error syncing driver cash to TPV:', tpvErr?.message);
+      }
+    }
+
+    return res.json({ ok: true, session: sanitizeDriverCashSession({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar sesión de caja' });
+  }
+}
+
+export async function removeDriverCashSession(req, res) {
+  try {
+    const { userId, sessionId } = req.params;
+    const existing = await ensureDriverCashSessionOwner(req, userId, sessionId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja no encontrada' });
+    const db = getDeliveryDbName();
+    await softDeleteDocument(req, db, sessionId);
+    return res.json({ ok: true, id: sessionId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar sesión de caja' });
+  }
+}
+
+// ─── TPV REGISTER SESSIONS ──────────────────────────────────────────────────
+
+async function ensureTpvRegisterOwner(req, userId, sessionId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, sessionId);
+  if (!doc || doc.type !== 'tpv_register_session' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+export async function listTpvRegisterSessions(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const sessions = await listTpvRegisterSessionsByUser(req, userId);
+    return res.json({ ok: true, sessions: sessions.map(sanitizeTpvRegisterSession) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar sesiones de caja TPV' });
+  }
+}
+
+export async function createTpvRegisterSession(req, res) {
+  try {
+    const { userId } = req.params;
+    const { session } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!session || typeof session !== 'object') return badRequest(res, 'Falta el objeto session');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildTpvRegisterSessionDocument(userId, session);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'tpv_register_session',
+      action: `Abrió caja TPV "${doc.terminalName || 'Terminal'}" — ${doc.workerName} — ${doc.initialCashAmount.toFixed(2)}€`,
+      entityId: doc._id,
+      entityLabel: doc.terminalName || 'Terminal',
+      metadata: { workerName: doc.workerName, initialCashAmount: doc.initialCashAmount },
+    });
+    triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'tpv', action: 'opened' }).catch(() => null);
+    return res.status(201).json({ ok: true, session: sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear sesión de caja TPV' });
+  }
+}
+
+export async function updateTpvRegisterSession(req, res) {
+  try {
+    const { userId, sessionId } = req.params;
+    const { session } = req.body || {};
+    if (!session || typeof session !== 'object') return badRequest(res, 'Faltan datos de la sesión');
+    const existing = await ensureTpvRegisterOwner(req, userId, sessionId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja TPV no encontrada' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const doc = buildTpvRegisterSessionDocument(userId, { ...existing, ...session }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const action = doc.status === 'closed'
+      ? `Cerró caja TPV "${doc.terminalName}" — Diferencia: ${doc.difference.toFixed(2)}€`
+      : `Actualizó caja TPV "${doc.terminalName}"`;
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'tpv_register_session', action, entityId: doc._id,
+      entityLabel: doc.terminalName || 'Terminal', metadata: { status: doc.status },
+    });
+    triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'tpv', action: doc.status }).catch(() => null);
+
+    // CAJA-11: generate finance movements when closing the register
+    const wasClosed = doc.status === 'closed' && existing.status === 'open';
+    if (wasClosed) {
+      try {
+        const finDb = getFinanceDbName();
+        await ensureDatabase(req, finDb);
+        const totalSales = (doc.transactions || []).filter(t => t.type === 'sale').reduce((s, t) => s + (t.amount || 0), 0);
+        if (totalSales > 0) {
+          const label = `Cierre caja ${doc.terminalName}${doc.pointOfSaleName ? ` (${doc.pointOfSaleName})` : ''} — ${new Date(doc.closedAt).toLocaleDateString('es-ES')}`;
+          const finDoc = buildFinanceDocument(userId, {
+            type: 'cobro',
+            concept: label,
+            category: 'Ventas TPV',
+            categoryIcon: '💰',
+            amountBase: totalSales,
+            taxRate: 0,
+            date: doc.closedAt,
+            paymentMethod: 'mixto',
+            tags: ['caja', 'tpv', doc.terminalName].filter(Boolean),
+            notes: `Auto: cierre de caja ${doc._id}. Efectivo: ${doc.summary?.salesByMethod?.efectivo?.toFixed(2) || 0}€, Tarjeta: ${doc.summary?.salesByMethod?.tarjeta?.toFixed(2) || 0}€, Bizum: ${doc.summary?.salesByMethod?.bizum?.toFixed(2) || 0}€.`,
+            linkedDocuments: [{ id: doc._id, type: 'tpv_register_session', name: label }],
+          });
+          await putDocument(req, finDb, finDoc._id, finDoc);
+        }
+      } catch (finErr) {
+        console.error('[CAJA-11] Error creating finance entry on register close:', finErr?.message);
+      }
+    }
+
+    return res.json({ ok: true, session: sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar sesión de caja TPV' });
+  }
+}
+
+export async function removeTpvRegisterSession(req, res) {
+  try {
+    const { userId, sessionId } = req.params;
+    const existing = await ensureTpvRegisterOwner(req, userId, sessionId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión no encontrada' });
+    const db = getDeliveryDbName();
+    await softDeleteDocument(req, db, sessionId);
+    return res.json({ ok: true, id: sessionId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar sesión de caja TPV' });
+  }
+}
+
+// ─── POINTS OF SALE ─────────────────────────────────────────────────────────
+
+async function ensurePointOfSaleOwner(req, userId, pdvId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, pdvId);
+  if (!doc || doc.type !== 'point_of_sale' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+export async function listPointsOfSale(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const pdvs = await listPointsOfSaleByUser(req, userId);
+    return res.json({ ok: true, pointsOfSale: pdvs.map(sanitizePointOfSale) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar puntos de venta' });
+  }
+}
+
+export async function createPointOfSale(req, res) {
+  try {
+    const { userId } = req.params;
+    const { pointOfSale } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!pointOfSale || typeof pointOfSale !== 'object') return badRequest(res, 'Falta el objeto pointOfSale');
+    if (!pointOfSale.name) return badRequest(res, 'El nombre del punto de venta es obligatorio');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildPointOfSaleDocument(userId, pointOfSale);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'point_of_sale', action: `Creó punto de venta "${doc.name}" (${doc.code}) con ${doc.terminals.length} terminales`,
+      entityId: doc._id, entityLabel: doc.name,
+      metadata: { code: doc.code, terminalCount: doc.terminals.length },
+    });
+    return res.status(201).json({ ok: true, pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear punto de venta' });
+  }
+}
+
+export async function updatePointOfSale(req, res) {
+  try {
+    const { userId, pdvId } = req.params;
+    const { pointOfSale } = req.body || {};
+    if (!pointOfSale || typeof pointOfSale !== 'object') return badRequest(res, 'Faltan datos');
+    const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const doc = buildPointOfSaleDocument(userId, { ...existing, ...pointOfSale }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'point_of_sale', action: `Actualizó punto de venta "${doc.name}"`,
+      entityId: doc._id, entityLabel: doc.name, metadata: { terminalCount: doc.terminals.length },
+    });
+    return res.json({ ok: true, pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar punto de venta' });
+  }
+}
+
+export async function removePointOfSale(req, res) {
+  try {
+    const { userId, pdvId } = req.params;
+    const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+    const db = getDeliveryDbName();
+    await softDeleteDocument(req, db, pdvId);
+    return res.json({ ok: true, id: pdvId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar punto de venta' });
+  }
+}
+
+// ─── DELIVERY CONFIG ─────────────────────────────────────────────────────────
+
+export async function getDeliveryConfig(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const configId = `dlvconf-${userId}`;
+    let doc;
+    try { doc = await getDocument(req, db, configId); } catch { doc = null; }
+    if (!doc || doc.type !== 'delivery_config') {
+      doc = buildDeliveryConfigDocument(userId, {});
+      const saved = await putDocument(req, db, doc._id, doc);
+      doc._rev = saved.rev;
+    }
+    return res.json({ ok: true, config: sanitizeDeliveryConfig(doc) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener configuración delivery' });
+  }
+}
+
+export async function updateDeliveryConfig(req, res) {
+  try {
+    const { userId } = req.params;
+    const { config } = req.body || {};
+    if (!config || typeof config !== 'object') return badRequest(res, 'Falta el objeto config');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const configId = `dlvconf-${userId}`;
+    let existing;
+    try { existing = await getDocument(req, db, configId); } catch { existing = null; }
+    if (!existing || existing.type !== 'delivery_config') existing = null;
+    const doc = buildDeliveryConfigDocument(userId, config, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, config: sanitizeDeliveryConfig({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar configuración delivery' });
+  }
+}
+
+// ─── OPS CENTER ──────────────────────────────────────────────────────────────
+
+function isSameDay(dateStr, targetDate) {
+  if (!dateStr) return false;
+  return dateStr.slice(0, 10) === targetDate;
+}
+
+function minutesSince(dateStr) {
+  if (!dateStr) return 0;
+  return Math.max(0, (Date.now() - new Date(dateStr).getTime()) / 60000);
+}
+
+function isInTimeSlot(dateStr, slot) {
+  if (!dateStr || !slot) return true;
+  const d = new Date(dateStr);
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return hhmm >= slot.start && hhmm <= slot.end;
+}
+
+function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) {
+  const alerts = [];
+  const now = new Date().toISOString();
+  const threshold = config.delayThresholdMinutes || 30;
+  const kitchenMax = config.kitchenSaturationThreshold || 10;
+
+  const activeStatuses = ['nuevo', 'cocina', 'listo'];
+  for (const o of orders) {
+    if (!activeStatuses.includes(o.status)) continue;
+    const mins = minutesSince(o.createdAt);
+    if (mins > threshold) {
+      alerts.push({
+        id: `delayed_${o._id}`, type: 'delayed_order', severity: mins > threshold * 2 ? 'critical' : 'warning',
+        title: `Pedido ${o.orderNumber} retrasado`,
+        message: `${Math.round(mins)} min desde creación (umbral: ${threshold} min)`,
+        orderId: o._id, route: '/saas/delivery', createdAt: now,
+      });
+    }
+  }
+
+  const inKitchen = orders.filter(o => o.status === 'cocina').length;
+  if (inKitchen >= kitchenMax) {
+    alerts.push({
+      id: 'kitchen_saturated', type: 'kitchen_saturated', severity: 'critical',
+      title: 'Cocina saturada',
+      message: `${inKitchen} pedidos en cocina (umbral: ${kitchenMax})`,
+      route: '/saas/delivery', createdAt: now,
+    });
+  }
+
+  const openTpv = tpvSessions.filter(s => s.status === 'open');
+  for (const s of openTpv) {
+    const hours = minutesSince(s.openedAt) / 60;
+    if (hours > 14) {
+      alerts.push({
+        id: `cash_pending_${s._id}`, type: 'cash_pending_close', severity: 'warning',
+        title: 'Caja pendiente de cierre',
+        message: `${s.terminalName || 'Terminal'} — ${s.pointOfSaleName || 'PDV'} abierta ${Math.round(hours)}h`,
+        sessionId: s._id, route: '/saas/delivery', createdAt: now,
+      });
+    }
+  }
+
+  if (Array.isArray(catalogItems)) {
+    const critical = catalogItems.filter(i => i.active !== false && i.stockQuantity != null && i.minStock > 0 && i.stockQuantity <= i.minStock);
+    for (const item of critical.slice(0, 5)) {
+      alerts.push({
+        id: `stock_${item._id}`, type: 'critical_stock', severity: item.stockQuantity <= 0 ? 'critical' : 'warning',
+        title: `Stock crítico: ${item.name}`,
+        message: `${item.stockQuantity} ${item.unit || 'uds'} (mín: ${item.minStock})`,
+        itemId: item._id, route: '/saas/articles', createdAt: now,
+      });
+    }
+  }
+
+  const incidents = orders.filter(o => o.status === 'incident');
+  if (incidents.length > 0) {
+    alerts.push({
+      id: 'open_incidents', type: 'open_incident', severity: 'warning',
+      title: `${incidents.length} incidencia(s) abierta(s)`,
+      message: incidents.slice(0, 2).map(o => `${o.orderNumber}: ${o.incidentType || 'General'}`).join(', '),
+      route: '/saas/delivery', createdAt: now,
+    });
+  }
+
+  return alerts;
+}
+
+export async function getOpsCenter(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const { salesPointId, channel, timeSlot, date: dateParam } = req.query;
+    const targetDate = dateParam || new Date().toISOString().slice(0, 10);
+
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+
+    const configId = `dlvconf-${userId}`;
+    let configDoc;
+    try { configDoc = await getDocument(req, db, configId); } catch { configDoc = null; }
+    if (!configDoc || configDoc.type !== 'delivery_config') {
+      configDoc = buildDeliveryConfigDocument(userId, {});
+      const saved = await putDocument(req, db, configDoc._id, configDoc);
+      configDoc._rev = saved.rev;
+    }
+    const config = sanitizeDeliveryConfig(configDoc);
+
+    let slotObj = null;
+    if (timeSlot && config.activeTimeSlots) {
+      slotObj = config.activeTimeSlots.find(s => s.id === timeSlot) || null;
+    }
+
+    const allOrders = await listDeliveryOrdersByUser(req, userId);
+    let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
+
+    if (salesPointId) dayOrders = dayOrders.filter(o => o.salesPointId === salesPointId);
+    if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
+    if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
+
+    const orders = dayOrders.map(sanitizeDeliveryOrder);
+
+    const activeStatuses = ['nuevo', 'cocina', 'listo', 'incident'];
+    const activeOrders = orders.filter(o => activeStatuses.includes(o.status));
+
+    const byStatus = { nuevo: 0, cocina: 0, listo: 0, entregado: 0, cancelled: 0, incident: 0 };
+    for (const o of orders) { if (byStatus[o.status] !== undefined) byStatus[o.status]++; }
+
+    const delivered = orders.filter(o => o.status === 'entregado');
+    const revenue = delivered.reduce((s, o) => s + (o.totalAmount || 0), 0);
+    const avgTicket = delivered.length > 0 ? revenue / delivered.length : 0;
+
+    const prepTimes = delivered
+      .map(o => o.kitchenStartedAt && o.assemblyCompletedAt ? (new Date(o.assemblyCompletedAt) - new Date(o.kitchenStartedAt)) / 60000 : null)
+      .filter(Boolean);
+    const avgPrepTime = prepTimes.length > 0 ? prepTimes.reduce((a, b) => a + b, 0) / prepTimes.length : 0;
+
+    const deliveryTimes = delivered
+      .map(o => o.createdAt && o.deliveredAt ? (new Date(o.deliveredAt) - new Date(o.createdAt)) / 60000 : null)
+      .filter(Boolean);
+    const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
+    const delayThreshold = config.delayThresholdMinutes || 30;
+    const deliveredOnTime = deliveryTimes.filter(t => t <= delayThreshold).length;
+    const deliveredLate = deliveryTimes.filter(t => t > delayThreshold).length;
+
+    const tpvSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const driverSessions = await listDriverCashSessionsByUser(req, userId);
+    const openTpv = tpvSessions.filter(s => s.status === 'open');
+    const openDriverSessions = driverSessions.filter(s => s.status === 'open');
+
+    let catalogItems = [];
+    try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
+
+    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config);
+
+    const inKitchen = orders.filter(o => o.status === 'cocina');
+    const kitchenOldest = inKitchen.reduce((max, o) => Math.max(max, minutesSince(o.createdAt)), 0);
+    const kitchenAvgWait = inKitchen.length > 0
+      ? inKitchen.reduce((s, o) => s + minutesSince(o.createdAt), 0) / inKitchen.length : 0;
+
+    const inDelivery = orders.filter(o => o.status === 'listo' && o.deliveryType === 'domicilio' && o.assignedDriver);
+    const drivers = new Set(inDelivery.map(o => o.assignedDriver).filter(Boolean));
+
+    const revenueByChannel = {};
+    for (const o of delivered) {
+      const ch = o.channel || 'direct';
+      revenueByChannel[ch] = (revenueByChannel[ch] || 0) + (o.totalAmount || 0);
+    }
+
+    const revenueByHour = {};
+    for (const o of delivered) {
+      if (!o.createdAt) continue;
+      const hour = o.createdAt.slice(11, 13) + ':00';
+      if (!revenueByHour[hour]) revenueByHour[hour] = { hour, revenue: 0, orders: 0 };
+      revenueByHour[hour].revenue += o.totalAmount || 0;
+      revenueByHour[hour].orders++;
+    }
+
+    const pdvs = await listPointsOfSaleByUser(req, userId);
+
+    return res.json({
+      ok: true,
+      date: targetDate,
+      filters: { salesPointId: salesPointId || null, channel: channel || null, timeSlot: timeSlot || null },
+      config,
+      kpis: {
+        totalOrders: orders.length,
+        byStatus,
+        revenue: Math.round(revenue * 100) / 100,
+        averageTicket: Math.round(avgTicket * 100) / 100,
+        avgPrepTimeMinutes: Math.round(avgPrepTime * 10) / 10,
+        avgDeliveryTimeMinutes: Math.round(avgDeliveryTime * 10) / 10,
+        deliveredOnTime, deliveredLate,
+        onTimePercentage: deliveryTimes.length > 0 ? Math.round(deliveredOnTime / deliveryTimes.length * 1000) / 10 : 100,
+      },
+      activeOrders,
+      alerts,
+      cashStatus: {
+        openTpvSessions: openTpv.map(sanitizeTpvRegisterSession),
+        openDriverSessions: openDriverSessions.map(sanitizeDriverCashSession),
+        totalCashInRegisters: openTpv.reduce((s, sess) => {
+          const txTotal = (sess.transactions || []).filter(t => t.paymentMethod === 'efectivo')
+            .reduce((sum, t) => sum + (t.type === 'sale' || t.type === 'cash_in' ? t.amount : -t.amount), 0);
+          return s + (sess.initialCashAmount || 0) + txTotal;
+        }, 0),
+        pendingClose: openTpv.filter(s => minutesSince(s.openedAt) / 60 > 14).length,
+        pendingValidation: tpvSessions.filter(s => s.status === 'closed' && s.closingValidationStatus === 'pending').length,
+        todayTotalSales: (() => {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          return tpvSessions.filter(s => s.openedAt?.startsWith(todayStr)).reduce((sum, s) => {
+            return sum + (s.transactions || []).filter(t => t.type === 'sale').reduce((ts, t) => ts + (t.amount || 0), 0);
+          }, 0);
+        })(),
+        todaySalesByMethod: (() => {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const result = { efectivo: 0, tarjeta: 0, bizum: 0, online: 0, otro: 0 };
+          for (const s of tpvSessions.filter(s => s.openedAt?.startsWith(todayStr))) {
+            for (const t of (s.transactions || []).filter(t => t.type === 'sale')) {
+              result[t.paymentMethod] = (result[t.paymentMethod] || 0) + (t.amount || 0);
+            }
+          }
+          return result;
+        })(),
+        todayDiscrepancy: (() => {
+          const todayStr = new Date().toISOString().slice(0, 10);
+          return tpvSessions.filter(s => s.status === 'closed' && s.closedAt?.startsWith(todayStr)).reduce((sum, s) => sum + (s.difference || 0), 0);
+        })(),
+        openIncidentCount: tpvSessions.reduce((sum, s) => sum + (s.incidents || []).filter(i => !i.resolvedAt).length, 0),
+      },
+      kitchenStatus: {
+        ordersInKitchen: inKitchen.length,
+        capacity: config.maxKitchenCapacity,
+        saturationPercent: config.maxKitchenCapacity > 0 ? Math.round(inKitchen.length / config.maxKitchenCapacity * 1000) / 10 : 0,
+        oldestOrderMinutes: Math.round(kitchenOldest * 10) / 10,
+        avgWaitMinutes: Math.round(kitchenAvgWait * 10) / 10,
+      },
+      deliveryStatus: {
+        ordersInDelivery: inDelivery.length,
+        driversActive: drivers.size,
+        avgDeliveryMinutes: Math.round(avgDeliveryTime * 10) / 10,
+        delayedCount: orders.filter(o => activeStatuses.includes(o.status) && minutesSince(o.createdAt) > delayThreshold).length,
+      },
+      revenueByChannel,
+      revenueByHour: Object.values(revenueByHour).sort((a, b) => a.hour.localeCompare(b.hour)),
+      pointsOfSale: pdvs.map(sanitizePointOfSale),
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar centro operativo' });
+  }
+}
+
+// ─── SSE BROADCASTING HELPERS ────────────────────────────────────────────────
+
+function emitDeliveryEvent(account, event, payload) {
+  if (!account?.businessId) return;
+  try { broadcastToBusiness(account.businessId, event, payload); } catch { /* ignore */ }
+}
+
+// ─── SCALE DEVICES ──────────────────────────────────────────────────────────
+
+async function ensureScaleDeviceOwner(req, userId, deviceId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, deviceId);
+  if (!doc || doc.type !== 'scale_device' || doc.user_id !== userId) return null;
+  return doc;
+}
+
+export async function listScaleDevices(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const devices = await listScaleDevicesByUser(req, userId);
+    return res.json({ ok: true, scaleDevices: devices.map(sanitizeScaleDevice) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar dispositivos de báscula' });
+  }
+}
+
+export async function getScaleDevice(req, res) {
+  try {
+    const { userId, deviceId } = req.params;
+    if (!userId || !deviceId) return badRequest(res, 'Faltan parámetros');
+    const doc = await ensureScaleDeviceOwner(req, userId, deviceId);
+    if (!doc) return res.status(404).json({ ok: false, error: 'Dispositivo no encontrado' });
+    return res.json({ ok: true, scaleDevice: sanitizeScaleDevice(doc) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener dispositivo' });
+  }
+}
+
+export async function createScaleDevice(req, res) {
+  try {
+    const { userId } = req.params;
+    const { scaleDevice } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!scaleDevice || typeof scaleDevice !== 'object') return badRequest(res, 'Falta el objeto scaleDevice');
+    if (!scaleDevice.name) return badRequest(res, 'El nombre del dispositivo es obligatorio');
+    if (!scaleDevice.connectionType) return badRequest(res, 'El tipo de conexión es obligatorio');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildScaleDeviceDocument(userId, scaleDevice);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'scale_device',
+      action: `Registró báscula "${doc.name}" (${doc.brand} ${doc.model}) — ${doc.connectionType}`,
+      entityId: doc._id, entityLabel: doc.name,
+      metadata: { brand: doc.brand, model: doc.model, connectionType: doc.connectionType },
+    });
+    return res.status(201).json({ ok: true, scaleDevice: sanitizeScaleDevice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear dispositivo de báscula' });
+  }
+}
+
+export async function updateScaleDevice(req, res) {
+  try {
+    const { userId, deviceId } = req.params;
+    const { scaleDevice } = req.body || {};
+    if (!scaleDevice || typeof scaleDevice !== 'object') return badRequest(res, 'Faltan datos del dispositivo');
+    const existing = await ensureScaleDeviceOwner(req, userId, deviceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Dispositivo no encontrado' });
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const doc = buildScaleDeviceDocument(userId, { ...existing, ...scaleDevice }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
+      type: 'scale_device', action: `Actualizó báscula "${doc.name}"`,
+      entityId: doc._id, entityLabel: doc.name,
+      metadata: { connectionType: doc.connectionType },
+    });
+    return res.json({ ok: true, scaleDevice: sanitizeScaleDevice({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar dispositivo' });
+  }
+}
+
+export async function removeScaleDevice(req, res) {
+  try {
+    const { userId, deviceId } = req.params;
+    const existing = await ensureScaleDeviceOwner(req, userId, deviceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Dispositivo no encontrado' });
+    const db = getDeliveryDbName();
+    await softDeleteDocument(req, db, deviceId);
+    return res.json({ ok: true, id: deviceId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar dispositivo' });
+  }
+}
+
+export async function assignScaleToTerminal(req, res) {
+  try {
+    const { userId, pdvId, terminalId } = req.params;
+    const { scaleDeviceId } = req.body || {};
+    const pdv = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!pdv) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+
+    let scaleName = '';
+    if (scaleDeviceId) {
+      const scaleDoc = await ensureScaleDeviceOwner(req, userId, scaleDeviceId);
+      if (!scaleDoc) return res.status(404).json({ ok: false, error: 'Dispositivo de báscula no encontrado' });
+      scaleName = scaleDoc.name || '';
+    }
+
+    const updatedTerminals = (pdv.terminals || []).map((t) => {
+      if (t.id === terminalId) {
+        return { ...t, scaleDeviceId: scaleDeviceId || '', scaleName };
+      }
+      if (scaleDeviceId && t.scaleDeviceId === scaleDeviceId) {
+        return { ...t, scaleDeviceId: '', scaleName: '' };
+      }
+      return t;
+    });
+
+    const terminalFound = updatedTerminals.some((t) => t.id === terminalId);
+    if (!terminalFound) return res.status(404).json({ ok: false, error: 'Terminal no encontrado en este punto de venta' });
+
+    const db = getDeliveryDbName();
+    const doc = buildPointOfSaleDocument(userId, { ...pdv, terminals: updatedTerminals }, pdv);
+    const saved = await putDocument(req, db, doc._id, doc);
+
+    const account = await findAccountByUserId(req, userId);
+    const terminalName = updatedTerminals.find((t) => t.id === terminalId)?.name || terminalId;
+    await logAccountActivity(req, {
+      actorUserId: userId, actorName: account?.fullName || '', targetUserId: userId,
+      type: 'scale_device',
+      action: scaleDeviceId
+        ? `Asignó báscula "${scaleName}" al terminal "${terminalName}" en "${doc.name}"`
+        : `Desasignó báscula del terminal "${terminalName}" en "${doc.name}"`,
+      entityId: doc._id, entityLabel: doc.name,
+      metadata: { terminalId, scaleDeviceId: scaleDeviceId || '' },
+    });
+
+    emitDeliveryEvent(account, 'scale:assignment_changed', {
+      pdvId, terminalId, scaleDeviceId: scaleDeviceId || '',
+    });
+
+    return res.json({ ok: true, pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al asignar báscula' });
+  }
+}
+
+export async function getTerminalScale(req, res) {
+  try {
+    const { userId, pdvId, terminalId } = req.params;
+    const pdv = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!pdv) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+
+    const terminal = (pdv.terminals || []).find((t) => t.id === terminalId);
+    if (!terminal) return res.status(404).json({ ok: false, error: 'Terminal no encontrado' });
+
+    if (!terminal.scaleDeviceId) {
+      return res.json({ ok: true, scaleDevice: null });
+    }
+
+    const scaleDoc = await ensureScaleDeviceOwner(req, userId, terminal.scaleDeviceId);
+    return res.json({ ok: true, scaleDevice: scaleDoc ? sanitizeScaleDevice(scaleDoc) : null });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener báscula del terminal' });
+  }
+}
+
+export async function reportScaleStatus(req, res) {
+  try {
+    const { userId, deviceId } = req.params;
+    const { status, message, terminalId, pdvId } = req.body || {};
+    if (!status) return badRequest(res, 'Falta el estado');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    if (status === 'disconnected' || status === 'error') {
+      const scaleDoc = await ensureScaleDeviceOwner(req, userId, deviceId);
+      const scaleName = scaleDoc?.name || deviceId;
+      emitDeliveryEvent(account, 'scale:status_changed', {
+        deviceId, status, message: message || '',
+        terminalId: terminalId || '', pdvId: pdvId || '', scaleName,
+      });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al reportar estado' });
+  }
+}
+
+// ─── DRIVERS ──────────────────────────────────────────────────────────────────
+
+export async function listDrivers(req, res) {
+  try {
+    const { userId } = req.params;
+    const docs = await listDriversByUser(req, userId);
+    return res.json({ ok: true, drivers: docs.map(sanitizeDriver) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al listar repartidores' });
+  }
+}
+
+export async function createDriver(req, res) {
+  try {
+    const { userId } = req.params;
+    const data = req.body || {};
+    if (!data.name?.trim()) return badRequest(res, 'El nombre es obligatorio');
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const doc = buildDriverDocument(userId, data);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.status(201).json({ ok: true, driver: sanitizeDriver({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear repartidor' });
+  }
+}
+
+export async function updateDriver(req, res) {
+  try {
+    const { userId, driverId } = req.params;
+    const data = req.body || {};
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const existing = await getDocument(req, db, driverId);
+    if (!existing || existing.type !== 'driver' || existing.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Repartidor no encontrado' });
+    }
+    const doc = buildDriverDocument(userId, data, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, driver: sanitizeDriver({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar repartidor' });
+  }
+}
+
+export async function removeDriver(req, res) {
+  try {
+    const { userId, driverId } = req.params;
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const existing = await getDocument(req, db, driverId);
+    if (!existing || existing.type !== 'driver' || existing.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Repartidor no encontrado' });
+    }
+    await softDeleteDocument(req, db, driverId);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar repartidor' });
+  }
+}
+
+export async function getDriversStats(req, res) {
+  try {
+    const { userId } = req.params;
+    const drivers = await listDriversByUser(req, userId);
+    const orders = await listDeliveryOrdersByUser(req, userId);
+    const stats = drivers.map(d => {
+      const driverOrders = orders.filter(o => o.driverId === d._id);
+      return {
+        driverId: d._id,
+        name: d.name,
+        totalOrders: driverOrders.length,
+        delivered: driverOrders.filter(o => o.status === 'entregado').length,
+        pending: driverOrders.filter(o => !['entregado', 'cancelado'].includes(o.status)).length,
+      };
+    });
+    return res.json({ ok: true, stats });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener estadísticas' });
+  }
+}
+
+export async function getRepartoConfig(req, res) {
+  try {
+    const { userId } = req.params;
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const docs = await getAllDocuments(req, db);
+    const config = docs.find(d => d?.type === 'reparto_config' && d?.user_id === userId);
+    return res.json({ ok: true, config: config ? sanitizeRepartoConfig(config) : null });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al obtener configuración' });
+  }
+}
+
+export async function saveRepartoConfig(req, res) {
+  try {
+    const { userId } = req.params;
+    const data = req.body || {};
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const docs = await getAllDocuments(req, db);
+    const existing = docs.find(d => d?.type === 'reparto_config' && d?.user_id === userId);
+    const doc = buildRepartoConfigDocument(userId, data, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, config: sanitizeRepartoConfig({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al guardar configuración' });
+  }
+}
+
+export async function autoAssignDriver(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const order = await getDocument(req, db, orderId);
+    if (!order || order.type !== 'delivery_order' || order.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    }
+    const drivers = await listDriversByUser(req, userId);
+    const active = drivers.filter(d => d.active !== false && !d.deletedAt);
+    if (active.length === 0) {
+      return badRequest(res, 'No hay repartidores disponibles');
+    }
+    const orders = await listDeliveryOrdersByUser(req, userId);
+    let best = active[0];
+    let minLoad = Infinity;
+    for (const d of active) {
+      const load = orders.filter(o => o.driverId === d._id && !['entregado', 'cancelado'].includes(o.status)).length;
+      if (load < minLoad) { minLoad = load; best = d; }
+    }
+    const updated = { ...order, driverId: best._id, driverName: best.name, updatedAt: new Date().toISOString() };
+    const saved = await putDocument(req, db, updated._id, updated);
+    return res.json({ ok: true, order: sanitizeDeliveryOrder({ ...updated, _rev: saved.rev }), assignedDriver: sanitizeDriver(best) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al asignar repartidor' });
+  }
+}

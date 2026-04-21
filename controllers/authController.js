@@ -1,0 +1,2066 @@
+import crypto from 'node:crypto';
+import { v4 as uuidv4 } from 'uuid';
+import { OAuth2Client } from 'google-auth-library';
+import {
+  ACCOUNTS_DB,
+  CARDS_DB,
+  ROLE_DEFINITIONS,
+  buildAccountDocument,
+  buildCardDocument,
+  buildActivityRecord,
+  buildJoinRequestDocument,
+  ensureDatabase,
+  extractIp,
+  findAccountByEmail,
+  findAccountByInviteToken,
+  findAccountByRefreshToken,
+  findAccountByResetToken,
+  findAccountByUserId,
+  findAccountByVerificationToken,
+  findCardByUserId,
+  findBusinessById,
+  findBusinessByCompanyCode,
+  findTeamMemberByUsername,
+  findPendingJoinRequest,
+  hashPassword,
+  incrementFailedLoginAttempts,
+  isAccountLocked,
+  listAllBusinesses,
+  listJoinRequestsByBusiness,
+  listJoinRequestsByUser,
+  logAccountActivity,
+  listAccounts,
+  normalizePermissionMatrix,
+  resetFailedLoginAttempts,
+  revokeAllSessions,
+  revokeRefreshToken,
+  revokeSession,
+  sanitizeAccount,
+  sanitizeCard,
+  sanitizeSession,
+  saveAccount,
+  saveBusiness,
+  saveCard,
+  saveEmailVerificationToken,
+  saveInviteToken,
+  saveJoinRequest,
+  saveSession,
+  saveResetToken,
+  findJoinRequestById,
+  softDeleteDocument,
+  verifyPassword,
+  writeChangelog,
+} from '../services/couchdb.js';
+import { signAccessToken, signRefreshToken, verifyRefreshToken, setAuthCookies, clearAuthCookies } from '../middleware/auth.js';
+import {
+  sendEmail,
+  buildEmailVerificationEmail,
+  buildInvitationEmail,
+  buildPasswordResetEmail,
+  buildAccountLockedEmail,
+  buildTrialExpiringEmail,
+  buildPaymentFailedEmail,
+  buildGracePeriodEmail,
+  buildSuspensionEmail,
+  buildSetupWelcomeEmail,
+} from '../services/email.js';
+import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
+
+function badRequest(res, error) {
+  return res.status(400).json({ ok: false, error });
+}
+
+function getClientIp(req) {
+  return extractIp(req);
+}
+
+// S-01 + S-07: Emite tokens JWT, crea sesión y establece httpOnly cookies
+async function issueTokens(req, res, account) {
+  const sessionId = uuidv4();
+  const tokenPayload = {
+    userId: account.user_id,
+    email: account.email,
+    role: account.role,
+    accountType: account.accountType || 'company',
+    emailVerified: Boolean(account.emailVerified),
+    sessionId,
+  };
+  const accessToken = signAccessToken(tokenPayload);
+  const rawRefreshToken = crypto.randomBytes(40).toString('hex');
+  const ip = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || '';
+
+  await saveSession(req, account, rawRefreshToken, sessionId, ip, userAgent);
+
+  const refreshToken = signRefreshToken({ userId: account.user_id, raw: rawRefreshToken, sessionId });
+
+  setAuthCookies(res, accessToken, refreshToken);
+
+  return { accessToken, refreshToken, sessionId };
+}
+
+function splitFullName(value) {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return { firstName: '', lastName: '' };
+  }
+
+  const parts = normalized.split(' ');
+  return {
+    firstName: parts.shift() || '',
+    lastName: parts.join(' '),
+  };
+}
+
+function generateTemporaryPassword(length = 12) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  let result = '';
+  for (let index = 0; index < length; index += 1) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
+}
+
+export async function register(req, res) {
+  try {
+    const { firstName, lastName, email, phone, password, googleCredential, accountType = 'company', referralCode } = req.body || {};
+
+    if (!firstName || !lastName || !email || !password) {
+      return badRequest(res, 'Faltan campos obligatorios');
+    }
+
+    if (accountType === 'company' && !phone) {
+      return badRequest(res, 'El teléfono es obligatorio para cuentas de empresa');
+    }
+
+    if (String(password).length < 8) {
+      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
+    }
+
+    let googleUser = null;
+    if (googleCredential) {
+      try {
+        googleUser = await verifyGoogleIdToken(googleCredential);
+        if (googleUser.email.toLowerCase() !== String(email).trim().toLowerCase()) {
+          return badRequest(res, 'El email del formulario no coincide con la cuenta de Google');
+        }
+      } catch (gErr) {
+        console.error('[AUTH] Error verificando Google credential en registro:', gErr?.message);
+        return badRequest(res, 'Token de Google inválido o expirado. Intenta de nuevo.');
+      }
+    }
+
+    let resolvedReferralCode = '';
+    let referredByAffiliateId = '';
+    if (referralCode && typeof referralCode === 'string' && referralCode.trim()) {
+      try {
+        const { findAffiliateByReferralCode } = await import('./affiliateController.js');
+        const affiliate = await findAffiliateByReferralCode(req, referralCode.trim().toUpperCase());
+        if (affiliate && affiliate.status === 'accepted') {
+          resolvedReferralCode = affiliate.referralCode;
+          referredByAffiliateId = affiliate._id;
+        }
+      } catch (refErr) {
+        console.error('[AUTH] Error validando referralCode:', refErr?.message);
+      }
+    }
+
+    await ensureDatabase(req, ACCOUNTS_DB);
+    const existingAccount = await findAccountByEmail(req, email);
+    if (existingAccount) {
+      return res.status(409).json({ ok: false, error: 'Este email ya está registrado' });
+    }
+
+    const isUserAccount = accountType === 'user';
+
+    const account = buildAccountDocument({
+      firstName,
+      lastName,
+      email,
+      phone: phone || '',
+      password,
+      accountType,
+      avatar: googleUser?.avatar || '',
+      provider: googleUser ? 'google' : 'email',
+      emailVerified: googleUser ? googleUser.emailVerified : false,
+    });
+
+    if (resolvedReferralCode) {
+      account.referralCode = resolvedReferralCode;
+      account.referredByAffiliateId = referredByAffiliateId;
+    }
+
+    if (googleUser) {
+      account.googleId = googleUser.googleId;
+      account.googleScopes = googleUser.scopes;
+      account.googleProfile = {
+        locale: googleUser.locale,
+        picture: googleUser.avatar,
+        name: googleUser.fullName,
+      };
+    }
+
+    const savedAccount = await saveAccount(req, account);
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'team',
+      action: googleUser ? 'Cuenta creada con Google OAuth' : 'Cuenta creada',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      metadata: googleUser
+        ? { googleId: googleUser.googleId, scopes: googleUser.scopes, accountType }
+        : { accountType },
+    });
+
+    if (!googleUser) {
+      try {
+        const rawVerificationToken = crypto.randomBytes(32).toString('hex');
+        await saveEmailVerificationToken(req, savedAccount, rawVerificationToken);
+        const { subject, html } = buildEmailVerificationEmail(savedAccount.email, rawVerificationToken);
+        await sendEmail({ to: savedAccount.email, subject, html });
+      } catch (emailError) {
+        console.error('[AUTH] Error enviando email de verificación:', emailError?.message || emailError);
+      }
+    }
+
+    if (!isUserAccount) {
+      sendWelcomeEmail(savedAccount).catch(() => null);
+    }
+
+    const redirectTo = isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type';
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.status(201).json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al registrar la cuenta',
+    });
+  }
+}
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const googleOAuthClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) : null;
+
+const GOOGLE_SCOPES_GRANTED = ['openid', 'email', 'profile'];
+
+async function verifyGoogleIdToken(credential) {
+  if (!googleOAuthClient) {
+    throw new Error('Google OAuth no configurado: falta GOOGLE_CLIENT_ID');
+  }
+
+  const ticket = await googleOAuthClient.verifyIdToken({
+    idToken: credential,
+    audience: GOOGLE_CLIENT_ID,
+  });
+
+  const payload = ticket.getPayload();
+  if (!payload) throw new Error('Token de Google inválido: sin payload');
+  if (!payload.email) throw new Error('Token de Google inválido: sin email');
+
+  return {
+    googleId: payload.sub,
+    email: payload.email,
+    emailVerified: Boolean(payload.email_verified),
+    firstName: payload.given_name || '',
+    lastName: payload.family_name || '',
+    fullName: payload.name || '',
+    avatar: payload.picture || '',
+    locale: payload.locale || '',
+    scopes: GOOGLE_SCOPES_GRANTED,
+  };
+}
+
+export async function googleLogin(req, res) {
+  try {
+    const { credential } = req.body || {};
+
+    if (!credential) {
+      return badRequest(res, 'Se requiere el token de Google (credential)');
+    }
+
+    const googleUser = await verifyGoogleIdToken(credential);
+
+    await ensureDatabase(req, ACCOUNTS_DB);
+    const account = await findAccountByEmail(req, googleUser.email);
+
+    if (!account) {
+      return res.status(404).json({
+        ok: false,
+        code: 'GOOGLE_ACCOUNT_NOT_FOUND',
+        error: 'No existe una cuenta con este email. Debes registrarte primero.',
+        googleUser: {
+          email: googleUser.email,
+          firstName: googleUser.firstName,
+          lastName: googleUser.lastName,
+          fullName: googleUser.fullName,
+          avatar: googleUser.avatar,
+          googleId: googleUser.googleId,
+          locale: googleUser.locale,
+          emailVerified: googleUser.emailVerified,
+        },
+      });
+    }
+
+    const updatedAccount = {
+      ...account,
+      firstName: googleUser.firstName || account.firstName,
+      lastName: googleUser.lastName || account.lastName,
+      fullName: googleUser.fullName || account.fullName || `${googleUser.firstName} ${googleUser.lastName}`.trim(),
+      avatar: googleUser.avatar || account.avatar,
+      provider: 'google',
+      emailVerified: googleUser.emailVerified || account.emailVerified,
+      googleId: googleUser.googleId,
+      googleScopes: googleUser.scopes,
+      googleProfile: {
+        locale: googleUser.locale,
+        picture: googleUser.avatar,
+        name: googleUser.fullName,
+      },
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const savedAccount = await saveAccount(req, updatedAccount);
+    const ip = getClientIp(req);
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Inicio de sesión con Google OAuth',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: {
+        googleId: googleUser.googleId,
+        scopes: googleUser.scopes,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    void writeChangelog(req, {
+      entity: 'login',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName || savedAccount.email,
+      action: 'login',
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName || savedAccount.email,
+      changes: {},
+      metadata: {
+        provider: 'google',
+        email: savedAccount.email,
+        role: savedAccount.role,
+        scopes: googleUser.scopes,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo: '/saas/dashboard',
+    });
+  } catch (error) {
+    console.error('[AUTH] Google login error:', error?.message || error);
+    return res.status(401).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al verificar las credenciales de Google',
+    });
+  }
+}
+
+export async function login(req, res) {
+  try {
+    const { email, password } = req.body || {};
+    const ip = getClientIp(req);
+
+    if (!email || !password) {
+      return badRequest(res, 'Email y contraseña son obligatorios');
+    }
+
+    let account = await findAccountByEmail(req, email);
+
+    if (!account) {
+      return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
+    }
+
+    // S-03: Verificar bloqueo temporal
+    const lockStatus = isAccountLocked(account);
+    if (lockStatus.locked) {
+      const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
+      return res.status(423).json({
+        ok: false,
+        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''}.`,
+        code: 'ACCOUNT_LOCKED',
+        lockUntil: lockStatus.lockUntil,
+      });
+    }
+
+    // A-02: Limpieza lazy — el bloqueo expiró; resetear contador para dar inicio fresco
+    if (lockStatus.wasExpired) {
+      try {
+        account = await saveAccount(req, {
+          ...account,
+          failedLoginAttempts: 0,
+          lockUntil: null,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (cleanupErr) {
+        console.error('[AUTH] Error en limpieza lazy de bloqueo:', cleanupErr?.message);
+      }
+    }
+
+    // S-03: Verificar contraseña — si falla, incrementar contador
+    if (!verifyPassword(password, account.passwordHash)) {
+      const { justLocked, lockUntil, failedLoginAttempts } = await incrementFailedLoginAttempts(req, account);
+
+      if (justLocked) {
+        try {
+          const { subject, html } = buildAccountLockedEmail(account.email, lockUntil, ip);
+          await sendEmail({ to: account.email, subject, html });
+        } catch (emailErr) {
+          console.error('[AUTH] Error enviando email de bloqueo:', emailErr?.message);
+        }
+        await logAccountActivity(req, {
+          actorUserId: account.user_id,
+          actorName: account.fullName,
+          targetUserId: account.user_id,
+          type: 'security',
+          action: 'Cuenta bloqueada por intentos fallidos',
+          entityId: account.user_id,
+          entityLabel: account.fullName,
+          ip,
+          metadata: { failedLoginAttempts, lockUntil, ip },
+        });
+      }
+
+      return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
+    }
+
+    // S-03: Login exitoso → resetear contador
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      status: 'active',
+      inviteStatus: account.inviteStatus === 'pending' ? 'accepted' : account.inviteStatus,
+      lastLoginAt: new Date().toISOString(),
+      failedLoginAttempts: 0,
+      lockUntil: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    // S-04: Log de actividad con IP
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Inicio de sesión',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: { ip, userAgent: req.headers['user-agent'] || '' },
+    });
+
+    void writeChangelog(req, {
+      entity: 'login',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName || savedAccount.email,
+      action: 'login',
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName || savedAccount.email,
+      changes: {},
+      metadata: { email: savedAccount.email, role: savedAccount.role, ip, userAgent: req.headers['user-agent'] || '' },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    const isUserAccount = savedAccount.accountType === 'user';
+    const redirectTo = isUserAccount ? '/saas/worker' : '/auth/gate';
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al iniciar sesión',
+    });
+  }
+}
+
+export async function listUsers(req, res) {
+  try {
+    const businessId = req.query.businessId || '';
+    let accounts = await listAccounts(req);
+
+    if (businessId) {
+      const business = await findBusinessById(req, businessId);
+      if (business) {
+        const memberIds = new Set([
+          business.owner_user_id,
+          ...(Array.isArray(business.members) ? business.members.map((m) => m.user_id) : []),
+        ].filter(Boolean));
+        accounts = accounts.filter((a) => memberIds.has(a.user_id));
+      }
+    }
+
+    return res.json({
+      ok: true,
+      users: accounts.map(sanitizeAccount),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar usuarios',
+    });
+  }
+}
+
+export async function listRoles(req, res) {
+  try {
+    const accounts = await listAccounts(req);
+    const counts = accounts.reduce((acc, account) => {
+      const role = account.role || 'Admin';
+      acc[role] = (acc[role] || 0) + 1;
+      return acc;
+    }, {});
+
+    return res.json({
+      ok: true,
+      roles: ROLE_DEFINITIONS.map((role) => ({
+        ...role,
+        users: counts[role.id] || 0,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar roles',
+    });
+  }
+}
+
+export async function updateProfile(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const {
+      firstName,
+      lastName,
+      phone,
+      avatar,
+      email,
+      fullName,
+      role,
+      status,
+      permissions,
+      employment,
+      inviteStatus,
+      lastLoginAt,
+      companyName,
+      onboardingCompleted,
+      onboardingData,
+      paymentSummary,
+      subscription,
+    } = req.body || {};
+
+    const normalizedFullName = fullName !== undefined ? String(fullName).trim() : '';
+    const derivedNames =
+      normalizedFullName && firstName === undefined && lastName === undefined
+        ? splitFullName(normalizedFullName)
+        : null;
+    const nextFirstName =
+      firstName !== undefined
+        ? String(firstName).trim()
+        : (derivedNames?.firstName || account.firstName);
+    const nextLastName =
+      lastName !== undefined
+        ? String(lastName).trim()
+        : (derivedNames?.lastName || account.lastName);
+    const nextFullName = normalizedFullName || `${nextFirstName} ${nextLastName}`.trim();
+
+    const updatedAccount = {
+      ...account,
+      firstName: nextFirstName,
+      lastName: nextLastName,
+      fullName: nextFullName,
+      email: email !== undefined ? String(email).trim().toLowerCase() : account.email,
+      phone: phone !== undefined ? String(phone).trim() : account.phone,
+      avatar: avatar !== undefined ? String(avatar).trim() : account.avatar,
+      role: role !== undefined ? String(role).trim() : account.role,
+      status: status !== undefined ? String(status).trim() : account.status,
+      inviteStatus: inviteStatus !== undefined ? String(inviteStatus).trim() : account.inviteStatus,
+      permissions: permissions !== undefined ? permissions : account.permissions,
+      employment: employment !== undefined ? employment : account.employment,
+      lastLoginAt: lastLoginAt !== undefined ? String(lastLoginAt).trim() : account.lastLoginAt,
+      companyName: companyName !== undefined ? String(companyName).trim() : account.companyName,
+      onboardingCompleted:
+        onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted,
+      onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
+      paymentSummary: paymentSummary !== undefined ? paymentSummary : account.paymentSummary,
+      subscription: subscription !== undefined ? subscription : account.subscription,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const savedAccount = await saveAccount(req, updatedAccount);
+    const actorId = req.body?.actorUserId || userId;
+    const actorNameStr = req.body?.actorName || savedAccount.fullName;
+    await logAccountActivity(req, {
+      actorUserId: actorId,
+      actorName: actorNameStr,
+      targetUserId: savedAccount.user_id,
+      type: 'team',
+      action: 'Perfil actualizado',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+    const profileDiff = {};
+    for (const key of ['role', 'status', 'email', 'companyName', 'subscription']) {
+      if (JSON.stringify(account[key]) !== JSON.stringify(updatedAccount[key])) {
+        profileDiff[key] = { before: account[key] ?? null, after: updatedAccount[key] ?? null };
+      }
+    }
+    if (Object.keys(profileDiff).length > 0) {
+      await writeChangelog(req, {
+        entity: 'account',
+        entityId: `account:${savedAccount.user_id}`,
+        entityLabel: savedAccount.fullName,
+        action: 'update',
+        actorUserId: actorId,
+        actorName: actorNameStr,
+        changes: profileDiff,
+        metadata: { email: savedAccount.email, ip: getClientIp(req) },
+      });
+    }
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al actualizar el perfil',
+    });
+  }
+}
+
+export async function updatePassword(req, res) {
+  try {
+    const userId = req.params.userId;
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return badRequest(res, 'Debes indicar la contraseña actual y la nueva');
+    }
+
+    if (String(newPassword).length < 8) {
+      return badRequest(res, 'La nueva contraseña debe tener al menos 8 caracteres');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    if (!verifyPassword(currentPassword, account.passwordHash)) {
+      return res.status(401).json({ ok: false, error: 'La contraseña actual no es correcta' });
+    }
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      password: undefined,
+      passwordHash: hashPassword(newPassword),
+      refreshTokenHash: null,
+      refreshTokenExpiry: null,
+      updatedAt: new Date().toISOString(),
+    });
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'security',
+      action: 'Contraseña actualizada',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+    await writeChangelog(req, {
+      entity: 'account',
+      entityId: `account:${savedAccount.user_id}`,
+      entityLabel: savedAccount.fullName,
+      action: 'update',
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      changes: { password: { before: '[redacted]', after: '[redacted]' } },
+      metadata: { event: 'password_changed', email: savedAccount.email, ip: getClientIp(req) },
+    });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al actualizar la contraseña',
+    });
+  }
+}
+
+export async function saveBillingCard(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const { cardNumber, cardHolderName, expiryDate, cvv, billingMode, selectedPlanId } = req.body || {};
+
+    if (!cardNumber || !cardHolderName || !expiryDate || !cvv) {
+      return badRequest(res, 'Faltan datos obligatorios de la tarjeta');
+    }
+
+    await ensureDatabase(req, CARDS_DB);
+    const existingCard = await findCardByUserId(req, userId);
+    const baseCard = buildCardDocument({
+      userId,
+      cardNumber,
+      cardHolderName,
+      expiryDate,
+      cvv,
+      billingMode,
+      selectedPlanId,
+    });
+
+    const savedCard = await saveCard(req, existingCard ? { ...existingCard, ...baseCard, updatedAt: new Date().toISOString() } : baseCard);
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      paymentSummary: {
+        cardId: savedCard._id,
+        lastFourDigits: savedCard.lastFourDigits,
+        cardHolderName: savedCard.cardHolderName,
+        expiryDate: savedCard.expiryDate,
+        billingMode: savedCard.billingMode,
+        selectedPlanId: savedCard.selectedPlanId,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      card: sanitizeCard(savedCard),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar la tarjeta',
+    });
+  }
+}
+
+export async function getBillingCard(req, res) {
+  try {
+    const userId = req.params.userId;
+    const card = await findCardByUserId(req, userId);
+
+    if (!card) {
+      return res.status(404).json({ ok: false, error: 'Tarjeta no encontrada' });
+    }
+
+    return res.json({
+      ok: true,
+      card: sanitizeCard(card),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar la tarjeta',
+    });
+  }
+}
+
+export async function inviteUser(req, res) {
+  try {
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/dashboard', username: requestedUsername, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '' } = req.body || {};
+
+    if (!name || !email) {
+      return badRequest(res, 'Nombre y email son obligatorios');
+    }
+
+    await ensureDatabase(req, ACCOUNTS_DB);
+    const existingAccount = await findAccountByEmail(req, email);
+    if (existingAccount) {
+      return res.status(409).json({ ok: false, error: 'Ya existe una cuenta con ese email' });
+    }
+
+    // Validar que la empresa existe si se proporciona businessId
+    let business = null;
+    if (businessId) {
+      business = await findBusinessById(req, businessId);
+      if (!business) {
+        return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+      }
+    }
+
+    const generatedPassword = generateTemporaryPassword();
+    const { firstName, lastName } = splitFullName(name);
+    const resolvedCompanyName = business?.name || companyName;
+
+    const baseUsername = requestedUsername
+      ? String(requestedUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+      : (String(firstName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'user');
+    let candidateUsername = baseUsername;
+    if (business) {
+      let counter = 1;
+      while (await findTeamMemberByUsername(req, business.business_id, candidateUsername)) {
+        candidateUsername = `${baseUsername}${counter}`;
+        counter++;
+      }
+    }
+
+    const account = buildAccountDocument({
+      firstName,
+      lastName,
+      email,
+      phone,
+      password: generatedPassword,
+      role,
+      permissions,
+      status: 'pending',
+      inviteStatus: 'pending',
+      invitedBy,
+      companyName: resolvedCompanyName,
+      onboardingCompleted: false,
+      onboardingData: {
+        source: 'team-invite',
+        businessId: businessId || undefined,
+      },
+      landingPage: landingPage || '/saas/dashboard',
+      linkedBusinessId: businessId || '',
+      username: candidateUsername,
+      employment: {
+        position,
+        contractType,
+        salary: grossMonthlySalary,
+        salesPointId: workCenterId,
+      },
+    });
+    const savedAccount = await saveAccount(req, account);
+
+    // Añadir el usuario como miembro de la empresa
+    if (business) {
+      const members = Array.isArray(business.members) ? business.members : [];
+      const now = new Date().toISOString();
+      const newMember = {
+        user_id: savedAccount.user_id,
+        fullName: savedAccount.fullName,
+        email: savedAccount.email,
+        role: role || 'Usuario',
+        permissions: normalizePermissionMatrix(permissions, role || 'Usuario'),
+        joinedAt: now,
+      };
+      await saveBusiness(req, {
+        ...business,
+        members: [...members, newMember],
+        updatedAt: now,
+      });
+    }
+
+    // A-04: Generar token de invitación y enviar email al invitado
+    const rawInviteToken = crypto.randomBytes(32).toString('hex');
+    await saveInviteToken(req, savedAccount, rawInviteToken);
+
+    let emailSent = false;
+    try {
+      const { subject, html } = buildInvitationEmail({
+        name: savedAccount.fullName,
+        email: savedAccount.email,
+        inviteToken: rawInviteToken,
+        temporaryPassword: generatedPassword,
+        invitedBy,
+        role,
+        companyName: resolvedCompanyName,
+      });
+      await sendEmail({ to: savedAccount.email, subject, html });
+      emailSent = true;
+    } catch (emailErr) {
+      console.error('[AUTH] Error enviando email de invitación:', emailErr?.message);
+    }
+
+    await logAccountActivity(req, {
+      actorUserId: invitedBy,
+      actorName: invitedBy,
+      targetUserId: savedAccount.user_id,
+      type: 'team',
+      action: 'Invitación enviada',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      metadata: {
+        email: savedAccount.email,
+        role: savedAccount.role,
+        businessId: businessId || undefined,
+        companyName: resolvedCompanyName,
+      },
+    });
+
+    return res.status(201).json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      generatedPassword,
+      generatedUsername: candidateUsername,
+      companyCode: business?.companyCode || '',
+      emailSent,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al invitar usuario',
+    });
+  }
+}
+
+export async function resetUserPassword(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const generatedPassword = generateTemporaryPassword(14);
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      password: undefined,
+      passwordHash: hashPassword(generatedPassword),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'security',
+      action: 'Contraseña restablecida',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+    await writeChangelog(req, {
+      entity: 'account',
+      entityId: `account:${savedAccount.user_id}`,
+      entityLabel: savedAccount.fullName,
+      action: 'update',
+      actorUserId: userId,
+      actorName: savedAccount.fullName,
+      changes: { password: { before: '[redacted]', after: '[redacted]' } },
+      metadata: { event: 'password_reset', email: savedAccount.email, ip: getClientIp(req) },
+    });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      generatedPassword,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al restablecer la contraseña',
+    });
+  }
+}
+
+export async function deleteUser(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    await softDeleteDocument(req, ACCOUNTS_DB, account._id);
+    await writeChangelog(req, {
+      entity: 'account',
+      entityId: account._id,
+      entityLabel: account.fullName,
+      action: 'delete',
+      actorUserId: req.body?.actorUserId || userId,
+      actorName: req.body?.actorName || account.fullName,
+      changes: { before: { email: account.email, role: account.role, status: account.status } },
+      metadata: { email: account.email, ip: getClientIp(req) },
+    });
+    return res.json({ ok: true, id: account.user_id });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al eliminar el usuario',
+    });
+  }
+}
+
+export async function getUserActivity(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    return res.json({
+      ok: true,
+      activities: Array.isArray(account.recentActivity) ? account.recentActivity : [],
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar la actividad',
+    });
+  }
+}
+
+export async function listAllActivities(req, res) {
+  try {
+    const accounts = await listAccounts(req);
+    const activities = accounts.flatMap((account) =>
+      Array.isArray(account.recentActivity)
+        ? account.recentActivity.map((activity) => ({
+            ...activity,
+            actorName: activity.actorName || account.fullName || account.email || '',
+          }))
+        : [],
+    );
+
+    activities.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+    return res.json({ ok: true, activities });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar las actividades',
+    });
+  }
+}
+
+export async function logActivity(req, res) {
+  try {
+    const {
+      actorUserId,
+      actorName = '',
+      targetUserId,
+      type = 'system',
+      action,
+      entityId = '',
+      entityLabel = '',
+      metadata = {},
+    } = req.body || {};
+
+    if (!actorUserId || !action) {
+      return badRequest(res, 'actorUserId y action son obligatorios');
+    }
+
+    const activity = buildActivityRecord({
+      actorUserId,
+      actorName,
+      targetUserId: targetUserId || actorUserId,
+      type,
+      action,
+      entityId,
+      entityLabel,
+      metadata,
+    });
+
+    await logAccountActivity(req, activity);
+    return res.json({ ok: true, activity });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar la actividad',
+    });
+  }
+}
+
+// S-01 + S-07: Refresh token — lee de cookie httpOnly, crea nueva sesión (sliding window)
+export async function refreshToken(req, res) {
+  try {
+    // S-01: Leer refresh token de cookie httpOnly primero, fallback a body (compatibilidad)
+    const cookieToken = req.cookies?.refresh_token;
+    const bodyToken = req.body?.refreshToken;
+    const rawToken = cookieToken || bodyToken;
+
+    if (!rawToken) {
+      return res.status(400).json({ ok: false, error: 'Refresh token requerido' });
+    }
+
+    let decoded;
+    try {
+      decoded = verifyRefreshToken(rawToken);
+    } catch {
+      clearAuthCookies(res);
+      return res.status(401).json({ ok: false, error: 'Refresh token inválido o expirado' });
+    }
+
+    // S-07: Buscar en sesiones (nuevo modelo) o campo legacy
+    const result = await findAccountByRefreshToken(req, decoded.raw);
+    if (!result || result.account.user_id !== decoded.userId) {
+      clearAuthCookies(res);
+      return res.status(401).json({ ok: false, error: 'Refresh token no reconocido' });
+    }
+
+    const { account, session } = result;
+
+    // S-07: Revocar sesión anterior antes de crear una nueva (token rotation)
+    if (session?.sessionId) {
+      await revokeSession(req, account, session.sessionId);
+    }
+
+    const { accessToken, refreshToken: newRefreshToken } = await issueTokens(req, res, account);
+    return res.json({ ok: true, accessToken, refreshToken: newRefreshToken });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al refrescar el token',
+    });
+  }
+}
+
+// S-07: Listar sesiones activas del usuario actual
+export async function listSessions(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    // Obtener sessionId de la cookie actual para marcar la sesión activa
+    const currentSessionId = req.authUser?.sessionId || null;
+
+    // Leer sesiones directamente del documento
+    const sessions = Array.isArray(account.sessions)
+      ? account.sessions.filter((s) => s && s.expiry && new Date(s.expiry) > new Date())
+      : [];
+
+    return res.json({
+      ok: true,
+      sessions: sessions.map((s) => sanitizeSession(s, currentSessionId)),
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al cargar sesiones' });
+  }
+}
+
+// S-07: Revocar una sesión específica
+export async function revokeSessionEndpoint(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    const { sessionId } = req.params;
+
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+    if (!sessionId) return res.status(400).json({ ok: false, error: 'sessionId requerido' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    await revokeSession(req, account, sessionId);
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'security',
+      action: 'Sesión revocada',
+      entityId: userId,
+      entityLabel: account.fullName,
+      ip: getClientIp(req),
+      metadata: { revokedSessionId: sessionId },
+    });
+
+    // Si revoca su propia sesión actual, limpiar cookies
+    if (sessionId === req.authUser?.sessionId) {
+      clearAuthCookies(res);
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al revocar sesión' });
+  }
+}
+
+// S-07: Revocar todas las demás sesiones (mantener solo la actual)
+export async function revokeOtherSessionsEndpoint(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    const currentSessionId = req.authUser?.sessionId;
+
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    await revokeAllSessions(req, account, currentSessionId);
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'security',
+      action: 'Todas las demás sesiones revocadas',
+      entityId: userId,
+      entityLabel: account.fullName,
+      ip: getClientIp(req),
+    });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al revocar sesiones' });
+  }
+}
+
+// S-06: Solicitar recuperación de contraseña
+export async function recoverPassword(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return badRequest(res, 'El email es obligatorio');
+    }
+
+    const account = await findAccountByEmail(req, email);
+
+    // No revelar si el email existe o no (prevención de enumeración)
+    if (!account) {
+      return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    await saveResetToken(req, account, rawToken);
+
+    const { subject, html } = buildPasswordResetEmail(email, rawToken);
+    await sendEmail({ to: email, subject, html });
+
+    await logAccountActivity(req, {
+      actorUserId: account.user_id,
+      actorName: account.fullName,
+      targetUserId: account.user_id,
+      type: 'security',
+      action: 'Solicitud de recuperación de contraseña',
+      entityId: account.user_id,
+      entityLabel: account.fullName,
+    });
+
+    return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al procesar la recuperación',
+    });
+  }
+}
+
+// S-06: Restablecer contraseña con token
+export async function resetPasswordWithToken(req, res) {
+  try {
+    const { token, email, newPassword } = req.body || {};
+
+    if (!token || !email || !newPassword) {
+      return badRequest(res, 'Token, email y nueva contraseña son obligatorios');
+    }
+
+    if (String(newPassword).length < 8) {
+      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
+    }
+
+    const account = await findAccountByResetToken(req, token);
+    if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
+      return res.status(400).json({ ok: false, error: 'Token inválido o expirado' });
+    }
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      passwordHash: hashPassword(newPassword),
+      passwordResetTokenHash: null,
+      passwordResetExpiry: null,
+      refreshTokenHash: null,
+      refreshTokenExpiry: null,
+      sessions: [],
+      updatedAt: new Date().toISOString(),
+    });
+    // S-01: Limpiar cookies al resetear contraseña
+    clearAuthCookies(res);
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'security',
+      action: 'Contraseña restablecida mediante enlace',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+
+    return res.json({ ok: true, message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al restablecer la contraseña',
+    });
+  }
+}
+
+// S-01 + S-07: Cerrar sesión — limpia cookies y revoca la sesión actual
+export async function logout(req, res) {
+  try {
+    // S-01: Leer token de cookie primero, fallback a body
+    const cookieToken = req.cookies?.refresh_token;
+    const bodyToken = req.body?.refreshToken;
+    const rawToken = cookieToken || bodyToken;
+
+    // S-01: Siempre limpiar las cookies httpOnly
+    clearAuthCookies(res);
+
+    if (rawToken) {
+      let decoded;
+      try {
+        decoded = verifyRefreshToken(rawToken);
+      } catch {
+        return res.json({ ok: true });
+      }
+
+      const account = await findAccountByUserId(req, decoded.userId);
+      if (account) {
+        // S-07: Revocar solo la sesión actual (no todas)
+        if (decoded.sessionId) {
+          await revokeSession(req, account, decoded.sessionId);
+        } else {
+          await revokeRefreshToken(req, account);
+        }
+        await logAccountActivity(req, {
+          actorUserId: account.user_id,
+          actorName: account.fullName,
+          targetUserId: account.user_id,
+          type: 'login',
+          action: 'Cierre de sesión',
+          entityId: account.user_id,
+          entityLabel: account.fullName,
+          ip: getClientIp(req),
+          metadata: { sessionId: decoded.sessionId || null },
+        });
+      }
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cerrar sesión',
+    });
+  }
+}
+
+// AUTH-02: Verificar email con token
+export async function verifyEmail(req, res) {
+  try {
+    const { token, email } = req.query || {};
+
+    if (!token || !email) {
+      return badRequest(res, 'Token y email son obligatorios');
+    }
+
+    const account = await findAccountByVerificationToken(req, String(token));
+    if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
+      return res.status(400).json({ ok: false, error: 'Enlace de verificación inválido o expirado' });
+    }
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      emailVerified: true,
+      emailVerificationTokenHash: null,
+      emailVerificationExpiry: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'security',
+      action: 'Email verificado',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al verificar el email',
+    });
+  }
+}
+
+// AUTH-02: Reenviar email de verificación (cooldown 60 s)
+const RESEND_COOLDOWN_MS = 60 * 1000;
+
+export async function resendVerificationEmail(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return badRequest(res, 'El email es obligatorio');
+    }
+
+    const account = await findAccountByEmail(req, email);
+
+    if (!account) {
+      return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+    }
+
+    if (account.emailVerified) {
+      return res.json({ ok: true, message: 'El email ya está verificado' });
+    }
+
+    if (account.lastVerificationEmailSentAt) {
+      const elapsed = Date.now() - new Date(account.lastVerificationEmailSentAt).getTime();
+      if (elapsed < RESEND_COOLDOWN_MS) {
+        const retryAfter = Math.ceil((RESEND_COOLDOWN_MS - elapsed) / 1000);
+        return res.status(429).json({
+          ok: false,
+          error: `Debes esperar ${retryAfter} segundos antes de solicitar otro enlace`,
+          retryAfter,
+        });
+      }
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    await saveEmailVerificationToken(req, account, rawToken);
+    const { subject, html } = buildEmailVerificationEmail(account.email, rawToken);
+    await sendEmail({ to: account.email, subject, html });
+
+    return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al reenviar el email de verificación',
+    });
+  }
+}
+
+// AUTH-03: Obtener progreso de onboarding
+export async function getOnboarding(req, res) {
+  try {
+    const { userId } = req.params;
+    const account = await findAccountByUserId(req, userId);
+
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    return res.json({
+      ok: true,
+      onboardingCompleted: Boolean(account.onboardingCompleted),
+      onboardingData: account.onboardingData || {},
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar el progreso de onboarding',
+    });
+  }
+}
+
+// AUTH-03: Guardar progreso de onboarding
+export async function saveOnboarding(req, res) {
+  try {
+    const { userId } = req.params;
+    const { onboardingData, onboardingCompleted } = req.body || {};
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const wasIncomplete = !account.onboardingCompleted;
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      onboardingCompleted:
+        onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted,
+      onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (wasIncomplete && Boolean(onboardingCompleted)) {
+      const onb = savedAccount.onboardingData || {};
+      const trial = onb.trial || {};
+      const emailData = buildSetupWelcomeEmail({
+        firstName: savedAccount.firstName,
+        companyName: savedAccount.companyName,
+        planName: savedAccount.subscription?.planName || 'Basic',
+        trialEndDate: trial.endDate || savedAccount.subscription?.trialEndsAt || null,
+        businessType: onb.businessType || '',
+        modules: onb.requestedModules || {},
+      });
+      sendEmail({ to: savedAccount.email, subject: emailData.subject, html: emailData.html }).catch(() => {});
+    }
+
+    return res.json({
+      ok: true,
+      onboardingCompleted: Boolean(savedAccount.onboardingCompleted),
+      onboardingData: savedAccount.onboardingData || {},
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar el progreso de onboarding',
+    });
+  }
+}
+
+// A-04: Aceptar invitación — el usuario invitado establece su contraseña con el token recibido por email
+export async function acceptInvite(req, res) {
+  try {
+    const { token, email, newPassword } = req.body || {};
+
+    if (!token || !email || !newPassword) {
+      return badRequest(res, 'Token, email y nueva contraseña son obligatorios');
+    }
+
+    if (String(newPassword).length < 8) {
+      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
+    }
+
+    const account = await findAccountByInviteToken(req, String(token));
+    if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
+      return res.status(400).json({ ok: false, error: 'Enlace de invitación inválido o expirado' });
+    }
+
+    const isTeamInvite = account.onboardingData?.source === 'team-invite';
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      passwordHash: hashPassword(newPassword),
+      inviteStatus: 'accepted',
+      status: 'active',
+      emailVerified: true,
+      inviteTokenHash: null,
+      inviteExpiresAt: null,
+      onboardingCompleted: isTeamInvite,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'team',
+      action: 'Invitación aceptada',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+    });
+
+    const redirectTo = isTeamInvite
+      ? (savedAccount.landingPage || '/saas/dashboard')
+      : '/auth/onboarding/business-type';
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al aceptar la invitación',
+    });
+  }
+}
+
+// ─── RGPD: Descargar mis datos personales ────────────────────────────────────
+
+export async function exportMyData(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const sanitized = sanitizeAccount(account);
+
+    const sessions = Array.isArray(account.sessions)
+      ? account.sessions
+          .filter((s) => s && s.expiry && new Date(s.expiry) > new Date())
+          .map((s) => sanitizeSession(s, req.authUser?.sessionId))
+      : [];
+
+    const activities = Array.isArray(account.recentActivity) ? account.recentActivity : [];
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      subject: 'personal_data',
+      profile: {
+        userId: sanitized.user_id,
+        email: sanitized.email,
+        firstName: sanitized.firstName,
+        lastName: sanitized.lastName,
+        fullName: sanitized.fullName,
+        phone: sanitized.phone,
+        avatar: sanitized.avatar,
+        role: sanitized.role,
+        companyName: sanitized.companyName,
+        provider: sanitized.provider,
+        createdAt: sanitized.createdAt,
+        updatedAt: sanitized.updatedAt,
+        lastLoginAt: sanitized.lastLoginAt,
+        emailVerified: sanitized.emailVerified,
+        onboardingCompleted: sanitized.onboardingCompleted,
+        landingPage: sanitized.landingPage,
+      },
+      employment: sanitized.employment || null,
+      permissions: sanitized.permissions || null,
+      activeSessions: sessions,
+      recentActivity: activities,
+    };
+
+    const filename = `mis-datos-${userId}-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.json(exportData);
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al exportar datos personales',
+    });
+  }
+}
+
+// ─── Join Requests: solicitudes de usuario para unirse a empresa ──────────
+
+export async function createJoinRequest(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const { businessId, message = '' } = req.body || {};
+    if (!businessId) return badRequest(res, 'businessId es obligatorio');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const existing = await findPendingJoinRequest(req, userId, businessId);
+    if (existing) {
+      return res.status(409).json({ ok: false, error: 'Ya tienes una solicitud pendiente para esta empresa' });
+    }
+
+    const joinRequest = buildJoinRequestDocument({
+      userId,
+      userFullName: account.fullName,
+      userEmail: account.email,
+      businessId: business.business_id,
+      businessName: business.name || '',
+      message,
+    });
+
+    const saved = await saveJoinRequest(req, joinRequest);
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: business.owner_user_id,
+      type: 'team',
+      action: 'Solicitud de unión a empresa enviada',
+      entityId: saved.request_id,
+      entityLabel: business.name || '',
+      metadata: { businessId: business.business_id, message },
+    });
+
+    return res.status(201).json({ ok: true, joinRequest: saved });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al crear la solicitud',
+    });
+  }
+}
+
+export async function getMyJoinRequests(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const requests = await listJoinRequestsByUser(req, userId);
+    return res.json({ ok: true, joinRequests: requests });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar solicitudes',
+    });
+  }
+}
+
+export async function getBusinessJoinRequests(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'businessId obligatorio');
+
+    const requests = await listJoinRequestsByBusiness(req, businessId);
+    return res.json({ ok: true, joinRequests: requests });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar solicitudes',
+    });
+  }
+}
+
+export async function reviewJoinRequest(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const { requestId } = req.params;
+    const { action } = req.body || {};
+
+    if (!requestId) return badRequest(res, 'requestId obligatorio');
+    if (!['accepted', 'rejected'].includes(action)) return badRequest(res, 'Acción inválida');
+
+    const joinRequest = await findJoinRequestById(req, requestId);
+    if (!joinRequest) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (joinRequest.status !== 'pending') {
+      return res.status(409).json({ ok: false, error: 'Esta solicitud ya fue procesada' });
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...joinRequest,
+      status: action,
+      reviewedBy: userId,
+      reviewedAt: now,
+      updatedAt: now,
+    };
+    const saved = await saveJoinRequest(req, updated);
+
+    if (action === 'accepted') {
+      const applicant = await findAccountByUserId(req, joinRequest.user_id);
+      const business = await findBusinessById(req, joinRequest.business_id);
+
+      if (applicant && business) {
+        const members = Array.isArray(business.members) ? business.members : [];
+        const alreadyMember = members.some((m) => m.user_id === applicant.user_id);
+
+        if (!alreadyMember) {
+          const newMember = {
+            user_id: applicant.user_id,
+            fullName: applicant.fullName,
+            email: applicant.email,
+            role: 'Usuario',
+            permissions: normalizePermissionMatrix(undefined, 'Usuario'),
+            joinedAt: now,
+          };
+          await saveBusiness(req, {
+            ...business,
+            members: [...members, newMember],
+            updatedAt: now,
+          });
+        }
+
+        await saveAccount(req, {
+          ...applicant,
+          linkedBusinessId: business.business_id,
+          companyName: business.name || applicant.companyName,
+          updatedAt: now,
+        });
+      }
+    }
+
+    const reviewer = await findAccountByUserId(req, userId);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: reviewer?.fullName || '',
+      targetUserId: joinRequest.user_id,
+      type: 'team',
+      action: action === 'accepted' ? 'Solicitud de unión aceptada' : 'Solicitud de unión rechazada',
+      entityId: saved.request_id,
+      entityLabel: joinRequest.businessName,
+      metadata: { businessId: joinRequest.business_id, action },
+    });
+
+    return res.json({ ok: true, joinRequest: saved });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al procesar la solicitud',
+    });
+  }
+}
+
+export async function searchBusinesses(req, res) {
+  try {
+    const { q = '' } = req.query || {};
+    const businesses = await listAllBusinesses(req);
+    const query = String(q).trim().toLowerCase();
+
+    const results = query
+      ? businesses.filter((b) =>
+          (b.name || '').toLowerCase().includes(query) ||
+          (b.legalName || '').toLowerCase().includes(query) ||
+          (b.taxId || '').toLowerCase().includes(query)
+        )
+      : businesses;
+
+    return res.json({
+      ok: true,
+      businesses: results.slice(0, 20).map((b) => ({
+        business_id: b.business_id,
+        name: b.name || '',
+        legalName: b.legalName || '',
+        city: b.city || '',
+        businessType: b.businessType || '',
+        logo: b.logo || '',
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al buscar empresas',
+    });
+  }
+}
+
+// ─── Team Login: miembros de equipo entran con código de empresa + usuario + contraseña ──
+
+export async function teamLogin(req, res) {
+  try {
+    const { companyCode, username, password } = req.body || {};
+    const ip = getClientIp(req);
+
+    if (!companyCode || !username || !password) {
+      return badRequest(res, 'Código de empresa, usuario y contraseña son obligatorios');
+    }
+
+    const business = await findBusinessByCompanyCode(req, companyCode);
+    if (!business) {
+      return res.status(401).json({ ok: false, error: 'Código de empresa, usuario o contraseña incorrectos' });
+    }
+
+    const account = await findTeamMemberByUsername(req, business.business_id, username);
+    if (!account) {
+      return res.status(401).json({ ok: false, error: 'Código de empresa, usuario o contraseña incorrectos' });
+    }
+
+    const lockStatus = isAccountLocked(account);
+    if (lockStatus.locked) {
+      const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
+      return res.status(423).json({
+        ok: false,
+        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''}.`,
+        code: 'ACCOUNT_LOCKED',
+        lockUntil: lockStatus.lockUntil,
+      });
+    }
+
+    if (lockStatus.wasExpired) {
+      try {
+        await saveAccount(req, {
+          ...account,
+          failedLoginAttempts: 0,
+          lockUntil: null,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (cleanupErr) {
+        console.error('[AUTH] Error en limpieza lazy de bloqueo (team):', cleanupErr?.message);
+      }
+    }
+
+    if (!verifyPassword(password, account.passwordHash)) {
+      await incrementFailedLoginAttempts(req, account);
+      return res.status(401).json({ ok: false, error: 'Código de empresa, usuario o contraseña incorrectos' });
+    }
+
+    const savedAccount = await saveAccount(req, {
+      ...account,
+      status: 'active',
+      lastLoginAt: new Date().toISOString(),
+      failedLoginAttempts: 0,
+      lockUntil: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Inicio de sesión de equipo',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: {
+        loginType: 'team',
+        companyCode,
+        businessId: business.business_id,
+        businessName: business.name,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    void writeChangelog(req, {
+      entity: 'login',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName || savedAccount.email,
+      action: 'login',
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName || savedAccount.email,
+      changes: {},
+      metadata: {
+        loginType: 'team',
+        companyCode,
+        businessId: business.business_id,
+        email: savedAccount.email,
+        role: savedAccount.role,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      business: {
+        business_id: business.business_id,
+        name: business.name,
+        logo: business.logo || '',
+        companyCode: business.companyCode,
+      },
+      accessToken,
+      refreshToken,
+      redirectTo: savedAccount.landingPage || '/saas/dashboard',
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al iniciar sesión de equipo',
+    });
+  }
+}
+
+// ─── POS Switch User: cambio rápido de usuario en el TPV sin cerrar sesión de empresa ──
+
+export async function posSwitchUser(req, res) {
+  try {
+    const { username, password } = req.body || {};
+    const currentUser = req.authUser;
+
+    if (!currentUser?.userId) {
+      return res.status(401).json({ ok: false, error: 'Se requiere una sesión activa de empresa' });
+    }
+
+    if (!username || !password) {
+      return badRequest(res, 'Usuario y contraseña son obligatorios');
+    }
+
+    const currentAccount = await findAccountByUserId(req, currentUser.userId);
+    if (!currentAccount) {
+      return res.status(401).json({ ok: false, error: 'Sesión no válida' });
+    }
+
+    const businessId = currentAccount.linkedBusinessId;
+    if (!businessId) {
+      return badRequest(res, 'La sesión actual no está vinculada a una empresa');
+    }
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) {
+      return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    }
+
+    const targetAccount = await findTeamMemberByUsername(req, businessId, username);
+    if (!targetAccount) {
+      return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
+    }
+
+    if (!verifyPassword(password, targetAccount.passwordHash)) {
+      return res.status(401).json({ ok: false, error: 'Usuario o contraseña incorrectos' });
+    }
+
+    const ip = getClientIp(req);
+    const savedAccount = await saveAccount(req, {
+      ...targetAccount,
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Cambio de usuario en TPV',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: {
+        loginType: 'pos-switch',
+        previousUserId: currentUser.userId,
+        businessId,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      business: {
+        business_id: business.business_id,
+        name: business.name,
+        logo: business.logo || '',
+      },
+      accessToken,
+      refreshToken,
+      switchedFrom: currentUser.userId,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cambiar de usuario',
+    });
+  }
+}

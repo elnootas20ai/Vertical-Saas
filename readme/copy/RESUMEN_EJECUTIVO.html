@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resumen Ejecutivo - Módulo Equipo UDAR EDGE</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 30px; line-height: 1.6; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        
+        h1 { color: #1a1a1a; font-size: 2.5em; margin-bottom: 15px; border-bottom: 4px solid #2563eb; padding-bottom: 15px; }
+        h2 { color: #2c3e50; font-size: 1.8em; margin-top: 40px; margin-bottom: 20px; background: #ecf0f1; padding: 15px; border-left: 5px solid #3498db; }
+        h3 { color: #34495e; font-size: 1.4em; margin-top: 25px; margin-bottom: 15px; }
+        
+        .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px; border-radius: 10px; margin: 30px 0; text-align: center; }
+        .hero h1 { color: white; border: none; }
+        
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 30px 0; }
+        .stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 3em; font-weight: bold; }
+        .stat-label { font-size: 1.1em; margin-top: 10px; opacity: 0.95; }
+        
+        .doc-card { border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin: 20px 0; background: #fafafa; }
+        .doc-header { font-size: 1.5em; font-weight: bold; color: #2563eb; margin-bottom: 15px; }
+        
+        .phase-card { border-left: 5px solid #3498db; background: #ecf0f1; padding: 20px; margin: 20px 0; }
+        .phase-title { font-size: 1.3em; font-weight: bold; margin-bottom: 10px; }
+        
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th { background: #2c3e50; color: white; padding: 12px; text-align: left; }
+        td { padding: 12px; border-bottom: 1px solid #e0e0e0; }
+        tr:hover { background: #f8f9fa; }
+        
+        .badge { display: inline-block; padding: 5px 12px; border-radius: 15px; font-size: 0.85em; font-weight: 600; margin: 3px; }
+        .badge-base { background: #d4edda; color: #155724; }
+        .badge-flag { background: #fff3cd; color: #856404; }
+        .badge-priority { background: #dc3545; color: white; }
+        
+        .checklist { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 20px; margin: 20px 0; }
+        .checklist-item { margin: 10px 0; padding-left: 30px; position: relative; }
+        .checklist-item:before { content: "☐"; position: absolute; left: 0; font-size: 1.5em; }
+        
+        .alert-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 20px; margin: 20px 0; }
+        
+        ul { margin-left: 25px; margin-top: 10px; }
+        li { margin: 8px 0; }
+        
+        @media print { 
+            body { background: white; }
+            .no-print { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero">
+            <h1>📚 DOCUMENTACIÓN COMPLETA</h1>
+            <h2 style="color: white; background: none; border: none; margin: 10px 0;">Módulo Equipo y RRHH | UDAR EDGE</h2>
+            <p style="font-size: 1.2em; margin-top: 15px;">Versión 1.0 | 4 Febrero 2026</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">162</div>
+                <div class="stat-label">Funcionalidades<br>documentadas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">71</div>
+                <div class="stat-label">Permisos del<br>sistema</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">9</div>
+                <div class="stat-label">FLAGS<br>configurables</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">3</div>
+                <div class="stat-label">Documentos<br>completos</div>
+            </div>
+        </div>
+
+        <h2>📋 Documentos Disponibles</h2>
+
+        <div class="doc-card">
+            <div class="doc-header">1️⃣ GUIA_COMPLETA_MODULO_EQUIPO.md</div>
+            <p><strong>Para quién:</strong> Gerentes de proyecto, Product Owners, Tech Leads</p>
+            <p><strong>Objetivo:</strong> Entender el sistema completo y cómo usar la documentación</p>
+            <p><strong>Contenido:</strong></p>
+            <ul>
+                <li>✅ Índice maestro de toda la documentación</li>
+                <li>✅ Priorización en 4 fases de desarrollo</li>
+                <li>✅ Sistema de IDs únicos para trazabilidad</li>
+                <li>✅ Sistema de permisos completo (71 permisos)</li>
+                <li>✅ Decisiones pendientes críticas</li>
+                <li>✅ Convenciones de API y estándares</li>
+                <li>✅ Checklist de entrega al programador</li>
+            </ul>
+            <p style="margin-top: 15px;"><strong>👉 LEER ESTO PRIMERO</strong></p>
+        </div>
+
+        <div class="doc-card">
+            <div class="doc-header">2️⃣ LISTADO_FUNCIONALIDADES_COMPLETO.html</div>
+            <p><strong>Para quién:</strong> Analistas de negocio, Product Owners, Stakeholders</p>
+            <p><strong>Objetivo:</strong> Clasificar funcionalidades en BASE vs FLAG</p>
+            <p><strong>Contenido:</strong></p>
+            <ul>
+                <li>✅ 162 funcionalidades organizadas por pestañas</li>
+                <li>✅ Clasificación BASE/FLAG para cada una</li>
+                <li>✅ IDs únicos (EQ-001, FIC-001, VAC-001, etc.)</li>
+                <li>✅ Descripción detallada de cada funcionalidad</li>
+                <li>✅ Roles que pueden acceder</li>
+                <li>✅ Decisiones pendientes marcadas</li>
+            </ul>
+            <p style="margin-top: 15px;"><strong>👉 ABRIR EN NAVEGADOR</strong></p>
+        </div>
+
+        <div class="doc-card">
+            <div class="doc-header">3️⃣ ESPECIFICACION_BACKEND_COMPLETA.html</div>
+            <p><strong>Para quién:</strong> Programadores backend, Arquitectos de software</p>
+            <p><strong>Objetivo:</strong> Implementar todos los endpoints y conectar con frontend</p>
+            <p><strong>Contenido:</strong></p>
+            <ul>
+                <li>✅ Especificación técnica completa de APIs REST</li>
+                <li>✅ Endpoints con métodos HTTP (GET, POST, PUT, DELETE)</li>
+                <li>✅ Request body con JSON estructurado</li>
+                <li>✅ Response esperado con ejemplos reales</li>
+                <li>✅ Validaciones backend punto por punto</li>
+                <li>✅ Permisos requeridos para cada endpoint</li>
+                <li>✅ Esquemas de base de datos (CREATE TABLE)</li>
+                <li>✅ Middleware de permisos (código ejemplo)</li>
+                <li>✅ Códigos de error estándar</li>
+            </ul>
+            <p style="margin-top: 15px;"><strong>👉 ABRIR EN NAVEGADOR</strong></p>
+        </div>
+
+        <h2>🚀 Priorización de Desarrollo</h2>
+
+        <div class="phase-card">
+            <div class="phase-title">FASE 1 - BASE (4-6 semanas) <span class="badge badge-priority">CRÍTICO</span></div>
+            <p><strong>~50 funcionalidades</strong></p>
+            <ul>
+                <li>Gestión de empleados (crear, editar, visualizar)</li>
+                <li>Fichajes completos (entrada, salida, ajustes)</li>
+                <li>Documentos (subir, gestionar, aprobar)</li>
+                <li>Sistema de permisos funcionando</li>
+                <li>Notificaciones básicas</li>
+            </ul>
+        </div>
+
+        <div class="phase-card">
+            <div class="phase-title">FASE 2 - FLAGS Básicos (3-4 semanas) <span class="badge badge-flag">FLAG</span></div>
+            <p><strong>~35 funcionalidades</strong></p>
+            <ul>
+                <li>FLAG vacations: Solicitar, aprobar, rechazar vacaciones</li>
+                <li>FLAG schedules: Planificación horaria y turnos</li>
+            </ul>
+        </div>
+
+        <div class="phase-card">
+            <div class="phase-title">FASE 3 - FLAGS Avanzados (3-4 semanas) <span class="badge badge-flag">FLAG</span></div>
+            <p><strong>~23 funcionalidades</strong></p>
+            <ul>
+                <li>FLAG expenses: Gestión de gastos y reembolsos</li>
+                <li>FLAG consumptions: Consumos internos</li>
+                <li>FLAG onboarding: Proceso de alta automatizado</li>
+            </ul>
+        </div>
+
+        <div class="phase-card">
+            <div class="phase-title">FASE 4 - Integraciones (2-3 semanas)</div>
+            <p><strong>~18 funcionalidades</strong></p>
+            <ul>
+                <li>FLAG gestoria: Integración con gestoría externa</li>
+                <li>FLAG multicenter: Soporte multicentro</li>
+                <li>FLAG audit: Auditoría de cambios</li>
+                <li>Módulo Informes avanzados</li>
+            </ul>
+        </div>
+
+        <h2>🔒 Sistema de Permisos</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Nivel</th>
+                    <th>Descripción</th>
+                    <th>Ejemplo de permisos</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>N1 - Básico</strong></td>
+                    <td>Permisos propios del trabajador</td>
+                    <td>Fichar, ver vacaciones propias, subir documentos</td>
+                </tr>
+                <tr>
+                    <td><strong>N2 - Intermedio</strong></td>
+                    <td>Visualización del equipo</td>
+                    <td>Ver equipo, ver fichajes, ver vacaciones equipo</td>
+                </tr>
+                <tr>
+                    <td><strong>N3 - Avanzado</strong></td>
+                    <td>Gestión del equipo</td>
+                    <td>Aprobar vacaciones, ajustar fichajes, gestionar horarios</td>
+                </tr>
+                <tr>
+                    <td><strong>N4 - Administrador</strong></td>
+                    <td>Administración completa</td>
+                    <td>Editar datos laborales, cambiar roles, dar de baja</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="alert-box">
+            <h3>⚠️ Arquitectura de permisos (IMPORTANTE)</h3>
+            <ul>
+                <li><strong>Los permisos SOLO se definen en roles</strong></li>
+                <li><strong>Los usuarios heredan TODOS los permisos del rol</strong></li>
+                <li><strong>NO hay personalización individual</strong></li>
+                <li><strong>Cambiar rol = cambiar TODOS los permisos</strong></li>
+            </ul>
+        </div>
+
+        <h2>✅ Checklist para el Programador</h2>
+
+        <div class="checklist">
+            <h3>Antes de empezar:</h3>
+            <div class="checklist-item">Leer ESPECIFICACION_BACKEND_COMPLETA.html completo</div>
+            <div class="checklist-item">Revisar LISTADO_FUNCIONALIDADES_COMPLETO.html para entender alcance</div>
+            <div class="checklist-item">Confirmar decisiones pendientes con Product Owner</div>
+            <div class="checklist-item">Configurar entorno de desarrollo</div>
+            <div class="checklist-item">Crear esquemas de base de datos</div>
+            <div class="checklist-item">Implementar middleware de autenticación y permisos</div>
+        </div>
+
+        <div class="checklist">
+            <h3>Durante el desarrollo:</h3>
+            <div class="checklist-item">Usar IDs únicos en commits (ej: feat(EQ-008): ...)</div>
+            <div class="checklist-item">Seguir estructura de request/response documentada</div>
+            <div class="checklist-item">Implementar TODAS las validaciones descritas</div>
+            <div class="checklist-item">Crear tests unitarios para cada endpoint</div>
+            <div class="checklist-item">Documentar cambios o desviaciones del spec</div>
+            <div class="checklist-item">Revisar FLAGS antes de cada implementación</div>
+        </div>
+
+        <h2>🚨 Decisiones Pendientes Críticas</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Categoría</th>
+                    <th>Decisión pendiente</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Fichajes</strong></td>
+                    <td>Límite días atrás para ajustes: ¿7 días? ¿15 días?</td>
+                </tr>
+                <tr>
+                    <td><strong>Fichajes</strong></td>
+                    <td>¿Notificar al trabajador ajuste manual del gerente?</td>
+                </tr>
+                <tr>
+                    <td><strong>Vacaciones</strong></td>
+                    <td>Anticipación mínima: ¿15 días? ¿30 días?</td>
+                </tr>
+                <tr>
+                    <td><strong>Gastos</strong></td>
+                    <td>Justificante: ¿Obligatorio u opcional?</td>
+                </tr>
+                <tr>
+                    <td><strong>Documentos</strong></td>
+                    <td>Tamaño máximo archivo: ¿10MB? ¿20MB?</td>
+                </tr>
+                <tr>
+                    <td><strong>Onboarding</strong></td>
+                    <td>¿Enviar invitación automática al crear empleado?</td>
+                </tr>
+                <tr>
+                    <td><strong>Gestoría</strong></td>
+                    <td>¿Qué software de gestoría? ¿A3? ¿Sage?</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>📊 Resumen por Clasificación</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Clasificación</th>
+                    <th>Cantidad</th>
+                    <th>Descripción</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="badge badge-base">BASE</span></td>
+                    <td><strong>~85 funcionalidades</strong></td>
+                    <td>Incluidas en plan base, siempre visibles y operativas</td>
+                </tr>
+                <tr>
+                    <td><span class="badge badge-flag">FLAG</span></td>
+                    <td><strong>~65 funcionalidades</strong></td>
+                    <td>Condicionadas a flags activos (schedules, vacations, expenses, etc.)</td>
+                </tr>
+                <tr>
+                    <td><strong>Pendientes</strong></td>
+                    <td><strong>~12 decisiones</strong></td>
+                    <td>Funcionalidades con decisiones de negocio pendientes</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>🎯 Convenciones API</h2>
+
+        <div style="background: #263238; color: #aed581; padding: 20px; border-radius: 8px; font-family: monospace; margin: 20px 0;">
+            <p><strong>Base URL:</strong> https://api.udaredge.com/v1</p>
+            <p style="margin-top: 10px;"><strong>Headers requeridos:</strong></p>
+            <p>Authorization: Bearer {token}</p>
+            <p>X-Company-Id: {companyId}</p>
+            <p style="margin-top: 10px;"><strong>Formato fechas:</strong> ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)</p>
+            <p><strong>Formato moneda:</strong> Decimal 2 decimales (ej: 1500.50)</p>
+        </div>
+
+        <div style="margin-top: 60px; padding: 30px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; text-align: center;">
+            <h2 style="color: white; background: none; border: none; margin-bottom: 15px;">✅ DOCUMENTACIÓN COMPLETA Y LISTA</h2>
+            <p style="font-size: 1.2em;">162 funcionalidades | 71 permisos | 9 FLAGS | 4 fases de desarrollo</p>
+            <p style="margin-top: 15px; font-size: 1.1em;">Estado: <strong>APROBADO PARA DESARROLLO BACKEND</strong></p>
+        </div>
+
+        <p style="text-align: center; color: #7f8c8d; margin-top: 40px; padding-top: 30px; border-top: 2px solid #ecf0f1;">
+            <strong>UDAR EDGE | Módulo Equipo y RRHH</strong><br>
+            Versión 1.0 | Febrero 2026<br>
+            <em>Documentación técnica completa para desarrollo backend</em>
+        </p>
+    </div>
+</body>
+</html>

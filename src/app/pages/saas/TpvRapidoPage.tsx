@@ -1,0 +1,1173 @@
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Layout } from '../../components/saas/Layout';
+import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
+import { useAuth } from '../../context/AuthContext';
+import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
+import {
+  listCatalogItemsRequest,
+  createDeliveryOrderRequest,
+  type CatalogItem,
+  type DeliveryOrder,
+  type DeliveryOrderItem,
+  type DeliveryOrderStatus,
+  type DeliveryType,
+} from '../../lib/deliveryApi';
+import { createClientRequest, updateClientRequest } from '../../lib/crmApi';
+import type { Client, ClientAddress } from '../../context/AppContext';
+import { v4 as uuidv4 } from 'uuid';
+import {
+  Phone,
+  Search,
+  ShoppingBag,
+  Truck,
+  Plus,
+  Minus,
+  X,
+  Check,
+  Edit3,
+  User,
+  MapPin,
+  CreditCard,
+  Banknote,
+  Smartphone,
+  Wallet,
+  ShoppingCart,
+  CheckCircle2,
+  Package,
+  Home,
+  Briefcase,
+  Loader2,
+} from 'lucide-react';
+
+type Step = 'client' | 'delivery' | 'products' | 'payment';
+type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otros';
+
+interface CartItem {
+  catalogItem: CatalogItem;
+  quantity: number;
+}
+
+const INPUT_CLASS =
+  'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
+const LABEL_CLASS =
+  'block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2';
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+}
+
+function formatPrice(n: number): string {
+  return n.toFixed(2).replace('.', ',') + ' €';
+}
+
+export function TpvRapidoPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const userId = user?.id || '';
+
+  const [currentStep, setCurrentStep] = useState<Step>('client');
+  const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
+
+  // Step 1 - Client
+  const [phonePrefix, setPhonePrefix] = useState('+34');
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneShake, setPhoneShake] = useState(false);
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientStreet, setNewClientStreet] = useState('');
+  const [newClientNotes, setNewClientNotes] = useState('');
+  const [newClientPayment, setNewClientPayment] = useState<PaymentMethod | ''>('');
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(false);
+
+  const { results, isSearching, selectedClient, selectClient, clearSelection, clearResults } =
+    useClientPhoneSearch({ userId, phone: phoneInput, enabled: !showCreateForm });
+
+  // Step 2 - Delivery
+  const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(null);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+  const [showNewAddress, setShowNewAddress] = useState(false);
+  const [newAddrLabel, setNewAddrLabel] = useState('Casa');
+  const [newAddrStreet, setNewAddrStreet] = useState('');
+  const [newAddrCity, setNewAddrCity] = useState('');
+  const [newAddrPostal, setNewAddrPostal] = useState('');
+  const [newAddrNotes, setNewAddrNotes] = useState('');
+  const [newAddrPrimary, setNewAddrPrimary] = useState(false);
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [addressWarning, setAddressWarning] = useState(false);
+
+  // Step 3 - Products
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [loadingCatalog, setLoadingCatalog] = useState(true);
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartShake, setCartShake] = useState(false);
+
+  // Step 4 - Payment
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [cashGiven, setCashGiven] = useState('');
+  const [orderNotes, setOrderNotes] = useState('');
+  const [initialStatus, setInitialStatus] = useState<'nuevo' | 'cocina'>('nuevo');
+
+  // Post-creation
+  const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // ─── Load catalog ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    setLoadingCatalog(true);
+    listCatalogItemsRequest(userId, 'catalog')
+      .then((items) => {
+        if (!cancelled) setCatalog(items);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error('Error al cargar el catálogo');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCatalog(false);
+      });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // ─── Autofocus phone on mount or reset ─────────────────────────────────────
+  useEffect(() => {
+    if (currentStep === 'client' && !selectedClient && !createdOrder) {
+      setTimeout(() => phoneRef.current?.focus(), 100);
+    }
+  }, [currentStep, selectedClient, createdOrder]);
+
+  // ─── Derived ───────────────────────────────────────────────────────────────
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    catalog.forEach((item) => { if (item.category) cats.add(item.category); });
+    return Array.from(cats).sort();
+  }, [catalog]);
+
+  const filteredProducts = useMemo(() => {
+    let items = catalog.filter((i) => i.itemType === 'product' || i.itemType === 'combo');
+    if (selectedCategory) items = items.filter((i) => i.category === selectedCategory);
+    if (productSearch.trim()) {
+      const q = productSearch.toLowerCase();
+      items = items.filter(
+        (i) => i.name.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q),
+      );
+    }
+    return items;
+  }, [catalog, selectedCategory, productSearch]);
+
+  const cartTotal = useMemo(
+    () => cart.reduce((sum, ci) => sum + ci.catalogItem.unitPrice * ci.quantity, 0),
+    [cart],
+  );
+
+  const cartCount = useMemo(
+    () => cart.reduce((sum, ci) => sum + ci.quantity, 0),
+    [cart],
+  );
+
+  const changeAmount = useMemo(() => {
+    const given = parseFloat(cashGiven.replace(',', '.'));
+    if (isNaN(given) || given < cartTotal) return null;
+    return given - cartTotal;
+  }, [cashGiven, cartTotal]);
+
+  const isStepReachable = useCallback(
+    (step: Step) => {
+      if (step === 'client') return true;
+      if (step === 'delivery') return !!selectedClient;
+      if (step === 'products') return !!selectedClient && !!deliveryType;
+      if (step === 'payment') return !!selectedClient && !!deliveryType && cart.length > 0;
+      return false;
+    },
+    [selectedClient, deliveryType, cart.length],
+  );
+
+  const canSubmit =
+    !!selectedClient &&
+    !!deliveryType &&
+    cart.length > 0 &&
+    !!paymentMethod &&
+    (deliveryType !== 'domicilio' || !!selectedAddressId);
+
+  // ─── Cart helpers ──────────────────────────────────────────────────────────
+  const addToCart = useCallback((item: CatalogItem) => {
+    if (!item.active) return;
+    setCart((prev) => {
+      const existing = prev.find((ci) => ci.catalogItem._id === item._id);
+      if (existing) return prev.map((ci) => ci.catalogItem._id === item._id ? { ...ci, quantity: ci.quantity + 1 } : ci);
+      return [...prev, { catalogItem: item, quantity: 1 }];
+    });
+  }, []);
+
+  const removeFromCart = useCallback((itemId: string) => {
+    setCart((prev) => {
+      const existing = prev.find((ci) => ci.catalogItem._id === itemId);
+      if (!existing) return prev;
+      if (existing.quantity <= 1) return prev.filter((ci) => ci.catalogItem._id !== itemId);
+      return prev.map((ci) => ci.catalogItem._id === itemId ? { ...ci, quantity: ci.quantity - 1 } : ci);
+    });
+  }, []);
+
+  const getCartQty = useCallback(
+    (itemId: string) => cart.find((ci) => ci.catalogItem._id === itemId)?.quantity || 0,
+    [cart],
+  );
+
+  // ─── Step navigation ──────────────────────────────────────────────────────
+  const completeStep = useCallback(
+    (step: Step) => {
+      setCompletedSteps((prev) => new Set(prev).add(step));
+      const order: Step[] = ['client', 'delivery', 'products', 'payment'];
+      const idx = order.indexOf(step);
+      if (idx < order.length - 1) setCurrentStep(order[idx + 1]);
+    },
+    [],
+  );
+
+  const editStep = useCallback((step: Step) => {
+    setCurrentStep(step);
+    setCompletedSteps((prev) => {
+      const next = new Set(prev);
+      next.delete(step);
+      return next;
+    });
+  }, []);
+
+  // ─── Client selection ─────────────────────────────────────────────────────
+  const handleSelectClient = useCallback(
+    (client: Client) => {
+      selectClient(client);
+      setShowCreateForm(false);
+      setDuplicateWarning(false);
+      setPaymentMethod(
+        (client.defaultPaymentMethod as PaymentMethod) || null,
+      );
+      const primary = client.addresses?.find((a) => a.isPrimary);
+      if (primary) setSelectedAddressId(primary.id);
+      completeStep('client');
+    },
+    [selectClient, completeStep],
+  );
+
+  const handleCreateClient = useCallback(async () => {
+    if (!newClientName.trim() || !phoneInput.trim() || !newClientStreet.trim()) {
+      toast.error('Completa nombre, teléfono y calle');
+      return;
+    }
+    setCreatingClient(true);
+    try {
+      const addressId = uuidv4();
+      const clientData = {
+        id: `client-${uuidv4()}`,
+        type: 'client' as const,
+        user_id: userId,
+        name: newClientName.trim(),
+        phone: phoneInput.trim(),
+        phonePrefix,
+        email: '',
+        status: 'active' as const,
+        address: newClientStreet.trim(),
+        notes: newClientNotes.trim(),
+        defaultPaymentMethod: (newClientPayment || '') as Client['defaultPaymentMethod'],
+        addresses: [
+          {
+            id: addressId,
+            label: 'Casa',
+            street: newClientStreet.trim(),
+            isPrimary: true,
+            usageCount: 0,
+            lastUsedAt: null,
+          },
+        ],
+        createdAt: new Date(),
+        stats: {
+          totalOrders: 0,
+          lastOrderDate: null,
+          orderFrequencyDays: 0,
+          favoriteAddressId: null,
+          totalSpent: 0,
+          createdFrom: 'tpv' as const,
+        },
+      } as Client;
+      const { client: created, duplicates } = await createClientRequest(userId, clientData);
+      if (duplicates && duplicates.length > 0) {
+        setDuplicateWarning(true);
+      }
+      if (created) {
+        toast.success('Cliente creado');
+        handleSelectClient(created);
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear cliente');
+    } finally {
+      setCreatingClient(false);
+    }
+  }, [userId, phonePrefix, phoneInput, newClientName, newClientStreet, newClientNotes, newClientPayment, handleSelectClient]);
+
+  // ─── Address creation ─────────────────────────────────────────────────────
+  const handleSaveNewAddress = useCallback(async () => {
+    if (!newAddrStreet.trim() || !selectedClient) return;
+    setSavingAddress(true);
+    try {
+      const newAddr: ClientAddress = {
+        id: uuidv4(),
+        label: newAddrLabel,
+        street: newAddrStreet.trim(),
+        city: newAddrCity.trim() || undefined,
+        postalCode: newAddrPostal.trim() || undefined,
+        notes: newAddrNotes.trim() || undefined,
+        isPrimary: newAddrPrimary,
+        usageCount: 0,
+        lastUsedAt: null,
+      };
+      const existingAddresses = (selectedClient.addresses || []).map((a) =>
+        newAddrPrimary ? { ...a, isPrimary: false } : a,
+      );
+      const updated = await updateClientRequest(userId, {
+        ...selectedClient,
+        addresses: [...existingAddresses, newAddr],
+      } as Client);
+      if (updated) {
+        selectClient(updated);
+        setSelectedAddressId(newAddr.id);
+        setShowNewAddress(false);
+        setNewAddrStreet('');
+        setNewAddrCity('');
+        setNewAddrPostal('');
+        setNewAddrNotes('');
+        setNewAddrPrimary(false);
+        toast.success('Dirección guardada');
+      }
+    } catch {
+      toast.error('Error al guardar dirección');
+    } finally {
+      setSavingAddress(false);
+    }
+  }, [selectedClient, userId, selectClient, newAddrLabel, newAddrStreet, newAddrCity, newAddrPostal, newAddrNotes, newAddrPrimary]);
+
+  // ─── Submit order ─────────────────────────────────────────────────────────
+  const handleSubmitOrder = useCallback(
+    async (status: DeliveryOrderStatus) => {
+      if (!selectedClient || !deliveryType || cart.length === 0) return;
+
+      if (deliveryType === 'domicilio' && !selectedAddressId) {
+        setAddressWarning(true);
+        return;
+      }
+      if (!paymentMethod) return;
+
+      setSubmitting(true);
+      try {
+        const items: DeliveryOrderItem[] = cart.map((ci) => ({
+          id: uuidv4(),
+          name: ci.catalogItem.name,
+          quantity: ci.quantity,
+          unitPrice: ci.catalogItem.unitPrice,
+          total: ci.catalogItem.unitPrice * ci.quantity,
+          catalogItemId: ci.catalogItem._id,
+          category: ci.catalogItem.category,
+        }));
+
+        const selectedAddr = selectedClient.addresses?.find((a) => a.id === selectedAddressId);
+
+        const orderData: Partial<DeliveryOrder> = {
+          clientId: selectedClient.id,
+          customerName: selectedClient.name,
+          customerPhone: `${selectedClient.phonePrefix || phonePrefix} ${selectedClient.phone}`,
+          customerEmail: selectedClient.email || '',
+          customerAddress: selectedAddr?.street || selectedClient.address || '',
+          deliveryType,
+          channel: 'tpv',
+          status,
+          items,
+          totalAmount: cartTotal,
+          notes: orderNotes.trim(),
+          observations: '',
+          paymentMethod,
+          paymentStatus: paymentMethod === 'efectivo' ? 'paid' : 'pending',
+          paidAmount: paymentMethod === 'efectivo' ? cartTotal : 0,
+          deliveryAddressId: selectedAddressId || '',
+          priority: 'normal',
+        };
+
+        const created = await createDeliveryOrderRequest(userId, orderData);
+        setCreatedOrder(created);
+        toast.success('Pedido creado correctamente');
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : 'Error al crear el pedido');
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, cartTotal, orderNotes, userId, phonePrefix],
+  );
+
+  // ─── Reset ────────────────────────────────────────────────────────────────
+  const handleReset = useCallback(() => {
+    setCurrentStep('client');
+    setCompletedSteps(new Set());
+    setPhoneInput('');
+    setPhonePrefix('+34');
+    clearSelection();
+    clearResults();
+    setShowCreateForm(false);
+    setNewClientName('');
+    setNewClientStreet('');
+    setNewClientNotes('');
+    setNewClientPayment('');
+    setDuplicateWarning(false);
+    setDeliveryType(null);
+    setSelectedAddressId(null);
+    setShowNewAddress(false);
+    setCart([]);
+    setProductSearch('');
+    setSelectedCategory(null);
+    setPaymentMethod(null);
+    setCashGiven('');
+    setOrderNotes('');
+    setInitialStatus('nuevo');
+    setCreatedOrder(null);
+    setTimeout(() => phoneRef.current?.focus(), 150);
+  }, [clearSelection, clearResults]);
+
+  // ─── Success screen ───────────────────────────────────────────────────────
+  if (createdOrder) {
+    return (
+      <Layout title="TPV Rápido" subtitle="Pedido creado">
+        <div className="max-w-[720px] mx-auto py-12">
+          <div className="flex flex-col items-center text-center gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
+              <CheckCircle2 className="w-10 h-10 text-green-600 dark:text-green-400" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                Pedido #{createdOrder.orderNumber || createdOrder.id.slice(-6)}
+              </h2>
+              <p className="text-gray-500 dark:text-gray-400 mt-1">
+                {createdOrder.customerName} · {formatPrice(createdOrder.totalAmount)}
+              </p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                {createdOrder.items.length} producto{createdOrder.items.length !== 1 ? 's' : ''} ·{' '}
+                {createdOrder.deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}
+              </p>
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => navigate('/saas/delivery')}
+                className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                Ver pedido
+              </button>
+              <button
+                onClick={handleReset}
+                className="px-6 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+              >
+                Crear otro pedido
+              </button>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  const digits = phoneInput.replace(/\D/g, '');
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+  return (
+    <Layout title="TPV Rápido" subtitle="Nuevo pedido">
+      <div className="max-w-[720px] mx-auto pb-32">
+
+        {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
+        {completedSteps.has('client') && currentStep !== 'client' ? (
+          <CollapsedStep
+            icon={<User className="w-4 h-4" />}
+            label={selectedClient?.name || ''}
+            detail={`${selectedClient?.phonePrefix || phonePrefix} ${selectedClient?.phone}`}
+            onEdit={() => editStep('client')}
+          />
+        ) : currentStep === 'client' ? (
+          <StepContainer step={1} title="Cliente" visible>
+            <div className="flex gap-2">
+              <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
+              <div className="flex-1 relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  ref={phoneRef}
+                  type="tel"
+                  value={phoneInput}
+                  onChange={(e) => {
+                    setPhoneInput(e.target.value);
+                    setShowCreateForm(false);
+                    setDuplicateWarning(false);
+                    setPhoneShake(false);
+                  }}
+                  placeholder="Teléfono del cliente..."
+                  className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            {isSearching && (
+              <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
+                <Loader2 className="w-4 h-4 animate-spin" /> Buscando...
+              </div>
+            )}
+
+            {results.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {results.map((client) => (
+                  <ClientResultCard
+                    key={client.id}
+                    client={client}
+                    onSelect={() => handleSelectClient(client)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!isSearching && results.length === 0 && digits.length >= 6 && !selectedClient && !showCreateForm && (
+              <div className="mt-4 text-center">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                  No se encontró ningún cliente
+                </p>
+                <button
+                  onClick={() => setShowCreateForm(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  Crear cliente nuevo con este teléfono
+                </button>
+              </div>
+            )}
+
+            {duplicateWarning && (
+              <div className="mt-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300 text-sm">
+                Ya existe un cliente con un teléfono similar. Se creó de todas formas.
+              </div>
+            )}
+
+            {showCreateForm && (
+              <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 space-y-4">
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">Nuevo cliente</h3>
+                <div>
+                  <label className={LABEL_CLASS}>Nombre *</label>
+                  <input value={newClientName} onChange={(e) => setNewClientName(e.target.value)} className={INPUT_CLASS} placeholder="Nombre completo" />
+                </div>
+                <div>
+                  <label className={LABEL_CLASS}>Teléfono *</label>
+                  <input value={phoneInput} readOnly className={`${INPUT_CLASS} bg-gray-100 dark:bg-gray-700`} />
+                </div>
+                <div>
+                  <label className={LABEL_CLASS}>Calle *</label>
+                  <input value={newClientStreet} onChange={(e) => setNewClientStreet(e.target.value)} className={INPUT_CLASS} placeholder="Dirección completa" />
+                </div>
+                <div>
+                  <label className={LABEL_CLASS}>Observaciones</label>
+                  <input value={newClientNotes} onChange={(e) => setNewClientNotes(e.target.value)} className={INPUT_CLASS} placeholder="Alergias, portal, piso..." />
+                </div>
+                <div>
+                  <label className={LABEL_CLASS}>Forma de pago</label>
+                  <select value={newClientPayment} onChange={(e) => setNewClientPayment(e.target.value as PaymentMethod | '')} className={INPUT_CLASS}>
+                    <option value="">Sin preferencia</option>
+                    <option value="efectivo">Efectivo</option>
+                    <option value="tarjeta">Tarjeta</option>
+                    <option value="bizum">Bizum</option>
+                    <option value="otros">Otros</option>
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={() => setShowCreateForm(false)} className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={handleCreateClient} disabled={creatingClient} className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50">
+                    {creatingClient ? 'Creando...' : 'Crear cliente'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </StepContainer>
+        ) : null}
+
+        {/* ═══════════════ STEP 2: DELIVERY TYPE ═══════════════ */}
+        {completedSteps.has('delivery') && currentStep !== 'delivery' ? (
+          <CollapsedStep
+            icon={deliveryType === 'domicilio' ? <Truck className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
+            label={deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}
+            detail={
+              deliveryType === 'domicilio'
+                ? selectedClient?.addresses?.find((a) => a.id === selectedAddressId)?.street || ''
+                : ''
+            }
+            onEdit={() => editStep('delivery')}
+          />
+        ) : currentStep === 'delivery' && isStepReachable('delivery') ? (
+          <StepContainer step={2} title="Tipo de entrega" visible>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => {
+                  setDeliveryType('recogida');
+                  completeStep('delivery');
+                }}
+                className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${
+                  deliveryType === 'recogida'
+                    ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                <ShoppingBag className="w-8 h-8 text-gray-700 dark:text-gray-300" />
+                <span className="font-semibold text-gray-900 dark:text-gray-100">Recogida en local</span>
+              </button>
+              <button
+                onClick={() => {
+                  setDeliveryType('domicilio');
+                  const primary = selectedClient?.addresses?.find((a) => a.isPrimary);
+                  if (primary) setSelectedAddressId(primary.id);
+                }}
+                className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${
+                  deliveryType === 'domicilio'
+                    ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                <Truck className="w-8 h-8 text-gray-700 dark:text-gray-300" />
+                <span className="font-semibold text-gray-900 dark:text-gray-100">Envío a domicilio</span>
+              </button>
+            </div>
+
+            {deliveryType === 'domicilio' && (
+              <div className="mt-4 space-y-3">
+                {addressWarning && !selectedAddressId && (
+                  <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 text-amber-800 dark:text-amber-300 text-sm">
+                    Selecciona o añade una dirección de entrega
+                  </div>
+                )}
+
+                {(selectedClient?.addresses || []).length > 0 && (
+                  <div className="space-y-2">
+                    {selectedClient!.addresses!.map((addr) => (
+                      <label
+                        key={addr.id}
+                        className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                          selectedAddressId === addr.id
+                            ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="address"
+                          checked={selectedAddressId === addr.id}
+                          onChange={() => setSelectedAddressId(addr.id)}
+                          className="mt-1 accent-gray-900 dark:accent-gray-300"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900 dark:text-gray-100 text-sm">{addr.label || 'Dirección'}</span>
+                            {addr.isPrimary && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-medium">Principal</span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{addr.street}</p>
+                          {addr.city && <p className="text-xs text-gray-400">{addr.city} {addr.postalCode}</p>}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                {!showNewAddress && (
+                  <button
+                    onClick={() => setShowNewAddress(true)}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Añadir nueva dirección
+                  </button>
+                )}
+
+                {showNewAddress && (
+                  <div className="p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 space-y-3">
+                    <div>
+                      <label className={LABEL_CLASS}>Etiqueta</label>
+                      <div className="flex gap-2">
+                        {['Casa', 'Trabajo', 'Otro'].map((lbl) => (
+                          <button
+                            key={lbl}
+                            onClick={() => setNewAddrLabel(lbl)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                              newAddrLabel === lbl
+                                ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                                : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            {lbl === 'Casa' && <Home className="w-3.5 h-3.5" />}
+                            {lbl === 'Trabajo' && <Briefcase className="w-3.5 h-3.5" />}
+                            {lbl === 'Otro' && <MapPin className="w-3.5 h-3.5" />}
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Calle *</label>
+                      <input value={newAddrStreet} onChange={(e) => setNewAddrStreet(e.target.value)} className={INPUT_CLASS} placeholder="Calle, número, piso..." />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={LABEL_CLASS}>Ciudad</label>
+                        <input value={newAddrCity} onChange={(e) => setNewAddrCity(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Código postal</label>
+                        <input value={newAddrPostal} onChange={(e) => setNewAddrPostal(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Notas</label>
+                      <input value={newAddrNotes} onChange={(e) => setNewAddrNotes(e.target.value)} className={INPUT_CLASS} placeholder="Portal, timbre..." />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                      <input type="checkbox" checked={newAddrPrimary} onChange={(e) => setNewAddrPrimary(e.target.checked)} className="accent-gray-900 dark:accent-gray-300" />
+                      Predeterminada
+                    </label>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button onClick={() => setShowNewAddress(false)} className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        Cancelar
+                      </button>
+                      <button onClick={handleSaveNewAddress} disabled={savingAddress || !newAddrStreet.trim()} className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50">
+                        {savingAddress ? 'Guardando...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedAddressId && (
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => completeStep('delivery')}
+                      className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                    >
+                      Continuar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </StepContainer>
+        ) : null}
+
+        {/* ═══════════════ STEP 3: PRODUCTS ═══════════════ */}
+        {completedSteps.has('products') && currentStep !== 'products' ? (
+          <CollapsedStep
+            icon={<ShoppingCart className="w-4 h-4" />}
+            label={`${cartCount} producto${cartCount !== 1 ? 's' : ''}`}
+            detail={formatPrice(cartTotal)}
+            onEdit={() => editStep('products')}
+          />
+        ) : currentStep === 'products' && isStepReachable('products') ? (
+          <StepContainer step={3} title="Productos" visible>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                placeholder="Buscar producto..."
+                className={`${INPUT_CLASS} pl-10`}
+              />
+            </div>
+
+            {categories.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1 mt-3 scrollbar-hide">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    !selectedCategory
+                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  Todos
+                </button>
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat === selectedCategory ? null : cat)}
+                    className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      selectedCategory === cat
+                        ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {loadingCatalog ? (
+              <div className="flex items-center justify-center py-12 text-gray-400">
+                <Loader2 className="w-6 h-6 animate-spin" />
+              </div>
+            ) : filteredProducts.length === 0 ? (
+              <p className="text-center text-sm text-gray-400 py-8">No hay productos</p>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                {filteredProducts.map((item) => {
+                  const qty = getCartQty(item._id);
+                  const disabled = !item.active;
+                  return (
+                    <div
+                      key={item._id}
+                      className={`relative rounded-2xl border-2 overflow-hidden transition-all ${
+                        qty > 0
+                          ? 'border-gray-900 dark:border-gray-300'
+                          : 'border-gray-200 dark:border-gray-700'
+                      } ${disabled ? 'opacity-60' : ''}`}
+                    >
+                      {disabled && (
+                        <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 text-[10px] font-bold uppercase">
+                          Agotado
+                        </div>
+                      )}
+                      <div className="aspect-square bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                        {item.image ? (
+                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="w-8 h-8 text-gray-300 dark:text-gray-500" />
+                        )}
+                      </div>
+                      <div className="p-2.5">
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
+                        <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mt-0.5">{formatPrice(item.unitPrice)}</p>
+                        <div className="flex items-center justify-between mt-2">
+                          {qty > 0 ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => removeFromCart(item._id)}
+                                className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="text-sm font-bold text-gray-900 dark:text-gray-100 w-6 text-center tabular-nums">{qty}</span>
+                              <button
+                                onClick={() => addToCart(item)}
+                                disabled={disabled}
+                                className="w-7 h-7 rounded-lg bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => addToCart(item)}
+                              disabled={disabled}
+                              className="w-full py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
+                            >
+                              Añadir
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {cart.length > 0 && (
+              <div className={`mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 ${cartShake ? 'animate-shake' : ''}`}>
+                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">Resumen</h4>
+                <div className="space-y-2">
+                  {cart.map((ci) => (
+                    <div key={ci.catalogItem._id} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-gray-500 dark:text-gray-400 tabular-nums">{ci.quantity}x</span>
+                        <span className="text-gray-900 dark:text-gray-100 truncate">{ci.catalogItem.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{formatPrice(ci.catalogItem.unitPrice * ci.quantity)}</span>
+                        <button onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <span className="font-bold text-gray-900 dark:text-gray-100">Total</span>
+                  <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
+                </div>
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={() => completeStep('products')}
+                    className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                  >
+                    Continuar
+                  </button>
+                </div>
+              </div>
+            )}
+          </StepContainer>
+        ) : null}
+
+        {/* ═══════════════ STEP 4: PAYMENT ═══════════════ */}
+        {currentStep === 'payment' && isStepReachable('payment') ? (
+          <StepContainer step={4} title="Pago y finalizar" visible>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {([
+                { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                { key: 'otros' as const, label: 'Otros', icon: Wallet },
+              ]).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setPaymentMethod(key)}
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                    paymentMethod === key
+                      ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                  } ${!paymentMethod && paymentMethod !== key ? '' : ''}`}
+                >
+                  <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            {paymentMethod === 'efectivo' && (
+              <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                <label className={LABEL_CLASS}>El cliente paga con</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={cashGiven}
+                    onChange={(e) => setCashGiven(e.target.value)}
+                    placeholder={formatPrice(cartTotal)}
+                    className={`${INPUT_CLASS} text-lg font-medium pr-8`}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                </div>
+                {changeAmount !== null && changeAmount >= 0 && (
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
+                    <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
+                      {formatPrice(changeAmount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4">
+              <label className={LABEL_CLASS}>Notas / Observaciones</label>
+              <textarea
+                rows={3}
+                value={orderNotes}
+                onChange={(e) => setOrderNotes(e.target.value)}
+                className={`${INPUT_CLASS} resize-none`}
+                placeholder="Instrucciones especiales..."
+              />
+            </div>
+
+            <div className="mt-4">
+              <label className={LABEL_CLASS}>Estado inicial</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setInitialStatus('nuevo')}
+                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                    initialStatus === 'nuevo'
+                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
+                  }`}
+                >
+                  Nuevo
+                </button>
+                <button
+                  onClick={() => setInitialStatus('cocina')}
+                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                    initialStatus === 'cocina'
+                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
+                  }`}
+                >
+                  En preparación
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                El gerente puede configurar el estado por defecto
+              </p>
+            </div>
+          </StepContainer>
+        ) : null}
+      </div>
+
+      {/* ═══════════════ STICKY FOOTER ═══════════════ */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg">
+        <div className="max-w-[720px] mx-auto px-4 py-3">
+          <div className="flex items-center justify-between gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
+            <div className="flex items-center gap-3 min-w-0 truncate">
+              {selectedClient && (
+                <span className="flex items-center gap-1">
+                  <User className="w-3 h-3" />
+                  {selectedClient.name}
+                </span>
+              )}
+              {cartCount > 0 && (
+                <span className="flex items-center gap-1">
+                  <ShoppingCart className="w-3 h-3" />
+                  {cartCount}
+                </span>
+              )}
+              {deliveryType && (
+                <span className="flex items-center gap-1">
+                  {deliveryType === 'domicilio' ? <Truck className="w-3 h-3" /> : <ShoppingBag className="w-3 h-3" />}
+                  {deliveryType === 'domicilio' ? 'Domicilio' : 'Recogida'}
+                </span>
+              )}
+            </div>
+            {cartTotal > 0 && (
+              <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+                {formatPrice(cartTotal)}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleReset}
+              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => handleSubmitOrder('nuevo')}
+              disabled={!canSubmit || submitting}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {submitting ? 'Guardando...' : 'Guardar (Nuevo)'}
+            </button>
+            <button
+              onClick={() => handleSubmitOrder('cocina')}
+              disabled={!canSubmit || submitting}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {submitting ? 'Enviando...' : 'Cobrar y enviar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
+
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function StepContainer({ step, title, visible, children }: { step: number; title: string; visible: boolean; children: ReactNode }) {
+  return (
+    <div
+      className={`mb-4 transition-all duration-500 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
+      }`}
+    >
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-7 h-7 rounded-full bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 text-xs font-bold">
+          {step}
+        </div>
+        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{title}</h2>
+      </div>
+      <div className="pl-10 space-y-0">{children}</div>
+    </div>
+  );
+}
+
+function CollapsedStep({
+  icon,
+  label,
+  detail,
+  onEdit,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700">
+      <div className="w-7 h-7 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center text-green-600 dark:text-green-400">
+        <Check className="w-4 h-4" />
+      </div>
+      <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">{icon}</div>
+      <div className="flex-1 min-w-0">
+        <span className="font-medium text-gray-900 dark:text-gray-100 text-sm">{label}</span>
+        {detail && <span className="text-gray-500 dark:text-gray-400 text-sm ml-2">{detail}</span>}
+      </div>
+      <button
+        onClick={onEdit}
+        className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+      >
+        <Edit3 className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () => void }) {
+  const primaryAddr = client.addresses?.find((a) => a.isPrimary) || client.addresses?.[0];
+  const payLabels: Record<string, string> = {
+    efectivo: 'Efectivo',
+    tarjeta: 'Tarjeta',
+    bizum: 'Bizum',
+    otros: 'Otros',
+  };
+
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-300 shrink-0">
+        {getInitials(client.name)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">{client.name}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {client.phonePrefix || '+34'} {client.phone}
+        </p>
+        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 dark:text-gray-500">
+          {primaryAddr && (
+            <span className="flex items-center gap-0.5 truncate">
+              <MapPin className="w-3 h-3 shrink-0" />
+              {primaryAddr.street}
+            </span>
+          )}
+          {client.defaultPaymentMethod && (
+            <span className="flex items-center gap-0.5 shrink-0">
+              <CreditCard className="w-3 h-3" />
+              {payLabels[client.defaultPaymentMethod] || client.defaultPaymentMethod}
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onSelect}
+        className="shrink-0 px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors"
+      >
+        Seleccionar
+      </button>
+    </div>
+  );
+}

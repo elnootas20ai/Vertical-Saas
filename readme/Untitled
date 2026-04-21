@@ -1,0 +1,153 @@
+# Documentacion e instalacion (Backend + Frontend)
+
+Base de prueba actual del backend:
+
+- `http://51.158.120.151:3001/health`
+
+## 1) Requisitos
+
+- Node.js 20+
+- npm 10+
+- PM2 instalado globalmente
+
+Instalar PM2 si no lo tienes:
+
+```bash
+npm install -g pm2
+```
+
+## 2) Instalacion del proyecto
+
+```bash
+cd /var/www/backend
+npm install
+```
+
+## 3) Ejecucion manual (sin PM2)
+
+### Backend (Express)
+
+```bash
+cd /var/www/backend
+PORT=3001 NODE_OPTIONS="--max-old-space-size=4014" npm run backend
+```
+
+### Frontend (Vite)
+
+Para entorno servidor, se recomienda build + preview:
+
+```bash
+cd /var/www/backend
+NODE_OPTIONS="--max-old-space-size=4014" npm run build
+NODE_OPTIONS="--max-old-space-size=4014" npx vite preview --host 0.0.0.0 --port 3005
+```
+
+## 4) Rutas del backend y para que sirve cada una
+
+### `GET /health`
+
+Chequeo rapido del servicio.
+
+Ejemplo:
+
+```bash
+curl -s http://51.158.120.151:3001/health
+```
+
+Respuesta esperada:
+
+```json
+{
+  "ok": true,
+  "service": "express-backend",
+  "time": "2026-02-19T00:00:00.000Z"
+}
+```
+
+### `GET /metrics`
+
+Metricas completas de salud del proceso:
+
+- `uptimeSeconds`
+- `memoryMB` (rss, heapUsed, picos)
+- `traffic` (requests, bytes in/out)
+- `users` (sockets activos y visitantes unicos)
+
+Ejemplo:
+
+```bash
+curl -s http://51.158.120.151:3001/metrics
+```
+
+### `GET /api/stats`
+
+Resumen ligero para monitorizacion rapida:
+
+- memoria principal
+- trafico de entrada/salida
+- usuarios conectados
+
+Ejemplo:
+
+```bash
+curl -s http://51.158.120.151:3001/api/stats
+```
+
+## 5) Como validar que las metricas "van bien"
+
+Referencia operativa (orientativa):
+
+- `requestsError` idealmente cercano a `0`.
+- ratio de error recomendado: menor al `1%`.
+- `memoryMB.heapUsed` estable sin crecimiento continuo.
+- `memoryMB.rss` por debajo del limite de Node (`4014 MB`) con margen.
+- `traffic.inMB` y `traffic.outMB` deben crecer de forma proporcional al uso real.
+
+Comprobacion simple cada 10s:
+
+```bash
+watch -n 10 'curl -s http://51.158.120.151:3001/metrics'
+```
+
+## 6) PM2 en puertos con nombres `frontend` y `backend` (4014 MB)
+
+### Backend en puerto 3001
+
+```bash
+cd /var/www/backend
+PORT=3001 NODE_OPTIONS="--max-old-space-size=4014" pm2 start index.js --name backend
+```
+
+### Frontend en puerto 3005
+
+```bash
+cd /var/www/backend
+NODE_OPTIONS="--max-old-space-size=4014" npm run build
+NODE_OPTIONS="--max-old-space-size=4014" pm2 start "npx vite preview --host 0.0.0.0 --port 3005" --name frontend
+```
+
+## 7) Comandos utiles de PM2
+
+```bash
+pm2 ls
+pm2 logs backend --lines 100
+pm2 logs frontend --lines 100
+pm2 restart backend
+pm2 restart frontend
+pm2 stop backend
+pm2 stop frontend
+pm2 delete backend
+pm2 delete frontend
+pm2 save
+pm2 startup
+```
+
+## 8) Verificacion final
+
+- Backend OK: `curl -s http://51.158.120.151:3001/health`
+- Metricas OK: `curl -s http://51.158.120.151:3001/metrics`
+- Frontend OK: abrir `http://51.158.120.151:3005`
+
+## 9) Nota importante de seguridad
+
+Si tienes claves en `.env`, no las publiques ni las subas a repositorios.

@@ -1,0 +1,133 @@
+import { Router } from 'express';
+import multer from 'multer';
+import {
+  listDeliveryOrders,
+  createDeliveryOrder,
+  updateDeliveryOrder,
+  removeDeliveryOrder,
+  cancelDeliveryOrder,
+  reopenDeliveryOrder,
+  registerPayment,
+  filterDeliveryOrders,
+  clientOrderHistory,
+  listCatalogItems,
+  createCatalogItem,
+  bulkCreateCatalogItems,
+  updateCatalogItem,
+  removeCatalogItem,
+  listSuppliers,
+  createSupplier,
+  updateSupplier,
+  removeSupplier,
+  listPurchaseInvoices,
+  createPurchaseInvoice,
+  updatePurchaseInvoice,
+  removePurchaseInvoice,
+  validatePurchaseInvoice,
+  rejectPurchaseInvoice,
+  checkDuplicateInvoice,
+  uploadInvoicePdf,
+  getInvoicePdf,
+  listDriverCashSessions,
+  createDriverCashSession,
+  updateDriverCashSession,
+  removeDriverCashSession,
+  listTpvRegisterSessions,
+  createTpvRegisterSession,
+  updateTpvRegisterSession,
+  removeTpvRegisterSession,
+  listPointsOfSale,
+  createPointOfSale,
+  updatePointOfSale,
+  removePointOfSale,
+  getDeliveryConfig,
+  updateDeliveryConfig,
+  getOpsCenter,
+  listDrivers,
+  createDriver,
+  updateDriver,
+  removeDriver,
+  getDriversStats,
+  getRepartoConfig,
+  saveRepartoConfig,
+  autoAssignDriver,
+  listScaleDevices,
+  getScaleDevice,
+  createScaleDevice,
+  updateScaleDevice,
+  removeScaleDevice,
+  assignScaleToTerminal,
+  getTerminalScale,
+  reportScaleStatus,
+} from '../controllers/deliveryController.js';
+
+const invoiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+const deliveryRouter = Router();
+
+deliveryRouter.get('/orders/:userId', listDeliveryOrders);
+deliveryRouter.get('/orders/:userId/filter', filterDeliveryOrders);
+deliveryRouter.get('/orders/:userId/client/:clientId/history', clientOrderHistory);
+deliveryRouter.post('/orders/:userId', createDeliveryOrder);
+deliveryRouter.put('/orders/:userId/:orderId', updateDeliveryOrder);
+deliveryRouter.put('/orders/:userId/:orderId/cancel', cancelDeliveryOrder);
+deliveryRouter.put('/orders/:userId/:orderId/reopen', reopenDeliveryOrder);
+deliveryRouter.put('/orders/:userId/:orderId/payment', registerPayment);
+deliveryRouter.delete('/orders/:userId/:orderId', removeDeliveryOrder);
+
+deliveryRouter.get('/catalog/:userId', listCatalogItems);
+deliveryRouter.post('/catalog/:userId', createCatalogItem);
+deliveryRouter.post('/catalog/:userId/bulk', bulkCreateCatalogItems);
+deliveryRouter.put('/catalog/:userId/:itemId', updateCatalogItem);
+deliveryRouter.delete('/catalog/:userId/:itemId', removeCatalogItem);
+
+deliveryRouter.get('/suppliers/:userId', listSuppliers);
+deliveryRouter.post('/suppliers/:userId', createSupplier);
+deliveryRouter.put('/suppliers/:userId/:supplierId', updateSupplier);
+deliveryRouter.delete('/suppliers/:userId/:supplierId', removeSupplier);
+
+deliveryRouter.get('/invoices/:userId', listPurchaseInvoices);
+deliveryRouter.post('/invoices/:userId', createPurchaseInvoice);
+deliveryRouter.post('/invoices/:userId/check-duplicate', checkDuplicateInvoice);
+deliveryRouter.put('/invoices/:userId/:invoiceId', updatePurchaseInvoice);
+deliveryRouter.put('/invoices/:userId/:invoiceId/validate', validatePurchaseInvoice);
+deliveryRouter.put('/invoices/:userId/:invoiceId/reject', rejectPurchaseInvoice);
+deliveryRouter.post('/invoices/:userId/:invoiceId/pdf', invoiceUpload.single('file'), uploadInvoicePdf);
+deliveryRouter.get('/invoices/:userId/:invoiceId/pdf', getInvoicePdf);
+deliveryRouter.delete('/invoices/:userId/:invoiceId', removePurchaseInvoice);
+
+deliveryRouter.get('/driver-sessions/:userId', listDriverCashSessions);
+deliveryRouter.post('/driver-sessions/:userId', createDriverCashSession);
+deliveryRouter.put('/driver-sessions/:userId/:sessionId', updateDriverCashSession);
+deliveryRouter.delete('/driver-sessions/:userId/:sessionId', removeDriverCashSession);
+
+deliveryRouter.get('/tpv-sessions/:userId', listTpvRegisterSessions);
+deliveryRouter.post('/tpv-sessions/:userId', createTpvRegisterSession);
+deliveryRouter.put('/tpv-sessions/:userId/:sessionId', updateTpvRegisterSession);
+deliveryRouter.delete('/tpv-sessions/:userId/:sessionId', removeTpvRegisterSession);
+
+deliveryRouter.get('/points-of-sale/:userId', listPointsOfSale);
+deliveryRouter.post('/points-of-sale/:userId', createPointOfSale);
+deliveryRouter.put('/points-of-sale/:userId/:pdvId', updatePointOfSale);
+deliveryRouter.delete('/points-of-sale/:userId/:pdvId', removePointOfSale);
+
+deliveryRouter.get('/drivers/:userId', listDrivers);
+deliveryRouter.get('/drivers/:userId/stats', getDriversStats);
+deliveryRouter.post('/drivers/:userId', createDriver);
+deliveryRouter.put('/drivers/:userId/:driverId', updateDriver);
+deliveryRouter.delete('/drivers/:userId/:driverId', removeDriver);
+deliveryRouter.post('/drivers/:userId/auto-assign/:orderId', autoAssignDriver);
+
+deliveryRouter.get('/reparto-config/:userId', getRepartoConfig);
+deliveryRouter.put('/reparto-config/:userId', saveRepartoConfig);
+
+deliveryRouter.get('/scale-devices/:userId', listScaleDevices);
+deliveryRouter.get('/scale-devices/:userId/:deviceId', getScaleDevice);
+deliveryRouter.post('/scale-devices/:userId', createScaleDevice);
+deliveryRouter.put('/scale-devices/:userId/:deviceId', updateScaleDevice);
+deliveryRouter.delete('/scale-devices/:userId/:deviceId', removeScaleDevice);
+deliveryRouter.put('/points-of-sale/:userId/:pdvId/terminals/:terminalId/scale', assignScaleToTerminal);
+deliveryRouter.get('/points-of-sale/:userId/:pdvId/terminals/:terminalId/scale', getTerminalScale);
+deliveryRouter.post('/scale-devices/:userId/:deviceId/status', reportScaleStatus);
+
+export { deliveryRouter };

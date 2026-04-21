@@ -1,0 +1,1586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Especificación Técnica Backend | Módulo Equipo UDAR EDGE</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; line-height: 1.6; }
+        .container { max-width: 1600px; margin: 0 auto; background: white; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        
+        h1 { color: #1a1a1a; font-size: 2.5em; margin-bottom: 15px; border-bottom: 4px solid #2563eb; padding-bottom: 15px; }
+        h2 { color: #2c3e50; font-size: 2em; margin-top: 50px; margin-bottom: 25px; background: #ecf0f1; padding: 15px; border-left: 5px solid #3498db; }
+        h3 { color: #34495e; font-size: 1.6em; margin-top: 35px; margin-bottom: 20px; }
+        h4 { color: #4b5563; font-size: 1.3em; margin-top: 25px; margin-bottom: 15px; }
+        
+        .intro { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 20px; margin: 30px 0; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+        .success { background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; }
+        .danger { background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; }
+        
+        .func-card { border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin: 25px 0; background: #fafafa; }
+        .func-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        .func-id { font-family: 'Courier New', monospace; font-size: 1.1em; font-weight: bold; }
+        .func-name { font-size: 1.3em; margin-top: 5px; }
+        
+        .endpoint { background: #263238; color: #aed581; padding: 12px; border-radius: 6px; font-family: 'Courier New', monospace; margin: 15px 0; overflow-x: auto; }
+        .method { display: inline-block; padding: 5px 12px; border-radius: 4px; font-weight: bold; margin-right: 10px; font-size: 0.9em; }
+        .get { background: #61affe; color: white; }
+        .post { background: #49cc90; color: white; }
+        .put { background: #fca130; color: white; }
+        .delete { background: #f93e3e; color: white; }
+        
+        .code-block { background: #263238; color: #aed581; padding: 15px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.9em; overflow-x: auto; margin: 10px 0; }
+        .code-block pre { margin: 0; white-space: pre-wrap; }
+        
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th { background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; }
+        td { padding: 12px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+        tr:hover { background: #f8f9fa; }
+        
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; margin: 2px; }
+        .base { background: #d4edda; color: #155724; }
+        .flag { background: #fff3cd; color: #856404; }
+        .pending { background: #f8d7da; color: #721c24; }
+        
+        .section-nav { background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 8px; padding: 20px; margin: 30px 0; }
+        .section-nav h3 { margin-top: 0; color: #495057; }
+        .section-nav ul { list-style-type: none; margin-left: 0; }
+        .section-nav li { margin: 8px 0; padding-left: 20px; }
+        .section-nav a { color: #007bff; text-decoration: none; font-weight: 500; }
+        .section-nav a:hover { text-decoration: underline; }
+        
+        .tech-spec { background: #e8f5e9; border-left: 4px solid #4caf50; padding: 15px; margin: 15px 0; }
+        .validation { background: #fff9c4; border-left: 4px solid #fbc02d; padding: 15px; margin: 15px 0; }
+        .permission { background: #ffebee; border-left: 4px solid #e53935; padding: 15px; margin: 15px 0; }
+        
+        .print-btn { position: fixed; bottom: 20px; right: 20px; background: #2563eb; color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2); z-index: 1000; }
+        .print-btn:hover { background: #1d4ed8; }
+        
+        @media print { 
+            .print-btn, .no-print { display: none; } 
+            body { background: white; }
+            .func-card { page-break-inside: avoid; }
+        }
+        
+        ul, ol { margin-left: 25px; margin-top: 10px; margin-bottom: 10px; }
+        li { margin: 6px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 ESPECIFICACIÓN TÉCNICA BACKEND</h1>
+        <p style="font-size: 1.3em; color: #6c757d; margin-bottom: 15px;"><strong>Módulo Equipo y RRHH | UDAR EDGE</strong></p>
+        <p><em>Versión 1.0 | 4 Febrero 2026 | Documento para desarrollo backend</em></p>
+        
+        <div class="intro">
+            <h3>📋 Propósito de este documento</h3>
+            <p>Este documento técnico está diseñado para el <strong>equipo de desarrollo backend</strong> y contiene:</p>
+            <ul>
+                <li><strong>162 funcionalidades</strong> del módulo Equipo con especificaciones completas</li>
+                <li><strong>Endpoints propuestos</strong> para cada funcionalidad</li>
+                <li><strong>Estructura de request/response</strong> en formato JSON</li>
+                <li><strong>Validaciones backend</strong> requeridas</li>
+                <li><strong>Permisos</strong> necesarios para cada operación</li>
+                <li><strong>Clasificación BASE/FLAG</strong> para priorización</li>
+                <li><strong>Dependencias</strong> entre módulos y funcionalidades</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ Convenciones importantes</h3>
+            <ul>
+                <li><strong>IDs únicos:</strong> Cada funcionalidad tiene un ID (ej: EQ-001, FIC-001) que debe usarse como referencia</li>
+                <li><strong>Base URL:</strong> <code>https://api.udaredge.com/v1</code></li>
+                <li><strong>Autenticación:</strong> Todas las peticiones requieren <code>Authorization: Bearer {token}</code></li>
+                <li><strong>Empresa context:</strong> Todas las peticiones incluyen header <code>X-Company-Id: {companyId}</code></li>
+                <li><strong>Formato fechas:</strong> ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)</li>
+                <li><strong>Formato moneda:</strong> Decimal (2 decimales, ej: 1500.50)</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3>✅ Estructura general de respuestas</h3>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": { /* payload de respuesta */ },
+  "message": "Operación exitosa",
+  "meta": {
+    "timestamp": "2026-02-04T10:30:00Z",
+    "requestId": "uuid-v4"
+  }
+}</pre>
+            </div>
+            <p><strong>En caso de error:</strong></p>
+            <div class="code-block">
+<pre>{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Email ya existe en el sistema",
+    "field": "email"
+  },
+  "meta": {
+    "timestamp": "2026-02-04T10:30:00Z",
+    "requestId": "uuid-v4"
+  }
+}</pre>
+            </div>
+        </div>
+
+        <div class="section-nav">
+            <h3>📑 Índice de Endpoints</h3>
+            <ul>
+                <li><a href="#api-equipo">1. APIs - Pestaña EQUIPO (BASE)</a></li>
+                <li><a href="#api-horarios">2. APIs - Pestaña HORARIOS (FLAG: schedules)</a></li>
+                <li><a href="#api-fichajes">3. APIs - Pestaña FICHAJES (BASE)</a></li>
+                <li><a href="#api-vacaciones">4. APIs - Pestaña VACACIONES (FLAG: vacations)</a></li>
+                <li><a href="#api-consumos">5. APIs - Pestaña CONSUMOS (FLAG: consumptions)</a></li>
+                <li><a href="#api-gastos">6. APIs - Pestaña GASTOS (FLAG: expenses)</a></li>
+                <li><a href="#api-adicionales">7. APIs - Funcionalidades Adicionales</a></li>
+                <li><a href="#api-informes">8. APIs - Módulo Informes</a></li>
+                <li><a href="#esquema-bd">9. Esquema de Base de Datos</a></li>
+                <li><a href="#permisos-sistema">10. Sistema de Permisos (71 permisos)</a></li>
+            </ul>
+        </div>
+
+        <hr style="margin: 50px 0;">
+
+        <!-- ========================================= -->
+        <!-- PESTAÑA 1: EQUIPO -->
+        <!-- ========================================= -->
+        
+        <h2 id="api-equipo">1. APIs - PESTAÑA EQUIPO <span class="badge base">BASE</span></h2>
+
+        <h3>1.1 Listado de Trabajadores</h3>
+
+        <!-- Funcionalidad EQ-001 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">EQ-001</div>
+                <div class="func-name">Obtener listado de trabajadores</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method get">GET</span> /employees
+            </div>
+
+            <h4>Query Parameters:</h4>
+            <table>
+                <tr>
+                    <th>Parámetro</th>
+                    <th>Tipo</th>
+                    <th>Requerido</th>
+                    <th>Descripción</th>
+                </tr>
+                <tr>
+                    <td><code>page</code></td>
+                    <td>number</td>
+                    <td>No</td>
+                    <td>Número de página (default: 1)</td>
+                </tr>
+                <tr>
+                    <td><code>limit</code></td>
+                    <td>number</td>
+                    <td>No</td>
+                    <td>Resultados por página (default: 20, max: 100)</td>
+                </tr>
+                <tr>
+                    <td><code>sortBy</code></td>
+                    <td>string</td>
+                    <td>No</td>
+                    <td>Campo para ordenar: name, email, role, status</td>
+                </tr>
+                <tr>
+                    <td><code>order</code></td>
+                    <td>string</td>
+                    <td>No</td>
+                    <td>Orden: asc, desc (default: asc)</td>
+                </tr>
+                <tr>
+                    <td><code>status</code></td>
+                    <td>string</td>
+                    <td>No</td>
+                    <td>Filtrar por estado: active, inactive, pending, invited</td>
+                </tr>
+            </table>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "employees": [
+      {
+        "id": "emp_123abc",
+        "fullName": "Juan Pérez García",
+        "email": "juan.perez@empresa.com",
+        "role": "Empleado",
+        "roleId": "role_456def",
+        "status": "active",
+        "avatar": null,
+        "initials": "JP",
+        "workCenter": {
+          "id": "wc_789ghi",
+          "name": "Sede Madrid"
+        },
+        "createdAt": "2025-01-15T10:00:00Z"
+      }
+    ],
+    "pagination": {
+      "total": 45,
+      "page": 1,
+      "limit": 20,
+      "totalPages": 3
+    }
+  }
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>ver_equipo</code> (N2)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li>Usuario debe tener permiso "ver_equipo"</li>
+                    <li>Vista Global deshabilitada (debe incluir X-Company-Id)</li>
+                    <li>Limit máximo: 100 registros</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><span class="badge base">BASE</span> Funcionalidad siempre disponible</li>
+                    <li>Implementar paginación eficiente con índices en BD</li>
+                    <li>Caché de 5 minutos para listados sin filtros</li>
+                    <li>Si FLAG onboarding activo, incluir estado "pending" y "invited"</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Funcionalidad EQ-008 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">EQ-008</div>
+                <div class="func-name">Crear nuevo empleado</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method post">POST</span> /employees
+            </div>
+
+            <h4>Request Body:</h4>
+            <div class="code-block">
+<pre>{
+  "personalData": {
+    "fullName": "María González López",
+    "personalEmail": "maria.personal@gmail.com",
+    "professionalEmail": "maria.gonzalez@empresa.com",
+    "dni": "12345678Z",
+    "dateOfBirth": "1990-05-15",
+    "placeOfBirth": "Madrid",
+    "nationality": "ES",
+    "address": {
+      "street": "Calle Mayor 123",
+      "city": "Madrid",
+      "postalCode": "28001",
+      "country": "ES"
+    },
+    "phone": "+34612345678",
+    "emergencyContact": {
+      "name": "Pedro González",
+      "phone": "+34698765432"
+    }
+  },
+  "laborData": {
+    "contractType": "indefinido",
+    "workingDay": "completa",
+    "weeklyHours": 40,
+    "grossSalary": 2500.00,
+    "workCenterId": "wc_789ghi",
+    "startDate": "2026-03-01",
+    "collectiveAgreement": "comercio_madrid"
+  },
+  "administrativeData": {
+    "socialSecurityNumber": "281234567890",
+    "sepeContractCode": "100",
+    "socialSecurityDate": "2026-03-01",
+    "cotizationGroup": "5",
+    "cotizationType": "001",
+    "mutua": "Mutua MAZ",
+    "companyCCC": "28123456789",
+    "irpfPercentage": 15.5
+  },
+  "roleId": "role_456def"
+}</pre>
+            </div>
+
+            <h4>Response (201 Created):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "employee": {
+      "id": "emp_new123",
+      "fullName": "María González López",
+      "status": "invited",
+      "createdAt": "2026-02-04T10:30:00Z"
+    },
+    "onboardingStarted": true,
+    "invitationSent": true
+  },
+  "message": "Empleado creado exitosamente. Invitación enviada."
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>añadir_empleados</code> (N3)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Email único:</strong> Verificar que personalEmail y professionalEmail no existan</li>
+                    <li><strong>DNI válido:</strong> Validar formato según país (ES: formato DNI/NIE español)</li>
+                    <li><strong>Fecha inicio:</strong> No puede ser más de 30 días futura</li>
+                    <li><strong>Salario:</strong> Debe ser >= salario mínimo interprofesional del país</li>
+                    <li><strong>Horas semanales:</strong> No exceder 40h (según convenio español)</li>
+                    <li><strong>CCC:</strong> Validar 12 dígitos</li>
+                    <li><strong>IRPF:</strong> Rango válido 0-50%</li>
+                    <li><strong>roleId:</strong> Debe existir en sistema</li>
+                    <li><strong>workCenterId:</strong> Debe existir y pertenecer a la empresa</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><span class="badge base">BASE</span> Funcionalidad core</li>
+                    <li><strong>Transacción:</strong> Crear empleado + asignar permisos del rol en una transacción</li>
+                    <li><strong>Si FLAG onboarding activo:</strong> Enviar email de invitación automáticamente</li>
+                    <li><strong>Si FLAG onboarding activo:</strong> Crear checklist de onboarding con 12 tareas</li>
+                    <li><strong>Generar:</strong> Initial avatar con iniciales del nombre</li>
+                    <li><strong>Auditoría:</strong> Si FLAG audit activo, registrar creación en historial</li>
+                    <li><strong>Gestoría:</strong> Si FLAG gestoria activo, notificar alta de empleado</li>
+                </ul>
+            </div>
+
+            <div class="danger">
+                <h4>⚠️ DECISIONES PENDIENTES:</h4>
+                <ul>
+                    <li>¿Enviar invitación automática o manual?</li>
+                    <li>¿Iniciar proceso de onboarding automático?</li>
+                    <li>¿Asignar permisos por defecto según rol?</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- PANEL DE DETALLE EMPLEADO -->
+        <!-- ========================================= -->
+
+        <h3>1.2 Panel de Detalle del Empleado</h3>
+
+        <!-- Funcionalidad INFO-001 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">INFO-001</div>
+                <div class="func-name">Obtener datos completos de empleado</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method get">GET</span> /employees/{employeeId}
+            </div>
+
+            <h4>Path Parameters:</h4>
+            <table>
+                <tr>
+                    <th>Parámetro</th>
+                    <th>Tipo</th>
+                    <th>Descripción</th>
+                </tr>
+                <tr>
+                    <td><code>employeeId</code></td>
+                    <td>string</td>
+                    <td>ID del empleado (formato: emp_xxxxx)</td>
+                </tr>
+            </table>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "employee": {
+      "id": "emp_123abc",
+      "personalData": {
+        "fullName": "Juan Pérez García",
+        "personalEmail": "juan@gmail.com",
+        "professionalEmail": "juan.perez@empresa.com",
+        "dni": "12345678Z",
+        "dateOfBirth": "1985-03-20",
+        "placeOfBirth": "Barcelona",
+        "nationality": "ES",
+        "address": {
+          "street": "Calle Mayor 123",
+          "city": "Madrid",
+          "postalCode": "28001",
+          "country": "ES"
+        },
+        "phone": "+34612345678",
+        "iban": "ES9121000418450200051332",
+        "emergencyContact": {
+          "name": "María Pérez",
+          "phone": "+34698765432"
+        }
+      },
+      "laborData": {
+        "contractType": "indefinido",
+        "workingDay": "completa",
+        "weeklyHours": 40,
+        "grossSalary": 2500.00,
+        "workCenter": {
+          "id": "wc_789ghi",
+          "name": "Sede Madrid"
+        },
+        "startDate": "2024-01-15",
+        "collectiveAgreement": "comercio_madrid",
+        "status": "active"
+      },
+      "administrativeData": {
+        "socialSecurityNumber": "281234567890",
+        "sepeContractCode": "100",
+        "socialSecurityDate": "2024-01-15",
+        "cotizationGroup": "5",
+        "cotizationType": "001",
+        "mutua": "Mutua MAZ",
+        "companyCCC": "28123456789",
+        "irpfPercentage": 15.5
+      },
+      "role": {
+        "id": "role_456def",
+        "name": "Empleado",
+        "level": "N1"
+      },
+      "status": "active",
+      "createdAt": "2024-01-15T10:00:00Z",
+      "updatedAt": "2026-02-01T15:30:00Z"
+    }
+  }
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>ver_equipo</code> (N2) - Para ver datos de otros</li>
+                    <li>O ser el propio trabajador (ver datos propios)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li>employeeId debe existir</li>
+                    <li>employeeId debe pertenecer a la empresa del contexto</li>
+                    <li>Si es trabajador, solo puede ver sus propios datos</li>
+                    <li>Si es gerente, puede ver todos los datos</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Funcionalidad INFO-002 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">INFO-002</div>
+                <div class="func-name">Editar datos personales de empleado</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method put">PUT</span> /employees/{employeeId}/personal-data
+            </div>
+
+            <h4>Request Body:</h4>
+            <div class="code-block">
+<pre>{
+  "personalEmail": "nuevo.email@gmail.com",
+  "phone": "+34611222333",
+  "address": {
+    "street": "Nueva Calle 456",
+    "city": "Madrid",
+    "postalCode": "28002",
+    "country": "ES"
+  },
+  "iban": "ES9121000418450200051999",
+  "emergencyContact": {
+    "name": "Nuevo Contacto",
+    "phone": "+34699888777"
+  }
+}</pre>
+            </div>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "employee": {
+      "id": "emp_123abc",
+      "personalData": { /* datos actualizados */ }
+    },
+    "auditRecorded": true,
+    "gestoriaNotified": true
+  },
+  "message": "Datos personales actualizados correctamente"
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>editar_datos_personales</code> (N3)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Email único:</strong> Si se cambia email, verificar que no exista</li>
+                    <li><strong>IBAN válido:</strong> Validar formato según país</li>
+                    <li><strong>Teléfono:</strong> Formato internacional válido</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><strong>Si cambio de IBAN:</strong> Notificar a gestoría/nóminas</li>
+                    <li><strong>Si FLAG audit activo:</strong> Registrar cambio en historial con valores anteriores/nuevos</li>
+                    <li><strong>Si FLAG gestoria activo y cambio dirección:</strong> Notificar actualización</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- RESUMEN MÓDULO FICHAJES -->
+        <!-- ========================================= -->
+
+        <h2 id="api-fichajes">3. APIs - PESTAÑA FICHAJES <span class="badge base">BASE</span></h2>
+
+        <h3>3.1 Vista General de Fichajes</h3>
+
+        <!-- Funcionalidad FIC-001 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">FIC-001</div>
+                <div class="func-name">Obtener resumen de fichajes de empleado</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method get">GET</span> /employees/{employeeId}/clock-ins/summary
+            </div>
+
+            <h4>Query Parameters:</h4>
+            <table>
+                <tr>
+                    <th>Parámetro</th>
+                    <th>Tipo</th>
+                    <th>Descripción</th>
+                </tr>
+                <tr>
+                    <td><code>startDate</code></td>
+                    <td>string</td>
+                    <td>Fecha inicio (ISO 8601)</td>
+                </tr>
+                <tr>
+                    <td><code>endDate</code></td>
+                    <td>string</td>
+                    <td>Fecha fin (ISO 8601)</td>
+                </tr>
+            </table>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "summary": {
+      "totalClockIns": 22,
+      "punctualityPercentage": 95.5,
+      "incidents": 1,
+      "hoursWorked": 176.5,
+      "hoursExpected": 176,
+      "mostUsedDevice": "mobile"
+    },
+    "clockIns": [
+      {
+        "id": "ci_abc123",
+        "date": "2026-02-03",
+        "clockIn": "2026-02-03T09:00:00Z",
+        "clockOut": "2026-02-03T18:00:00Z",
+        "totalHours": 8,
+        "status": "complete",
+        "punctuality": "on_time",
+        "device": "mobile",
+        "geolocation": {
+          "lat": 40.4168,
+          "lng": -3.7038
+        }
+      }
+    ]
+  }
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>consulta_fichajes_equipo</code> (N2) - Para ver otros empleados</li>
+                    <li><code>consulta_fichajes_propios</code> (N1) - Para ver propios</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Funcionalidad FICMOV-001 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">FICMOV-001</div>
+                <div class="func-name">Fichar entrada (App móvil - Trabajador)</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method post">POST</span> /clock-ins/check-in
+            </div>
+
+            <h4>Request Body:</h4>
+            <div class="code-block">
+<pre>{
+  "timestamp": "2026-02-04T09:00:00Z",
+  "device": "mobile",
+  "geolocation": {
+    "lat": 40.4168,
+    "lng": -3.7038,
+    "accuracy": 10
+  },
+  "biometricAuth": true
+}</pre>
+            </div>
+
+            <h4>Response (201 Created):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "clockIn": {
+      "id": "ci_new456",
+      "employeeId": "emp_123abc",
+      "timestamp": "2026-02-04T09:00:00Z",
+      "punctuality": "on_time",
+      "device": "mobile"
+    }
+  },
+  "message": "Fichaje de entrada registrado correctamente"
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>fichar_entrada_salida</code> (N1)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Geolocalización:</strong> Si activa, verificar que esté dentro del radio permitido del centro de trabajo</li>
+                    <li><strong>Ventana horaria:</strong> Verificar que esté dentro de la ventana de fichaje configurada</li>
+                    <li><strong>Duplicados:</strong> No permitir doble fichaje de entrada en el mismo día</li>
+                    <li><strong>Dispositivo:</strong> Verificar que el dispositivo esté permitido en configuración</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><strong>Puntualidad:</strong> Calcular si es "on_time" o "late" basándose en horario asignado y margen configurado</li>
+                    <li><strong>Notificación:</strong> Si fichaje tardío, notificar a gerente (según configuración)</li>
+                    <li><strong>KPIs:</strong> Actualizar estadísticas del empleado en tiempo real</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- RESUMEN MÓDULO VACACIONES -->
+        <!-- ========================================= -->
+
+        <h2 id="api-vacaciones">4. APIs - PESTAÑA VACACIONES <span class="badge flag">FLAG: vacations</span></h2>
+
+        <!-- Funcionalidad VAC-001 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">VAC-001</div>
+                <div class="func-name">Obtener balance de vacaciones de empleado</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method get">GET</span> /employees/{employeeId}/vacations/balance
+            </div>
+
+            <h4>Query Parameters:</h4>
+            <table>
+                <tr>
+                    <th>Parámetro</th>
+                    <th>Tipo</th>
+                    <th>Descripción</th>
+                </tr>
+                <tr>
+                    <td><code>year</code></td>
+                    <td>number</td>
+                    <td>Año (default: año actual)</td>
+                </tr>
+            </table>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "balance": {
+      "totalDays": 22,
+      "usedDays": 8,
+      "pendingDays": 14,
+      "requestedDays": 3,
+      "calculation": {
+        "baseDays": 22,
+        "proportionalDays": 0,
+        "previousYearDays": 0
+      }
+    },
+    "upcomingVacations": [
+      {
+        "id": "vac_123",
+        "startDate": "2026-03-15",
+        "endDate": "2026-03-20",
+        "days": 4,
+        "status": "approved"
+      }
+    ]
+  }
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>consultar_vacaciones_propias</code> (N1) - Para propias</li>
+                    <li><code>ver_vacaciones_equipo</code> (N2) - Para otros</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Cálculo automático:</strong> Días según convenio colectivo + proporcional según fecha alta</li>
+                    <li><strong>País:</strong> Días base según legislación del país</li>
+                    <li><strong>Días año anterior:</strong> Verificar si procede arrastre de días no disfrutados</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><span class="badge flag">FLAG: vacations</span> Solo disponible si flag activo</li>
+                    <li><strong>Cálculo proporcional:</strong> Si empleado ingresó durante el año, calcular proporcional desde fecha alta</li>
+                    <li><strong>Convenio:</strong> Leer días base desde configuración de convenio colectivo</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Funcionalidad VAC-005 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">VAC-005</div>
+                <div class="func-name">Solicitar vacaciones (Trabajador)</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method post">POST</span> /employees/{employeeId}/vacations/request
+            </div>
+
+            <h4>Request Body:</h4>
+            <div class="code-block">
+<pre>{
+  "startDate": "2026-03-15",
+  "endDate": "2026-03-20",
+  "comments": "Viaje familiar planificado",
+  "halfDay": false
+}</pre>
+            </div>
+
+            <h4>Response (201 Created):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "vacationRequest": {
+      "id": "vreq_789xyz",
+      "employeeId": "emp_123abc",
+      "startDate": "2026-03-15",
+      "endDate": "2026-03-20",
+      "workingDays": 4,
+      "status": "pending",
+      "createdAt": "2026-02-04T10:30:00Z"
+    },
+    "managerNotified": true
+  },
+  "message": "Solicitud de vacaciones enviada correctamente"
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>solicitar_vacaciones</code> (N1)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Días disponibles:</strong> Verificar que el empleado tenga días suficientes</li>
+                    <li><strong>No solapar:</strong> Verificar que no solapen con vacaciones ya aprobadas</li>
+                    <li><strong>No festivos:</strong> No contar festivos en el cálculo de días laborables</li>
+                    <li><strong>Anticipación:</strong> Verificar días mínimos de anticipación (según configuración)</li>
+                    <li><strong>Calendario laboral:</strong> Calcular días laborables excluyendo sábados, domingos y festivos</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><strong>Notificación:</strong> Enviar notificación a gerente de nueva solicitud</li>
+                    <li><strong>Confirmación:</strong> Enviar confirmación al trabajador</li>
+                    <li><strong>Calendario laboral:</strong> Usar calendario laboral del país/región configurado</li>
+                </ul>
+            </div>
+
+            <div class="danger">
+                <h4>⚠️ DECISIÓN PENDIENTE:</h4>
+                <ul>
+                    <li>¿Días mínimos de anticipación? (Sugerencia: 15 días)</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Funcionalidad VAC-010 -->
+        <div class="func-card">
+            <div class="func-header">
+                <div class="func-id">VAC-010</div>
+                <div class="func-name">Aprobar solicitud de vacaciones (Gerente)</div>
+            </div>
+
+            <div class="endpoint">
+                <span class="method put">PUT</span> /vacation-requests/{requestId}/approve
+            </div>
+
+            <h4>Request Body:</h4>
+            <div class="code-block">
+<pre>{
+  "comments": "Aprobado. Buen viaje!"
+}</pre>
+            </div>
+
+            <h4>Response (200 OK):</h4>
+            <div class="code-block">
+<pre>{
+  "success": true,
+  "data": {
+    "vacationRequest": {
+      "id": "vreq_789xyz",
+      "status": "approved",
+      "approvedBy": "emp_manager",
+      "approvedAt": "2026-02-04T11:00:00Z"
+    },
+    "employeeNotified": true
+  },
+  "message": "Solicitud aprobada correctamente"
+}</pre>
+            </div>
+
+            <div class="permission">
+                <h4>🔒 Permisos requeridos:</h4>
+                <ul>
+                    <li><code>aprobar_vacaciones</code> (N3)</li>
+                </ul>
+            </div>
+
+            <div class="validation">
+                <h4>✓ Validaciones backend:</h4>
+                <ul>
+                    <li><strong>Estado válido:</strong> Solo se pueden aprobar solicitudes en estado "pending"</li>
+                    <li><strong>Días disponibles:</strong> Revalidar que empleado sigue teniendo días disponibles</li>
+                    <li><strong>Conflictos horarios:</strong> Verificar que no cause problemas en planificación (según configuración)</li>
+                </ul>
+            </div>
+
+            <div class="tech-spec">
+                <h4>📌 Notas de implementación:</h4>
+                <ul>
+                    <li><strong>Actualizar balance:</strong> Restar días del balance de vacaciones del empleado</li>
+                    <li><strong>Notificar empleado:</strong> Enviar notificación de aprobación</li>
+                    <li><strong>Si FLAG schedules activo:</strong> Marcar días en planificación horaria como "vacaciones"</li>
+                    <li><strong>Si FLAG audit activo:</strong> Registrar aprobación en historial</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- ESQUEMA DE BASE DE DATOS -->
+        <!-- ========================================= -->
+
+        <hr style="margin: 60px 0;">
+
+        <h2 id="esquema-bd">9. ESQUEMA DE BASE DE DATOS PROPUESTO</h2>
+
+        <div class="intro">
+            <h3>📋 Tablas principales del módulo Equipo</h3>
+            <p>A continuación se detalla el esquema de base de datos sugerido para implementar todas las funcionalidades del módulo.</p>
+        </div>
+
+        <h3>Tabla: employees</h3>
+        <div class="code-block">
+<pre>CREATE TABLE employees (
+  id VARCHAR(50) PRIMARY KEY,
+  company_id VARCHAR(50) NOT NULL,
+  full_name VARCHAR(255) NOT NULL,
+  personal_email VARCHAR(255) UNIQUE,
+  professional_email VARCHAR(255) UNIQUE,
+  dni VARCHAR(50) NOT NULL,
+  date_of_birth DATE,
+  place_of_birth VARCHAR(255),
+  nationality VARCHAR(2),
+  address_street VARCHAR(255),
+  address_city VARCHAR(100),
+  address_postal_code VARCHAR(20),
+  address_country VARCHAR(2),
+  phone VARCHAR(50),
+  iban VARCHAR(50),
+  emergency_contact_name VARCHAR(255),
+  emergency_contact_phone VARCHAR(50),
+  
+  contract_type VARCHAR(50),
+  working_day VARCHAR(50),
+  weekly_hours DECIMAL(5,2),
+  gross_salary DECIMAL(10,2),
+  work_center_id VARCHAR(50),
+  start_date DATE,
+  collective_agreement VARCHAR(100),
+  
+  social_security_number VARCHAR(50),
+  sepe_contract_code VARCHAR(20),
+  social_security_date DATE,
+  cotization_group VARCHAR(10),
+  cotization_type VARCHAR(10),
+  mutua VARCHAR(100),
+  company_ccc VARCHAR(20),
+  irpf_percentage DECIMAL(5,2),
+  
+  role_id VARCHAR(50) NOT NULL,
+  status VARCHAR(20) DEFAULT 'active',
+  
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  created_by VARCHAR(50),
+  
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  FOREIGN KEY (role_id) REFERENCES roles(id),
+  FOREIGN KEY (work_center_id) REFERENCES work_centers(id),
+  
+  INDEX idx_company_status (company_id, status),
+  INDEX idx_email (personal_email, professional_email)
+);</pre>
+        </div>
+
+        <h3>Tabla: clock_ins</h3>
+        <div class="code-block">
+<pre>CREATE TABLE clock_ins (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  date DATE NOT NULL,
+  clock_in_time TIMESTAMP,
+  clock_out_time TIMESTAMP,
+  total_hours DECIMAL(5,2),
+  status VARCHAR(20),
+  punctuality VARCHAR(20),
+  device VARCHAR(20),
+  geolocation_lat DECIMAL(10,8),
+  geolocation_lng DECIMAL(11,8),
+  geolocation_accuracy DECIMAL(6,2),
+  manually_adjusted BOOLEAN DEFAULT FALSE,
+  adjusted_by VARCHAR(50),
+  adjustment_reason TEXT,
+  
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  
+  INDEX idx_employee_date (employee_id, date),
+  INDEX idx_company_date (company_id, date)
+);</pre>
+        </div>
+
+        <h3>Tabla: vacation_requests</h3>
+        <div class="code-block">
+<pre>CREATE TABLE vacation_requests (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  working_days INT NOT NULL,
+  comments TEXT,
+  half_day BOOLEAN DEFAULT FALSE,
+  status VARCHAR(20) DEFAULT 'pending',
+  requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  approved_by VARCHAR(50),
+  approved_at TIMESTAMP,
+  rejection_reason TEXT,
+  type VARCHAR(20) DEFAULT 'employee_request',
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  FOREIGN KEY (approved_by) REFERENCES employees(id),
+  
+  INDEX idx_employee_status (employee_id, status),
+  INDEX idx_company_dates (company_id, start_date, end_date)
+);</pre>
+        </div>
+
+        <h3>Tabla: expenses</h3>
+        <div class="code-block">
+<pre>CREATE TABLE expenses (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  date DATE NOT NULL,
+  category VARCHAR(50) NOT NULL,
+  amount DECIMAL(10,2) NOT NULL,
+  concept VARCHAR(255) NOT NULL,
+  justification TEXT,
+  receipt_url VARCHAR(500),
+  status VARCHAR(20) DEFAULT 'pending',
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  reviewed_by VARCHAR(50),
+  reviewed_at TIMESTAMP,
+  rejection_reason TEXT,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  
+  INDEX idx_employee_status (employee_id, status),
+  INDEX idx_company_date (company_id, date)
+);</pre>
+        </div>
+
+        <h3>Tabla: consumptions</h3>
+        <div class="code-block">
+<pre>CREATE TABLE consumptions (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  date DATE NOT NULL,
+  category VARCHAR(50) NOT NULL,
+  quantity DECIMAL(10,2) NOT NULL,
+  description VARCHAR(255),
+  status VARCHAR(20) DEFAULT 'pending',
+  submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  reviewed_by VARCHAR(50),
+  reviewed_at TIMESTAMP,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  
+  INDEX idx_employee_date (employee_id, date),
+  INDEX idx_company_status (company_id, status)
+);</pre>
+        </div>
+
+        <h3>Tabla: documents</h3>
+        <div class="code-block">
+<pre>CREATE TABLE documents (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  document_type VARCHAR(50) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_url VARCHAR(500) NOT NULL,
+  file_size INT,
+  status VARCHAR(20) DEFAULT 'pending_review',
+  uploaded_by VARCHAR(50) NOT NULL,
+  uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  
+  INDEX idx_employee_type (employee_id, document_type)
+);</pre>
+        </div>
+
+        <h3>Tabla: schedules</h3>
+        <div class="code-block">
+<pre>CREATE TABLE schedules (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  date DATE NOT NULL,
+  shift_id VARCHAR(50),
+  is_day_off BOOLEAN DEFAULT FALSE,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  FOREIGN KEY (shift_id) REFERENCES shifts(id),
+  
+  UNIQUE KEY unique_employee_date (employee_id, date),
+  INDEX idx_company_date (company_id, date)
+);</pre>
+        </div>
+
+        <h3>Tabla: audit_log</h3>
+        <div class="code-block">
+<pre>CREATE TABLE audit_log (
+  id VARCHAR(50) PRIMARY KEY,
+  employee_id VARCHAR(50) NOT NULL,
+  company_id VARCHAR(50) NOT NULL,
+  entity_type VARCHAR(50) NOT NULL,
+  entity_id VARCHAR(50),
+  action VARCHAR(50) NOT NULL,
+  field_changed VARCHAR(100),
+  old_value TEXT,
+  new_value TEXT,
+  changed_by VARCHAR(50) NOT NULL,
+  changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  
+  FOREIGN KEY (employee_id) REFERENCES employees(id),
+  FOREIGN KEY (company_id) REFERENCES companies(id),
+  
+  INDEX idx_employee_date (employee_id, changed_at),
+  INDEX idx_entity (entity_type, entity_id)
+);</pre>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- SISTEMA DE PERMISOS -->
+        <!-- ========================================= -->
+
+        <hr style="margin: 60px 0;">
+
+        <h2 id="permisos-sistema">10. SISTEMA DE PERMISOS (71 permisos totales)</h2>
+
+        <div class="intro">
+            <h3>🔒 Arquitectura de permisos</h3>
+            <ul>
+                <li><strong>Arquitectura fija:</strong> Los permisos SOLO se definen a nivel de roles</li>
+                <li><strong>Herencia:</strong> Los usuarios heredan TODOS los permisos del rol asignado</li>
+                <li><strong>No personalización individual:</strong> NO se pueden asignar/quitar permisos a usuarios individuales</li>
+                <li><strong>4 niveles jerárquicos:</strong> N1 (básico) → N2 (intermedio) → N3 (avanzado) → N4 (administrador)</li>
+            </ul>
+        </div>
+
+        <h3>Módulo: RRHH / Equipo (32 permisos)</h3>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 35%;">Código Permiso</th>
+                    <th style="width: 45%;">Descripción</th>
+                    <th style="width: 15%;">Nivel</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1</td>
+                    <td><code>ver_equipo</code></td>
+                    <td>Ver equipo completo (listado de empleados)</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td><code>añadir_empleados</code></td>
+                    <td>Añadir nuevos empleados al sistema</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>3</td>
+                    <td><code>editar_datos_personales</code></td>
+                    <td>Editar datos personales de empleados</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>4</td>
+                    <td><code>editar_datos_laborales</code></td>
+                    <td>Editar datos laborales de empleados (contrato, salario, etc.)</td>
+                    <td>N4</td>
+                </tr>
+                <tr>
+                    <td>5</td>
+                    <td><code>eliminar_empleados</code></td>
+                    <td>Eliminar/dar de baja empleados</td>
+                    <td>N4</td>
+                </tr>
+                <tr>
+                    <td>6</td>
+                    <td><code>fichar_entrada_salida</code></td>
+                    <td>Fichar entrada y salida (fichaje propio)</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>7</td>
+                    <td><code>consulta_fichajes_propios</code></td>
+                    <td>Consultar fichajes propios</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>8</td>
+                    <td><code>consulta_fichajes_equipo</code></td>
+                    <td>Consultar fichajes de todo el equipo</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>9</td>
+                    <td><code>solicitar_correccion_fichaje</code></td>
+                    <td>Solicitar corrección de fichaje erróneo</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>10</td>
+                    <td><code>aprobar_correcciones_fichaje</code></td>
+                    <td>Aprobar/rechazar solicitudes de corrección de fichaje</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>11</td>
+                    <td><code>ajustar_fichajes_manual</code></td>
+                    <td>Ajustar fichajes manualmente sin solicitud previa</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>12</td>
+                    <td><code>ver_horas_trabajadas_propias</code></td>
+                    <td>Ver horas trabajadas propias</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>13</td>
+                    <td><code>ver_horas_trabajadas_equipo</code></td>
+                    <td>Ver horas trabajadas de todo el equipo</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>14</td>
+                    <td><code>aprobar_horas_extra</code></td>
+                    <td>Aprobar horas extra del equipo</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>15</td>
+                    <td><code>gestion_horarios</code></td>
+                    <td>Gestión completa de horarios y turnos</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>16</td>
+                    <td><code>solicitar_vacaciones</code></td>
+                    <td>Solicitar vacaciones propias</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>17</td>
+                    <td><code>consultar_vacaciones_propias</code></td>
+                    <td>Consultar balance y vacaciones propias</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>18</td>
+                    <td><code>ver_vacaciones_equipo</code></td>
+                    <td>Ver vacaciones de todo el equipo</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>19</td>
+                    <td><code>aprobar_vacaciones</code></td>
+                    <td>Aprobar/rechazar solicitudes de vacaciones</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>20</td>
+                    <td><code>proponer_vacaciones</code></td>
+                    <td>Proponer fechas de vacaciones a empleados</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>21</td>
+                    <td><code>asignar_vacaciones_directamente</code></td>
+                    <td>Asignar vacaciones sin solicitud previa</td>
+                    <td>N4</td>
+                </tr>
+                <tr>
+                    <td>22</td>
+                    <td><code>subir_gastos_personales</code></td>
+                    <td>Subir gastos personales para reembolso</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>23</td>
+                    <td><code>ver_gastos_propios</code></td>
+                    <td>Ver gastos propios y estado de aprobación</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>24</td>
+                    <td><code>ver_gastos_equipo</code></td>
+                    <td>Ver gastos de todo el equipo</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>25</td>
+                    <td><code>aprobar_gastos_equipo</code></td>
+                    <td>Aprobar/rechazar gastos del equipo</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>26</td>
+                    <td><code>registrar_consumos_internos</code></td>
+                    <td>Registrar consumos internos propios</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>27</td>
+                    <td><code>ver_consumos_equipo</code></td>
+                    <td>Ver consumos de todo el equipo</td>
+                    <td>N2</td>
+                </tr>
+                <tr>
+                    <td>28</td>
+                    <td><code>aprobar_consumos</code></td>
+                    <td>Aprobar/rechazar consumos del equipo</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>29</td>
+                    <td><code>subir_documentos_laborales</code></td>
+                    <td>Subir documentos laborales propios</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>30</td>
+                    <td><code>ver_documentos_propios</code></td>
+                    <td>Ver documentos laborales propios</td>
+                    <td>N1</td>
+                </tr>
+                <tr>
+                    <td>31</td>
+                    <td><code>ver_documentos_equipo</code></td>
+                    <td>Ver documentos laborales de todo el equipo</td>
+                    <td>N3</td>
+                </tr>
+                <tr>
+                    <td>32</td>
+                    <td><code>gestion_permisos_usuarios</code></td>
+                    <td>Gestionar permisos de usuarios (cambiar roles)</td>
+                    <td>N4</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="tech-spec">
+            <h4>📌 Implementación del sistema de permisos:</h4>
+            <div class="code-block">
+<pre>// Middleware de validación de permisos
+function checkPermission(requiredPermission, requiredLevel) {
+  return async (req, res, next) => {
+    const userId = req.user.id;
+    const user = await User.findById(userId).populate('role');
+    
+    // Verificar que el rol tenga el permiso
+    const hasPermission = user.role.permissions.includes(requiredPermission);
+    
+    if (!hasPermission) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'No tienes permisos para realizar esta acción'
+        }
+      });
+    }
+    
+    next();
+  };
+}
+
+// Uso en rutas
+app.get('/employees', 
+  authenticate,
+  checkPermission('ver_equipo', 'N2'),
+  getEmployees
+);
+
+app.post('/employees',
+  authenticate,
+  checkPermission('añadir_empleados', 'N3'),
+  createEmployee
+);</pre>
+            </div>
+        </div>
+
+        <!-- ========================================= -->
+        <!-- CÓDIGOS DE ERROR -->
+        <!-- ========================================= -->
+
+        <hr style="margin: 60px 0;">
+
+        <h2>11. CÓDIGOS DE ERROR ESTÁNDAR</h2>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Código HTTP</th>
+                    <th>Código Error</th>
+                    <th>Descripción</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>400</td>
+                    <td><code>VALIDATION_ERROR</code></td>
+                    <td>Error de validación en datos de entrada</td>
+                </tr>
+                <tr>
+                    <td>401</td>
+                    <td><code>UNAUTHORIZED</code></td>
+                    <td>Token de autenticación inválido o expirado</td>
+                </tr>
+                <tr>
+                    <td>403</td>
+                    <td><code>FORBIDDEN</code></td>
+                    <td>Usuario no tiene permisos para esta acción</td>
+                </tr>
+                <tr>
+                    <td>404</td>
+                    <td><code>NOT_FOUND</code></td>
+                    <td>Recurso no encontrado</td>
+                </tr>
+                <tr>
+                    <td>409</td>
+                    <td><code>CONFLICT</code></td>
+                    <td>Conflicto con estado actual (ej: email duplicado)</td>
+                </tr>
+                <tr>
+                    <td>422</td>
+                    <td><code>BUSINESS_RULE_ERROR</code></td>
+                    <td>Violación de regla de negocio (ej: sin días de vacaciones)</td>
+                </tr>
+                <tr>
+                    <td>500</td>
+                    <td><code>INTERNAL_ERROR</code></td>
+                    <td>Error interno del servidor</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- ========================================= -->
+        <!-- RESUMEN FINAL -->
+        <!-- ========================================= -->
+
+        <hr style="margin: 60px 0;">
+
+        <div class="success">
+            <h2>✅ RESUMEN PARA EL PROGRAMADOR</h2>
+            
+            <h3>Priorización de desarrollo:</h3>
+            <ol>
+                <li><strong>FASE 1 - BASE (Funcionalidades críticas):</strong>
+                    <ul>
+                        <li>Gestión de empleados (EQ-001 a EQ-012)</li>
+                        <li>Fichajes completos (FIC-001 a FIC-009, FICMOV-001 a FICMOV-005)</li>
+                        <li>Documentos (DOC-001 a DOC-012)</li>
+                        <li>Permisos (PER-001 a PER-008)</li>
+                        <li>Comunicaciones básicas (COM-001 a COM-005)</li>
+                    </ul>
+                </li>
+                <li><strong>FASE 2 - FLAGS Básicos:</strong>
+                    <ul>
+                        <li>FLAG vacations (VAC-001 a VAC-013)</li>
+                        <li>FLAG schedules (HOR-001 a HOR-012, HORGEN-001 a HORGEN-007)</li>
+                    </ul>
+                </li>
+                <li><strong>FASE 3 - FLAGS Avanzados:</strong>
+                    <ul>
+                        <li>FLAG expenses (GAST-001 a GAST-011)</li>
+                        <li>FLAG consumptions (CONS-001 a CONS-008)</li>
+                        <li>FLAG onboarding (ONB-001 a ONB-004)</li>
+                    </ul>
+                </li>
+                <li><strong>FASE 4 - Integraciones:</strong>
+                    <ul>
+                        <li>FLAG gestoria (GEST-001 a GEST-003)</li>
+                        <li>FLAG multicenter (MULTI-001 a MULTI-003)</li>
+                        <li>FLAG audit (HIST-001 a HIST-003)</li>
+                    </ul>
+                </li>
+            </ol>
+
+            <h3>Consideraciones técnicas importantes:</h3>
+            <ul>
+                <li>✅ Todas las operaciones deben ser transaccionales</li>
+                <li>✅ Implementar índices en BD para queries frecuentes</li>
+                <li>✅ Caché de 5 minutos para listados sin filtros</li>
+                <li>✅ Validar permisos en CADA endpoint</li>
+                <li>✅ Registrar auditoría si FLAG audit activo</li>
+                <li>✅ Notificar a gestoría si FLAG gestoria activo</li>
+                <li>✅ Todas las fechas en UTC, convertir en frontend</li>
+                <li>✅ Validaciones específicas por país (DNI, IBAN, SS, etc.)</li>
+            </ul>
+        </div>
+
+        <div class="warning">
+            <h3>⚠️ DECISIONES PENDIENTES CRÍTICAS PARA BACKEND</h3>
+            <p>Antes de comenzar el desarrollo, es necesario definir:</p>
+            <ol>
+                <li><strong>Tamaño máximo archivos:</strong> ¿10MB? ¿20MB? (DOC-009, GAST-010)</li>
+                <li><strong>Límite días atrás ajustes fichaje:</strong> ¿7 días? ¿15 días? (FIC-008)</li>
+                <li><strong>Anticipación mínima vacaciones:</strong> ¿15 días? ¿30 días? (VACCONF-003)</li>
+                <li><strong>Justificante obligatorio gastos:</strong> ¿Obligatorio u opcional? (GAST-010)</li>
+                <li><strong>Notificar ajuste manual fichaje:</strong> ¿Sí o no? (FIC-009)</li>
+                <li><strong>Integración automática nóminas:</strong> ¿Implementar o no? (GAST-011)</li>
+                <li><strong>API directa gestoría:</strong> ¿Qué software usar? (GEST-003)</li>
+            </ol>
+        </div>
+
+        <p style="text-align: center; color: #7f8c8d; margin-top: 60px; padding: 20px; border-top: 2px solid #ecf0f1;">
+            <strong>ESPECIFICACIÓN TÉCNICA BACKEND - MÓDULO EQUIPO Y RRHH</strong><br>
+            UDAR EDGE | Versión 1.0 | Febrero 2026<br>
+            <em>Documento técnico para equipo de desarrollo backend</em><br>
+            <strong>162 funcionalidades | 71 permisos | 9 FLAGS</strong>
+        </p>
+    </div>
+
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</body>
+</html>

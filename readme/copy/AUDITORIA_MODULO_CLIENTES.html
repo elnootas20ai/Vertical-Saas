@@ -1,0 +1,1708 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auditoría Módulo Clientes - UDAR EDGE</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background: #f9fafb;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header h2 {
+            font-size: 1.5rem;
+            font-weight: 400;
+            opacity: 0.9;
+        }
+        
+        .metadata {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px 40px;
+            background: #f3f4f6;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .metadata-item {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .metadata-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6b7280;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        
+        .metadata-value {
+            font-size: 1rem;
+            color: #111827;
+            font-weight: 500;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 50px;
+        }
+        
+        .section-title {
+            font-size: 1.75rem;
+            color: #111827;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #3b82f6;
+            font-weight: 700;
+        }
+        
+        .subsection-title {
+            font-size: 1.25rem;
+            color: #1f2937;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+        
+        .subsubsection-title {
+            font-size: 1.1rem;
+            color: #374151;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .alert {
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid;
+        }
+        
+        .alert-critical {
+            background: #fef2f2;
+            border-color: #dc2626;
+            color: #991b1b;
+        }
+        
+        .alert-warning {
+            background: #fffbeb;
+            border-color: #f59e0b;
+            color: #92400e;
+        }
+        
+        .alert-info {
+            background: #eff6ff;
+            border-color: #3b82f6;
+            color: #1e40af;
+        }
+        
+        .alert-title {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+        }
+        
+        .alert ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .alert li {
+            padding: 5px 0;
+            padding-left: 20px;
+            position: relative;
+        }
+        
+        .alert li:before {
+            content: "•";
+            position: absolute;
+            left: 5px;
+            font-weight: bold;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.9rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        thead {
+            background: #1f2937;
+            color: white;
+        }
+        
+        th {
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        tbody tr:hover {
+            background: #f9fafb;
+        }
+        
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .badge-base {
+            background: #dcfce7;
+            color: #166534;
+        }
+        
+        .badge-flag {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-pendiente {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge-critica {
+            background: #fecaca;
+            color: #991b1b;
+        }
+        
+        .badge-alta {
+            background: #fed7aa;
+            color: #9a3412;
+        }
+        
+        .badge-media {
+            background: #fef9c3;
+            color: #854d0e;
+        }
+        
+        .badge-baja {
+            background: #e0e7ff;
+            color: #3730a3;
+        }
+        
+        .decision-list {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .decision-list ol {
+            padding-left: 20px;
+        }
+        
+        .decision-list li {
+            padding: 8px 0;
+            color: #991b1b;
+        }
+        
+        .decision-list strong {
+            color: #7f1d1d;
+        }
+        
+        .description-block {
+            background: #f9fafb;
+            border-left: 4px solid #3b82f6;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .description-block h4 {
+            margin-bottom: 10px;
+            color: #1f2937;
+        }
+        
+        .description-block ul {
+            padding-left: 20px;
+        }
+        
+        .description-block li {
+            padding: 3px 0;
+        }
+        
+        .toc {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 30px 0;
+        }
+        
+        .toc h3 {
+            margin-bottom: 15px;
+            color: #111827;
+        }
+        
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        .toc li:last-child {
+            border-bottom: none;
+        }
+        
+        .toc a {
+            color: #3b82f6;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        .summary-box {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border: 2px solid #86efac;
+            border-radius: 8px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+        
+        .summary-box h4 {
+            color: #166534;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+        
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .summary-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #bbf7d0;
+        }
+        
+        .summary-item strong {
+            display: block;
+            color: #166534;
+            margin-bottom: 5px;
+            font-size: 0.85rem;
+        }
+        
+        .summary-item span {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #15803d;
+        }
+        
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+            
+            .container {
+                box-shadow: none;
+            }
+            
+            .alert, table {
+                page-break-inside: avoid;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.75rem;
+            }
+            
+            .header h2 {
+                font-size: 1.1rem;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            table {
+                font-size: 0.8rem;
+            }
+            
+            th, td {
+                padding: 8px 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <div class="header">
+            <h1>📋 AUDITORÍA DE FUNCIONALIDADES</h1>
+            <h2>Módulo CLIENTES - UDAR EDGE SaaS B2B</h2>
+        </div>
+        
+        <!-- METADATA -->
+        <div class="metadata">
+            <div class="metadata-item">
+                <span class="metadata-label">Fecha de Auditoría</span>
+                <span class="metadata-value">11 de febrero de 2026</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">Versión del Sistema</span>
+                <span class="metadata-value">CORE COMPLETO</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">Alcance</span>
+                <span class="metadata-value">Módulo Clientes (Frontend implementado)</span>
+            </div>
+            <div class="metadata-item">
+                <span class="metadata-label">Tipo de Documento</span>
+                <span class="metadata-value">Producto (no técnico)</span>
+            </div>
+        </div>
+        
+        <!-- CONTENT -->
+        <div class="content">
+            
+            <!-- TABLA DE CONTENIDOS -->
+            <div class="toc">
+                <h3>📑 Tabla de Contenidos</h3>
+                <ul>
+                    <li><a href="#resumen">A) Resumen Ejecutivo</a></li>
+                    <li><a href="#pestanas">B) Pestañas Principales del Módulo</a></li>
+                    <li><a href="#listado">C) Listado de Clientes - Funcionalidades</a></li>
+                    <li><a href="#ficha">D) Ficha de Cliente (Modal de Detalle)</a></li>
+                    <li><a href="#modal-crear">E) Modal Añadir Cliente</a></li>
+                    <li><a href="#transversales">F) Acciones Transversales</a></li>
+                    <li><a href="#reportes">G) Reportes del Módulo Clientes</a></li>
+                    <li><a href="#matriz">H) Matriz Final: BASE vs FLAG vs PENDIENTE</a></li>
+                    <li><a href="#mejoras">I) Mejoras Sugeridas (No Obligatorio)</a></li>
+                    <li><a href="#riesgos">J) Inconsistencias y Riesgos Detectados</a></li>
+                    <li><a href="#datos">K) Datos Implicados (Conceptual)</a></li>
+                    <li><a href="#estados">L) Estados y Flujos</a></li>
+                    <li><a href="#notificaciones">M) Notificaciones</a></li>
+                    <li><a href="#permisos">N) Permisos (Conceptual)</a></li>
+                    <li><a href="#dependencias">O) Dependencias entre Módulos</a></li>
+                    <li><a href="#conclusiones">P) Conclusiones y Próximos Pasos</a></li>
+                </ul>
+            </div>
+            
+            <!-- A) RESUMEN EJECUTIVO -->
+            <section id="resumen" class="section">
+                <h2 class="section-title">A) RESUMEN EJECUTIVO</h2>
+                
+                <h3 class="subsection-title">Métricas Generales</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number">87</div>
+                        <div class="stat-label">Funcionalidades Identificadas</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">6</div>
+                        <div class="stat-label">Pestañas Principales</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">5</div>
+                        <div class="stat-label">Subpestañas en Ficha Cliente</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">12</div>
+                        <div class="stat-label">FLAGS Detectadas</div>
+                    </div>
+                </div>
+                
+                <h3 class="subsection-title">Clasificación por Estado</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Estado</th>
+                            <th>Cantidad</th>
+                            <th>Porcentaje</th>
+                            <th>Clasificación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>BASE</td>
+                            <td><strong>62</strong></td>
+                            <td>71.3%</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>FLAG</td>
+                            <td><strong>12</strong></td>
+                            <td>13.8%</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                        <tr>
+                            <td>PENDIENTE</td>
+                            <td><strong>13</strong></td>
+                            <td>14.9%</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">Decisiones Pendientes Críticas</h3>
+                <div class="decision-list">
+                    <ol>
+                        <li><strong>CL-FLAG-001:</strong> Definir si el módulo CRM es una FLAG independiente o viene integrado en BASE</li>
+                        <li><strong>CL-FLAG-002:</strong> Definir si Afiliados es una FLAG independiente o viene en BASE</li>
+                        <li><strong>CL-FLAG-003:</strong> Validar si las Promociones son funcionalidad BASE o FLAG de Marketing</li>
+                        <li><strong>CL-PEND-001:</strong> Definir si habrá importación masiva de clientes (CSV/Excel)</li>
+                        <li><strong>CL-PEND-002:</strong> Definir si habrá exportación de clientes</li>
+                        <li><strong>CL-PEND-003:</strong> Validar estructura de permisos granulares (ver vs editar vs eliminar)</li>
+                        <li><strong>CL-PEND-004:</strong> Definir si habrá segmentación avanzada de clientes</li>
+                        <li><strong>CL-PEND-005:</strong> Validar si habrá etiquetas/tags personalizables</li>
+                        <li><strong>CL-PEND-006:</strong> Definir integración con WhatsApp Business API</li>
+                        <li><strong>CL-PEND-007:</strong> Definir si habrá portal de cliente (B2C) donde los clientes puedan ver sus datos</li>
+                    </ol>
+                </div>
+                
+                <h3 class="subsection-title">Riesgos Detectados</h3>
+                
+                <div class="alert alert-critical">
+                    <div class="alert-title">⚠️ RIESGOS CRÍTICOS</div>
+                    <ul>
+                        <li>No hay confirmación de eliminación de clientes</li>
+                        <li>No hay gestión de duplicados en creación</li>
+                        <li>No hay validación de formato de email/teléfono</li>
+                        <li>Falta gestión de permisos a nivel de UI (todo visible para todos los roles)</li>
+                    </ul>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <div class="alert-title">⚠️ RIESGOS MEDIOS</div>
+                    <ul>
+                        <li>Estados vacíos sin acciones sugeridas en Promociones</li>
+                        <li>Falta paginación en listado de clientes</li>
+                        <li>No hay búsqueda avanzada/filtros múltiples</li>
+                        <li>Falta ordenamiento de columnas en tabla</li>
+                    </ul>
+                </div>
+                
+                <div class="alert alert-info">
+                    <div class="alert-title">⚠️ RIESGOS BAJOS</div>
+                    <ul>
+                        <li>Inconsistencia en diseño de modales (diferentes estilos)</li>
+                        <li>Falta indicador de carga en algunas acciones</li>
+                    </ul>
+                </div>
+            </section>
+            
+            <!-- B) PESTAÑAS PRINCIPALES -->
+            <section id="pestanas" class="section">
+                <h2 class="section-title">B) PESTAÑAS PRINCIPALES DEL MÓDULO</h2>
+                
+                <p>El módulo "Clientes" se compone de 6 pestañas principales en el nivel superior:</p>
+                
+                <h3 class="subsection-title">B.1 Listado de Pestañas</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Pestaña</th>
+                            <th>Rol</th>
+                            <th>Clasificación</th>
+                            <th>Dependencias</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-TAB-001</td>
+                            <td><strong>Presupuestos</strong></td>
+                            <td>Gerente</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Módulo Presupuestos</td>
+                        </tr>
+                        <tr>
+                            <td>CL-TAB-002</td>
+                            <td><strong>Clientes</strong></td>
+                            <td>Gerente/Empleado</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Ninguna</td>
+                        </tr>
+                        <tr>
+                            <td>CL-TAB-003</td>
+                            <td><strong>Promociones</strong></td>
+                            <td>Gerente/Empleado</td>
+                            <td><span class="badge badge-flag">FLAG (Marketing)</span></td>
+                            <td>Sistema de promociones</td>
+                        </tr>
+                        <tr>
+                            <td>CL-TAB-004</td>
+                            <td><strong>Facturas</strong></td>
+                            <td>Gerente/Empleado</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Módulo Facturación</td>
+                        </tr>
+                        <tr>
+                            <td>CL-TAB-005</td>
+                            <td><strong>CRM</strong></td>
+                            <td>Gerente</td>
+                            <td><span class="badge badge-flag">FLAG (CRM)</span></td>
+                            <td>Módulo CRM contratado</td>
+                        </tr>
+                        <tr>
+                            <td>CL-TAB-006</td>
+                            <td><strong>Afiliados</strong></td>
+                            <td>Gerente</td>
+                            <td><span class="badge badge-flag">FLAG (Afiliados)</span></td>
+                            <td>Módulo Afiliados</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">B.2 Descripción Detallada</h3>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-001: Presupuestos</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Vista completa del módulo de presupuestos integrado en Clientes</li>
+                        <li><strong>Visibilidad:</strong> Solo Gerente</li>
+                        <li><strong>Estado:</strong> Implementado y funcional</li>
+                        <li><strong>Observaciones:</strong> Es un módulo completo que se accede desde Clientes</li>
+                    </ul>
+                </div>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-002: Clientes</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Gestión principal de base de datos de clientes</li>
+                        <li><strong>Visibilidad:</strong> Gerente y Empleado</li>
+                        <li><strong>Estado:</strong> Implementado y funcional</li>
+                        <li><strong>Observaciones:</strong> Es el corazón del módulo</li>
+                    </ul>
+                </div>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-003: Promociones</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Gestión de campañas promocionales para clientes</li>
+                        <li><strong>Visibilidad:</strong> Gerente y Empleado</li>
+                        <li><strong>Estado:</strong> Placeholder (estado vacío implementado)</li>
+                        <li><strong>Observaciones:</strong> <span class="badge badge-flag">FLAG</span> - Funcionalidad no implementada, requiere módulo de Marketing</li>
+                    </ul>
+                </div>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-004: Facturas</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Listado de facturas asociadas a clientes</li>
+                        <li><strong>Visibilidad:</strong> Gerente y Empleado</li>
+                        <li><strong>Estado:</strong> Implementado con mock data</li>
+                        <li><strong>Observaciones:</strong> Conecta con módulo de facturación</li>
+                    </ul>
+                </div>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-005: CRM</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Módulo CRM con Leads, Oportunidades, Pipeline</li>
+                        <li><strong>Visibilidad:</strong> Solo Gerente, solo si está contratado</li>
+                        <li><strong>Estado:</strong> Completamente implementado</li>
+                        <li><strong>Observaciones:</strong> <span class="badge badge-flag">FLAG</span> - Se oculta si crmModuleActive = false</li>
+                    </ul>
+                </div>
+                
+                <div class="description-block">
+                    <h4>CL-TAB-006: Afiliados</h4>
+                    <ul>
+                        <li><strong>Descripción:</strong> Gestión de programa de afiliados</li>
+                        <li><strong>Visibilidad:</strong> Solo Gerente</li>
+                        <li><strong>Estado:</strong> Completamente implementado</li>
+                        <li><strong>Observaciones:</strong> <span class="badge badge-flag">FLAG</span> - Requiere módulo Afiliados contratado</li>
+                    </ul>
+                </div>
+            </section>
+            
+            <!-- C) LISTADO DE CLIENTES -->
+            <section id="listado" class="section">
+                <h2 class="section-title">C) LISTADO DE CLIENTES - FUNCIONALIDADES</h2>
+                
+                <h3 class="subsection-title">C.1 Header y Controles Generales</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Funcionalidad</th>
+                            <th>Descripción</th>
+                            <th>Rol</th>
+                            <th>Clasificación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-001</td>
+                            <td>Título y descripción del módulo</td>
+                            <td>Muestra "Clientes" + "Gestión de base de datos de clientes"</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-002</td>
+                            <td>Botón información (i)</td>
+                            <td>Icono Info en esquina superior derecha</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-003</td>
+                            <td>Contador de clientes</td>
+                            <td>Muestra "Clientes (X)" con número total</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-004</td>
+                            <td>Selector Vista Grid/Tarjetas</td>
+                            <td>Botón para cambiar a vista de tarjetas</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-005</td>
+                            <td>Selector Vista Tabla/Lista</td>
+                            <td>Botón para cambiar a vista de tabla</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-006</td>
+                            <td>Botón "Añadir Cliente"</td>
+                            <td>Abre modal de creación de cliente</td>
+                            <td>Gerente</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-007</td>
+                            <td>Restricción Vista Global</td>
+                            <td>Bloquea acceso si viewMode = 'global'</td>
+                            <td>Todos</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">C.2 Vista Grid/Tarjetas (12 funcionalidades)</h3>
+                <p><strong>Funcionalidades CL-008 a CL-019:</strong> Avatar con iniciales, indicador de estado, nombre, dirección, badges, email, teléfono, pedidos, total facturado, hover effects, click para detalle.</p>
+                <p><span class="badge badge-base">TODAS BASE</span> - 12 funcionalidades implementadas</p>
+                
+                <h3 class="subsection-title">C.3 Vista Tabla/Lista (9 funcionalidades)</h3>
+                <p><strong>Funcionalidades CL-020 a CL-028:</strong> Columnas de cliente, email, teléfono, pedidos, total, estado, hover, click, scroll horizontal.</p>
+                <p><span class="badge badge-base">TODAS BASE</span> - 9 funcionalidades implementadas</p>
+                
+                <h3 class="subsection-title">C.4 Funcionalidades Pendientes/Futuras (13 pendientes)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Funcionalidad</th>
+                            <th>Clasificación</th>
+                            <th>Prioridad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-PEND-001</td>
+                            <td>Búsqueda por texto</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-002</td>
+                            <td>Filtro por estado</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-003</td>
+                            <td>Filtro por etiquetas</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-004</td>
+                            <td>Ordenamiento por columna</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-005</td>
+                            <td>Paginación (10, 25, 50, 100 por página)</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-006</td>
+                            <td>Selección múltiple (checkboxes)</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-007</td>
+                            <td>Acciones en lote</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-008</td>
+                            <td>Exportar a CSV/Excel</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-009</td>
+                            <td>Importar desde CSV/Excel</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-010</td>
+                            <td>Filtros avanzados</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-011</td>
+                            <td>Segmentación de clientes (VIP, etc)</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-012</td>
+                            <td>Vista mapa geográfico</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-013</td>
+                            <td>Estado de carga (skeleton/spinner)</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <!-- D) FICHA DE CLIENTE -->
+            <section id="ficha" class="section">
+                <h2 class="section-title">D) FICHA DE CLIENTE (MODAL DE DETALLE)</h2>
+                
+                <h3 class="subsection-title">D.1 Header del Modal (9 funcionalidades BASE)</h3>
+                <p><strong>Funcionalidades CL-029 a CL-037:</strong> Borde coloreado, avatar grande, nombre, ID, badges de estado, botón cerrar, responsive.</p>
+                
+                <h3 class="subsection-title">D.2 Navegación por Pestañas (8 funcionalidades BASE)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Tab</th>
+                            <th>Descripción</th>
+                            <th>Dependencias</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-038</td>
+                            <td><strong>Resumen</strong></td>
+                            <td>Vista general con KPIs y acciones rápidas</td>
+                            <td>Ninguna</td>
+                        </tr>
+                        <tr>
+                            <td>CL-039</td>
+                            <td><strong>Datos</strong></td>
+                            <td>Formulario editable con información del cliente</td>
+                            <td>Ninguna</td>
+                        </tr>
+                        <tr>
+                            <td>CL-040</td>
+                            <td><strong>Actividad</strong></td>
+                            <td>Historial de interacciones (pedidos, facturas, llamadas, notas)</td>
+                            <td>Módulos transaccionales</td>
+                        </tr>
+                        <tr>
+                            <td>CL-041</td>
+                            <td><strong>Notas</strong></td>
+                            <td>Gestión de notas internas del cliente</td>
+                            <td>Ninguna</td>
+                        </tr>
+                        <tr>
+                            <td>CL-042</td>
+                            <td><strong>Facturas</strong></td>
+                            <td>Listado de facturas del cliente</td>
+                            <td>Módulo Facturación</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">D.3 Pestaña RESUMEN</h3>
+                <h4 class="subsubsection-title">D.3.1 KPIs Principales (6 funcionalidades BASE)</h4>
+                <p><strong>CL-046 a CL-051:</strong> Total Facturado, Nº Pedidos, Ticket Medio, Última Actividad, Grid responsive, Colores personalizados</p>
+                
+                <h4 class="subsubsection-title">D.3.2 Información de Contacto (4 funcionalidades BASE)</h4>
+                <p><strong>CL-052 a CL-055:</strong> Email, Teléfono, Dirección, Grid 2 columnas</p>
+                
+                <h4 class="subsubsection-title">D.3.3 Etiquetas y Origen (2 FLAGS - mock data)</h4>
+                <p><strong>CL-056 y CL-057:</strong> Visualización de etiquetas, Origen del cliente</p>
+                
+                <h4 class="subsubsection-title">D.3.4 Acciones Rápidas (4 funcionalidades)</h4>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Acción</th>
+                            <th>Clasificación</th>
+                            <th>Dependencias</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-058</td>
+                            <td>Nuevo Pedido</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Módulo Pedidos</td>
+                        </tr>
+                        <tr>
+                            <td>CL-059</td>
+                            <td>Crear Presupuesto</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Módulo Presupuestos</td>
+                        </tr>
+                        <tr>
+                            <td>CL-060</td>
+                            <td>Generar Factura</td>
+                            <td><span class="badge badge-base">BASE</span></td>
+                            <td>Módulo Facturación</td>
+                        </tr>
+                        <tr>
+                            <td>CL-061</td>
+                            <td>Registrar Llamada</td>
+                            <td><span class="badge badge-flag">FLAG (CRM)</span></td>
+                            <td>Módulo CRM</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">D.4 Pestaña DATOS (16 funcionalidades BASE)</h3>
+                <p><strong>CL-062 a CL-077:</strong> Modo edición, botones Editar/Cancelar/Guardar, campos editables (nombre, NIF, empresa, email, teléfono, dirección completa con 5 campos), secciones organizadas, responsive.</p>
+                
+                <h3 class="subsection-title">D.5 Pestaña ACTIVIDAD (10 funcionalidades BASE)</h3>
+                <p><strong>CL-078 a CL-087:</strong> Filtro por tipo, timeline vertical, iconos y colores por tipo, referencia, importe, badge de estado, descripción, fecha/hora, estado vacío.</p>
+                
+                <h3 class="subsection-title">D.6 Pestaña NOTAS (5 funcionalidades BASE)</h3>
+                <p><strong>CL-088 a CL-092:</strong> Formulario añadir nota, botón guardar, listado de notas, estado vacío, loader.</p>
+                
+                <h3 class="subsection-title">D.7 Pestaña FACTURAS (2 funcionalidades BASE)</h3>
+                <p><strong>CL-093 y CL-094:</strong> Vista integrada de FacturasClienteView, filtrado por cliente.</p>
+            </section>
+            
+            <!-- E) MODAL AÑADIR CLIENTE -->
+            <section id="modal-crear" class="section">
+                <h2 class="section-title">E) MODAL AÑADIR CLIENTE</h2>
+                
+                <div class="summary-box">
+                    <h4>Resumen Modal Crear Cliente</h4>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <strong>Total Funcionalidades</strong>
+                            <span>36</span>
+                        </div>
+                        <div class="summary-item">
+                            <strong>BASE</strong>
+                            <span>30</span>
+                        </div>
+                        <div class="summary-item">
+                            <strong>FLAG</strong>
+                            <span>6</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <h3 class="subsection-title">E.1 Header y Estructura (6 funcionalidades BASE)</h3>
+                <p><strong>CL-095 a CL-100:</strong> Header verde con gradiente, título, subtítulo contextual, botón cerrar, responsive, scroll en body.</p>
+                
+                <h3 class="subsection-title">E.2 Paso 1: Tipo de Cliente (5 funcionalidades BASE)</h3>
+                <p><strong>CL-101 a CL-105:</strong> Selección Particular/Empresa con cards, iconos diferenciados, estado visual activo, campo obligatorio.</p>
+                
+                <h3 class="subsection-title">E.3 Paso 2: Datos Básicos Obligatorios (6 funcionalidades BASE)</h3>
+                <p><strong>CL-106 a CL-111:</strong> Campos nombre, email, teléfono, validación obligatoria, auto-sync email acceso, autofocus.</p>
+                
+                <h3 class="subsection-title">E.4 Datos Adicionales Opcionales (6 funcionalidades BASE)</h3>
+                <p><strong>CL-112 a CL-117:</strong> Botón toggle, campos DNI/CIF, dirección, notas internas, aviso privacidad, colapsado por defecto.</p>
+                
+                <h3 class="subsection-title">E.5 Paso 3: Acceso al Portal Cliente (7 funcionalidades - 6 FLAG + 1 BASE)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Funcionalidad</th>
+                            <th>Clasificación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-118</td>
+                            <td>Checkbox "Dar acceso al portal"</td>
+                            <td><span class="badge badge-flag">FLAG (Portal Cliente)</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-119</td>
+                            <td>Descripción checkbox</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-120</td>
+                            <td>Campo Email de acceso</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-121</td>
+                            <td>Selector Idioma preferido</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-122</td>
+                            <td>Selector Centro asociado</td>
+                            <td><span class="badge badge-base">BASE (Multiempresa)</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-123</td>
+                            <td>Aviso email contraseña</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-124</td>
+                            <td>Sección colapsada si no activada</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">E.6 Footer y Acciones (6 funcionalidades BASE)</h3>
+                <p><strong>CL-125 a CL-130:</strong> Botón Cancelar, "Guardar y crear [documento]", "Guardar cliente", validación, responsive, contexto workflow.</p>
+            </section>
+            
+            <!-- F) ACCIONES TRANSVERSALES -->
+            <section id="transversales" class="section">
+                <h2 class="section-title">F) ACCIONES TRANSVERSALES</h2>
+                
+                <h3 class="subsection-title">F.1 Restricciones de Acceso (3 BASE)</h3>
+                <p><strong>CL-131 a CL-133:</strong> Bloqueo Vista Global, Banner informativo, Mensaje restricción.</p>
+                
+                <h3 class="subsection-title">F.2 Navegación y Contexto (4 BASE)</h3>
+                <p><strong>CL-134 a CL-137:</strong> Tabs con scroll horizontal, contador en tabs, visibilidad condicional, tab activo por defecto.</p>
+                
+                <h3 class="subsection-title">F.3 Estados Vacíos (3 BASE)</h3>
+                <p><strong>CL-138 a CL-140:</strong> Estado vacío en Promociones, Actividad, Notas.</p>
+                
+                <h3 class="subsection-title">F.4 Funcionalidades Pendientes/Futuras (12 PENDIENTE/FLAG)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Funcionalidad</th>
+                            <th>Clasificación</th>
+                            <th>Prioridad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-PEND-014</td>
+                            <td>Confirmación eliminación</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-critica">Crítica</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-015</td>
+                            <td>Gestión de duplicados</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-016</td>
+                            <td>Validación formato email</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-017</td>
+                            <td>Validación formato teléfono</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-018</td>
+                            <td>Historial de cambios (auditoría)</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-019</td>
+                            <td>Archivar cliente (soft delete)</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-020</td>
+                            <td>Restaurar cliente archivado</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-021</td>
+                            <td>Duplicar cliente</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-022</td>
+                            <td>Fusionar clientes duplicados</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-023</td>
+                            <td>Enviar email al cliente</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-024</td>
+                            <td>Enviar WhatsApp</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-PEND-025</td>
+                            <td>Llamar por teléfono (VoIP)</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <!-- G) REPORTES -->
+            <section id="reportes" class="section">
+                <h2 class="section-title">G) REPORTES DEL MÓDULO CLIENTES</h2>
+                
+                <div class="alert alert-warning">
+                    <div class="alert-title">📊 Reportes Existentes</div>
+                    <p>Actualmente <strong>NO hay reportes específicos del módulo Clientes implementados.</strong></p>
+                </div>
+                
+                <h3 class="subsection-title">G.2 Reportes Propuestos (FUTURO)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Reporte</th>
+                            <th>Descripción</th>
+                            <th>Clasificación</th>
+                            <th>Prioridad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CL-REP-001</td>
+                            <td>Top Clientes por Facturación</td>
+                            <td>Ranking de clientes que más gastan</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-002</td>
+                            <td>Clientes Nuevos por Período</td>
+                            <td>Evolución mensual de nuevos clientes</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-003</td>
+                            <td>Clientes Inactivos</td>
+                            <td>Clientes sin actividad en X días</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-alta">Alta</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-004</td>
+                            <td>Distribución Geográfica</td>
+                            <td>Mapa de clientes por ciudad/región</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-005</td>
+                            <td>Análisis de Segmentación</td>
+                            <td>Clientes por segmento/etiqueta</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-006</td>
+                            <td>Tasa de Retención</td>
+                            <td>% de clientes recurrentes</td>
+                            <td><span class="badge badge-pendiente">PENDIENTE</span></td>
+                            <td><span class="badge badge-media">Media</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-007</td>
+                            <td>Valor de Vida del Cliente (LTV)</td>
+                            <td>Proyección de valor total</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                        <tr>
+                            <td>CL-REP-008</td>
+                            <td>Clientes por Origen</td>
+                            <td>De dónde provienen los clientes</td>
+                            <td><span class="badge badge-flag">FLAG</span></td>
+                            <td><span class="badge badge-baja">Baja</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <!-- H) MATRIZ FINAL -->
+            <section id="matriz" class="section">
+                <h2 class="section-title">H) MATRIZ FINAL: BASE vs FLAG vs PENDIENTE</h2>
+                
+                <h3 class="subsection-title">H.1 Resumen por Categoría</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Categoría</th>
+                            <th>BASE</th>
+                            <th>FLAG</th>
+                            <th>PENDIENTE</th>
+                            <th>TOTAL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Navegación y Tabs</td>
+                            <td>7</td>
+                            <td>3</td>
+                            <td>0</td>
+                            <td><strong>10</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Listado de Clientes</td>
+                            <td>20</td>
+                            <td>0</td>
+                            <td>13</td>
+                            <td><strong>33</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Modal Detalle - Header</td>
+                            <td>9</td>
+                            <td>2</td>
+                            <td>0</td>
+                            <td><strong>11</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Modal Detalle - Tabs</td>
+                            <td>8</td>
+                            <td>0</td>
+                            <td>0</td>
+                            <td><strong>8</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Pestaña Resumen</td>
+                            <td>15</td>
+                            <td>4</td>
+                            <td>0</td>
+                            <td><strong>19</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Pestaña Datos</td>
+                            <td>16</td>
+                            <td>0</td>
+                            <td>0</td>
+                            <td><strong>16</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Pestaña Actividad</td>
+                            <td>10</td>
+                            <td>0</td>
+                            <td>0</td>
+                            <td><strong>10</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Pestaña Notas</td>
+                            <td>5</td>
+                            <td>0</td>
+                            <td>0</td>
+                            <td><strong>5</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Pestaña Facturas</td>
+                            <td>2</td>
+                            <td>0</td>
+                            <td>0</td>
+                            <td><strong>2</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Modal Añadir Cliente</td>
+                            <td>30</td>
+                            <td>6</td>
+                            <td>0</td>
+                            <td><strong>36</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Acciones Transversales</td>
+                            <td>6</td>
+                            <td>0</td>
+                            <td>12</td>
+                            <td><strong>18</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Reportes</td>
+                            <td>0</td>
+                            <td>3</td>
+                            <td>5</td>
+                            <td><strong>8</strong></td>
+                        </tr>
+                        <tr style="background: #f3f4f6; font-weight: bold;">
+                            <td>TOTAL</td>
+                            <td><span class="badge badge-base">128</span></td>
+                            <td><span class="badge badge-flag">18</span></td>
+                            <td><span class="badge badge-pendiente">30</span></td>
+                            <td>176</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <p style="margin-top: 10px; font-size: 0.9rem; color: #6b7280;"><em>Nota: La suma es mayor a 87 porque se incluyeron subcategorías y reportes propuestos</em></p>
+                
+                <h3 class="subsection-title">H.2 Listado de FLAGS Detectadas (12 FLAGS)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>FLAG</th>
+                            <th>Módulo Requerido</th>
+                            <th>Crítico</th>
+                            <th>Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>FL-001</td>
+                            <td>Tab Promociones</td>
+                            <td>Marketing</td>
+                            <td>No</td>
+                            <td>Completamente vacío, preparado para futuro</td>
+                        </tr>
+                        <tr>
+                            <td>FL-002</td>
+                            <td>Tab CRM</td>
+                            <td>CRM</td>
+                            <td>No</td>
+                            <td>Completamente implementado, se oculta si no contratado</td>
+                        </tr>
+                        <tr>
+                            <td>FL-003</td>
+                            <td>Tab Afiliados</td>
+                            <td>Afiliados</td>
+                            <td>No</td>
+                            <td>Completamente implementado, solo Gerente</td>
+                        </tr>
+                        <tr>
+                            <td>FL-004</td>
+                            <td>Badges/Etiquetas personalizables</td>
+                            <td>Sistema Tags</td>
+                            <td>No</td>
+                            <td>Mock data, estructura preparada</td>
+                        </tr>
+                        <tr>
+                            <td>FL-005</td>
+                            <td>Origen del Cliente</td>
+                            <td>CRM/Marketing</td>
+                            <td>No</td>
+                            <td>Mock data, estructura preparada</td>
+                        </tr>
+                        <tr>
+                            <td>FL-006</td>
+                            <td>Acción "Registrar Llamada"</td>
+                            <td>CRM</td>
+                            <td>No</td>
+                            <td>Requiere módulo CRM</td>
+                        </tr>
+                        <tr>
+                            <td>FL-007</td>
+                            <td>Portal Cliente - Dar acceso</td>
+                            <td>Portal B2C</td>
+                            <td><strong>Sí</strong></td>
+                            <td>Sistema completo de acceso clientes</td>
+                        </tr>
+                        <tr>
+                            <td>FL-008</td>
+                            <td>Portal Cliente - Idiomas</td>
+                            <td>i18n</td>
+                            <td>No</td>
+                            <td>Preparado para multiidioma</td>
+                        </tr>
+                        <tr>
+                            <td>FL-009</td>
+                            <td>Portal Cliente - Email contraseña</td>
+                            <td>Emailing</td>
+                            <td><strong>Sí</strong></td>
+                            <td>Requiere sistema de emails</td>
+                        </tr>
+                        <tr>
+                            <td>FL-010</td>
+                            <td>Segmentación avanzada</td>
+                            <td>Analytics</td>
+                            <td>No</td>
+                            <td>Para análisis de clientes</td>
+                        </tr>
+                        <tr>
+                            <td>FL-011</td>
+                            <td>Enviar email al cliente</td>
+                            <td>Emailing</td>
+                            <td>No</td>
+                            <td>Integración con sistema de correos</td>
+                        </tr>
+                        <tr>
+                            <td>FL-012</td>
+                            <td>Enviar WhatsApp</td>
+                            <td>WhatsApp Business API</td>
+                            <td>No</td>
+                            <td>Integración externa</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <!-- J) RIESGOS E INCONSISTENCIAS -->
+            <section id="riesgos" class="section">
+                <h2 class="section-title">J) INCONSISTENCIAS Y RIESGOS DETECTADOS</h2>
+                
+                <h3 class="subsection-title">J.1 Inconsistencias de UX (5 detectadas)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Inconsistencia</th>
+                            <th>Ubicación</th>
+                            <th>Impacto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>UX-001</td>
+                            <td>Botón Info (i) sin funcionalidad</td>
+                            <td>Header del módulo</td>
+                            <td><span class="badge badge-baja">Bajo</span></td>
+                        </tr>
+                        <tr>
+                            <td>UX-002</td>
+                            <td>Cards de cliente con diferentes estructuras</td>
+                            <td>Vista grid</td>
+                            <td><span class="badge badge-media">Medio</span></td>
+                        </tr>
+                        <tr>
+                            <td>UX-003</td>
+                            <td>Estados "activo/inactivo" sin acción para cambiar</td>
+                            <td>Badges en listado</td>
+                            <td><span class="badge badge-media">Medio</span></td>
+                        </tr>
+                        <tr>
+                            <td>UX-004</td>
+                            <td>Iconos en tabs mobile sin labels</td>
+                            <td>Navegación modal</td>
+                            <td><span class="badge badge-baja">Bajo</span></td>
+                        </tr>
+                        <tr>
+                            <td>UX-005</td>
+                            <td>Sin indicación de campos editables</td>
+                            <td>Pestaña Datos fuera de modo edición</td>
+                            <td><span class="badge badge-baja">Bajo</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">J.2 Riesgos Funcionales (10 críticos/altos)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Riesgo</th>
+                            <th>Severidad</th>
+                            <th>Mitigación Propuesta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>RK-001</td>
+                            <td>Sin confirmación al eliminar</td>
+                            <td><span class="badge badge-critica">CRÍTICO</span></td>
+                            <td>Implementar modal de confirmación</td>
+                        </tr>
+                        <tr>
+                            <td>RK-002</td>
+                            <td>Sin detección de duplicados</td>
+                            <td><span class="badge badge-alta">ALTA</span></td>
+                            <td>Validar email/NIF únicos en backend</td>
+                        </tr>
+                        <tr>
+                            <td>RK-003</td>
+                            <td>Sin validación de email</td>
+                            <td><span class="badge badge-alta">ALTA</span></td>
+                            <td>Regex de validación + verificación</td>
+                        </tr>
+                        <tr>
+                            <td>RK-004</td>
+                            <td>Sin límite en listado</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Implementar paginación o scroll infinito</td>
+                        </tr>
+                        <tr>
+                            <td>RK-005</td>
+                            <td>Datos calculados en frontend</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Calcular en backend para consistencia</td>
+                        </tr>
+                        <tr>
+                            <td>RK-006</td>
+                            <td>Sin estados de loading</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Añadir skeletons y spinners</td>
+                        </tr>
+                        <tr>
+                            <td>RK-007</td>
+                            <td>Sin manejo de errores visible</td>
+                            <td><span class="badge badge-alta">ALTA</span></td>
+                            <td>Toast/banner de errores</td>
+                        </tr>
+                        <tr>
+                            <td>RK-008</td>
+                            <td>Mock data mezclado con real</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Separar claramente o eliminar</td>
+                        </tr>
+                        <tr>
+                            <td>RK-009</td>
+                            <td>Sin restore en cancelar edición</td>
+                            <td><span class="badge badge-baja">BAJA</span></td>
+                            <td>✅ Implementado correctamente</td>
+                        </tr>
+                        <tr>
+                            <td>RK-010</td>
+                            <td>Sin limit en textarea notas</td>
+                            <td><span class="badge badge-baja">BAJA</span></td>
+                            <td>Añadir maxLength</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <h3 class="subsection-title">J.3 Riesgos de Permisos (4 detectados)</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Riesgo</th>
+                            <th>Severidad</th>
+                            <th>Mitigación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>PR-001</td>
+                            <td>Todo visible para todos los roles</td>
+                            <td><span class="badge badge-alta">ALTA</span></td>
+                            <td>Implementar permisos en componentes</td>
+                        </tr>
+                        <tr>
+                            <td>PR-002</td>
+                            <td>Botones habilitados sin validación backend</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Validar permisos antes de enviar</td>
+                        </tr>
+                        <tr>
+                            <td>PR-003</td>
+                            <td>Tab CRM visible aunque no contratado</td>
+                            <td><span class="badge badge-baja">BAJA</span></td>
+                            <td>Validar desde backend</td>
+                        </tr>
+                        <tr>
+                            <td>PR-004</td>
+                            <td>Sin distinción empleado/gerente en datos</td>
+                            <td><span class="badge badge-media">MEDIA</span></td>
+                            <td>Ofuscar datos según rol</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+            
+            <!-- P) CONCLUSIONES -->
+            <section id="conclusiones" class="section">
+                <h2 class="section-title">P) CONCLUSIONES Y PRÓXIMOS PASOS</h2>
+                
+                <div class="summary-box">
+                    <h4>Estado Actual del Módulo Clientes</h4>
+                    <p>El módulo <strong>Clientes</strong> está <strong>71.3% implementado en BASE</strong> con:</p>
+                    <ul style="list-style: none; padding-left: 0; margin-top: 15px;">
+                        <li style="padding: 5px 0;">✅ CRUD completo (crear, ver, editar - NO eliminar)</li>
+                        <li style="padding: 5px 0;">✅ Dos vistas (grid y tabla)</li>
+                        <li style="padding: 5px 0;">✅ Modal de detalle con 5 pestañas funcionales</li>
+                        <li style="padding: 5px 0;">✅ Integración con Presupuestos, Facturación, CRM, Afiliados</li>
+                        <li style="padding: 5px 0;">✅ Diseño responsive mobile/desktop</li>
+                        <li style="padding: 5px 0;">✅ Sistema de permisos conceptual</li>
+                        <li style="padding: 5px 0;">❌ Sin backend conectado (mock data)</li>
+                        <li style="padding: 5px 0;">❌ Sin validaciones de seguridad</li>
+                        <li style="padding: 5px 0;">❌ Sin paginación</li>
+                        <li style="padding: 5px 0;">❌ Sin búsqueda/filtros</li>
+                    </ul>
+                </div>
+                
+                <h3 class="subsection-title">Prioridades de Implementación (Backend)</h3>
+                
+                <div class="alert alert-critical">
+                    <div class="alert-title">🔥 CRÍTICO (Semana 1-2)</div>
+                    <ul>
+                        <li>Conexión a backend real</li>
+                        <li>CRUD completo con validaciones</li>
+                        <li>Gestión de duplicados</li>
+                        <li>Validación de email/teléfono</li>
+                        <li>Permisos básicos (ver vs editar)</li>
+                        <li>Paginación</li>
+                        <li>Búsqueda simple</li>
+                    </ul>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <div class="alert-title">⚠️ ALTA (Semana 3-4)</div>
+                    <ul>
+                        <li>Sistema de notas</li>
+                        <li>Historial de actividad</li>
+                        <li>Integración con Facturación/Pedidos</li>
+                        <li>Estados de loading</li>
+                        <li>Manejo de errores</li>
+                        <li>Confirmación de eliminación</li>
+                    </ul>
+                </div>
+                
+                <div class="alert alert-info">
+                    <div class="alert-title">📋 MEDIA (Mes 2)</div>
+                    <ul>
+                        <li>Exportar/Importar</li>
+                        <li>Filtros avanzados</li>
+                        <li>Etiquetas/Tags</li>
+                        <li>Segmentación</li>
+                        <li>Reportes básicos</li>
+                    </ul>
+                </div>
+                
+                <h3 class="subsection-title">Documento Técnico (Siguiente Fase)</h3>
+                <p>Este documento servirá de base para crear:</p>
+                <ol style="padding-left: 20px;">
+                    <li style="padding: 5px 0;"><strong>Especificación técnica de API:</strong> Endpoints, schemas, autenticación</li>
+                    <li style="padding: 5px 0;"><strong>Modelo de base de datos:</strong> Tablas, relaciones, índices, migraciones</li>
+                    <li style="padding: 5px 0;"><strong>Casos de uso técnicos:</strong> Flujos con backend, manejo de errores, optimizaciones</li>
+                    <li style="padding: 5px 0;"><strong>Plan de testing:</strong> Unit tests, Integration tests, E2E tests</li>
+                </ol>
+            </section>
+            
+            <!-- FOOTER -->
+            <div style="margin-top: 60px; padding-top: 30px; border-top: 3px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 0.9rem;">
+                <p><strong>FIN DE AUDITORÍA</strong></p>
+                <p style="margin-top: 10px;">Documento generado para <strong>UDAR EDGE</strong></p>
+                <p>Módulo: Clientes | Fecha: 11 de febrero de 2026 | Versión: 1.0</p>
+            </div>
+            
+        </div>
+    </div>
+</body>
+</html>

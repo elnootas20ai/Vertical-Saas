@@ -1,0 +1,34 @@
+# Formato extendido para contexto de IA/plugin:
+# MODEL|nombreModelo|tituloModelo
+# #DESC|descripcion del modelo
+# SECTOR|claveSector|tituloSector|#descripcion del sector
+# FIELD|nombre|tipo|required|control|titulo|placeholder|#descripcion campo
+# ENDSECTOR
+# ENDMODEL
+
+MODEL|clientes|Clientes
+#DESC|Modelo principal de clientes para CRM y ventas. Prioriza datos de contacto y notas comerciales.
+SECTOR|identidad|Identidad del cliente|#Datos base para identificar al cliente en toda la app.
+FIELD|_id|string|required|input|ID cliente|Ej: cli_0001|#Identificador unico del documento en CouchDB.
+FIELD|nombre|string|required|input|Nombre completo|Ej: Juan Perez|#Nombre visible del cliente para listados y busquedas.
+FIELD|telefono|string|optional|input|Telefono|Ej: +34 600 000 000|#Telefono principal para contacto comercial y soporte.
+FIELD|activo|boolean|required|input|Cliente activo|true o false|#Estado operativo del cliente para filtrar registros vigentes.
+ENDSECTOR
+SECTOR|contexto|Contexto comercial|#Informacion cualitativa para dar contexto al equipo y a la IA.
+FIELD|notas|string|optional|textarea|Notas internas|Ej: Cliente con preferencia de contacto por la tarde|#Observaciones internas para personalizacion del trato comercial.
+ENDSECTOR
+ENDMODEL
+
+MODEL|pedidos|Pedidos
+#DESC|Modelo de pedidos asociado a clientes. Define importes, estado y detalle de lineas.
+SECTOR|cabecera|Cabecera del pedido|#Metadatos principales del pedido para seguimiento y facturacion.
+FIELD|_id|string|required|input|ID pedido|Ej: ped_2026_0001|#Identificador unico del pedido en CouchDB.
+FIELD|clienteId|string|required|input|ID cliente|Ej: cli_0001|#Referencia al cliente propietario del pedido.
+FIELD|total|number|required|input|Total pedido|Ej: 199.99|#Importe total del pedido con precision decimal.
+FIELD|estado|string|optional|input|Estado|Ej: borrador, confirmado, enviado|#Estado del ciclo de vida del pedido para automatizaciones.
+ENDSECTOR
+SECTOR|detalle|Detalle de lineas|#Contenido del pedido para construir resumenes y renderizar detalle.
+FIELD|lineas|array|required|textarea|Lineas del pedido|JSON array de lineas|#Listado de items del pedido con cantidad, precio y subtotal.
+FIELD|observaciones|string|optional|textarea|Observaciones|Ej: Entregar por la puerta trasera|#Indicaciones logisticas o comerciales asociadas al pedido.
+ENDSECTOR
+ENDMODEL

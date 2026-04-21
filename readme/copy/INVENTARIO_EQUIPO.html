@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INVENTARIO COMPLETO - Módulo Equipo y RRHH | UDAR EDGE</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background-color: #f9fafb;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 40px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #111827;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            border-bottom: 4px solid #3b82f6;
+            padding-bottom: 15px;
+        }
+        
+        h2 {
+            color: #1f2937;
+            font-size: 2em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        h3 {
+            color: #374151;
+            font-size: 1.5em;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        h4 {
+            color: #4b5563;
+            font-size: 1.25em;
+            margin-top: 25px;
+            margin-bottom: 12px;
+        }
+        
+        h5 {
+            color: #6b7280;
+            font-size: 1.1em;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .metadata {
+            background-color: #f3f4f6;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        
+        .metadata p {
+            margin: 5px 0;
+            font-weight: 600;
+        }
+        
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #ffffff;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .subsection {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f9fafb;
+            border-left: 3px solid #9ca3af;
+        }
+        
+        ul, ol {
+            margin: 15px 0 15px 30px;
+        }
+        
+        li {
+            margin: 8px 0;
+        }
+        
+        strong {
+            color: #111827;
+            font-weight: 700;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin: 0 4px;
+        }
+        
+        .badge-base {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .badge-flag {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .badge-dependencia {
+            background-color: #e0e7ff;
+            color: #3730a3;
+        }
+        
+        .badge-pais {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .badge-pendiente {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .warning {
+            background-color: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 12px;
+            margin: 15px 0;
+        }
+        
+        .info-box {
+            background-color: #dbeafe;
+            border-left: 4px solid #3b82f6;
+            padding: 12px;
+            margin: 15px 0;
+        }
+        
+        .success-box {
+            background-color: #d1fae5;
+            border-left: 4px solid #10b981;
+            padding: 12px;
+            margin: 15px 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        
+        th {
+            background-color: #f3f4f6;
+            font-weight: 700;
+            color: #111827;
+        }
+        
+        .toc {
+            background-color: #f9fafb;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+            border: 2px solid #e5e7eb;
+        }
+        
+        .toc h3 {
+            margin-top: 0;
+            color: #1f2937;
+        }
+        
+        .toc ul {
+            list-style-type: none;
+            margin-left: 0;
+        }
+        
+        .toc li {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        
+        .toc a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        .emoji {
+            font-style: normal;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 3em;
+            font-weight: 700;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        @media print {
+            body {
+                background-color: white;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+                padding: 20px;
+            }
+            .no-print {
+                display: none;
+            }
+        }
+        
+        code {
+            background-color: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        hr {
+            border: none;
+            border-top: 2px solid #e5e7eb;
+            margin: 30px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <h1>📋 INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH</h1>
+        <p style="font-size: 1.3em; color: #6b7280; margin-bottom: 20px;"><strong>SaaS UDAR EDGE - Vista Gerente</strong></p>
+        
+        <div class="metadata">
+            <p><strong>Versión:</strong> 1.0</p>
+            <p><strong>Fecha:</strong> 4 Febrero 2026</p>
+            <p><strong>Contexto:</strong> Sistema multiempresa, multivertical, multipaís</p>
+            <p><strong>Alcance:</strong> Módulo Equipo completo (gestión de trabajadores, horarios, fichajes, vacaciones, gastos, consumos)</p>
+        </div>
+
+        <!-- ESTADÍSTICAS PRINCIPALES -->
+        <h2>📊 Resumen Ejecutivo</h2>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Funcionalidades</div>
+                <div class="stat-number">150+</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Pestañas Principales</div>
+                <div class="stat-number">6</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Permisos Sistema</div>
+                <div class="stat-number">71</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">FLAGS Módulo</div>
+                <div class="stat-number">9</div>
+            </div>
+        </div>
+
+        <!-- TABLA DE CONTENIDOS -->
+        <div class="toc">
+            <h3>📑 Índice de Contenidos</h3>
+            <ul>
+                <li><a href="#estructura">1. Estructura General del Módulo</a></li>
+                <li><a href="#pestana-equipo">2. Pestaña: EQUIPO (BASE)</a></li>
+                <li><a href="#pestana-horarios">3. Pestaña: HORARIOS (FLAG)</a></li>
+                <li><a href="#pestana-fichajes">4. Pestaña: FICHAJES (BASE)</a></li>
+                <li><a href="#pestana-vacaciones">5. Pestaña: VACACIONES (FLAG)</a></li>
+                <li><a href="#pestana-consumos">6. Pestaña: CONSUMOS (FLAG)</a></li>
+                <li><a href="#pestana-gastos">7. Pestaña: GASTOS (FLAG)</a></li>
+                <li><a href="#funcionalidades-adicionales">8. Funcionalidades Adicionales</a></li>
+                <li><a href="#modulo-informes">9. Módulo de Informes - Equipo</a></li>
+                <li><a href="#dependencias">10. Resumen de Dependencias y Decisiones Pendientes</a></li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <!-- ESTRUCTURA GENERAL -->
+        <h2 id="estructura">ESTRUCTURA GENERAL DEL MÓDULO</h2>
+
+        <div class="section">
+            <h3>Navegación por Pestañas (Tabs Principales)</h3>
+            <ol>
+                <li><strong>Equipo</strong> <span class="badge badge-base">BASE</span> - siempre visible</li>
+                <li><strong>Horarios</strong> <span class="badge badge-flag">FLAG: schedules</span></li>
+                <li><strong>Fichajes</strong> <span class="badge badge-base">BASE</span> - siempre visible</li>
+                <li><strong>Vacaciones</strong> <span class="badge badge-flag">FLAG: vacations</span></li>
+                <li><strong>Consumos</strong> <span class="badge badge-flag">FLAG: consumptions</span></li>
+                <li><strong>Gastos</strong> <span class="badge badge-flag">FLAG: expenses</span></li>
+            </ol>
+
+            <h3>Panel Lateral de Detalle de Empleado</h3>
+            <p>Al hacer clic en un empleado, se abre panel lateral con estas pestañas:</p>
+            <ol>
+                <li><strong>Información</strong> - siempre visible</li>
+                <li><strong>Horarios</strong> <span class="badge badge-flag">FLAG: schedules</span></li>
+                <li><strong>Fichajes</strong> - siempre visible</li>
+                <li><strong>Vacaciones</strong> <span class="badge badge-flag">FLAG: vacations</span></li>
+                <li><strong>Documentos</strong> - siempre visible</li>
+                <li><strong>Permisos</strong> - siempre visible</li>
+                <li><strong>Puesto</strong> <span class="badge badge-flag">FLAG: jobdescription</span></li>
+                <li><strong>Historial</strong> <span class="badge badge-flag">FLAG: audit</span></li>
+            </ol>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA EQUIPO -->
+        <h2 id="pestana-equipo">1. PESTAÑA: EQUIPO <span class="badge badge-base">BASE</span></h2>
+
+        <div class="section">
+            <h3>1.1 LISTADO DE TRABAJADORES</h3>
+
+            <div class="subsection">
+                <h4>1.1.1 Visualización del Listado</h4>
+                <p><strong>Función:</strong> Mostrar todos los trabajadores de la empresa</p>
+                <p><strong>Rol:</strong> Gerente</p>
+                <p><strong>Dependencias:</strong></p>
+                <ul>
+                    <li><span class="emoji">🔗</span> RRHH / Trabajador (datos de empleados)</li>
+                    <li><span class="emoji">🔗</span> Documentación (estado onboarding)</li>
+                </ul>
+
+                <p><strong>Funcionalidades incluidas:</strong></p>
+                <ul>
+                    <li>Contador de trabajadores total</li>
+                    <li>Toggle vista: Tarjetas / Tabla</li>
+                    <li>Ordenamiento por: Nombre, Email, Rol, Estado</li>
+                    <li>Estado visual: Activo / Inactivo</li>
+                    <li>Avatar con inicial del nombre</li>
+                </ul>
+
+                <div class="warning">
+                    <p><strong><span class="emoji">⚠</span> Validaciones:</strong></p>
+                    <ul>
+                        <li>Usuario debe tener permiso "ver_equipo"</li>
+                        <li>Vista Global deshabilitada (requiere empresa específica)</li>
+                    </ul>
+                </div>
+
+                <p><strong>Configuraciones previas:</strong></p>
+                <ul>
+                    <li>Empresa creada y seleccionada</li>
+                    <li>Permisos de usuario configurados</li>
+                </ul>
+            </div>
+
+            <div class="subsection">
+                <h4>1.1.2 Vista en Tarjetas (Cards)</h4>
+                <p><strong>Función:</strong> Visualización en formato tarjeta con información resumida</p>
+                <p><strong>Rol:</strong> Gerente</p>
+                
+                <p><strong>Información mostrada por tarjeta:</strong></p>
+                <ul>
+                    <li>Avatar / Inicial</li>
+                    <li>Nombre completo</li>
+                    <li>Rol del empleado</li>
+                    <li>Email</li>
+                    <li>Estado (badge visual)</li>
+                    <li>Botón "Enviar mensaje"</li>
+                    <li>Botón "Ver perfil completo"</li>
+                </ul>
+
+                <p><strong>Interacciones:</strong></p>
+                <ul>
+                    <li>Click en tarjeta → Abre panel de detalle</li>
+                    <li>Click en "Enviar mensaje" → Abre chat con empleado</li>
+                    <li>Hover → Efecto visual de elevación</li>
+                </ul>
+
+                <p><strong>Responsive:</strong></p>
+                <ul>
+                    <li>Mobile: 1 columna</li>
+                    <li>Tablet: 2 columnas</li>
+                    <li>Desktop: 3 columnas</li>
+                </ul>
+            </div>
+
+            <div class="subsection">
+                <h4>1.1.3 Vista en Tabla</h4>
+                <p><strong>Función:</strong> Visualización en formato tabla con ordenamiento</p>
+                
+                <p><strong>Columnas de la tabla:</strong></p>
+                <ul>
+                    <li>Trabajador (nombre + avatar)</li>
+                    <li>Email</li>
+                    <li>Rol</li>
+                    <li>Estado</li>
+                    <li>Acciones (ver perfil)</li>
+                </ul>
+
+                <p><strong>Funcionalidades:</strong></p>
+                <ul>
+                    <li>Click en header de columna → Ordenar ascendente/descendente</li>
+                    <li>Click en fila → Abre panel de detalle</li>
+                    <li>Indicador visual de ordenamiento activo</li>
+                </ul>
+            </div>
+
+            <div class="subsection">
+                <h4>1.1.4 Añadir Nuevo Empleado</h4>
+                <p><strong>Función:</strong> Crear registro de nuevo trabajador</p>
+                <p><strong>Rol:</strong> Gerente</p>
+                <p><strong>Dependencias:</strong></p>
+                <ul>
+                    <li><span class="emoji">🔗</span> RRHH / Trabajador (creación de registro)</li>
+                    <li><span class="emoji">🔗</span> Documentación (inicio de onboarding si está activo)</li>
+                    <li><span class="emoji">🌍</span> Dependencia por país (campos obligatorios de contrato)</li>
+                </ul>
+
+                <p><strong>Campos del formulario:</strong></p>
+                
+                <h5>Datos Personales:</h5>
+                <ul>
+                    <li>Nombre completo (obligatorio)</li>
+                    <li>Email personal (obligatorio)</li>
+                    <li>Email profesional (opcional)</li>
+                    <li>DNI/NIF (obligatorio)</li>
+                    <li><span class="emoji">🌍</span> Fecha de nacimiento (formato según país)</li>
+                    <li>Lugar de nacimiento</li>
+                    <li>Nacionalidad</li>
+                    <li>Dirección completa</li>
+                    <li>Ciudad</li>
+                    <li>Código postal</li>
+                    <li><span class="emoji">🌍</span> País</li>
+                    <li>Teléfono</li>
+                    <li>Contacto de emergencia (nombre + teléfono)</li>
+                </ul>
+
+                <h5>Datos Laborales:</h5>
+                <ul>
+                    <li><span class="emoji">🌍</span> Tipo de contrato (según legislación del país)</li>
+                    <li><span class="emoji">🌍</span> Jornada laboral (según convenio)</li>
+                    <li>Horas semanales</li>
+                    <li><span class="emoji">🌍</span> Salario (según convenio y país)</li>
+                    <li>Centro de trabajo (si multicenter está activo)</li>
+                    <li>Fecha de inicio</li>
+                    <li><span class="emoji">🌍</span> Convenio colectivo aplicable</li>
+                </ul>
+
+                <h5>Datos Administrativos (España):</h5>
+                <ul>
+                    <li>Número de la Seguridad Social</li>
+                    <li>Código de contrato SEPE</li>
+                    <li>Fecha alta Seguridad Social</li>
+                    <li>Grupo de cotización</li>
+                    <li>Tipo de cotización</li>
+                    <li>Mutua</li>
+                    <li>CCC de la empresa</li>
+                    <li>% IRPF</li>
+                </ul>
+
+                <div class="warning">
+                    <p><strong><span class="emoji">⚠</span> DECISIONES PENDIENTES:</strong></p>
+                    <ul>
+                        <li>¿Enviar invitación automática?</li>
+                        <li>¿Iniciar proceso de onboarding automático?</li>
+                        <li>¿Asignar permisos por defecto según rol?</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <h3>1.2 PANEL DE DETALLE DEL EMPLEADO</h3>
+
+        <div class="section">
+            <h4>1.2.1 Pestaña: INFORMACIÓN</h4>
+
+            <h5>1.2.1.1 Sección: Datos Personales</h5>
+            <p><strong>Función:</strong> Visualizar y editar información personal del trabajador</p>
+            <p><strong>Rol:</strong> Gerente (lectura y escritura), Trabajador (solo lectura propia)</p>
+
+            <p><strong>Campos visualizados:</strong></p>
+            <ul>
+                <li>DNI/NIF</li>
+                <li>Fecha de nacimiento</li>
+                <li>Lugar de nacimiento</li>
+                <li>Nacionalidad</li>
+                <li>Dirección completa</li>
+                <li>Ciudad, Código postal, País</li>
+                <li>Teléfono personal</li>
+                <li>Email personal y profesional</li>
+                <li>IBAN (para nóminas)</li>
+                <li>Contacto de emergencia</li>
+            </ul>
+
+            <div class="info-box">
+                <p><strong>Funcionalidad de edición:</strong></p>
+                <ul>
+                    <li>Botón "Editar Datos Personales" → Abre modal contextual</li>
+                    <li>Modal específico muestra SOLO campos de datos personales</li>
+                    <li>Guardado → Genera entrada en historial (si FLAG audit activo)</li>
+                </ul>
+            </div>
+
+            <h5>1.2.1.2 Sección: Datos Laborales</h5>
+            <p><strong>Función:</strong> Visualizar y editar información contractual del trabajador</p>
+
+            <p><strong>Campos visualizados:</strong></p>
+            <ul>
+                <li><span class="emoji">🌍</span> Tipo de contrato (indefinido, temporal, formación, etc.)</li>
+                <li><span class="emoji">🌍</span> Tipo de jornada (completa, parcial, etc.)</li>
+                <li>Horas semanales contratadas</li>
+                <li><span class="emoji">🌍</span> Salario bruto mensual</li>
+                <li>Centro de trabajo (si multicenter activo)</li>
+                <li>Fecha de inicio en la empresa</li>
+                <li><span class="emoji">🌍</span> Convenio colectivo aplicable</li>
+                <li>Estado del empleado: Activo / Inactivo</li>
+            </ul>
+
+            <div class="warning">
+                <p><strong><span class="emoji">⚠</span> DECISIONES PENDIENTES:</strong></p>
+                <ul>
+                    <li>¿Cambio de centro mueve horarios automáticamente?</li>
+                    <li>¿Inactivar empleado cancela vacaciones futuras?</li>
+                </ul>
+            </div>
+
+            <h5>1.2.1.3 Sección: Datos Administrativos</h5>
+            <p><strong>Función:</strong> Visualizar y editar información administrativa y fiscal</p>
+            <p><strong>Rol:</strong> Gerente (lectura y escritura), RRHH (lectura y escritura)</p>
+
+            <p><strong>Campos visualizados (España):</strong></p>
+            <ul>
+                <li>Número de la Seguridad Social</li>
+                <li>Código de contrato SEPE</li>
+                <li>Fecha de alta en Seguridad Social</li>
+                <li>Grupo de cotización</li>
+                <li>Tipo de cotización</li>
+                <li>Mutua asignada</li>
+                <li>CCC de la empresa</li>
+                <li>% IRPF</li>
+            </ul>
+
+            <h5>1.2.1.4 Funcionalidad: Badge de Estado</h5>
+            <p><strong>Estados posibles:</strong></p>
+            <ul>
+                <li><strong>Activo</strong> (verde): Empleado activo con acceso completo</li>
+                <li><strong>Inactivo</strong> (gris): Empleado dado de baja o suspendido</li>
+                <li><strong>Pendiente</strong> (naranja): Onboarding no completado</li>
+                <li><strong>Invitado</strong> (azul): Invitación enviada, pendiente aceptación</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h4>1.2.2 Pestaña: HORARIOS <span class="badge badge-flag">FLAG: schedules</span></h4>
+
+            <h5>1.2.2.1 Visualización de Horario Asignado</h5>
+            <p><strong>Función:</strong> Mostrar horario semanal asignado al trabajador</p>
+
+            <p><strong>Información mostrada:</strong></p>
+            <ul>
+                <li>Horario semanal en formato visual (calendarios)</li>
+                <li>Turnos asignados por día</li>
+                <li>Horas totales semanales</li>
+                <li>Centro de trabajo (si multicenter)</li>
+                <li>Días libres/descanso</li>
+            </ul>
+
+            <h5>1.2.2.2 Edición de Horario Individual</h5>
+            <p><strong>Funcionalidades:</strong></p>
+            <ul>
+                <li>Seleccionar semana/mes</li>
+                <li>Asignar turno por día</li>
+                <li>Copiar semana anterior</li>
+                <li>Aplicar plantilla predefinida</li>
+                <li>Marcar días libres/vacaciones</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h4>1.2.3 Pestaña: FICHAJES</h4>
+
+            <h5>1.2.3.1 Resumen de Fichajes del Empleado</h5>
+            <p><strong>KPIs mostrados:</strong></p>
+            <ul>
+                <li>Fichajes totales del mes</li>
+                <li>% Puntualidad</li>
+                <li>Incidencias (retrasos, ausencias)</li>
+                <li>Horas trabajadas vs horas esperadas</li>
+                <li>Dispositivo de fichaje más usado</li>
+            </ul>
+
+            <h5>1.2.3.2 Solicitud de Ajuste de Fichaje</h5>
+            <p><strong>Función:</strong> Trabajador solicita corrección de fichaje erróneo</p>
+            <p><strong>Rol:</strong> Trabajador (crea solicitud), Gerente (aprueba/rechaza)</p>
+
+            <p><strong>Proceso:</strong></p>
+            <ol>
+                <li>Trabajador selecciona fichaje a corregir</li>
+                <li>Indica nuevo horario correcto</li>
+                <li>Añade justificación obligatoria</li>
+                <li>Envía solicitud</li>
+            </ol>
+
+            <h5>1.2.3.3 Ajuste Manual de Fichaje (Gerente)</h5>
+            <p><strong>Función:</strong> Gerente modifica fichaje directamente</p>
+
+            <h5>1.2.3.4 Exportación de Fichajes</h5>
+            <p><strong>Formatos disponibles:</strong></p>
+            <ul>
+                <li>Excel (.xlsx)</li>
+                <li>CSV</li>
+                <li>PDF (resumen)</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h4>1.2.4 Pestaña: VACACIONES <span class="badge badge-flag">FLAG: vacations</span></h4>
+
+            <h5>1.2.4.1 Balance de Vacaciones</h5>
+            <p><strong>Información mostrada:</strong></p>
+            <ul>
+                <li>Días totales anuales (según convenio)</li>
+                <li>Días disfrutados</li>
+                <li>Días pendientes</li>
+                <li>Días solicitados (pendientes aprobación)</li>
+                <li>Próximas vacaciones aprobadas</li>
+            </ul>
+
+            <h5>1.2.4.2 Calendario Visual de Vacaciones</h5>
+            <p><strong>Color coding por estado:</strong></p>
+            <ul>
+                <li>Verde: Aprobadas</li>
+                <li>Naranja: Pendientes</li>
+                <li>Rojo: Rechazadas</li>
+                <li>Azul: Propuestas por gerente</li>
+            </ul>
+
+            <h5>1.2.4.3 Solicitar Vacaciones (Trabajador)</h5>
+            <h5>1.2.4.4 Proponer Vacaciones (Gerente)</h5>
+            <h5>1.2.4.5 Asignar Vacaciones Directamente (Gerente)</h5>
+            <h5>1.2.4.6 Aprobar/Rechazar Solicitudes de Vacaciones</h5>
+        </div>
+
+        <div class="section">
+            <h4>1.2.5 Pestaña: DOCUMENTOS</h4>
+
+            <h5>1.2.5.1 Listado de Documentos del Empleado</h5>
+            <p><strong>Tipos de documentos:</strong></p>
+            <ul>
+                <li><strong>Contrato laboral</strong> (obligatorio)</li>
+                <li><strong>DNI/Pasaporte</strong> (obligatorio)</li>
+                <li>Títulos académicos (opcional)</li>
+                <li>Certificados formación (opcional)</li>
+                <li>Nóminas</li>
+                <li>Partes de IT (baja médica)</li>
+                <li>Certificados médicos</li>
+                <li>Otros documentos</li>
+            </ul>
+
+            <h5>1.2.5.2 Subir Nuevo Documento</h5>
+            <p><strong>Validaciones:</strong></p>
+            <ul>
+                <li>Formatos permitidos: PDF, JPG, PNG, DOCX</li>
+                <li>Tamaño máximo: <span class="badge badge-pendiente">⚠ DECISIÓN PENDIENTE</span></li>
+            </ul>
+
+            <h5>1.2.5.3 Gestión de Documentación Obligatoria</h5>
+            <p><strong>Estados:</strong></p>
+            <ul>
+                <li>✅ Completo: Todos los documentos subidos</li>
+                <li>⚠️ Incompleto: Faltan documentos obligatorios</li>
+                <li>❌ Rechazado: Algún documento no válido</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h4>1.2.6 Pestaña: PERMISOS</h4>
+
+            <h5>1.2.6.1 Visualización de Permisos Asignados</h5>
+            
+            <div class="info-box">
+                <p><strong>Estructura de permisos:</strong></p>
+                <ul>
+                    <li><strong>Arquitectura fija:</strong> Permisos solo se definen en roles</li>
+                    <li><strong>Herencia:</strong> Usuarios heredan permisos del rol asignado</li>
+                    <li><strong>Niveles jerárquicos:</strong> 4 niveles (N1 a N4)</li>
+                    <li><strong>71 permisos totales</strong> organizados en 6 módulos</li>
+                </ul>
+            </div>
+
+            <p><strong>Módulos de permisos:</strong></p>
+            <ul>
+                <li>Negocio / F1</li>
+                <li>Clientes</li>
+                <li>Almacén / Proveedores</li>
+                <li>Facturación / Contabilidad</li>
+                <li>Informes</li>
+                <li>RRHH / Equipo</li>
+            </ul>
+
+            <h5>1.2.6.2 Cambio de Rol del Empleado</h5>
+            <p><strong>Sistema muestra comparativa de permisos:</strong></p>
+            <ul>
+                <li>Permisos que se añadirán (verde)</li>
+                <li>Permisos que se quitarán (rojo)</li>
+                <li>Permisos que se mantienen (gris)</li>
+            </ul>
+
+            <h5>1.2.6.3 Módulo: Negocio / F1 (11 permisos)</h5>
+            <h5>1.2.6.4 Módulo: Clientes (7 permisos)</h5>
+            <h5>1.2.6.5 Módulo: Almacén / Proveedores (10 permisos)</h5>
+            <h5>1.2.6.6 Módulo: Facturación / Contabilidad (10 permisos)</h5>
+            <h5>1.2.6.7 Módulo: Informes (7 permisos)</h5>
+            <h5>1.2.6.8 Módulo: RRHH / Equipo (32 permisos)</h5>
+        </div>
+
+        <div class="section">
+            <h4>1.2.7 Pestaña: PUESTO <span class="badge badge-flag">FLAG: jobdescription</span></h4>
+
+            <h5>1.2.7.1 Descripción del Puesto de Trabajo</h5>
+            <p><strong>Secciones de la descripción:</strong></p>
+            <ul>
+                <li>Nombre del puesto</li>
+                <li>Departamento</li>
+                <li>Reporta a</li>
+                <li>Supervisa a</li>
+                <li>Misión del puesto</li>
+                <li>Funciones principales</li>
+                <li>Competencias requeridas</li>
+                <li>Formación requerida</li>
+                <li>Experiencia requerida</li>
+            </ul>
+
+            <h5>1.2.7.2 Objetivos del Puesto</h5>
+        </div>
+
+        <div class="section">
+            <h4>1.2.8 Pestaña: HISTORIAL <span class="badge badge-flag">FLAG: audit</span></h4>
+
+            <h5>1.2.8.1 Registro de Cambios del Empleado</h5>
+            <p><strong>Eventos registrados:</strong></p>
+            <ul>
+                <li>Cambios en datos personales</li>
+                <li>Cambios en datos laborales</li>
+                <li>Cambios en datos administrativos</li>
+                <li>Cambios de rol/permisos</li>
+                <li>Ajustes de fichajes</li>
+                <li>Aprobación/rechazo de vacaciones</li>
+                <li>Subida de documentos</li>
+                <li>Cambios en horarios</li>
+                <li>Cambios en descripción de puesto</li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA HORARIOS -->
+        <h2 id="pestana-horarios">2. PESTAÑA: HORARIOS <span class="badge badge-flag">FLAG: schedules</span></h2>
+
+        <div class="section">
+            <h3>2.1 VISTA GENERAL DE PLANIFICACIÓN HORARIA</h3>
+
+            <h4>2.1.1 Calendario Mensual de Horarios</h4>
+            <p><strong>Funcionalidades:</strong></p>
+            <ul>
+                <li>Navegación mes a mes</li>
+                <li>Vista por semanas</li>
+                <li>Filtro por centro de trabajo (si multicenter)</li>
+                <li>Color coding por turno</li>
+                <li>Indicador de conflictos</li>
+            </ul>
+
+            <h4>2.1.2 Gestión de Turnos</h4>
+            <p><strong>Información de un turno:</strong></p>
+            <ul>
+                <li>Nombre del turno</li>
+                <li>Hora de inicio y fin</li>
+                <li>Descanso (duración y si es remunerado)</li>
+                <li>Color identificativo</li>
+                <li>Centro de trabajo</li>
+            </ul>
+
+            <h4>2.1.3 Plantillas de Horario Semanal</h4>
+            <h4>2.1.4 Asignación Masiva de Horarios</h4>
+            <h4>2.1.5 Copiar Semana Anterior</h4>
+
+            <h4>2.1.6 Alertas de Planificación</h4>
+            <p><strong>Tipos de alertas:</strong></p>
+            <ul>
+                <li><strong>Falta de personal:</strong> Día con menos empleados del mínimo</li>
+                <li><strong>Solapamiento:</strong> Empleado con dos turnos simultáneos</li>
+                <li><strong>Exceso de horas:</strong> Empleado supera horas contratadas</li>
+                <li><strong>Sin horario:</strong> Empleado sin turno asignado</li>
+                <li><strong>Conflicto con vacaciones</strong></li>
+                <li><strong>Descansos insuficientes:</strong> <span class="emoji">🌍</span> No cumple mínimo legal</li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA FICHAJES -->
+        <h2 id="pestana-fichajes">3. PESTAÑA: FICHAJES <span class="badge badge-base">BASE</span></h2>
+
+        <div class="section">
+            <h3>3.1 VISTA GENERAL DE FICHAJES</h3>
+
+            <h4>3.1.1 KPIs de Fichajes</h4>
+            <ul>
+                <li><strong>Fichados hoy:</strong> Número y % de empleados que han fichado</li>
+                <li><strong>Puntualidad:</strong> % de empleados que llegaron a tiempo</li>
+                <li><strong>Incidencias:</strong> Número de fichajes con problemas</li>
+                <li><strong>Horas trabajadas hoy:</strong> Total acumulado</li>
+                <li><strong>Empleados activos:</strong> Trabajando en este momento</li>
+            </ul>
+
+            <h4>3.1.2 Tarjetas Desplegables de Resumen</h4>
+            <p><strong>Tarjeta A: Fichajes de Hoy</strong></p>
+            <p><strong>Tarjeta B: Puntualidad</strong></p>
+            <p><strong>Tarjeta C: Incidencias</strong></p>
+
+            <h4>3.1.3 Botón: Ver Listado Completo de Fichajes</h4>
+            <p><span class="badge badge-pendiente">⚠ DECISIÓN PENDIENTE</span> Implementación futura</p>
+
+            <h4>3.1.4 Ranking de Puntualidad</h4>
+            <p><strong>Información mostrada:</strong></p>
+            <ul>
+                <li>Posición en ranking</li>
+                <li>Nombre del empleado</li>
+                <li>% de puntualidad en el período</li>
+                <li>Días trabajados/puntuales/tarde</li>
+                <li>Promedio de retraso</li>
+                <li>Medallas/insignias (1º, 2º, 3º)</li>
+            </ul>
+
+            <h3>3.2 CONFIGURACIÓN DE FICHAJES</h3>
+
+            <h4>3.2.1 Configuración de Geolocalización</h4>
+            <p><span class="emoji">🌍</span> Legislación de privacidad y geolocalización</p>
+
+            <h4>3.2.2 Configuración de Dispositivos Permitidos</h4>
+            <ul>
+                <li>Móvil</li>
+                <li>Tablet</li>
+                <li>Web (PC)</li>
+                <li>Autenticación biométrica (opcional)</li>
+            </ul>
+
+            <h4>3.2.3 Horarios de Fichaje</h4>
+            <ul>
+                <li><strong>Anticipación máxima:</strong> Minutos antes de inicio</li>
+                <li><strong>Retraso máximo:</strong> Minutos después que aún es puntual</li>
+                <li><strong>Ventana de salida:</strong> Minutos antes/después de fin</li>
+            </ul>
+
+            <h3>3.3 FICHAJE DESDE APLICACIÓN MÓVIL (Trabajador)</h3>
+            <h4>3.3.1 Fichar Entrada</h4>
+            <h4>3.3.2 Fichar Salida</h4>
+            <h4>3.3.3 Olvidé Fichar</h4>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA VACACIONES -->
+        <h2 id="pestana-vacaciones">4. PESTAÑA: VACACIONES <span class="badge badge-flag">FLAG: vacations</span></h2>
+
+        <div class="section">
+            <h3>4.1 VISTA GENERAL DE VACACIONES</h3>
+
+            <h4>4.1.1 Vista por Centros de Trabajo (si multicenter)</h4>
+
+            <h4>4.1.2 Tarjetas de Resumen por Centro</h4>
+            <ul>
+                <li><strong>Tarjeta A:</strong> Total Días Mes</li>
+                <li><strong>Tarjeta B:</strong> Solicitudes Pendientes</li>
+                <li><strong>Tarjeta C:</strong> Total Año</li>
+            </ul>
+
+            <h4>4.1.3 Calendario Mensual de Vacaciones</h4>
+            <p><strong>Código de colores:</strong></p>
+            <ul>
+                <li>Verde: Vacaciones aprobadas</li>
+                <li>Naranja: Solicitudes pendientes</li>
+                <li>Azul: Propuestas del gerente</li>
+                <li>Rojo: Solicitudes rechazadas</li>
+            </ul>
+
+            <h4>4.1.4 Botón: Proponer Vacaciones</h4>
+            <h4>4.1.5 Botón: Asignar Vacaciones</h4>
+            <h4>4.1.6 Modal de Solicitudes Pendientes</h4>
+
+            <h3>4.2 CONFIGURACIÓN DE VACACIONES</h3>
+
+            <h4>4.2.1 Configuración de Días por Año</h4>
+            <p><span class="emoji">🌍</span> Días según convenio y legislación del país</p>
+
+            <h4>4.2.2 Configuración de Períodos Bloqueados</h4>
+            <h4>4.2.3 Configuración de Anticipación Mínima</h4>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA CONSUMOS -->
+        <h2 id="pestana-consumos">5. PESTAÑA: CONSUMOS <span class="badge badge-flag">FLAG: consumptions</span></h2>
+
+        <div class="section">
+            <h3>5.1 VISTA GENERAL DE CONSUMOS</h3>
+
+            <h4>5.1.1 Tarjetas de Resumen</h4>
+            <ul>
+                <li><strong>Tarjeta A:</strong> Total Este Mes</li>
+                <li><strong>Tarjeta B:</strong> Aprobaciones Pendientes</li>
+                <li><strong>Tarjeta C:</strong> Límites Excedidos</li>
+            </ul>
+
+            <h3>5.2 GESTIÓN DE CONSUMOS</h3>
+
+            <h4>5.2.1 Registrar Consumo (Trabajador)</h4>
+            <h4>5.2.2 Aprobar/Rechazar Consumos</h4>
+
+            <h3>5.3 CONFIGURACIÓN DE CONSUMOS</h3>
+
+            <h4>5.3.1 Configurar Límites por Empleado</h4>
+            <h4>5.3.2 Categorías de Consumos</h4>
+            <p><strong>Categorías típicas:</strong></p>
+            <ul>
+                <li>Comida (menú del día)</li>
+                <li>Bebidas</li>
+                <li>Snacks</li>
+                <li>Material personal</li>
+                <li>Otros</li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <!-- PESTAÑA GASTOS -->
+        <h2 id="pestana-gastos">6. PESTAÑA: GASTOS <span class="badge badge-flag">FLAG: expenses</span></h2>
+
+        <div class="section">
+            <h3>6.1 VISTA GENERAL DE GASTOS</h3>
+
+            <h4>6.1.1 Tarjetas de Resumen</h4>
+            <ul>
+                <li><strong>Tarjeta A:</strong> Total Gastos</li>
+                <li><strong>Tarjeta B:</strong> Aprobaciones Pendientes</li>
+                <li><strong>Tarjeta C:</strong> Límites Excedidos</li>
+            </ul>
+
+            <h4>6.1.3 Modal de Detalle de Gasto</h4>
+            <p><strong>Información mostrada:</strong></p>
+            <ul>
+                <li>Empleado</li>
+                <li>Fecha del gasto</li>
+                <li>Concepto y categoría</li>
+                <li>Importe</li>
+                <li>Justificación</li>
+                <li>Factura/ticket adjunto</li>
+                <li>Total de gastos del empleado este mes</li>
+            </ul>
+
+            <h3>6.2 GESTIÓN DE GASTOS</h3>
+
+            <h4>6.2.1 Subir Gasto (Trabajador)</h4>
+            <p><strong>Categorías de gasto típicas:</strong></p>
+            <ul>
+                <li><strong>Transporte:</strong> combustible, peajes, taxis</li>
+                <li><strong>Alojamiento:</strong> hoteles</li>
+                <li><strong>Manutención:</strong> comidas con clientes</li>
+                <li><strong>Material:</strong> compras para la empresa</li>
+                <li><strong>Otros</strong></li>
+            </ul>
+
+            <h4>6.2.2 Aprobar/Rechazar Gastos</h4>
+            <h4>6.2.3 Solicitar Más Información</h4>
+
+            <h3>6.3 CONFIGURACIÓN DE GASTOS</h3>
+
+            <h4>6.3.1 Configurar Límites de Gastos</h4>
+            <h4>6.3.2 Categorías de Gastos</h4>
+            <h4>6.3.3 Políticas de Gastos</h4>
+            <p><span class="badge badge-pendiente">⚠ DECISIÓN PENDIENTE</span> Implementación futura</p>
+            <h4>6.3.4 Integración con Nóminas</h4>
+            <p><span class="badge badge-pendiente">⚠ DECISIÓN PENDIENTE</span> Implementación futura</p>
+        </div>
+
+        <hr>
+
+        <!-- FUNCIONALIDADES ADICIONALES -->
+        <h2 id="funcionalidades-adicionales">7. FUNCIONALIDADES ADICIONALES</h2>
+
+        <div class="section">
+            <h3>7.1 SISTEMA DE ONBOARDING <span class="badge badge-flag">FLAG: onboarding</span></h3>
+
+            <h4>7.1.1 Invitar Empleado</h4>
+            <p><strong>Estados de onboarding:</strong></p>
+            <ul>
+                <li><strong>Invitado:</strong> Invitación enviada, pendiente aceptación</li>
+                <li><strong>Pendiente datos:</strong> Aceptó invitación, faltan datos</li>
+                <li><strong>Pendiente gestoría:</strong> Datos completos, pendiente alta legal</li>
+                <li><strong>Activo:</strong> Proceso completo</li>
+                <li><strong>Inactivo:</strong> Dado de baja</li>
+            </ul>
+
+            <h4>7.1.2 Checklist de Onboarding</h4>
+            <p><strong>Tareas típicas:</strong></p>
+            <ul>
+                <li>✅ Datos personales completos</li>
+                <li>✅ Datos laborales completos</li>
+                <li>✅ Datos administrativos completos</li>
+                <li>✅ Contrato firmado subido</li>
+                <li>✅ DNI/Pasaporte subido</li>
+                <li>✅ Cuenta bancaria registrada</li>
+                <li>✅ Alta en Seguridad Social</li>
+                <li>✅ Reconocimiento médico</li>
+                <li>✅ Formación PRL completada</li>
+                <li>✅ Permisos asignados</li>
+                <li>✅ Horario asignado</li>
+                <li>✅ Acceso a app móvil configurado</li>
+            </ul>
+
+            <h3>7.2 INTEGRACIÓN CON GESTORÍA <span class="badge badge-flag">FLAG: gestoria</span></h3>
+
+            <h4>7.2.1 Notificaciones a Gestoría</h4>
+            <p><strong>Eventos que generan notificación:</strong></p>
+            <ul>
+                <li>Alta de nuevo empleado</li>
+                <li>Baja de empleado</li>
+                <li>Cambio de datos administrativos</li>
+                <li>Cambio de tipo de contrato</li>
+                <li>Cambio de salario</li>
+                <li>Cambio de jornada</li>
+                <li>IT (baja médica)</li>
+            </ul>
+
+            <h4>7.2.2 Exportación para Gestoría</h4>
+            <p><strong>Datos exportados:</strong></p>
+            <ul>
+                <li>Listado de empleados activos</li>
+                <li>Horas trabajadas del mes</li>
+                <li>Horas extra aprobadas</li>
+                <li>Gastos aprobados para reembolso</li>
+                <li>Ausencias (bajas, vacaciones)</li>
+                <li>Cambios contractuales</li>
+            </ul>
+
+            <h3>7.3 MULTICENTRO <span class="badge badge-flag">FLAG: multicenter</span></h3>
+
+            <h4>7.3.1 Gestión de Centros de Trabajo</h4>
+            <p><strong>Información por centro:</strong></p>
+            <ul>
+                <li>Nombre del centro</li>
+                <li>Dirección completa</li>
+                <li>Coordenadas geográficas</li>
+                <li>Color identificativo</li>
+                <li>Icono</li>
+                <li>Empleados asignados</li>
+                <li>Estado: Activo/Inactivo</li>
+            </ul>
+
+            <h4>7.3.2 Filtros por Centro</h4>
+
+            <h3>7.4 COMUNICACIONES</h3>
+
+            <h4>7.4.1 Chat con Empleado</h4>
+            <h4>7.4.2 Notificaciones Internas</h4>
+            <p><strong>Tipos de notificación:</strong></p>
+            <ul>
+                <li>Push (app móvil)</li>
+                <li>Email</li>
+                <li>Badge en app web</li>
+                <li>Panel de notificaciones</li>
+            </ul>
+        </div>
+
+        <hr>
+
+        <!-- MÓDULO DE INFORMES -->
+        <h2 id="modulo-informes">8. MÓDULO DE INFORMES - EQUIPO</h2>
+
+        <div class="section">
+            <h3>8.1 Informe: Fichajes</h3>
+            <p><span class="badge badge-base">BASE</span> Categoría: Equipo</p>
+            <p><strong>Contenido:</strong></p>
+            <ul>
+                <li>KPIs: Fichajes totales, Puntuales, Tardíos, Ausentes</li>
+                <li>Evolución de fichajes (gráfico)</li>
+                <li>Detalle por empleado</li>
+                <li>Alertas y excepciones</li>
+                <li>Insights (NORMAL/PRO)</li>
+            </ul>
+
+            <h3>8.2 Informe: Horas Trabajadas</h3>
+            <p><span class="badge badge-base">BASE</span></p>
+
+            <h3>8.3 Informe: Asistencia y Absentismo</h3>
+            <p><span class="badge badge-base">BASE</span></p>
+
+            <h3>8.4 Informe: Consumos Internos</h3>
+            <p><span class="badge badge-pendiente">⚠ DECISIÓN PENDIENTE</span> Implementación completa</p>
+        </div>
+
+        <hr>
+
+        <!-- DEPENDENCIAS Y DECISIONES -->
+        <h2 id="dependencias">9. RESUMEN DE DEPENDENCIAS Y DECISIONES PENDIENTES</h2>
+
+        <div class="section">
+            <h3>9.1 DEPENDENCIAS DE OTROS MÓDULOS</h3>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Módulo</th>
+                        <th>Dependencias</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>RRHH / Trabajador</strong></td>
+                        <td>Creación y gestión de empleados, datos personales/laborales/administrativos, estados, permisos y roles</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Fichajes</strong></td>
+                        <td>Registro de entradas/salidas, validación de horarios, geolocalización, datos para informes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Documentación</strong></td>
+                        <td>Almacenamiento de documentos laborales, checklist de onboarding, contratos, justificantes</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Facturación / Contabilidad</strong></td>
+                        <td>Registro contable de gastos, categorías contables, exportación</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Informes</strong></td>
+                        <td>Generación de informes de equipo, KPIs y métricas, exportación de datos</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>9.2 DEPENDENCIAS DE PAÍS <span class="emoji">🌍</span></h3>
+            
+            <div class="info-box">
+                <h4>España:</h4>
+                <ul>
+                    <li>Número de Seguridad Social</li>
+                    <li>CCC de empresa</li>
+                    <li>Código de contrato SEPE</li>
+                    <li>Grupo de cotización</li>
+                    <li>Convenios colectivos</li>
+                    <li>Días de vacaciones según convenio</li>
+                    <li>Descansos mínimos legales</li>
+                    <li>Alta en Seguridad Social</li>
+                    <li>Mutua laboral</li>
+                </ul>
+
+                <h4>Otros países:</h4>
+                <ul>
+                    <li>Identificación fiscal local</li>
+                    <li>Sistema de seguridad social equivalente</li>
+                    <li>Convenios y legislación laboral local</li>
+                    <li>Días de vacaciones según ley</li>
+                    <li>Formatos de contrato</li>
+                    <li>Retenciones fiscales</li>
+                </ul>
+            </div>
+
+            <h3>9.3 DECISIONES PENDIENTES CRÍTICAS</h3>
+
+            <div class="warning">
+                <h4>1. Onboarding:</h4>
+                <ul>
+                    <li>¿Enviar invitación automática al crear empleado?</li>
+                    <li>¿Proceso obligatorio o opcional?</li>
+                    <li>¿Qué pasa si trabajador no completa onboarding?</li>
+                </ul>
+
+                <h4>2. Fichajes:</h4>
+                <ul>
+                    <li>¿Límite de días atrás para solicitar ajuste?</li>
+                    <li>¿Límite de solicitudes de ajuste por mes?</li>
+                    <li>¿Notificar a trabajador de ajuste manual?</li>
+                    <li>¿Bloquear fichaje si documentación incompleta?</li>
+                    <li>¿Qué pasa si ficha fuera de ventana horaria?</li>
+                    <li>¿Qué pasa si ficha fuera de área geográfica?</li>
+                </ul>
+
+                <h4>3. Horarios:</h4>
+                <ul>
+                    <li>¿Permitir horas extra sin límite?</li>
+                    <li>¿Cambio de centro mueve horarios automáticamente?</li>
+                </ul>
+
+                <h4>4. Vacaciones:</h4>
+                <ul>
+                    <li>¿Bloquear aprobación si capacidad insuficiente?</li>
+                    <li>¿Permitir forzar vacaciones sin días disponibles?</li>
+                    <li>¿Inactivar empleado cancela vacaciones futuras?</li>
+                    <li>¿Días mínimos de anticipación?</li>
+                </ul>
+
+                <h4>5. Consumos y Gastos:</h4>
+                <ul>
+                    <li>¿Justificante obligatorio o opcional?</li>
+                    <li>¿Tamaño máximo de archivo?</li>
+                    <li>¿Permitir aprobar si excede límite?</li>
+                    <li>¿Permitir aprobar sin justificante?</li>
+                    <li>¿Qué pasa si se excede límite mensual?</li>
+                    <li>¿Integración automática con contabilidad?</li>
+                </ul>
+
+                <h4>6. Permisos:</h4>
+                <ul>
+                    <li>¿Cambio de rol requiere autorización adicional para roles críticos?</li>
+                </ul>
+
+                <h4>7. Gestión de Personal:</h4>
+                <ul>
+                    <li>¿Actualizar documentación laboral al cambiar dirección?</li>
+                    <li>¿Objetivos individuales o por equipo?</li>
+                    <li>¿Integrar con sistema de evaluación de desempeño?</li>
+                </ul>
+
+                <h4>8. Descripción de puesto:</h4>
+                <ul>
+                    <li>¿Obligatorio para todos los empleados?</li>
+                </ul>
+
+                <h4>9. Integración con Gestoría:</h4>
+                <ul>
+                    <li>¿API directa con software de gestoría?</li>
+                    <li>¿Formato A3 para nóminas?</li>
+                </ul>
+
+                <h4>10. Gamificación:</h4>
+                <ul>
+                    <li>¿Mostrar ranking de puntualidad a trabajadores?</li>
+                    <li>¿Premios o reconocimientos automáticos?</li>
+                </ul>
+            </div>
+
+            <h3>9.4 CONFIGURACIONES PREVIAS NECESARIAS</h3>
+
+            <div class="success-box">
+                <p><strong>Para poner en marcha el módulo Equipo:</strong></p>
+                <ol>
+                    <li>Empresa creada y seleccionada</li>
+                    <li>Sistema de permisos configurado (roles y permisos)</li>
+                    <li>Flags de RRHH activadas según plan contratado</li>
+                    <li>Estructura organizativa básica (departamentos, centros)</li>
+                    <li><span class="emoji">🌍</span> Configuración legal del país seleccionado</li>
+                    <li><span class="emoji">🌍</span> Convenios colectivos aplicables cargados</li>
+                    <li>Almacenamiento cloud para documentos</li>
+                    <li>Tipos de documentos obligatorios definidos</li>
+                    <li>Categorías de consumos y gastos creadas</li>
+                    <li>Turnos básicos creados (si FLAG schedules)</li>
+                    <li>Centros de trabajo creados (si FLAG multicenter)</li>
+                    <li>Gestoría partner configurada (si FLAG gestoria)</li>
+                    <li>Configuración de geolocalización (si fichaje con geo)</li>
+                    <li>Dispositivos permitidos para fichaje</li>
+                    <li>Políticas de vacaciones configuradas</li>
+                </ol>
+            </div>
+        </div>
+
+        <hr>
+
+        <!-- ESTADÍSTICAS FINALES -->
+        <h2>📈 ESTADÍSTICAS FINALES</h2>
+
+        <div class="section">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Métrica</th>
+                        <th>Valor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Total de funcionalidades inventariadas</strong></td>
+                        <td>150+</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Pestañas principales</strong></td>
+                        <td>6</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Pestañas en panel de detalle de empleado</strong></td>
+                        <td>8</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Flags totales del módulo</strong></td>
+                        <td>9 (onboarding, schedules, clockin.advanced, vacations, expenses, consumptions, jobdescription, audit, gestoria, multicenter)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Dependencias con otros módulos</strong></td>
+                        <td>5 (RRHH/Trabajador, Fichajes, Documentación, Facturación/Contabilidad, Informes)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Dependencias de país identificadas</strong></td>
+                        <td>20+</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Decisiones pendientes críticas</strong></td>
+                        <td>10 áreas principales</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Roles que intervienen</strong></td>
+                        <td>3 (Gerente, Trabajador, RRHH)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Sistema de permisos</strong></td>
+                        <td>71 permisos en 6 módulos con 4 niveles (N1-N4)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <hr>
+
+        <!-- NOTAS FINALES -->
+        <div class="section" style="background-color: #f0f9ff; border-left: 4px solid #0284c7;">
+            <h2>📝 NOTAS FINALES</h2>
+            
+            <p>Este inventario refleja el estado <strong>ACTUAL</strong> del módulo Equipo tal como está implementado en la interfaz.</p>
+
+            <h3>NO incluye:</h3>
+            <ul>
+                <li>Propuestas de nuevas funcionalidades</li>
+                <li>Rediseños de UX</li>
+                <li>Clasificación BASE/FLAG (se indica solo lo ya definido)</li>
+            </ul>
+
+            <h3>Próximos pasos sugeridos:</h3>
+            <ol>
+                <li>Revisar y aprobar decisiones pendientes</li>
+                <li>Completar configuraciones de país</li>
+                <li>Definir integraciones con gestoría</li>
+                <li>Implementar funcionalidades marcadas como "pendientes"</li>
+                <li>Realizar pruebas de flujos completos</li>
+                <li>Documentar APIs para backend</li>
+            </ol>
+        </div>
+
+        <!-- FOOTER -->
+        <hr>
+        <div style="text-align: center; padding: 20px; color: #6b7280; font-size: 0.9em;">
+            <p><strong>INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH</strong></p>
+            <p>UDAR EDGE | Versión 1.0 | Febrero 2026</p>
+            <p style="margin-top: 10px;">
+                <em>Documento generado para revisión técnica y planificación de integración con backend</em>
+            </p>
+        </div>
+
+        <div class="no-print" style="position: fixed; bottom: 20px; right: 20px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <button onclick="window.print()" style="background: #3b82f6; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                🖨️ Imprimir / Guardar como PDF
+            </button>
+        </div>
+    </div>
+</body>
+</html>

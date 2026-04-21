@@ -1,0 +1,10267 @@
+import crypto from 'node:crypto';
+import { v4 as uuidv4 } from 'uuid';
+import * as cacheService from './cache.js';
+import { computeSetupSteps } from '../models/setupSteps.js';
+
+export const ACCOUNTS_DB = 'accounts';
+export const BUSINESSES_DB = 'businesses';
+export const CARDS_DB = 'cards';
+export const INVOICES_DB = 'invoice';
+export const VEHICLES_DB = 'vehicles';
+export const FLEET_DB = 'fleet';
+export const NOTIFICATIONS_DB = 'notifications';
+export const ACCOUNT_ACTIVITY_LIMIT = 50;
+export const TEAM_PERMISSION_KEYS = ['vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team', 'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'butcher_waste', 'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard'];
+
+export const ROLE_DEFINITIONS = [
+  {
+    id: 'Admin',
+    description: 'Acceso completo al panel y a la configuración del sistema.',
+    permissions: ['all'],
+  },
+  {
+    id: 'Gerente',
+    description: 'Acceso completo a vehículos, clientes, ventas, documentos y equipo.',
+    permissions: ['all'],
+  },
+  {
+    id: 'Comercial',
+    description: 'Gestión de vehículos, clientes, ventas y documentos.',
+    permissions: ['vehicles', 'clients', 'sales', 'documents'],
+  },
+  {
+    id: 'Administración',
+    description: 'Acceso a finanzas, clientes y documentación.',
+    permissions: ['finance', 'clients', 'documents'],
+  },
+  {
+    id: 'Taller',
+    description: 'Gestión de reparaciones, preparación y estado de vehículos.',
+    permissions: ['vehicles'],
+  },
+  {
+    id: 'Usuario',
+    description: 'Acceso básico limitado según permisos asignados.',
+    permissions: [],
+  },
+];
+
+function normalizeBaseUrl(value) {
+  return String(value || '').replace(/\/+$/, '');
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next.toISOString();
+}
+
+export function getCouchConfig(req) {
+  const headerUrl = req?.headers?.['x-couch-url'];
+  const headerUser = req?.headers?.['x-couch-user'];
+  const headerPassword = req?.headers?.['x-couch-password'];
+
+  return {
+    baseUrl: normalizeBaseUrl(headerUrl || process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || ''),
+    username: String(headerUser || process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || ''),
+    password: String(headerPassword || process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || ''),
+  };
+}
+
+export function buildCouchAuthHeader(req) {
+  const cfg = getCouchConfig(req);
+  if (!cfg.username || !cfg.password) {
+    return '';
+  }
+  return `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64')}`;
+}
+
+export async function couchRequest(req, pathname, init = {}) {
+  const cfg = getCouchConfig(req);
+  if (!cfg.baseUrl) {
+    throw new Error('COUCHDB_URL o VITE_COUCHDB_URL no configurado en backend');
+  }
+
+  const auth = buildCouchAuthHeader(req);
+  const response = await fetch(`${cfg.baseUrl}${pathname}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(auth ? { Authorization: auth } : {}),
+      ...(init.headers || {}),
+    },
+  });
+
+  return response;
+}
+
+export async function ensureDatabase(req, dbName) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const response = await couchRequest(req, `/${encodedDbName}`, { method: 'PUT' });
+  const payload = await response.json().catch(() => ({}));
+
+  if (![201, 202, 412].includes(response.status)) {
+    throw new Error(payload?.reason || payload?.error || `No se pudo asegurar la base ${dbName}`);
+  }
+
+  return payload;
+}
+
+export async function getAllDocuments(req, dbName) {
+  const cacheKey = cacheService.buildKey('db', dbName, 'all_docs_svc');
+  const cached = cacheService.get(cacheKey);
+  if (cached) return cached;
+
+  const encodedDbName = encodeURIComponent(dbName);
+  const response = await couchRequest(req, `/${encodedDbName}/_all_docs?include_docs=true`);
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `No se pudieron leer documentos de ${dbName}`);
+  }
+
+  const docs = Array.isArray(payload.rows) ? payload.rows.map((row) => row.doc).filter(Boolean) : [];
+  cacheService.set(cacheKey, docs, cacheService.TTL_PRESETS.DOCS_LIST);
+  return docs;
+}
+
+export async function getDocument(req, dbName, docId) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const response = await couchRequest(req, `/${encodedDbName}/${encodedDocId}`);
+  const payload = await response.json().catch(() => ({}));
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `No se pudo leer ${docId}`);
+  }
+
+  return payload;
+}
+
+export async function putDocument(req, dbName, docId, document) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const response = await couchRequest(req, `/${encodedDbName}/${encodedDocId}`, {
+    method: 'PUT',
+    body: JSON.stringify(document),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `No se pudo guardar ${docId}`);
+  }
+
+  cacheService.invalidateDb(dbName);
+  cacheService.invalidateByPrefix('kpi:');
+  cacheService.invalidateByPrefix('view:');
+
+  return payload;
+}
+
+export async function bulkPutDocuments(req, dbName, docs) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const response = await couchRequest(req, `/${encodedDbName}/_bulk_docs`, {
+    method: 'POST',
+    body: JSON.stringify({ docs }),
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `Error en bulk insert en ${dbName}`);
+  }
+
+  cacheService.invalidateDb(dbName);
+  cacheService.invalidateByPrefix('kpi:');
+  cacheService.invalidateByPrefix('view:');
+
+  return Array.isArray(payload) ? payload : [];
+}
+
+export async function deleteDocument(req, dbName, docId, rev) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const encodedRev = encodeURIComponent(String(rev || ''));
+
+  if (!encodedRev) {
+    throw new Error('Falta rev para eliminar documento');
+  }
+
+  const response = await couchRequest(req, `/${encodedDbName}/${encodedDocId}?rev=${encodedRev}`, {
+    method: 'DELETE',
+  });
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `No se pudo eliminar ${docId}`);
+  }
+
+  cacheService.invalidateDb(dbName);
+  cacheService.invalidateByPrefix('kpi:');
+  cacheService.invalidateByPrefix('view:');
+
+  return payload;
+}
+
+export async function softDeleteDocument(req, dbName, docId) {
+  const doc = await getDocument(req, dbName, docId);
+  if (!doc) {
+    throw new Error(`Documento ${docId} no encontrado en ${dbName}`);
+  }
+
+  const now = new Date().toISOString();
+  return putDocument(req, dbName, docId, {
+    ...doc,
+    deletedAt: now,
+    updatedAt: now,
+  });
+}
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeOptionalText(value) {
+  const nextValue = normalizeText(value);
+  return nextValue || undefined;
+}
+
+function normalizeRequiredNumber(value, fallback = 0) {
+  const normalized = Number(String(value ?? '').replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(normalized) ? normalized : fallback;
+}
+
+function normalizeOptionalNumber(value) {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  const normalized = Number(String(value).replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(normalized) ? normalized : undefined;
+}
+
+function normalizeStatus(value) {
+  const allowed = [
+    'available', 'reserved', 'sold', 'workshop', 'scrapped',
+    'received', 'dismantling', 'partially_dismantled', 'fully_dismantled', 'compacted',
+  ];
+  return allowed.includes(String(value || '')) ? value : 'available';
+}
+
+function normalizeFuelType(value) {
+  const aliases = {
+    gasolina: 'gasolina',
+    gasoline: 'gasolina',
+    diesel: 'diesel',
+    diésel: 'diesel',
+    hibrido: 'hibrido',
+    híbrido: 'hibrido',
+    hybrid: 'hibrido',
+    electrico: 'electrico',
+    eléctrico: 'electrico',
+    electric: 'electrico',
+    glp: 'glp',
+    otro: 'otro',
+  };
+  const normalized = aliases[String(value || '').trim().toLowerCase()];
+  return normalized || undefined;
+}
+
+function normalizeTransmission(value) {
+  const aliases = {
+    manual: 'manual',
+    automatico: 'automatico',
+    automático: 'automatico',
+    automatic: 'automatico',
+    semiauto: 'semiauto',
+    semiauto: 'semiauto',
+  };
+  const normalized = aliases[String(value || '').trim().toLowerCase()];
+  return normalized || undefined;
+}
+
+function normalizeOrigin(value) {
+  const aliases = {
+    particular: 'particular',
+    proveedor: 'empresa',
+    empresa: 'empresa',
+    subasta: 'subasta',
+    permuta: 'permuta',
+    otro: 'otro',
+  };
+  const normalized = aliases[String(value || '').trim().toLowerCase()];
+  return normalized || undefined;
+}
+
+const VEHICLE_DOC_TYPE_ALIASES = {
+  ficha_tecnica: 'ficha_tecnica',
+  technical_sheet: 'ficha_tecnica',
+  permiso_circulacion: 'permiso_circulacion',
+  registration_certificate: 'permiso_circulacion',
+  itv: 'itv',
+  mot: 'itv',
+  seguro: 'seguro',
+  insurance: 'seguro',
+  contrato_compraventa: 'contrato_compraventa',
+  purchase_contract: 'contrato_compraventa',
+  informe_historial: 'informe_historial',
+  history_report: 'informe_historial',
+  factura_compra: 'factura_compra',
+  purchase_invoice: 'factura_compra',
+  otro: 'otro',
+  other: 'otro',
+};
+
+export function normalizeVehicleDocType(type) {
+  return VEHICLE_DOC_TYPE_ALIASES[(type || '').toLowerCase().trim()] || 'otro';
+}
+
+function normalizeBodyType(value) {
+  const aliases = {
+    sedan: 'sedan',
+    sedán: 'sedan',
+    suv: 'suv',
+    familiar: 'familiar',
+    coupe: 'coupe',
+    coupé: 'coupe',
+    cabrio: 'cabrio',
+    furgon: 'furgon',
+    furgón: 'furgon',
+    pickup: 'pickup',
+    'pick-up': 'pickup',
+    otro: 'otro',
+  };
+  const normalized = aliases[String(value || '').trim().toLowerCase()];
+  return normalized || undefined;
+}
+
+// ── Scrapyard Part helpers ───────────────────────────────────────────────────
+
+function normalizePartCategory(cat) {
+  const allowed = [
+    'motor', 'caja_cambios', 'puertas', 'faros', 'paragolpes', 'llantas',
+    'interior', 'centralitas', 'retrovisores', 'radiadores', 'transmision',
+    'frenos', 'suspension', 'electricidad', 'carroceria', 'escape',
+    'direccion', 'climatizacion', 'otra'
+  ];
+  const normalized = String(cat || '').toLowerCase().trim()
+    .replace(/\s+/g, '_')
+    .replace(/á/g, 'a').replace(/é/g, 'e').replace(/í/g, 'i')
+    .replace(/ó/g, 'o').replace(/ú/g, 'u');
+  return allowed.includes(normalized) ? normalized : 'otra';
+}
+
+function normalizePartStatus(status) {
+  const allowed = ['disponible', 'reservada', 'vendida', 'defectuosa', 'en_revision', 'desmontando'];
+  const val = String(status || '').toLowerCase().trim();
+  return allowed.includes(val) ? val : 'disponible';
+}
+
+function normalizeScrapyardOrigin(origin) {
+  const allowed = ['particular', 'aseguradora', 'empresa', 'subasta', 'grua_municipal', 'otro'];
+  const val = String(origin || '').toLowerCase().trim();
+  return allowed.includes(val) ? val : null;
+}
+
+const PART_CATEGORY_PREFIXES = {
+  motor: 'MOT', caja_cambios: 'CCM', puertas: 'PTA', faros: 'FAR',
+  paragolpes: 'PAR', llantas: 'LLA', interior: 'INT', centralitas: 'CEN',
+  retrovisores: 'RET', radiadores: 'RAD', transmision: 'TRN', frenos: 'FRE',
+  suspension: 'SUS', electricidad: 'ELE', carroceria: 'CAR', escape: 'ESC',
+  direccion: 'DIR', climatizacion: 'CLI', otra: 'OTR'
+};
+
+function generatePartCode(categoria) {
+  const prefix = PART_CATEGORY_PREFIXES[categoria] || 'OTR';
+  const ts = Date.now().toString(36).toUpperCase().slice(-4);
+  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}-${ts}-${rand}`;
+}
+
+function calculateDaysInStock(vehicle) {
+  const baseDate = vehicle.purchaseDate || vehicle.createdAt;
+  const parsed = new Date(baseDate);
+  if (Number.isNaN(parsed.getTime())) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 86400000));
+}
+
+function normalizeVehicleRepairStatus(value) {
+  if (value === 0 || value === '0' || value === 'pending') return 'pending';
+  if (value === 1 || value === '1' || value === 'in_progress') return 'in_progress';
+  if (value === 2 || value === '2' || value === 'done') return 'done';
+  return 'pending';
+}
+
+function normalizeVehicleRepairs(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(Boolean)
+    .map((item) => ({
+      id: String(item.id || `repair:${uuidv4()}`),
+      concept: String(item.concept || '').trim(),
+      date: String(item.date || new Date().toISOString().slice(0, 10)),
+      amount: Number.isFinite(Number(item.amount)) ? Number(item.amount) : 0,
+      status: normalizeVehicleRepairStatus(item.status),
+      workshop: String(item.workshop || '').trim(),
+      notes: String(item.notes || '').trim(),
+    }));
+}
+
+function normalizeVehicleChecklist(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(Boolean)
+    .map((item) => ({
+      id: String(item.id || `check:${uuidv4()}`),
+      task: String(item.task || '').trim(),
+      done: Boolean(item.done),
+      category: String(item.category || 'otro').trim() || 'otro',
+    }));
+}
+
+export function buildVehicleDocument(userId, data = {}, existingVehicle = null, businessId = null) {
+  const now = new Date().toISOString();
+
+  // Normalise warranties array
+  const rawWarranties = Array.isArray(data.warranties)
+    ? data.warranties
+    : Array.isArray(existingVehicle?.warranties)
+      ? existingVehicle.warranties
+      : [];
+  const warranties = rawWarranties.filter(Boolean).map((w) => ({
+    id: w.id || `w:${uuidv4()}`,
+    type: ['factory', 'own'].includes(w.type) ? w.type : 'own',
+    provider: String(w.provider || '').trim(),
+    startDate: String(w.startDate || '').trim() || undefined,
+    endDate: String(w.endDate || '').trim() || undefined,
+    coverage: String(w.coverage || '').trim(),
+    claims: Array.isArray(w.claims) ? w.claims.filter(Boolean) : [],
+  }));
+
+  // Normalise associated costs array
+  const COST_CATEGORIES = ['preparacion', 'itv', 'limpieza', 'fotos', 'publicidad', 'otro',
+    'compra', 'transporte', 'gestoria', 'documentacion', 'descontaminacion', 'compactacion', 'almacenamiento', 'reparacion_pieza'];
+  const rawCosts = Array.isArray(data.associatedCosts)
+    ? data.associatedCosts
+    : Array.isArray(existingVehicle?.associatedCosts)
+      ? existingVehicle.associatedCosts
+      : [];
+  const associatedCosts = rawCosts.filter(Boolean).map((c) => ({
+    id: c.id || `cost:${uuidv4()}`,
+    category: COST_CATEGORIES.includes(c.category) ? c.category : 'otro',
+    description: String(c.description || '').trim(),
+    amount: Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0,
+    date: String(c.date || now.slice(0, 10)).trim(),
+  }));
+
+  // Preserve price history (append-only — controller adds new entries)
+  const priceHistory = Array.isArray(data.priceHistory)
+    ? data.priceHistory
+    : Array.isArray(existingVehicle?.priceHistory)
+      ? existingVehicle.priceHistory
+      : [];
+
+  const workshopRepairs = normalizeVehicleRepairs(
+    Array.isArray(data.workshopRepairs)
+      ? data.workshopRepairs
+      : existingVehicle?.workshopRepairs,
+  );
+  const workshopChecklist = normalizeVehicleChecklist(
+    Array.isArray(data.workshopChecklist)
+      ? data.workshopChecklist
+      : existingVehicle?.workshopChecklist,
+  );
+
+  return {
+    _id: existingVehicle?._id || `car:${uuidv4()}`,
+    _rev: existingVehicle?._rev,
+    type: 'car',
+    active: true,
+    user_id: userId,
+    business_id: businessId || data.business_id || existingVehicle?.business_id || undefined,
+    registrationPlate: normalizeText(data.registrationPlate).toUpperCase(),
+    brand: normalizeText(data.brand),
+    model: normalizeText(data.model),
+    version: normalizeOptionalText(data.version),
+    year: normalizeRequiredNumber(data.year),
+    color: normalizeText(data.color),
+    fuelType: normalizeFuelType(data.fuelType),
+    mileage: normalizeOptionalNumber(data.mileage),
+    vin: normalizeOptionalText(data.vin)?.toUpperCase(),
+    transmission: normalizeTransmission(data.transmission),
+    doors: normalizeOptionalNumber(data.doors),
+    power: normalizeOptionalNumber(data.power),
+    bodyType: normalizeBodyType(data.bodyType),
+    purchasePrice: normalizeRequiredNumber(data.purchasePrice),
+    salePrice: normalizeOptionalNumber(data.salePrice),
+    purchaseDate: normalizeOptionalText(data.purchaseDate),
+    origin: normalizeOrigin(data.origin),
+    supplierName: normalizeOptionalText(data.supplierName),
+    status: normalizeStatus(data.status),
+    location: normalizeOptionalText(data.location),
+    images: Array.isArray(data.images) ? data.images.filter(Boolean) : [],
+    notes: normalizeOptionalText(data.notes),
+    priceHistory,
+    warranties,
+    associatedCosts,
+    workshopRepairs,
+    workshopChecklist,
+    stockAlertSentAt: data.stockAlertSentAt || existingVehicle?.stockAlertSentAt || undefined,
+
+    // Commercial fields
+    commercialDescription: normalizeOptionalText(data.commercialDescription) || existingVehicle?.commercialDescription || '',
+    commercialStatus: normalizeCommercialStatus(data.commercialStatus || existingVehicle?.commercialStatus),
+    published: typeof data.published === 'boolean' ? data.published : (existingVehicle?.published ?? false),
+    publishedAt: (function () {
+      if (data.published === true && !existingVehicle?.published) return now;
+      if (data.published === false) return null;
+      return data.publishedAt || existingVehicle?.publishedAt || null;
+    })(),
+    featured: typeof data.featured === 'boolean' ? data.featured : (existingVehicle?.featured ?? false),
+    minimumSalePrice: normalizeOptionalNumber(data.minimumSalePrice) ?? existingVehicle?.minimumSalePrice ?? null,
+    assignedCommercialId: normalizeOptionalText(data.assignedCommercialId) || existingVehicle?.assignedCommercialId || null,
+    assignedCommercialName: normalizeOptionalText(data.assignedCommercialName) || existingVehicle?.assignedCommercialName || null,
+    publicationChannels: normalizePublicationChannels(data.publicationChannels, existingVehicle?.publicationChannels),
+    estimatedMargin: normalizeOptionalNumber(data.estimatedMargin) ?? existingVehicle?.estimatedMargin ?? null,
+    totalPreparationCost: normalizeOptionalNumber(data.totalPreparationCost) ?? existingVehicle?.totalPreparationCost ?? null,
+    marginPercentage: normalizeOptionalNumber(data.marginPercentage) ?? existingVehicle?.marginPercentage ?? null,
+    commercialStatusHistory: normalizeCommercialStatusHistory(data.commercialStatusHistory, existingVehicle?.commercialStatusHistory),
+
+    // Scrapyard dismantling fields
+    dismantlingStartedAt: data.dismantlingStartedAt || existingVehicle?.dismantlingStartedAt || null,
+    dismantlingCompletedAt: data.dismantlingCompletedAt || existingVehicle?.dismantlingCompletedAt || null,
+    dismantlingProgress: typeof data.dismantlingProgress === 'number'
+      ? Math.min(100, Math.max(0, data.dismantlingProgress))
+      : existingVehicle?.dismantlingProgress ?? null,
+    totalPartsExpected: typeof data.totalPartsExpected === 'number' ? data.totalPartsExpected : existingVehicle?.totalPartsExpected ?? null,
+    totalPartsExtracted: typeof data.totalPartsExtracted === 'number' ? data.totalPartsExtracted : existingVehicle?.totalPartsExtracted ?? 0,
+    procedencia: normalizeScrapyardOrigin(data.procedencia) || existingVehicle?.procedencia || null,
+    entryDate: data.entryDate || existingVehicle?.entryDate || null,
+
+    // Vehicle entry fields
+    documents: (Array.isArray(data.documents) ? data.documents : Array.isArray(existingVehicle?.documents) ? existingVehicle.documents : [])
+      .filter(Boolean).map((doc) => ({
+        id: doc.id || `vdoc:${uuidv4()}`,
+        name: String(doc.name || '').trim(),
+        documentType: normalizeVehicleDocType(doc.documentType),
+        fileUrl: String(doc.fileUrl || '').trim(),
+        fileName: String(doc.fileName || '').trim(),
+        mimeType: String(doc.mimeType || '').trim(),
+        fileSize: typeof doc.fileSize === 'number' ? doc.fileSize : 0,
+        attachmentName: String(doc.attachmentName || '').trim(),
+        notes: String(doc.notes || '').trim(),
+        expiresAt: doc.expiresAt || null,
+        uploadedAt: doc.uploadedAt || now,
+        uploadedBy: String(doc.uploadedBy || '').trim(),
+      })),
+    entryStatus: data.entryStatus || existingVehicle?.entryStatus || null,
+    enteredBy: data.enteredBy || existingVehicle?.enteredBy || null,
+    entryValidated: typeof data.entryValidated === 'boolean' ? data.entryValidated : (existingVehicle?.entryValidated ?? null),
+    validatedBy: data.validatedBy || existingVehicle?.validatedBy || null,
+    validatedAt: data.validatedAt || existingVehicle?.validatedAt || null,
+
+    createdAt: existingVehicle?.createdAt || now,
+    updatedAt: now,
+    soldAt: data.status === 'sold' ? data.soldAt || existingVehicle?.soldAt || now : existingVehicle?.soldAt,
+  };
+}
+
+export function sanitizeVehicle(vehicle) {
+  if (!vehicle) {
+    return null;
+  }
+
+  return {
+    id: vehicle._id,
+    _rev: vehicle._rev,
+    type: vehicle.type || 'car',
+    active: vehicle.active !== false,
+    user_id: vehicle.user_id,
+    registrationPlate: vehicle.registrationPlate || '',
+    brand: vehicle.brand || '',
+    model: vehicle.model || '',
+    version: vehicle.version || '',
+    year: vehicle.year || 0,
+    color: vehicle.color || '',
+    fuelType: vehicle.fuelType,
+    mileage: vehicle.mileage,
+    vin: vehicle.vin,
+    transmission: vehicle.transmission,
+    doors: vehicle.doors,
+    power: vehicle.power,
+    bodyType: vehicle.bodyType,
+    purchasePrice: vehicle.purchasePrice || 0,
+    salePrice: vehicle.salePrice,
+    purchaseDate: vehicle.purchaseDate,
+    origin: vehicle.origin,
+    supplierName: vehicle.supplierName,
+    status: vehicle.status || 'available',
+    location: vehicle.location,
+    images: Array.isArray(vehicle.images) ? vehicle.images : [],
+    notes: vehicle.notes,
+    priceHistory: Array.isArray(vehicle.priceHistory) ? vehicle.priceHistory : [],
+    warranties: Array.isArray(vehicle.warranties) ? vehicle.warranties : [],
+    associatedCosts: Array.isArray(vehicle.associatedCosts) ? vehicle.associatedCosts : [],
+    workshopRepairs: normalizeVehicleRepairs(vehicle.workshopRepairs),
+    workshopChecklist: normalizeVehicleChecklist(vehicle.workshopChecklist),
+    stockAlertSentAt: vehicle.stockAlertSentAt || null,
+    createdAt: vehicle.createdAt,
+    updatedAt: vehicle.updatedAt,
+    soldAt: vehicle.soldAt,
+    deletedAt: vehicle.deletedAt || null,
+    daysInStock: calculateDaysInStock(vehicle),
+  };
+}
+
+export async function listVehiclesByUser(req, userId, businessId = null) {
+  await ensureDatabase(req, VEHICLES_DB);
+  const docs = await getAllDocuments(req, VEHICLES_DB);
+
+  return docs
+    .filter((doc) => {
+      if (!doc || doc.type !== 'car' || doc.active === false || doc.deletedAt) return false;
+      if (businessId) return doc.business_id === businessId;
+      return doc.user_id === userId && !doc.business_id;
+    })
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ── Scrapyard DB + Part / Dismantling builders ───────────────────────────────
+
+export function getScrapyardDbName() {
+  return 'scrapyard';
+}
+
+export function buildScrapyardPartDocument(userId, data, existing) {
+  const now = new Date().toISOString();
+  const categoria = normalizePartCategory(data.categoria);
+  return {
+    _id: existing?._id || `scrapyard_part:${uuidv4()}`,
+    _rev: existing?._rev,
+    type: 'scrapyard_part',
+    user_id: userId,
+    active: data.active !== false,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    referencia: normalizeText(data.referencia),
+    codigoInterno: normalizeText(data.codigoInterno) || existing?.codigoInterno || generatePartCode(categoria),
+    nombre: normalizeText(data.nombre),
+    categoria,
+    subcategoria: normalizeText(data.subcategoria),
+    vehiculoOrigenId: normalizeText(data.vehiculoOrigenId),
+    vehiculoOrigenLabel: normalizeText(data.vehiculoOrigenLabel),
+    vehiculoOrigenMatricula: normalizeText(data.vehiculoOrigenMatricula),
+    estado: normalizePartStatus(data.estado),
+    precioVenta: normalizeRequiredNumber(data.precioVenta),
+    precioMinimo: normalizeRequiredNumber(data.precioMinimo),
+    ubicacion: normalizeText(data.ubicacion),
+    zona: normalizeText(data.zona),
+    estanteria: normalizeText(data.estanteria),
+    compatibilidades: Array.isArray(data.compatibilidades)
+      ? data.compatibilidades.map(c => ({
+          marca: normalizeText(c.marca),
+          modelo: normalizeText(c.modelo),
+          anioDesde: typeof c.anioDesde === 'number' ? c.anioDesde : null,
+          anioHasta: typeof c.anioHasta === 'number' ? c.anioHasta : null,
+          referenciasOEM: Array.isArray(c.referenciasOEM) ? c.referenciasOEM.map(r => String(r).trim()).filter(Boolean) : [],
+        }))
+      : existing?.compatibilidades || [],
+    fotos: Array.isArray(data.fotos) ? data.fotos.filter(Boolean).slice(0, 20) : existing?.fotos || [],
+    observaciones: normalizeText(data.observaciones),
+    peso: typeof data.peso === 'number' ? data.peso : existing?.peso ?? null,
+    garantiaMeses: typeof data.garantiaMeses === 'number' ? data.garantiaMeses : existing?.garantiaMeses ?? 3,
+    despieceId: normalizeText(data.despieceId) || existing?.despieceId || '',
+    desmontadoPor: normalizeText(data.desmontadoPor) || existing?.desmontadoPor || '',
+    fechaDesmontaje: data.fechaDesmontaje || existing?.fechaDesmontaje || null,
+    ordenDesmontaje: typeof data.ordenDesmontaje === 'number' ? data.ordenDesmontaje : existing?.ordenDesmontaje || 0,
+    deletedAt: data.deletedAt || existing?.deletedAt || null,
+  };
+}
+
+export const DEFAULT_DISMANTLING_TEMPLATE = [
+  { categoria: 'motor', nombre: 'Motor completo' },
+  { categoria: 'caja_cambios', nombre: 'Caja de cambios' },
+  { categoria: 'puertas', nombre: 'Puerta delantera izquierda' },
+  { categoria: 'puertas', nombre: 'Puerta delantera derecha' },
+  { categoria: 'puertas', nombre: 'Puerta trasera izquierda' },
+  { categoria: 'puertas', nombre: 'Puerta trasera derecha' },
+  { categoria: 'puertas', nombre: 'Portón trasero / Maletero' },
+  { categoria: 'faros', nombre: 'Faro delantero izquierdo' },
+  { categoria: 'faros', nombre: 'Faro delantero derecho' },
+  { categoria: 'faros', nombre: 'Piloto trasero izquierdo' },
+  { categoria: 'faros', nombre: 'Piloto trasero derecho' },
+  { categoria: 'paragolpes', nombre: 'Paragolpes delantero' },
+  { categoria: 'paragolpes', nombre: 'Paragolpes trasero' },
+  { categoria: 'llantas', nombre: 'Llanta + neumático DI' },
+  { categoria: 'llantas', nombre: 'Llanta + neumático DD' },
+  { categoria: 'llantas', nombre: 'Llanta + neumático TI' },
+  { categoria: 'llantas', nombre: 'Llanta + neumático TD' },
+  { categoria: 'interior', nombre: 'Asiento delantero izquierdo' },
+  { categoria: 'interior', nombre: 'Asiento delantero derecho' },
+  { categoria: 'interior', nombre: 'Asiento trasero completo' },
+  { categoria: 'interior', nombre: 'Cuadro de instrumentos' },
+  { categoria: 'interior', nombre: 'Volante + airbag' },
+  { categoria: 'centralitas', nombre: 'Centralita motor (ECU)' },
+  { categoria: 'centralitas', nombre: 'Centralita ABS' },
+  { categoria: 'centralitas', nombre: 'Cuadro de fusibles' },
+  { categoria: 'retrovisores', nombre: 'Retrovisor izquierdo' },
+  { categoria: 'retrovisores', nombre: 'Retrovisor derecho' },
+  { categoria: 'retrovisores', nombre: 'Retrovisor interior' },
+  { categoria: 'radiadores', nombre: 'Radiador agua' },
+  { categoria: 'radiadores', nombre: 'Radiador A/C (condensador)' },
+  { categoria: 'escape', nombre: 'Catalizador' },
+  { categoria: 'escape', nombre: 'Tubo de escape completo' },
+  { categoria: 'direccion', nombre: 'Cremallera de dirección' },
+  { categoria: 'suspension', nombre: 'Amortiguador delantero izquierdo' },
+  { categoria: 'suspension', nombre: 'Amortiguador delantero derecho' },
+  { categoria: 'transmision', nombre: 'Palier / transmisión izquierda' },
+  { categoria: 'transmision', nombre: 'Palier / transmisión derecha' },
+  { categoria: 'climatizacion', nombre: 'Compresor A/C' },
+  { categoria: 'electricidad', nombre: 'Alternador' },
+  { categoria: 'electricidad', nombre: 'Motor de arranque' },
+];
+
+export function buildDismantlingSession(userId, data, existing) {
+  const now = new Date().toISOString();
+  return {
+    _id: existing?._id || `dismantling_session:${uuidv4()}`,
+    _rev: existing?._rev,
+    type: 'dismantling_session',
+    user_id: userId,
+    vehicleId: normalizeText(data.vehicleId),
+    vehicleLabel: normalizeText(data.vehicleLabel),
+    vehicleMatricula: normalizeText(data.vehicleMatricula),
+    status: data.status || existing?.status || 'in_progress',
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    completedAt: data.completedAt || existing?.completedAt || null,
+    piezasPrevistas: Array.isArray(data.piezasPrevistas)
+      ? data.piezasPrevistas.map(p => ({
+          categoria: normalizePartCategory(p.categoria),
+          nombre: normalizeText(p.nombre),
+          extraida: !!p.extraida,
+          partId: normalizeText(p.partId),
+          noAplica: !!p.noAplica,
+          motivoNoAplica: normalizeText(p.motivoNoAplica),
+        }))
+      : existing?.piezasPrevistas || [],
+    historial: Array.isArray(data.historial) ? data.historial : existing?.historial || [],
+    trabajadores: Array.isArray(data.trabajadores) ? data.trabajadores : existing?.trabajadores || [],
+    observaciones: normalizeText(data.observaciones),
+  };
+}
+
+export { normalizePartCategory, normalizePartStatus, generatePartCode };
+
+// ── Scrapyard Worker + Task builders ────────────────────────────────────────
+
+export function buildScrapyardWorkerDocument(userId, data, existing) {
+  const now = new Date().toISOString();
+  return {
+    _id: existing?._id || `scrapyard_worker:${uuidv4()}`,
+    _rev: existing?._rev,
+    type: 'scrapyard_worker',
+    user_id: userId,
+    active: data.active !== false,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    name: normalizeText(data.name),
+    phone: normalizeText(data.phone),
+    email: normalizeText(data.email),
+    avatar: normalizeText(data.avatar),
+    address: normalizeText(data.address),
+    teamMemberId: normalizeText(data.teamMemberId) || existing?.teamMemberId || '',
+    role: normalizeText(data.role),
+    zone: normalizeText(data.zone),
+    specializations: Array.isArray(data.specializations) ? data.specializations.map(s => String(s).trim()).filter(Boolean) : existing?.specializations || [],
+    documents: Array.isArray(data.documents)
+      ? data.documents.map(d => ({
+          type: normalizeText(d.type),
+          status: ['valid', 'pending', 'expired'].includes(d.status) ? d.status : 'pending',
+          expiresAt: d.expiresAt || null,
+          fileUrl: normalizeText(d.fileUrl),
+          notes: normalizeText(d.notes),
+        }))
+      : existing?.documents || [],
+    contractType: ['full_time', 'part_time', 'temporary', 'freelance'].includes(data.contractType) ? data.contractType : existing?.contractType || 'full_time',
+    hourlyCost: typeof data.hourlyCost === 'number' ? data.hourlyCost : existing?.hourlyCost ?? 0,
+    weeklyHours: typeof data.weeklyHours === 'number' ? data.weeklyHours : existing?.weeklyHours ?? 40,
+    startDate: data.startDate || existing?.startDate || now.slice(0, 10),
+    endDate: data.endDate || existing?.endDate || null,
+    shift: ['manana', 'tarde', 'completa', 'rotativo'].includes(data.shift) ? data.shift : existing?.shift || 'completa',
+    schedule: normalizeText(data.schedule),
+    scheduleDetails: data.scheduleDetails || existing?.scheduleDetails || null,
+    permissions: Array.isArray(data.permissions) ? data.permissions.map(p => String(p).trim()).filter(Boolean) : existing?.permissions || [],
+    status: ['active', 'inactive', 'vacation', 'sick_leave'].includes(data.status) ? data.status : existing?.status || 'active',
+    notes: normalizeText(data.notes),
+    deletedAt: data.deletedAt || existing?.deletedAt || null,
+  };
+}
+
+export function buildScrapyardTaskDocument(userId, data, existing) {
+  const now = new Date().toISOString();
+  const validTypes = ['recepcion', 'desmontaje', 'catalogacion', 'almacen', 'venta', 'expedicion'];
+  const validStatuses = ['pending', 'assigned', 'in_progress', 'paused', 'completed', 'cancelled'];
+  const validPriorities = ['low', 'normal', 'high', 'urgent'];
+  return {
+    _id: existing?._id || `scrapyard_task:${uuidv4()}`,
+    _rev: existing?._rev,
+    type: 'scrapyard_task',
+    user_id: userId,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    taskType: validTypes.includes(data.taskType) ? data.taskType : existing?.taskType || 'desmontaje',
+    assignedWorkerId: normalizeText(data.assignedWorkerId) || existing?.assignedWorkerId || '',
+    assignedWorkerName: normalizeText(data.assignedWorkerName) || existing?.assignedWorkerName || '',
+    vehicleId: normalizeText(data.vehicleId) || existing?.vehicleId || '',
+    vehiclePlate: normalizeText(data.vehiclePlate) || existing?.vehiclePlate || '',
+    vehicleModel: normalizeText(data.vehicleModel) || existing?.vehicleModel || '',
+    partIds: Array.isArray(data.partIds) ? data.partIds.filter(Boolean) : existing?.partIds || [],
+    saleId: normalizeText(data.saleId) || existing?.saleId || '',
+    orderId: normalizeText(data.orderId) || existing?.orderId || '',
+    title: normalizeText(data.title),
+    description: normalizeText(data.description),
+    priority: validPriorities.includes(data.priority) ? data.priority : existing?.priority || 'normal',
+    zone: normalizeText(data.zone),
+    status: validStatuses.includes(data.status) ? data.status : existing?.status || 'pending',
+    scheduledDate: data.scheduledDate || existing?.scheduledDate || now.slice(0, 10),
+    scheduledStartTime: normalizeText(data.scheduledStartTime) || existing?.scheduledStartTime || '',
+    estimatedMinutes: typeof data.estimatedMinutes === 'number' ? data.estimatedMinutes : existing?.estimatedMinutes ?? 60,
+    timeEntries: Array.isArray(data.timeEntries) ? data.timeEntries : existing?.timeEntries || [],
+    totalMinutes: typeof data.totalMinutes === 'number' ? data.totalMinutes : existing?.totalMinutes ?? 0,
+    result: data.result || existing?.result || null,
+    completedAt: data.completedAt || existing?.completedAt || null,
+    deletedAt: data.deletedAt || existing?.deletedAt || null,
+  };
+}
+
+export function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+export function buildDefaultEmploymentInfo(overrides = {}) {
+  return {
+    department: String(overrides.department || '').trim(),
+    position: String(overrides.position || '').trim(),
+    schedule: String(overrides.schedule || '').trim(),
+    notes: String(overrides.notes || '').trim(),
+    skills: Array.isArray(overrides.skills) ? overrides.skills.map(s => ({
+      id: String(s.id || '').trim(),
+      name: String(s.name || '').trim(),
+      level: Math.max(1, Math.min(5, Number(s.level) || 1)),
+    })) : [],
+    startDate: String(overrides.startDate || '').trim(),
+    contractType: String(overrides.contractType || '').trim(),
+    workday: String(overrides.workday || '').trim(),
+    salary: String(overrides.salary || '').trim(),
+    bankAccount: String(overrides.bankAccount || '').trim(),
+    emergencyContact: String(overrides.emergencyContact || '').trim(),
+    emergencyPhone: String(overrides.emergencyPhone || '').trim(),
+    salesPointId: String(overrides.salesPointId || '').trim(),
+  };
+}
+
+export function buildDefaultPermissionMatrix(role = 'Usuario') {
+  const allEnabled = role === 'Admin' || role === 'Gerente';
+  const base = TEAM_PERMISSION_KEYS.reduce((acc, key) => {
+    acc[key] = { view: allEnabled, edit: allEnabled };
+    return acc;
+  }, {});
+
+  if (allEnabled) {
+    return base;
+  }
+
+  const presets = {
+    Comercial: ['vehicles', 'clients', 'sales', 'documents'],
+    Administración: ['clients', 'documents', 'finance', 'ancove'],
+    Taller: ['vehicles'],
+    Usuario: ['vehicles', 'clients'],
+  };
+
+  const readWriteModules = presets[role] || [];
+  for (const key of readWriteModules) {
+    base[key] = { view: true, edit: true };
+  }
+
+  if (role === 'Usuario') {
+    base.clients = { view: true, edit: false };
+  }
+
+  return base;
+}
+
+export function normalizePermissionMatrix(value, role = 'Usuario') {
+  const fallback = buildDefaultPermissionMatrix(role);
+
+  if (Array.isArray(value)) {
+    if (value.includes('all')) {
+      return buildDefaultPermissionMatrix('Admin');
+    }
+    for (const key of TEAM_PERMISSION_KEYS) {
+      const enabled = value.includes(key);
+      fallback[key] = {
+        view: enabled,
+        edit: enabled,
+      };
+    }
+    return fallback;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  for (const key of TEAM_PERMISSION_KEYS) {
+    const raw = value[key];
+    fallback[key] = {
+      view: Boolean(raw?.view),
+      edit: Boolean(raw?.edit),
+    };
+
+    if (fallback[key].edit) {
+      fallback[key].view = true;
+    }
+  }
+
+  return fallback;
+}
+
+// ─── Vehicle sub-permissions (PV-07) ────────────────────────────────────────
+
+const DEFAULT_VEHICLE_SUB_PERMISSIONS_MANAGER = {
+  canEditPrices: true,
+  canSetMinimumPrice: true,
+  canPublish: true,
+  canChangeCommercialStatus: true,
+  canAssignCommercial: true,
+  canSeeMargins: true,
+  canViewAllStock: true,
+  canViewFinancials: true,
+  canChangeStatus: true,
+  canCreateEntry: true,
+  canUploadPhotos: true,
+  canUploadDocs: true,
+  canSetPurchasePrice: true,
+  canSetSalePrice: true,
+  canOverrideDuplicate: true,
+  canValidateEntry: true,
+};
+
+const DEFAULT_VEHICLE_SUB_PERMISSIONS_WORKER = {
+  canEditPrices: false,
+  canSetMinimumPrice: false,
+  canPublish: false,
+  canChangeCommercialStatus: false,
+  canAssignCommercial: false,
+  canSeeMargins: false,
+  canViewAllStock: false,
+  canViewFinancials: false,
+  canChangeStatus: true,
+  canCreateEntry: true,
+  canUploadPhotos: true,
+  canUploadDocs: true,
+  canSetPurchasePrice: false,
+  canSetSalePrice: false,
+  canOverrideDuplicate: false,
+  canValidateEntry: false,
+};
+
+export function buildVehicleSubPermissions(role, overrides = null) {
+  const isManager = role === 'Admin' || role === 'Gerente';
+  const defaults = isManager ? DEFAULT_VEHICLE_SUB_PERMISSIONS_MANAGER : DEFAULT_VEHICLE_SUB_PERMISSIONS_WORKER;
+
+  if (!overrides || typeof overrides !== 'object') return { ...defaults };
+
+  return {
+    canEditPrices: typeof overrides.canEditPrices === 'boolean' ? overrides.canEditPrices : defaults.canEditPrices,
+    canSetMinimumPrice: typeof overrides.canSetMinimumPrice === 'boolean' ? overrides.canSetMinimumPrice : defaults.canSetMinimumPrice,
+    canPublish: typeof overrides.canPublish === 'boolean' ? overrides.canPublish : defaults.canPublish,
+    canChangeCommercialStatus: typeof overrides.canChangeCommercialStatus === 'boolean' ? overrides.canChangeCommercialStatus : defaults.canChangeCommercialStatus,
+    canAssignCommercial: typeof overrides.canAssignCommercial === 'boolean' ? overrides.canAssignCommercial : defaults.canAssignCommercial,
+    canSeeMargins: typeof overrides.canSeeMargins === 'boolean' ? overrides.canSeeMargins : defaults.canSeeMargins,
+    canViewAllStock: typeof overrides.canViewAllStock === 'boolean' ? overrides.canViewAllStock : defaults.canViewAllStock,
+    canViewFinancials: typeof overrides.canViewFinancials === 'boolean' ? overrides.canViewFinancials : defaults.canViewFinancials,
+    canChangeStatus: typeof overrides.canChangeStatus === 'boolean' ? overrides.canChangeStatus : defaults.canChangeStatus,
+  };
+}
+
+// S-04: Extrae la IP real del cliente considerando proxies
+export function extractIp(req) {
+  if (!req) return 'unknown';
+  const forwarded = req.headers?.['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+}
+
+// S-07: Parsea el User-Agent para descripción legible del dispositivo
+export function parseUserAgent(ua) {
+  const str = String(ua || '');
+  const browser =
+    str.includes('Firefox') ? 'Firefox' :
+    str.includes('Edg/') || str.includes('Edge/') ? 'Edge' :
+    str.includes('Chrome') ? 'Chrome' :
+    str.includes('Safari') ? 'Safari' :
+    str.includes('MSIE') || str.includes('Trident') ? 'IE' : 'Desconocido';
+  const os =
+    str.includes('Windows') ? 'Windows' :
+    str.includes('Mac') ? 'macOS' :
+    str.includes('iPhone') || str.includes('iPad') ? 'iOS' :
+    str.includes('Android') ? 'Android' :
+    str.includes('Linux') ? 'Linux' : 'Desconocido';
+  const device =
+    str.includes('Mobile') || str.includes('iPhone') || (str.includes('Android') && !str.includes('Tablet')) ? 'Móvil' :
+    str.includes('iPad') || str.includes('Tablet') ? 'Tablet' : 'Escritorio';
+  return { browser, os, device };
+}
+
+export function buildActivityRecord({
+  type = 'system',
+  action,
+  entityId = '',
+  entityLabel = '',
+  actorUserId = '',
+  actorName = '',
+  targetUserId = '',
+  metadata = {},
+  createdAt,
+  ip = '',
+}) {
+  return {
+    id: `activity:${uuidv4()}`,
+    type: String(type || 'system').trim(),
+    action: String(action || '').trim(),
+    entityId: String(entityId || '').trim(),
+    entityLabel: String(entityLabel || '').trim(),
+    actorUserId: String(actorUserId || '').trim(),
+    actorName: String(actorName || '').trim(),
+    targetUserId: String(targetUserId || '').trim(),
+    metadata: metadata && typeof metadata === 'object' ? metadata : {},
+    ip: String(ip || '').trim(),
+    createdAt: createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeNotificationLevel(value) {
+  const allowed = ['success', 'warning', 'info', 'alert'];
+  return allowed.includes(String(value || '')) ? String(value) : 'info';
+}
+
+const VALID_PRIORITIES = ['high', 'medium', 'low'];
+const VALID_ALERT_STATUSES = ['new', 'seen', 'resolved'];
+const VALID_SOURCES = ['finanzas', 'stock', 'equipo', 'documentacion', 'verticales', 'ocr', 'conciliacion', 'crm', 'taller', 'sistema'];
+
+const LEVEL_PRIORITY_MAP = { alert: 'high', warning: 'medium', info: 'low', success: 'low' };
+const CATEGORY_SOURCE_MAP = {
+  out_of_stock: 'stock', low_stock: 'stock', parts_low_stock: 'stock',
+  overdue_purchase: 'finanzas', high_payables: 'finanzas', low_sales_velocity: 'finanzas',
+  payment_overdue: 'finanzas', negative_cash_flow: 'finanzas', client_payment_overdue: 'finanzas',
+  stale_web_order: 'verticales', stale_delivery: 'verticales',
+  vehicle_stock_aging: 'stock', stale_work_order: 'taller',
+  worker_no_clockin: 'equipo', worker_late_clockin: 'equipo', contract_expiring: 'equipo',
+  document_expired: 'documentacion', document_expiring_soon: 'documentacion',
+  fleet_itv_expiring: 'documentacion', fleet_insurance_expiring: 'documentacion',
+  invoice_pending_validation: 'ocr', bank_unreconciled: 'conciliacion',
+  purchase_order_delayed: 'stock', booking_no_show: 'verticales',
+  lead_new: 'crm', lead_stale: 'crm',
+};
+
+export function buildNotificationDocument({
+  userId,
+  level = 'info',
+  category = 'system',
+  title,
+  message,
+  entityId = '',
+  entityType = '',
+  route = '',
+  metadata = {},
+  read = false,
+  createdAt,
+  priority,
+  status,
+  businessId = '',
+  source,
+  channels,
+  assignedTo,
+  resolvedAt = null,
+  resolvedBy = null,
+}) {
+  const now = createdAt || new Date().toISOString();
+  const normalizedLevel = normalizeNotificationLevel(level);
+  const cat = String(category || 'system').trim() || 'system';
+  const uid = String(userId || '').trim();
+
+  const derivedPriority = priority && VALID_PRIORITIES.includes(priority)
+    ? priority
+    : (LEVEL_PRIORITY_MAP[normalizedLevel] || 'medium');
+
+  const derivedStatus = status && VALID_ALERT_STATUSES.includes(status)
+    ? status
+    : (read ? 'seen' : 'new');
+
+  const derivedSource = source && VALID_SOURCES.includes(source)
+    ? source
+    : (CATEGORY_SOURCE_MAP[cat] || 'sistema');
+
+  const normalizedAssignedTo = assignedTo && typeof assignedTo === 'object'
+    ? {
+        userIds: Array.isArray(assignedTo.userIds) ? assignedTo.userIds.map(String) : (uid ? [uid] : []),
+        roles: Array.isArray(assignedTo.roles) ? assignedTo.roles.map(String) : [],
+      }
+    : { userIds: uid ? [uid] : [], roles: [] };
+
+  return {
+    _id: `notification:${uuidv4()}`,
+    type: 'notification',
+    user_id: uid,
+    level: normalizedLevel,
+    category: cat,
+    title: String(title || '').trim(),
+    message: String(message || '').trim(),
+    entityId: String(entityId || '').trim(),
+    entityType: String(entityType || '').trim(),
+    route: String(route || '').trim(),
+    metadata: metadata && typeof metadata === 'object' ? metadata : {},
+    read: derivedStatus !== 'new',
+    priority: derivedPriority,
+    status: derivedStatus,
+    businessId: String(businessId || '').trim(),
+    source: derivedSource,
+    channels: Array.isArray(channels) ? channels : ['inApp'],
+    assignedTo: normalizedAssignedTo,
+    resolvedAt: resolvedAt || null,
+    resolvedBy: resolvedBy || null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeNotification(notification) {
+  if (!notification) {
+    return null;
+  }
+
+  const level = normalizeNotificationLevel(notification.level);
+  const cat = String(notification.category || 'system');
+  const uid = notification.user_id || '';
+
+  const priority = notification.priority && VALID_PRIORITIES.includes(notification.priority)
+    ? notification.priority
+    : (LEVEL_PRIORITY_MAP[level] || 'medium');
+
+  const status = notification.status && VALID_ALERT_STATUSES.includes(notification.status)
+    ? notification.status
+    : (notification.read ? 'seen' : 'new');
+
+  const source = notification.source && VALID_SOURCES.includes(notification.source)
+    ? notification.source
+    : (CATEGORY_SOURCE_MAP[cat] || 'sistema');
+
+  const assignedTo = notification.assignedTo && typeof notification.assignedTo === 'object'
+    ? {
+        userIds: Array.isArray(notification.assignedTo.userIds) ? notification.assignedTo.userIds : (uid ? [uid] : []),
+        roles: Array.isArray(notification.assignedTo.roles) ? notification.assignedTo.roles : [],
+      }
+    : { userIds: uid ? [uid] : [], roles: [] };
+
+  return {
+    id: notification._id,
+    _rev: notification._rev,
+    user_id: uid,
+    level,
+    category: cat,
+    title: String(notification.title || ''),
+    message: String(notification.message || ''),
+    entityId: String(notification.entityId || ''),
+    entityType: String(notification.entityType || ''),
+    route: String(notification.route || ''),
+    metadata: notification.metadata && typeof notification.metadata === 'object' ? notification.metadata : {},
+    read: status !== 'new',
+    priority,
+    status,
+    businessId: String(notification.businessId || ''),
+    source,
+    channels: Array.isArray(notification.channels) ? notification.channels : ['inApp'],
+    assignedTo,
+    resolvedAt: notification.resolvedAt || null,
+    resolvedBy: notification.resolvedBy || null,
+    createdAt: String(notification.createdAt || new Date().toISOString()),
+    updatedAt: String(notification.updatedAt || notification.createdAt || new Date().toISOString()),
+    deletedAt: notification.deletedAt || null,
+  };
+}
+
+export async function listNotificationsByUser(req, userId) {
+  await ensureDatabase(req, NOTIFICATIONS_DB);
+  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+
+  return docs
+    .filter((doc) => doc?.type === 'notification' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function findNotificationById(req, notificationId) {
+  if (!notificationId) {
+    return null;
+  }
+
+  await ensureDatabase(req, NOTIFICATIONS_DB);
+  return getDocument(req, NOTIFICATIONS_DB, notificationId);
+}
+
+export async function saveNotification(req, notification) {
+  if (!notification?._id) {
+    throw new Error('Documento de notificación inválido');
+  }
+
+  await ensureDatabase(req, NOTIFICATIONS_DB);
+  const result = await putDocument(req, NOTIFICATIONS_DB, notification._id, notification);
+  return { ...notification, _rev: result.rev };
+}
+
+function normalizeRecentActivity(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(Boolean)
+    .map((item) => ({
+      id: String(item.id || `activity:${uuidv4()}`),
+      type: String(item.type || 'system'),
+      action: String(item.action || ''),
+      entityId: String(item.entityId || ''),
+      entityLabel: String(item.entityLabel || ''),
+      actorUserId: String(item.actorUserId || ''),
+      actorName: String(item.actorName || ''),
+      targetUserId: String(item.targetUserId || ''),
+      metadata: item.metadata && typeof item.metadata === 'object' ? item.metadata : {},
+      ip: String(item.ip || ''),
+      createdAt: String(item.createdAt || new Date().toISOString()),
+    }))
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, ACCOUNT_ACTIVITY_LIMIT);
+}
+
+// S-07: Normaliza el array de sesiones activas (filtra expiradas)
+function normalizeSessions(sessions) {
+  if (!Array.isArray(sessions)) return [];
+  const now = new Date();
+  return sessions
+    .filter((s) => s && s.sessionId && (s.refreshTokenHash || s.tokenHash) && s.expiry && new Date(s.expiry) > now)
+    .map((s) => ({
+      sessionId: String(s.sessionId),
+      refreshTokenHash: String(s.refreshTokenHash || s.tokenHash || ''),
+      expiry: String(s.expiry),
+      deviceInfo: s.deviceInfo && typeof s.deviceInfo === 'object' ? s.deviceInfo : {},
+      ipAddress: String(s.ipAddress || ''),
+      lastActiveAt: String(s.lastActiveAt || s.createdAt || new Date().toISOString()),
+      createdAt: String(s.createdAt || new Date().toISOString()),
+    }));
+}
+
+export function hashToken(rawToken) {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+export function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+export async function saveResetToken(req, account, rawToken) {
+  const expiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  return saveAccount(req, {
+    ...account,
+    passwordResetTokenHash: hashToken(rawToken),
+    passwordResetExpiry: expiry,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function findAccountByResetToken(req, rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const accounts = await listAccounts(req);
+  return (
+    accounts.find(
+      (a) =>
+        a.passwordResetTokenHash === tokenHash &&
+        a.passwordResetExpiry &&
+        new Date(a.passwordResetExpiry) > new Date(),
+    ) || null
+  );
+}
+
+export async function saveEmailVerificationToken(req, account, rawToken) {
+  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  return saveAccount(req, {
+    ...account,
+    emailVerificationTokenHash: hashToken(rawToken),
+    emailVerificationExpiry: expiry,
+    lastVerificationEmailSentAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function findAccountByVerificationToken(req, rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const accounts = await listAccounts(req);
+  return (
+    accounts.find(
+      (a) =>
+        a.emailVerificationTokenHash === tokenHash &&
+        a.emailVerificationExpiry &&
+        new Date(a.emailVerificationExpiry) > new Date(),
+    ) || null
+  );
+}
+
+// A-04: Tokens de invitación de miembros
+export async function saveInviteToken(req, account, rawToken) {
+  const expiry = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString(); // 72 horas
+  return saveAccount(req, {
+    ...account,
+    inviteTokenHash: hashToken(rawToken),
+    inviteExpiresAt: expiry,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function findAccountByInviteToken(req, rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const accounts = await listAccounts(req);
+  return (
+    accounts.find(
+      (a) =>
+        a.inviteTokenHash === tokenHash &&
+        a.inviteExpiresAt &&
+        new Date(a.inviteExpiresAt) > new Date(),
+    ) || null
+  );
+}
+
+// S-03: Lógica de bloqueo progresivo de cuenta
+// El primer umbral es configurable vía env; los siguientes escalan automáticamente
+function buildLockoutThresholds() {
+  const firstAttempts = Math.max(1, parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10));
+  const firstDurationMs = Math.max(60_000, parseInt(process.env.LOCK_DURATION_MINUTES || '15', 10) * 60 * 1000);
+  return [
+    { attempts: firstAttempts,      durationMs: firstDurationMs },
+    { attempts: firstAttempts * 2,  durationMs: firstDurationMs * 4 },
+    { attempts: firstAttempts * 4,  durationMs: 24 * 60 * 60 * 1000 },
+  ];
+}
+
+// Recalcula en cada llamada para respetar cambios de env en runtime (tests, hot-reload)
+function getLockoutThresholds() {
+  return buildLockoutThresholds();
+}
+
+/**
+ * Devuelve el estado de bloqueo de una cuenta.
+ * - locked: true  → bloqueo activo
+ * - locked: false, wasExpired: true → había bloqueo pero ya expiró (requiere limpieza lazy)
+ * - locked: false, wasExpired: false → sin bloqueo previo
+ */
+export function isAccountLocked(account) {
+  if (!account?.lockUntil) return { locked: false, wasExpired: false };
+  const lockUntil = new Date(account.lockUntil);
+  if (lockUntil > new Date()) {
+    return { locked: true, lockUntil: lockUntil.toISOString(), remainingMs: lockUntil - Date.now() };
+  }
+  return { locked: false, wasExpired: true };
+}
+
+export async function incrementFailedLoginAttempts(req, account) {
+  const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+  const currentAttempts = (fresh.failedLoginAttempts || 0) + 1;
+
+  let lockUntil = fresh.lockUntil || null;
+  let justLocked = false;
+
+  for (const threshold of getLockoutThresholds()) {
+    if (currentAttempts === threshold.attempts) {
+      lockUntil = new Date(Date.now() + threshold.durationMs).toISOString();
+      justLocked = true;
+      break;
+    }
+  }
+
+  const saved = await saveAccount(req, {
+    ...fresh,
+    failedLoginAttempts: currentAttempts,
+    lockUntil,
+    updatedAt: new Date().toISOString(),
+  });
+
+  return { account: saved, justLocked, lockUntil, failedLoginAttempts: currentAttempts };
+}
+
+export async function resetFailedLoginAttempts(req, account) {
+  if (!account.failedLoginAttempts && !account.lockUntil) return account;
+  const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+  return saveAccount(req, {
+    ...fresh,
+    failedLoginAttempts: 0,
+    lockUntil: null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+
+export function verifyPassword(password, storedHash) {
+  if (!storedHash || !String(storedHash).includes(':')) {
+    return false;
+  }
+
+  const [salt, originalHash] = String(storedHash).split(':');
+  const derivedHash = crypto.scryptSync(password, salt, 64).toString('hex');
+
+  return crypto.timingSafeEqual(
+    Buffer.from(originalHash, 'hex'),
+    Buffer.from(derivedHash, 'hex'),
+  );
+}
+
+export function buildAccountDocument({
+  firstName,
+  lastName,
+  email,
+  phone,
+  password,
+  avatar = '',
+  accountType = 'company',
+  role = 'Admin',
+  status = 'active',
+  onboardingCompleted = false,
+  onboardingData = {},
+  companyName = '',
+  provider = 'email',
+  permissions,
+  employment = {},
+  inviteStatus = 'accepted',
+  invitedBy = '',
+  lastLoginAt = '',
+  recentActivity = [],
+  emailVerified = false,
+  landingPage,
+  linkedBusinessId = '',
+  username = '',
+}) {
+  const userId = uuidv4();
+  const now = new Date().toISOString();
+  const normalizedEmail = normalizeEmail(email);
+  const resolvedAccountType = ['user', 'company'].includes(accountType) ? accountType : 'company';
+  const defaultLanding = resolvedAccountType === 'user' ? '/saas/worker' : '/saas/dashboard';
+
+  return {
+    _id: `account:${userId}`,
+    type: 'account',
+    user_id: userId,
+    email: normalizedEmail,
+    firstName: String(firstName || '').trim(),
+    lastName: String(lastName || '').trim(),
+    fullName: `${String(firstName || '').trim()} ${String(lastName || '').trim()}`.trim(),
+    phone: String(phone || '').trim(),
+    avatar: String(avatar || '').trim(),
+    accountType: resolvedAccountType,
+    role: resolvedAccountType === 'user' ? 'Usuario' : (String(role || 'Admin').trim() || 'Admin'),
+    status: String(status || 'active').trim() || 'active',
+    inviteStatus: String(inviteStatus || 'accepted').trim() || 'accepted',
+    invitedBy: String(invitedBy || '').trim(),
+    companyName: String(companyName || '').trim(),
+    onboardingCompleted: resolvedAccountType === 'user' ? true : Boolean(onboardingCompleted),
+    onboardingData: onboardingData || {},
+    provider: String(provider || 'email').trim() || 'email',
+    permissions: normalizePermissionMatrix(permissions, resolvedAccountType === 'user' ? 'Usuario' : role),
+    employment: buildDefaultEmploymentInfo(employment),
+    recentActivity: normalizeRecentActivity(recentActivity),
+    lastLoginAt: String(lastLoginAt || '').trim(),
+    emailVerified: Boolean(emailVerified),
+    paymentSummary: null,
+    subscription: resolvedAccountType === 'user' ? null : {
+      status: 'trial_active',
+      planName: 'Basic',
+      selectedPlanId: 'basic',
+      trialEndsAt: addDays(now, 14),
+      currentPeriodStart: now,
+      currentPeriodEnd: addDays(now, 14),
+      gracePeriodEndsAt: addDays(now, 17),
+      lastPaymentAt: '',
+      cancelAtPeriodEnd: false,
+    },
+    landingPage: String(landingPage || defaultLanding).trim(),
+    linkedBusinessId: String(linkedBusinessId || '').trim(),
+    username: String(username || '').trim().toLowerCase(),
+    referralCode: '',
+    referredByAffiliateId: '',
+    passwordHash: hashPassword(password),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeAccount(account) {
+  if (!account) {
+    return null;
+  }
+
+  const accountType = account.accountType || 'company';
+
+  return {
+    id: account._id,
+    user_id: account.user_id,
+    email: account.email,
+    firstName: account.firstName || '',
+    lastName: account.lastName || '',
+    fullName: account.fullName || `${account.firstName || ''} ${account.lastName || ''}`.trim(),
+    phone: account.phone || '',
+    avatar: account.avatar || '',
+    accountType,
+    role: account.role || 'Admin',
+    status: account.status || 'active',
+    inviteStatus: account.inviteStatus || (account.status === 'pending' ? 'pending' : 'accepted'),
+    invitedBy: account.invitedBy || '',
+    companyName: account.companyName || '',
+    provider: account.provider || 'email',
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+    deletedAt: account.deletedAt || null,
+    lastLoginAt: account.lastLoginAt || '',
+    onboardingCompleted: Boolean(account.onboardingCompleted),
+    onboardingData: account.onboardingData || {},
+    emailVerified: Boolean(account.emailVerified),
+    paymentSummary: account.paymentSummary || null,
+    subscription: account.subscription || null,
+    permissions: normalizePermissionMatrix(account.permissions || account.permissionMatrix || account.permissionsLegacy, account.role),
+    employment: buildDefaultEmploymentInfo(account.employment),
+    recentActivity: normalizeRecentActivity(account.recentActivity),
+    failedLoginAttempts: account.failedLoginAttempts || 0,
+    lockUntil: account.lockUntil || null,
+    googleId: account.googleId || null,
+    googleScopes: account.googleScopes || null,
+    googleProfile: account.googleProfile || null,
+    landingPage: account.landingPage || (accountType === 'user' ? '/saas/worker' : '/saas/dashboard'),
+    linkedBusinessId: account.linkedBusinessId || '',
+    username: account.username || '',
+    referralCode: account.referralCode || '',
+    referredByAffiliateId: account.referredByAffiliateId || '',
+  };
+}
+
+// S-07: Sanitiza una sesión para devolver al frontend (sin el hash del token)
+export function sanitizeSession(session, currentSessionId) {
+  return {
+    sessionId: session.sessionId,
+    deviceInfo: session.deviceInfo || {},
+    ipAddress: session.ipAddress || '',
+    lastActiveAt: session.lastActiveAt || session.createdAt,
+    createdAt: session.createdAt,
+    isCurrent: session.sessionId === currentSessionId,
+  };
+}
+
+export async function findAccountByEmail(req, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+
+  return (
+    docs.find((doc) => doc?.type === 'account' && !doc?.deletedAt && normalizeEmail(doc.email) === normalizedEmail) || null
+  );
+}
+
+export async function findAccountByUserId(req, userId) {
+  if (!userId) {
+    return null;
+  }
+
+  await ensureDatabase(req, ACCOUNTS_DB);
+  return getDocument(req, ACCOUNTS_DB, `account:${userId}`);
+}
+
+export async function listAccounts(req) {
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+
+  return docs
+    .filter((doc) => doc?.type === 'account' && !doc?.deletedAt)
+    .sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || '')));
+}
+
+export async function saveAccount(req, account) {
+  if (!account?._id) {
+    throw new Error('Documento de cuenta inválido');
+  }
+
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const result = await putDocument(req, ACCOUNTS_DB, account._id, account);
+  return { ...account, _rev: result.rev };
+}
+
+export async function appendActivityToAccount(req, userId, activity) {
+  const account = await findAccountByUserId(req, userId);
+  if (!account) {
+    return null;
+  }
+
+  const nextAccount = {
+    ...account,
+    recentActivity: normalizeRecentActivity([activity, ...(account.recentActivity || [])]),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return saveAccount(req, nextAccount);
+}
+
+export async function logAccountActivity(req, activityInput) {
+  const activity = buildActivityRecord(activityInput);
+  const targetIds = Array.from(
+    new Set(
+      [activity.targetUserId || activity.actorUserId]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    ),
+  );
+
+  const updates = [];
+  for (const userId of targetIds) {
+    const saved = await appendActivityToAccount(req, userId, activity);
+    if (saved) {
+      updates.push(saved);
+    }
+  }
+
+  return activity;
+}
+
+export async function findCardByUserId(req, userId) {
+  if (!userId) {
+    return null;
+  }
+
+  await ensureDatabase(req, CARDS_DB);
+  return getDocument(req, CARDS_DB, `card:${userId}`);
+}
+
+export function buildCardDocument({
+  userId,
+  cardNumber,
+  cardHolderName,
+  expiryDate,
+  cvv,
+  billingMode,
+  selectedPlanId,
+}) {
+  const now = new Date().toISOString();
+  const digitsOnly = String(cardNumber || '').replace(/\s+/g, '');
+
+  // SEC-01: Solo almacenamos los últimos 4 dígitos. Nunca el PAN completo ni el CVV.
+  // El procesamiento real de pagos debe hacerse contra un PSP (Stripe, Redsys, etc.)
+  // que devuelva un token/paymentMethodId para almacenar en su lugar.
+  return {
+    _id: `card:${userId}`,
+    type: 'card',
+    user_id: userId,
+    cardHolderName: String(cardHolderName || '').trim(),
+    expiryDate: String(expiryDate || '').trim(),
+    lastFourDigits: digitsOnly.slice(-4),
+    billingMode: String(billingMode || 'monthly'),
+    selectedPlanId: String(selectedPlanId || ''),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeCard(card) {
+  if (!card) {
+    return null;
+  }
+
+  // SEC-01: Nunca devolver PAN completo ni CVV al cliente.
+  return {
+    id: card._id,
+    user_id: card.user_id,
+    cardHolderName: card.cardHolderName || '',
+    expiryDate: card.expiryDate || '',
+    lastFourDigits: card.lastFourDigits || '',
+    billingMode: card.billingMode || 'monthly',
+    selectedPlanId: card.selectedPlanId || '',
+    createdAt: card.createdAt,
+    updatedAt: card.updatedAt,
+  };
+}
+
+export async function saveCard(req, card) {
+  if (!card?._id) {
+    throw new Error('Documento de tarjeta inválido');
+  }
+
+  await ensureDatabase(req, CARDS_DB);
+  const result = await putDocument(req, CARDS_DB, card._id, card);
+  return { ...card, _rev: result.rev };
+}
+
+// ─── D-01: Mango Indexes ──────────────────────────────────────────────────────
+
+export async function ensureIndex(req, dbName, fields, indexName) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const response = await couchRequest(req, `/${encodedDbName}/_index`, {
+    method: 'POST',
+    body: JSON.stringify({
+      index: { fields },
+      name: indexName || `idx-${fields.join('-')}`,
+      type: 'json',
+    }),
+  });
+  return response.json().catch(() => ({}));
+}
+
+const INDEX_DEFINITIONS = {
+  [VEHICLES_DB]: [
+    ['user_id', 'type'],
+    ['user_id', 'status'],
+    ['user_id', 'createdAt'],
+    ['type', 'active', 'user_id'],
+    ['user_id', 'type', 'vehicleId'],
+    ['user_id', 'type', 'status'],
+    ['user_id', 'type', 'expenseType'],
+  ],
+  [FLEET_DB]: [
+    ['user_id', 'type'],
+    ['user_id', 'status'],
+    ['user_id', 'ownershipType'],
+    ['user_id', 'createdAt'],
+    ['type', 'active', 'user_id'],
+  ],
+  [ACCOUNTS_DB]: [
+    ['type', 'email'],
+    ['type', 'user_id'],
+    ['type', 'status'],
+    ['createdAt'],
+  ],
+  [NOTIFICATIONS_DB]: [
+    ['user_id', 'type'],
+    ['user_id', 'read'],
+    ['user_id', 'createdAt'],
+    ['businessId', 'status', 'priority', 'createdAt'],
+    ['businessId', 'source', 'status', 'createdAt'],
+    ['businessId', 'status', 'createdAt'],
+    ['status', 'priority', 'createdAt'],
+  ],
+};
+
+export async function setupDatabaseIndexes(req, dbName) {
+  await ensureDatabase(req, dbName);
+  const defs = INDEX_DEFINITIONS[dbName] || [
+    ['user_id', 'type'],
+    ['user_id', 'status'],
+    ['user_id', 'createdAt'],
+    ['createdAt'],
+  ];
+  const safeDb = dbName.replace(/[^a-z0-9]/g, '-');
+  for (const fields of defs) {
+    const name = `idx-${safeDb}-${fields.join('-')}`;
+    await ensureIndex(req, dbName, fields, name).catch(() => null);
+  }
+}
+
+// ─── D-02: Design Documents & MapReduce Views ─────────────────────────────────
+
+export async function ensureDesignDocument(req, dbName, designName, views) {
+  await ensureDatabase(req, dbName);
+  const docId = `_design/${designName}`;
+  const existing = await getDocument(req, dbName, docId).catch(() => null);
+  const doc = {
+    _id: docId,
+    ...(existing?._rev ? { _rev: existing._rev } : {}),
+    language: 'javascript',
+    views,
+  };
+  const encodedDbName = encodeURIComponent(dbName);
+  const encodedDocId = encodeURIComponent(docId);
+  const response = await couchRequest(req, `/${encodedDbName}/${encodedDocId}`, {
+    method: 'PUT',
+    body: JSON.stringify(doc),
+  });
+  return response.json().catch(() => ({}));
+}
+
+export async function queryView(req, dbName, designName, viewName, params = {}) {
+  const cacheKey = cacheService.buildKey('view', dbName, designName, viewName, JSON.stringify(params));
+  const cached = cacheService.get(cacheKey);
+  if (cached) return cached;
+
+  const encodedDbName = encodeURIComponent(dbName);
+  const qs = new URLSearchParams();
+  if (params.group) qs.set('group', 'true');
+  if (params.group_level !== undefined) qs.set('group_level', String(params.group_level));
+  if (params.reduce !== undefined) qs.set('reduce', String(params.reduce));
+  if (params.key !== undefined) qs.set('key', JSON.stringify(params.key));
+  if (params.startkey !== undefined) qs.set('startkey', JSON.stringify(params.startkey));
+  if (params.endkey !== undefined) qs.set('endkey', JSON.stringify(params.endkey));
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.descending) qs.set('descending', 'true');
+  if (params.include_docs) qs.set('include_docs', 'true');
+  const qstr = qs.toString();
+  const viewPath = `/${encodedDbName}/_design/${encodeURIComponent(designName)}/_view/${encodeURIComponent(viewName)}${qstr ? `?${qstr}` : ''}`;
+  const response = await couchRequest(req, viewPath);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.reason || payload?.error || `Error en vista ${designName}/${viewName}`);
+  }
+  cacheService.set(cacheKey, payload, cacheService.TTL_PRESETS.VIEW);
+  return payload;
+}
+
+export const VEHICLES_DESIGN_VIEWS = {
+  by_user_status: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false){emit([doc.user_id,doc.status],1);}}`,
+    reduce: '_count',
+  },
+  stock_value_by_user: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false&&doc.status!=='vendido'&&doc.status!=='sold'){emit(doc.user_id,doc.purchasePrice||0);}}`,
+    reduce: '_sum',
+  },
+  sales_revenue_by_month: {
+    map: `function(doc){if(doc.type==='car'&&(doc.status==='vendido'||doc.status==='sold')&&doc.soldAt){var m=doc.soldAt.slice(0,7);emit([doc.user_id,m],doc.salePrice||0);}}`,
+    reduce: '_sum',
+  },
+  margin_by_user: {
+    map: `function(doc){if(doc.type==='car'&&(doc.status==='vendido'||doc.status==='sold')){var costs=0;if(doc.associatedCosts){for(var i=0;i<doc.associatedCosts.length;i++){costs+=(doc.associatedCosts[i].amount||0);}}emit(doc.user_id,(doc.salePrice||0)-(doc.purchasePrice||0)-costs);}}`,
+    reduce: '_sum',
+  },
+  days_in_stock_stats: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false&&doc.status!=='vendido'&&doc.status!=='sold'&&(doc.purchaseDate||doc.createdAt)){var base=doc.purchaseDate||doc.createdAt;var ms=Date.now()-new Date(base).getTime();var days=Math.max(0,Math.floor(ms/86400000));emit(doc.user_id,days);}}`,
+    reduce: '_stats',
+  },
+  by_assigned_to: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false&&doc.assignedTo){emit([doc.user_id,doc.assignedTo],1);}}`,
+    reduce: '_count',
+  },
+};
+
+export const ACCOUNTS_DESIGN_VIEWS = {
+  by_plan: {
+    map: `function(doc){if(doc.type==='account'&&!doc.invitedBy){emit(doc.subscription&&doc.subscription.planName||'Basic',1);}}`,
+    reduce: '_count',
+  },
+  by_status: {
+    map: `function(doc){if(doc.type==='account'){emit(doc.status||'active',1);}}`,
+    reduce: '_count',
+  },
+  signups_by_month: {
+    map: `function(doc){if(doc.type==='account'&&!doc.invitedBy&&doc.createdAt){emit(doc.createdAt.slice(0,7),1);}}`,
+    reduce: '_count',
+  },
+};
+
+export const NOTIFICATIONS_DESIGN_VIEWS = {
+  unread_by_user: {
+    map: `function(doc){if(doc.type==='notification'&&!doc.read){emit(doc.user_id,1);}}`,
+    reduce: '_count',
+  },
+  by_user_level: {
+    map: `function(doc){if(doc.type==='notification'){emit([doc.user_id,doc.level],1);}}`,
+    reduce: '_count',
+  },
+};
+
+// ─── D-06: Changelog ─────────────────────────────────────────────────────────
+
+export const CHANGELOG_DB = 'changelog';
+
+export function buildChangelogEntry({
+  entity,
+  entityId = '',
+  entityLabel = '',
+  action,
+  actorUserId = '',
+  actorName = '',
+  changes = {},
+  metadata = {},
+}) {
+  return {
+    _id: `changelog:${uuidv4()}`,
+    type: 'changelog',
+    entity: String(entity || '').trim(),
+    entityId: String(entityId || '').trim(),
+    entityLabel: String(entityLabel || '').trim(),
+    action: String(action || '').trim(),
+    actorUserId: String(actorUserId || '').trim(),
+    actorName: String(actorName || '').trim(),
+    changes: changes && typeof changes === 'object' ? changes : {},
+    metadata: metadata && typeof metadata === 'object' ? metadata : {},
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function writeChangelog(req, input) {
+  const entry = buildChangelogEntry(input);
+  try {
+    await ensureDatabase(req, CHANGELOG_DB);
+    await putDocument(req, CHANGELOG_DB, entry._id, entry);
+  } catch (_err) {
+    // El changelog no debe romper operaciones principales
+  }
+  return entry;
+}
+
+export async function queryChangelog(req, filters = {}) {
+  await ensureDatabase(req, CHANGELOG_DB);
+  const docs = await getAllDocuments(req, CHANGELOG_DB);
+  let entries = docs.filter((doc) => doc?.type === 'changelog');
+  if (filters.entity) entries = entries.filter((d) => d.entity === filters.entity);
+  if (filters.actorUserId) entries = entries.filter((d) => d.actorUserId === filters.actorUserId);
+  if (filters.entityId) entries = entries.filter((d) => d.entityId === filters.entityId);
+  return entries
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, Number(filters.limit) || 200);
+}
+
+// ─── DB name helpers ───────────────────────────────────────────────────────────
+
+function normalizeDbName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_$()+/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getDbPrefix() {
+  return normalizeDbName(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'udar');
+}
+
+export function getSalesDbName() {
+  return normalizeDbName(process.env.VITE_SALES_DB || `${getDbPrefix()}-sales`);
+}
+
+export function getLeadsDbName() {
+  return normalizeDbName(process.env.VITE_CRM_LEADS_DB || `${getDbPrefix()}-leads`);
+}
+
+export function getClientsDbName() {
+  return normalizeDbName(process.env.VITE_CRM_CLIENTS_DB || `${getDbPrefix()}-clients`);
+}
+
+export function getFinanceDbName() {
+  return normalizeDbName(process.env.VITE_FINANCE_DB || process.env.VITE_PAYMENTS_DB || 'pay');
+}
+
+export function getInvoicesDbName() {
+  return normalizeDbName(process.env.VITE_CRM_INVOICES_DB || `${getDbPrefix()}-crm-invoices`);
+}
+
+export function getDocumentsDbName() {
+  return normalizeDbName(process.env.VITE_DOCUMENTS_DB || `${getDbPrefix()}-documents`);
+}
+
+export function getOcrLogsDbName() {
+  return normalizeDbName(process.env.VITE_OCR_LOGS_DB || `${getDbPrefix()}-ocr-logs`);
+}
+
+export function getPayrollDbName() {
+  return normalizeDbName(process.env.VITE_PAYROLL_DB || `${getDbPrefix()}-payroll`);
+}
+
+export function getLocationsDbName() {
+  return normalizeDbName(process.env.VITE_LOCATIONS_DB || `${getDbPrefix()}-locations`);
+}
+
+export function getAppointmentsDbName() {
+  return normalizeDbName(process.env.VITE_APPOINTMENTS_DB || `${getDbPrefix()}-appointments`);
+}
+
+export function getUserHistoryDbName() {
+  return normalizeDbName(process.env.VITE_USER_HISTORY_DB || `${getDbPrefix()}-user-history`);
+}
+
+export function getClockinsDbName() {
+  return normalizeDbName(process.env.VITE_CLOCKINS_DB || `${getDbPrefix()}-clockins`);
+}
+
+export async function listClockinsByBusiness(req, businessId) {
+  const db = getClockinsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'clockin' && !doc?.deletedAt && doc?.business_id === businessId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ─── USER HISTORY ─────────────────────────────────────────────────────────────
+
+/**
+ * Persiste un evento de historial de usuario.
+ *
+ * @param {object} req   — Express request (lleva cabeceras CouchDB)
+ * @param {object} event — Documento construido con buildUserHistoryEvent()
+ * @returns {Promise<object>}
+ */
+export async function saveUserHistoryEvent(req, event) {
+  const db = getUserHistoryDbName();
+  await ensureDatabase(req, db);
+  return putDocument(req, db, event._id, event);
+}
+
+/**
+ * Devuelve todos los eventos de historial de un usuario concreto.
+ *
+ * @param {object} req
+ * @param {string} userId
+ * @param {string} [sessionUserId]
+ * @param {number} [limit=500]
+ * @returns {Promise<object[]>}
+ */
+export async function getUserHistoryEvents(req, userId, sessionUserId = null, limit = 500) {
+  const db = getUserHistoryDbName();
+  await ensureDatabase(req, db);
+  const all = await getAllDocuments(req, db);
+  const filtered = all
+    .filter((d) => d.type === 'user_history_event' && d.userId === userId && !d._deleted)
+    .filter((d) => (sessionUserId ? d.sessionUserId === sessionUserId : true))
+    .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))
+    .slice(0, limit);
+  return filtered;
+}
+
+/**
+ * Elimina los eventos anteriores a la fecha de corte (limpieza periódica).
+ *
+ * @param {object} req
+ * @param {string} userId
+ * @param {Date}   cutoffDate
+ * @returns {Promise<number>} — número de documentos eliminados
+ */
+export async function pruneOldHistoryEvents(req, userId, cutoffDate) {
+  const db = getUserHistoryDbName();
+  await ensureDatabase(req, db);
+  const all = await getAllDocuments(req, db);
+  const stale = all.filter(
+    (d) =>
+      d.type === 'user_history_event' &&
+      d.userId === userId &&
+      new Date(d.createdAt) < cutoffDate,
+  );
+
+  let count = 0;
+  for (const doc of stale) {
+    await softDeleteDocument(req, db, doc._id);
+    count++;
+  }
+  return count;
+}
+
+// ─── APPOINTMENTS ─────────────────────────────────────────────────────────────
+
+const VALID_APPOINTMENT_TYPES = [
+  'visit', 'test_drive', 'paperwork', 'delivery',
+  'consultation', 'treatment', 'checkup', 'followup_appt',
+  'trial_class', 'enrollment', 'personal_session',
+  'reservation', 'checkin', 'tour',
+  'service', 'assessment', 'class_session',
+];
+const VALID_APPOINTMENT_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'];
+
+const DEFAULT_APPOINTMENT_TYPES_BY_VERTICAL = {
+  carDealership: ['visit', 'test_drive', 'paperwork', 'delivery'],
+  workshop:      ['visit', 'delivery', 'paperwork'],
+  clinic:        ['consultation', 'treatment', 'checkup', 'followup_appt'],
+  vet:           ['consultation', 'treatment', 'checkup', 'followup_appt'],
+  gym:           ['visit', 'trial_class', 'enrollment', 'personal_session'],
+  academy:       ['visit', 'enrollment', 'class_session', 'consultation'],
+  hairSalon:     ['reservation', 'consultation', 'treatment'],
+  hotel:         ['reservation', 'checkin', 'tour'],
+  realEstate:    ['visit', 'tour', 'consultation', 'paperwork'],
+  lawyer:        ['consultation', 'followup_appt', 'paperwork'],
+  construction:  ['visit', 'assessment', 'paperwork', 'delivery'],
+  cleaning:      ['visit', 'service', 'assessment'],
+  events:        ['reservation', 'visit', 'consultation'],
+  delivery:      ['reservation', 'delivery'],
+  nightclub:     ['reservation', 'visit'],
+  scrapyard:     ['visit', 'delivery', 'paperwork'],
+  spareParts:    ['visit', 'consultation', 'delivery'],
+  taxi:          ['reservation', 'service'],
+  pharmacy:      ['consultation', 'service', 'delivery'],
+  carWash:       ['reservation', 'service'],
+};
+
+function normalizeAppointmentType(value) {
+  return VALID_APPOINTMENT_TYPES.includes(String(value || '')) ? String(value) : 'visit';
+}
+
+function normalizeAppointmentStatus(value) {
+  return VALID_APPOINTMENT_STATUSES.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+export function buildAppointmentDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `appt-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'appointment',
+    id,
+    user_id: userId,
+    appointmentType: normalizeAppointmentType(data.appointmentType),
+    date: String(data.date || ''),
+    time: String(data.time || ''),
+    location: String(data.location || 'Concesionario Principal'),
+    notes: String(data.notes || ''),
+    status: normalizeAppointmentStatus(data.status),
+    clientName: String(data.clientName || ''),
+    clientPhone: String(data.clientPhone || ''),
+    clientEmail: String(data.clientEmail || ''),
+    leadId: String(data.leadId || ''),
+    clientId: String(data.clientId || ''),
+    assignedTo: String(data.assignedTo || ''),
+    assignedName: String(data.assignedName || ''),
+    vehicleId: String(data.vehicleId || ''),
+    vehicleName: String(data.vehicleName || ''),
+    vehiclePlate: String(data.vehiclePlate || '').toUpperCase(),
+    source: ['internal', 'booking'].includes(String(data.source || '')) ? String(data.source) : 'internal',
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeAppointment(doc) {
+  if (!doc) return null;
+  return {
+    id: doc._id || doc.id || '',
+    _id: doc._id,
+    _rev: doc._rev,
+    type: doc.type,
+    user_id: doc.user_id,
+    appointmentType: doc.appointmentType || 'visit',
+    date: doc.date || '',
+    time: doc.time || '',
+    location: doc.location || '',
+    notes: doc.notes || '',
+    status: doc.status || 'pending',
+    clientName: doc.clientName || '',
+    clientPhone: doc.clientPhone || '',
+    clientEmail: doc.clientEmail || '',
+    leadId: doc.leadId || '',
+    clientId: doc.clientId || '',
+    assignedTo: doc.assignedTo || '',
+    assignedName: doc.assignedName || '',
+    vehicleId: doc.vehicleId || '',
+    vehicleName: doc.vehicleName || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    source: doc.source || 'internal',
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+  };
+}
+
+export async function listAppointmentsByUser(req, userId) {
+  const db = getAppointmentsDbName();
+  await ensureDatabase(req, db);
+  const all = await getAllDocuments(req, db);
+  return all.filter((d) => d && d.type === 'appointment' && d.user_id === userId && !d._deleted);
+}
+
+// ─── BOOKING CONFIG ───────────────────────────────────────────────────────────
+
+export function buildBookingConfigDocument(userId, data = {}, existing = null, businessType = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `booking-config-${userId}`;
+
+  const defaultWorkingHours = {
+    mon: { enabled: true, start: '09:00', end: '18:00' },
+    tue: { enabled: true, start: '09:00', end: '18:00' },
+    wed: { enabled: true, start: '09:00', end: '18:00' },
+    thu: { enabled: true, start: '09:00', end: '18:00' },
+    fri: { enabled: true, start: '09:00', end: '18:00' },
+    sat: { enabled: true, start: '09:00', end: '14:00' },
+    sun: { enabled: false, start: '09:00', end: '14:00' },
+  };
+
+  const defaultTypes = (businessType && DEFAULT_APPOINTMENT_TYPES_BY_VERTICAL[businessType])
+    || DEFAULT_APPOINTMENT_TYPES_BY_VERTICAL.carDealership;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'booking_config',
+    id,
+    user_id: userId,
+    enabled: data.enabled !== undefined ? Boolean(data.enabled) : (existing?.enabled ?? true),
+    displayName: String(data.displayName || existing?.displayName || ''),
+    slotDuration: Number(data.slotDuration || existing?.slotDuration || 60),
+    bufferMinutes: Number(data.bufferMinutes || existing?.bufferMinutes || 15),
+    maxDaysAhead: Number(data.maxDaysAhead || existing?.maxDaysAhead || 30),
+    appointmentTypes: Array.isArray(data.appointmentTypes)
+      ? data.appointmentTypes.filter((t) => VALID_APPOINTMENT_TYPES.includes(t))
+      : (existing?.appointmentTypes || defaultTypes),
+    workingHours: data.workingHours || existing?.workingHours || defaultWorkingHours,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+// ─── SALES ────────────────────────────────────────────────────────────────────
+
+function normalizeSaleStage(value) {
+  const allowed = ['interested', 'reserved', 'documentation', 'sold', 'delivered'];
+  return allowed.includes(String(value || '')) ? String(value) : 'interested';
+}
+
+const DEFAULT_SALE_DELIVERY_CHECKLIST = [
+  { id: 'payment', label: 'Cobro completo verificado' },
+  { id: 'contract', label: 'Contrato de compraventa firmado por ambas partes' },
+  { id: 'invoice', label: 'Factura de venta emitida y entregada' },
+  { id: 'docs', label: 'Documentación completa (ficha técnica, ITV, permiso circulación)' },
+  { id: 'transfer', label: 'Transferencia de titularidad tramitada' },
+  { id: 'keys', label: 'Llaves entregadas (principal + copia)' },
+  { id: 'accessories', label: 'Accesorios incluidos (alfombrillas, triángulos, chaleco)' },
+  { id: 'condition', label: 'Estado del vehículo verificado (sin daños nuevos)' },
+  { id: 'manual', label: 'Manual del propietario entregado' },
+  { id: 'warranty', label: 'Garantía y condiciones explicadas al cliente' },
+  { id: 'clean', label: 'Vehículo limpio y preparado para entrega' },
+  { id: 'fuel', label: 'Nivel de combustible verificado y registrado' },
+  { id: 'mileage', label: 'Kilometraje registrado en el acta de entrega' },
+];
+
+function normalizeSaleDeliveryChecklist(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return DEFAULT_SALE_DELIVERY_CHECKLIST.map((item) => ({ ...item, checked: false, notes: '' }));
+  }
+  return value.map((item, index) => ({
+    id: String(item?.id || `delivery-item-${index + 1}`),
+    label: String(item?.label || `Punto ${index + 1}`),
+    checked: Boolean(item?.checked),
+    notes: String(item?.notes || ''),
+  }));
+}
+
+export function buildSaleDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `sale-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'sale',
+    id,
+    user_id: userId,
+    vehicleId: String(data.vehicleId || ''),
+    vehicleName: String(data.vehicleName || ''),
+    vehiclePlate: String(data.vehiclePlate || '').toUpperCase(),
+    vehicleYear: data.vehicleYear ? Number(data.vehicleYear) || undefined : undefined,
+    vehicleMileage: data.vehicleMileage ? Number(data.vehicleMileage) || undefined : undefined,
+    vehicleFuel: String(data.vehicleFuel || ''),
+    purchasePrice: Number(data.purchasePrice || 0),
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || ''),
+    clientPhone: String(data.clientPhone || ''),
+    clientEmail: String(data.clientEmail || ''),
+    clientDni: data.clientDni !== undefined ? String(data.clientDni || '') : (existing?.clientDni || ''),
+    leadId: data.leadId !== undefined ? String(data.leadId || '') : (existing?.leadId || ''),
+    stage: normalizeSaleStage(data.stage),
+    totalPrice: Number(data.totalPrice || 0),
+    depositPaid: Number(data.depositPaid || 0),
+    financingAmount: Number(data.financingAmount || 0),
+    financingBank: String(data.financingBank || ''),
+    paymentMethod: String(data.paymentMethod || ''),
+    operationType: String(data.operationType || ''),
+    expectedDelivery: String(data.expectedDelivery || ''),
+    deliveredAt: normalizeSaleStage(data.stage) === 'delivered'
+      ? (data.deliveredAt || existing?.deliveredAt || now)
+      : (existing?.deliveredAt || ''),
+    responsible: String(data.responsible || 'Sin asignar'),
+    notes: String(data.notes || ''),
+    stageHistory: Array.isArray(data.stageHistory) ? data.stageHistory : (existing?.stageHistory || []),
+    paymentHistory: Array.isArray(data.paymentHistory) ? data.paymentHistory : (existing?.paymentHistory || []),
+    internalNotes: Array.isArray(data.internalNotes) ? data.internalNotes : (existing?.internalNotes || []),
+    generatedDocuments: Array.isArray(data.generatedDocuments) ? data.generatedDocuments : (existing?.generatedDocuments || []),
+    priceHistory: Array.isArray(data.priceHistory) ? data.priceHistory : (existing?.priceHistory || []),
+    deliveryChecklist: normalizeSaleDeliveryChecklist(data.deliveryChecklist || existing?.deliveryChecklist),
+    minimumPrice: Number.isFinite(Number(data.minimumPrice))
+      ? Number(data.minimumPrice)
+      : (Number.isFinite(Number(existing?.minimumPrice)) ? Number(existing.minimumPrice) : Number(data.purchasePrice || existing?.purchasePrice || 0)),
+    closureData: data.closureData !== undefined ? data.closureData : (existing?.closureData || undefined),
+    deliveryData: data.deliveryData !== undefined ? data.deliveryData : (existing?.deliveryData || undefined),
+    vehicleBlocked: data.vehicleBlocked !== undefined ? Boolean(data.vehicleBlocked) : Boolean(
+      existing?.vehicleBlocked ?? ['reserved', 'documentation', 'sold', 'delivered'].includes(normalizeSaleStage(data.stage)),
+    ),
+    vehicleBlockReason: data.vehicleBlockReason !== undefined ? data.vehicleBlockReason : existing?.vehicleBlockReason,
+    vehicleStatusBeforeSale: data.vehicleStatusBeforeSale !== undefined
+      ? String(data.vehicleStatusBeforeSale || '')
+      : (existing?.vehicleStatusBeforeSale || ''),
+    financeIncomeCreated: data.financeIncomeCreated !== undefined ? Boolean(data.financeIncomeCreated) : Boolean(existing?.financeIncomeCreated),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeSale(sale) {
+  if (!sale) return null;
+  return {
+    _id: sale._id,
+    _rev: sale._rev,
+    type: 'sale',
+    id: sale._id,
+    user_id: sale.user_id,
+    vehicleId: sale.vehicleId || '',
+    vehicleName: sale.vehicleName || '',
+    vehiclePlate: sale.vehiclePlate || '',
+    vehicleYear: sale.vehicleYear,
+    vehicleMileage: sale.vehicleMileage,
+    vehicleFuel: sale.vehicleFuel || '',
+    purchasePrice: Number(sale.purchasePrice || 0),
+    clientId: sale.clientId || '',
+    clientName: sale.clientName || '',
+    clientPhone: sale.clientPhone || '',
+    clientEmail: sale.clientEmail || '',
+    clientDni: sale.clientDni || '',
+    leadId: sale.leadId || '',
+    stage: normalizeSaleStage(sale.stage),
+    totalPrice: Number(sale.totalPrice || 0),
+    depositPaid: Number(sale.depositPaid || 0),
+    financingAmount: Number(sale.financingAmount || 0),
+    financingBank: sale.financingBank || '',
+    paymentMethod: sale.paymentMethod || '',
+    operationType: sale.operationType || '',
+    expectedDelivery: sale.expectedDelivery || '',
+    deliveredAt: sale.deliveredAt || '',
+    responsible: sale.responsible || 'Sin asignar',
+    notes: sale.notes || '',
+    stageHistory: Array.isArray(sale.stageHistory) ? sale.stageHistory : [],
+    paymentHistory: Array.isArray(sale.paymentHistory) ? sale.paymentHistory : [],
+    internalNotes: Array.isArray(sale.internalNotes) ? sale.internalNotes : [],
+    generatedDocuments: Array.isArray(sale.generatedDocuments) ? sale.generatedDocuments : [],
+    priceHistory: Array.isArray(sale.priceHistory) ? sale.priceHistory : [],
+    deliveryChecklist: normalizeSaleDeliveryChecklist(sale.deliveryChecklist),
+    minimumPrice: Number.isFinite(Number(sale.minimumPrice))
+      ? Number(sale.minimumPrice)
+      : Number(sale.purchasePrice || 0),
+    closureData: sale.closureData || undefined,
+    deliveryData: sale.deliveryData || undefined,
+    vehicleBlocked: Boolean(sale.vehicleBlocked),
+    vehicleBlockReason: sale.vehicleBlockReason || undefined,
+    vehicleStatusBeforeSale: sale.vehicleStatusBeforeSale || '',
+    financeIncomeCreated: Boolean(sale.financeIncomeCreated),
+    createdAt: sale.createdAt || new Date().toISOString(),
+    updatedAt: sale.updatedAt || sale.createdAt || new Date().toISOString(),
+    deletedAt: sale.deletedAt || null,
+  };
+}
+
+export async function listSalesByUser(req, userId) {
+  const db = getSalesDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'sale' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── RESERVATIONS ─────────────────────────────────────────────────────────────
+
+function normalizeReservationStatus(value) {
+  const allowed = ['active', 'expired', 'cancelled', 'converted'];
+  return allowed.includes(String(value || '')) ? String(value) : 'active';
+}
+
+export function getReservationsDbName() {
+  return getSalesDbName();
+}
+
+export function buildReservationDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `reservation-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'reservation',
+    id,
+    user_id: userId,
+
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || ''),
+    clientPhone: String(data.clientPhone || ''),
+    clientEmail: String(data.clientEmail || ''),
+    clientDni: String(data.clientDni || ''),
+
+    vehicleId: String(data.vehicleId || ''),
+    vehicleName: String(data.vehicleName || ''),
+    vehiclePlate: String(data.vehiclePlate || '').toUpperCase(),
+    vehicleYear: data.vehicleYear ? Number(data.vehicleYear) || undefined : undefined,
+
+    status: normalizeReservationStatus(data.status),
+    depositAmount: Number(data.depositAmount || 0),
+    depositPaid: Boolean(data.depositPaid),
+    paymentMethod: String(data.paymentMethod || ''),
+    reservationDate: String(data.reservationDate || now.slice(0, 10)),
+    expirationDate: String(data.expirationDate || ''),
+
+    saleId: String(data.saleId || existing?.saleId || ''),
+    financeMovementId: String(data.financeMovementId || existing?.financeMovementId || ''),
+    contractGenerated: Boolean(data.contractGenerated ?? existing?.contractGenerated),
+
+    commercial: String(data.commercial || 'Sin asignar'),
+    commercialId: String(data.commercialId || ''),
+    observations: String(data.observations || ''),
+    workCenterId: String(data.workCenterId || ''),
+    workCenterName: String(data.workCenterName || ''),
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    cancelledAt: existing?.cancelledAt || null,
+    cancelReason: existing?.cancelReason || '',
+    convertedAt: existing?.convertedAt || null,
+  };
+}
+
+export function sanitizeReservation(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'reservation',
+    id: doc._id,
+    user_id: doc.user_id || '',
+
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientPhone: doc.clientPhone || '',
+    clientEmail: doc.clientEmail || '',
+    clientDni: doc.clientDni || '',
+
+    vehicleId: doc.vehicleId || '',
+    vehicleName: doc.vehicleName || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    vehicleYear: doc.vehicleYear,
+
+    status: normalizeReservationStatus(doc.status),
+    depositAmount: Number(doc.depositAmount || 0),
+    depositPaid: Boolean(doc.depositPaid),
+    paymentMethod: doc.paymentMethod || '',
+    reservationDate: doc.reservationDate || '',
+    expirationDate: doc.expirationDate || '',
+
+    saleId: doc.saleId || '',
+    financeMovementId: doc.financeMovementId || '',
+    contractGenerated: Boolean(doc.contractGenerated),
+
+    commercial: doc.commercial || 'Sin asignar',
+    commercialId: doc.commercialId || '',
+    observations: doc.observations || '',
+    workCenterId: doc.workCenterId || '',
+    workCenterName: doc.workCenterName || '',
+
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    cancelledAt: doc.cancelledAt || null,
+    cancelReason: doc.cancelReason || '',
+    convertedAt: doc.convertedAt || null,
+  };
+}
+
+export async function listReservationsByUser(req, userId) {
+  const db = getReservationsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'reservation' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── OPPORTUNITIES ────────────────────────────────────────────────────────────
+
+const VALID_OPPORTUNITY_STATUSES = ['new', 'contacted', 'test_drive', 'quoted', 'negotiation', 'reserved', 'won', 'lost'];
+
+function normalizeOpportunityStatus(value) {
+  return VALID_OPPORTUNITY_STATUSES.includes(String(value || '')) ? String(value) : 'new';
+}
+
+export function getOpportunitiesDbName() {
+  return normalizeDbName(process.env.VITE_OPPORTUNITIES_DB || `${getDbPrefix()}-opportunities`);
+}
+
+export function buildOpportunityDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `opp-${uuidv4()}`;
+  const newStatus = normalizeOpportunityStatus(data.commercialStatus);
+  const oldStatus = existing ? normalizeOpportunityStatus(existing.commercialStatus) : null;
+
+  const stageHistory = Array.isArray(data.stageHistory)
+    ? data.stageHistory
+    : (existing?.stageHistory || []);
+
+  if (existing && oldStatus && newStatus !== oldStatus) {
+    stageHistory.push({
+      from: oldStatus,
+      to: newStatus,
+      at: now,
+      by: String(data._changedBy || ''),
+    });
+  }
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'opportunity',
+    id,
+    user_id: userId,
+    leadId: String(data.leadId || existing?.leadId || ''),
+    clientId: String(data.clientId || existing?.clientId || ''),
+    vehicleId: String(data.vehicleId || existing?.vehicleId || ''),
+    vehicleName: String(data.vehicleName || existing?.vehicleName || ''),
+    vehiclePlate: String(data.vehiclePlate || existing?.vehiclePlate || '').toUpperCase(),
+    vehicleYear: data.vehicleYear ? Number(data.vehicleYear) || undefined : (existing?.vehicleYear || undefined),
+    vehiclePrice: Number(data.vehiclePrice || existing?.vehiclePrice || 0),
+    commercialStatus: newStatus,
+    responsible: String(data.responsible || existing?.responsible || 'Sin asignar'),
+    responsibleName: String(data.responsibleName || existing?.responsibleName || ''),
+    budget: Number(data.budget || existing?.budget || 0),
+    quoteId: String(data.quoteId || existing?.quoteId || ''),
+    saleId: String(data.saleId || existing?.saleId || ''),
+    expectedCloseDate: String(data.expectedCloseDate || existing?.expectedCloseDate || ''),
+    probability: Math.min(100, Math.max(0, Number(data.probability ?? existing?.probability ?? 50))),
+    source: String(data.source || existing?.source || ''),
+    notes: String(data.notes ?? existing?.notes ?? ''),
+    nextAction: data.nextAction !== undefined ? data.nextAction : (existing?.nextAction || null),
+    interactions: Array.isArray(data.interactions) ? data.interactions : (existing?.interactions || []),
+    tags: Array.isArray(data.tags) ? data.tags.map((t) => String(t)) : (existing?.tags || []),
+    lostReason: String(data.lostReason || existing?.lostReason || ''),
+    financingRequested: Boolean(data.financingRequested ?? existing?.financingRequested),
+    tradeInVehicleId: String(data.tradeInVehicleId || existing?.tradeInVehicleId || ''),
+    stageHistory,
+    lastContact: String(data.lastContact || existing?.lastContact || ''),
+    workCenterId: String(data.workCenterId || existing?.workCenterId || ''),
+    workCenterName: String(data.workCenterName || existing?.workCenterName || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeOpportunity(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'opportunity',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    leadId: doc.leadId || '',
+    clientId: doc.clientId || '',
+    vehicleId: doc.vehicleId || '',
+    vehicleName: doc.vehicleName || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    vehicleYear: doc.vehicleYear || undefined,
+    vehiclePrice: Number(doc.vehiclePrice || 0),
+    commercialStatus: normalizeOpportunityStatus(doc.commercialStatus),
+    responsible: doc.responsible || 'Sin asignar',
+    responsibleName: doc.responsibleName || '',
+    budget: Number(doc.budget || 0),
+    quoteId: doc.quoteId || '',
+    saleId: doc.saleId || '',
+    expectedCloseDate: doc.expectedCloseDate || '',
+    probability: Number(doc.probability ?? 50),
+    source: doc.source || '',
+    notes: doc.notes || '',
+    nextAction: doc.nextAction || null,
+    interactions: Array.isArray(doc.interactions) ? doc.interactions : [],
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    lostReason: doc.lostReason || '',
+    financingRequested: Boolean(doc.financingRequested),
+    tradeInVehicleId: doc.tradeInVehicleId || '',
+    stageHistory: Array.isArray(doc.stageHistory) ? doc.stageHistory : [],
+    lastContact: doc.lastContact || '',
+    workCenterId: doc.workCenterId || '',
+    workCenterName: doc.workCenterName || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listOpportunitiesByUser(req, userId) {
+  const db = getOpportunitiesDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'opportunity' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+}
+
+// ─── SCRAPYARD SALES (Ventas de piezas de desguace) ──────────────────────────
+
+export function getScrapyardSalesDbName() {
+  return normalizeDbName(`${getDbPrefix()}-scrapyard-sales`);
+}
+
+const VALID_SCRAPYARD_CHANNELS = ['mostrador', 'telefono', 'web', 'talleres', 'marketplace'];
+const VALID_SCRAPYARD_STATUSES = ['borrador', 'confirmada', 'preparando', 'lista', 'enviada', 'entregada', 'cancelada'];
+const VALID_SCRAPYARD_PAY_METHODS = ['efectivo', 'tarjeta', 'transferencia', 'bizum', 'financiacion', 'contrareembolso'];
+const VALID_SCRAPYARD_PAY_STATUSES = ['pendiente', 'parcial', 'cobrada'];
+const VALID_SCRAPYARD_DELIVERY = ['recogida', 'envio'];
+const VALID_SCRAPYARD_CLIENT_TYPES = ['particular', 'taller', 'empresa'];
+
+function normalizeScrapyardChannel(v) { return VALID_SCRAPYARD_CHANNELS.includes(String(v || '')) ? String(v) : 'mostrador'; }
+function normalizeScrapyardStatus(v) { return VALID_SCRAPYARD_STATUSES.includes(String(v || '')) ? String(v) : 'borrador'; }
+function normalizeScrapyardPayMethod(v) { return VALID_SCRAPYARD_PAY_METHODS.includes(String(v || '')) ? String(v) : 'efectivo'; }
+function normalizeScrapyardPayStatus(v) { return VALID_SCRAPYARD_PAY_STATUSES.includes(String(v || '')) ? String(v) : 'pendiente'; }
+function normalizeScrapyardDelivery(v) { return VALID_SCRAPYARD_DELIVERY.includes(String(v || '')) ? String(v) : 'recogida'; }
+function normalizeScrapyardClientType(v) { return VALID_SCRAPYARD_CLIENT_TYPES.includes(String(v || '')) ? String(v) : 'particular'; }
+
+function sanitizeScrapyardShipping(data) {
+  if (!data || typeof data !== 'object') return { direccion: '', cp: '', ciudad: '', provincia: '', transportista: '', numSeguimiento: '', costeEnvio: 0 };
+  return {
+    direccion: String(data.direccion || ''),
+    cp: String(data.cp || ''),
+    ciudad: String(data.ciudad || ''),
+    provincia: String(data.provincia || ''),
+    transportista: String(data.transportista || ''),
+    numSeguimiento: String(data.numSeguimiento || ''),
+    costeEnvio: Number(data.costeEnvio || 0),
+  };
+}
+
+function sanitizeScrapyardLines(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(l => ({
+    id: String(l.id || uuidv4()),
+    piezaId: String(l.piezaId || ''),
+    referencia: String(l.referencia || ''),
+    nombre: String(l.nombre || ''),
+    cantidad: Number(l.cantidad || 1),
+    precioUnitario: Number(l.precioUnitario || 0),
+    coste: Number(l.coste || 0),
+    descuento: Number(l.descuento || 0),
+    subtotal: Number(l.subtotal || 0),
+  }));
+}
+
+function sanitizeScrapyardPayments(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(p => ({
+    id: String(p.id || uuidv4()),
+    importe: Number(p.importe || 0),
+    metodo: normalizeScrapyardPayMethod(p.metodo),
+    fecha: String(p.fecha || new Date().toISOString()),
+    nota: String(p.nota || ''),
+  }));
+}
+
+function sanitizeScrapyardHistorial(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(h => ({
+    id: String(h.id || uuidv4()),
+    accion: String(h.accion || ''),
+    fecha: String(h.fecha || ''),
+    usuario: String(h.usuario || ''),
+    detalle: String(h.detalle || ''),
+  }));
+}
+
+function sanitizeScrapyardDocuments(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(d => ({
+    id: String(d.id || uuidv4()),
+    tipo: String(d.tipo || ''),
+    nombre: String(d.nombre || ''),
+    fecha: String(d.fecha || ''),
+    fileData: d.fileData || undefined,
+    mimeType: d.mimeType || undefined,
+  }));
+}
+
+export function buildScrapyardSaleDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `scrapyard-sale-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'scrapyard_sale',
+    id,
+    user_id: userId,
+    numVenta: String(data.numVenta || existing?.numVenta || ''),
+    canal: normalizeScrapyardChannel(data.canal ?? existing?.canal),
+    canalDetalle: String(data.canalDetalle ?? existing?.canalDetalle ?? ''),
+    clientId: String(data.clientId || existing?.clientId || ''),
+    clientName: String(data.clientName || existing?.clientName || ''),
+    clientPhone: String(data.clientPhone || existing?.clientPhone || ''),
+    clientEmail: String(data.clientEmail || existing?.clientEmail || ''),
+    clientTipo: normalizeScrapyardClientType(data.clientTipo ?? existing?.clientTipo),
+    lineas: sanitizeScrapyardLines(data.lineas ?? existing?.lineas),
+    importeTotal: Number(data.importeTotal ?? existing?.importeTotal ?? 0),
+    descuentoGlobal: Number(data.descuentoGlobal ?? existing?.descuentoGlobal ?? 0),
+    importeNeto: Number(data.importeNeto ?? existing?.importeNeto ?? 0),
+    iva: Number(data.iva ?? existing?.iva ?? 21),
+    importeConIva: Number(data.importeConIva ?? existing?.importeConIva ?? 0),
+    formaPago: normalizeScrapyardPayMethod(data.formaPago ?? existing?.formaPago),
+    estadoPago: normalizeScrapyardPayStatus(data.estadoPago ?? existing?.estadoPago),
+    pagos: sanitizeScrapyardPayments(data.pagos ?? existing?.pagos),
+    entrega: normalizeScrapyardDelivery(data.entrega ?? existing?.entrega),
+    envio: sanitizeScrapyardShipping(data.envio ?? existing?.envio),
+    estado: normalizeScrapyardStatus(data.estado ?? existing?.estado),
+    reservaExpira: String(data.reservaExpira || existing?.reservaExpira || ''),
+    observaciones: String(data.observaciones ?? existing?.observaciones ?? ''),
+    responsable: String(data.responsable || existing?.responsable || 'Sin asignar'),
+    garantia: String(data.garantia ?? existing?.garantia ?? '3 meses'),
+    documentos: sanitizeScrapyardDocuments(data.documentos ?? existing?.documentos),
+    historial: sanitizeScrapyardHistorial(data.historial ?? existing?.historial),
+    margen: Number(data.margen ?? existing?.margen ?? 0),
+    financeIncomeCreated: Boolean(data.financeIncomeCreated ?? existing?.financeIncomeCreated),
+    cancelMotivo: String(data.cancelMotivo ?? existing?.cancelMotivo ?? ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeScrapyardSale(sale) {
+  if (!sale) return null;
+  return {
+    _id: sale._id,
+    _rev: sale._rev,
+    type: 'scrapyard_sale',
+    id: sale._id,
+    user_id: sale.user_id,
+    numVenta: sale.numVenta || '',
+    canal: normalizeScrapyardChannel(sale.canal),
+    canalDetalle: sale.canalDetalle || '',
+    clientId: sale.clientId || '',
+    clientName: sale.clientName || '',
+    clientPhone: sale.clientPhone || '',
+    clientEmail: sale.clientEmail || '',
+    clientTipo: normalizeScrapyardClientType(sale.clientTipo),
+    lineas: sanitizeScrapyardLines(sale.lineas),
+    importeTotal: Number(sale.importeTotal || 0),
+    descuentoGlobal: Number(sale.descuentoGlobal || 0),
+    importeNeto: Number(sale.importeNeto || 0),
+    iva: Number(sale.iva ?? 21),
+    importeConIva: Number(sale.importeConIva || 0),
+    formaPago: normalizeScrapyardPayMethod(sale.formaPago),
+    estadoPago: normalizeScrapyardPayStatus(sale.estadoPago),
+    pagos: sanitizeScrapyardPayments(sale.pagos),
+    entrega: normalizeScrapyardDelivery(sale.entrega),
+    envio: sanitizeScrapyardShipping(sale.envio),
+    estado: normalizeScrapyardStatus(sale.estado),
+    reservaExpira: sale.reservaExpira || '',
+    observaciones: sale.observaciones || '',
+    responsable: sale.responsable || 'Sin asignar',
+    garantia: sale.garantia || '3 meses',
+    documentos: sanitizeScrapyardDocuments(sale.documentos),
+    historial: sanitizeScrapyardHistorial(sale.historial),
+    margen: Number(sale.margen || 0),
+    financeIncomeCreated: Boolean(sale.financeIncomeCreated),
+    cancelMotivo: sale.cancelMotivo || '',
+    createdAt: sale.createdAt || new Date().toISOString(),
+    updatedAt: sale.updatedAt || sale.createdAt || new Date().toISOString(),
+    deletedAt: sale.deletedAt || null,
+  };
+}
+
+export async function listScrapyardSalesByUser(req, userId) {
+  const db = getScrapyardSalesDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'scrapyard_sale' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── LEADS ────────────────────────────────────────────────────────────────────
+
+function normalizeLeadStatus(value) {
+  const allowed = ['new', 'contacted', 'appointment', 'reserved', 'negotiation', 'won', 'lost'];
+  return allowed.includes(String(value || '')) ? String(value) : 'new';
+}
+
+export function buildLeadDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `lead-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'lead',
+    id,
+    user_id: userId,
+    name: String(data.name || '').trim(),
+    phone: String(data.phone || '').trim(),
+    email: String(data.email || '').trim().toLowerCase(),
+    source: String(data.source || 'web'),
+    status: normalizeLeadStatus(data.status),
+    interestedVehicle: String(data.interestedVehicle || data.vehicleInterest || ''),
+    vehicleInterest: String(data.vehicleInterest || data.interestedVehicle || ''),
+    vehicleInterestId: String(data.vehicleInterestId || ''),
+    budget: String(data.budget || ''),
+    notes: String(data.notes || ''),
+    responsible: String(data.responsible || 'Sin asignar'),
+    tags: Array.isArray(data.tags) ? data.tags.map((t) => String(t)) : (existing?.tags || []),
+    interactions: Array.isArray(data.interactions) ? data.interactions : (existing?.interactions || []),
+    score: typeof data.score === 'number' ? data.score : (existing?.score ?? 0),
+    lastContact: data.lastContact ? String(data.lastContact) : '',
+    convertedAt: data.convertedAt ? String(data.convertedAt) : '',
+    convertedToClientId: String(data.convertedToClientId || ''),
+    convertedToClientName: String(data.convertedToClientName || ''),
+    // UTM attribution
+    utm_source: String(data.utm_source || existing?.utm_source || ''),
+    utm_medium: String(data.utm_medium || existing?.utm_medium || ''),
+    utm_campaign: String(data.utm_campaign || existing?.utm_campaign || ''),
+    utm_content: String(data.utm_content || existing?.utm_content || ''),
+    utm_term: String(data.utm_term || existing?.utm_term || ''),
+    referrer: String(data.referrer || existing?.referrer || ''),
+    landing_page: String(data.landing_page || existing?.landing_page || ''),
+    createdAt: existing?.createdAt || (data.createdAt ? String(data.createdAt) : now),
+    updatedAt: now,
+  };
+}
+
+export function sanitizeLead(lead) {
+  if (!lead) return null;
+  return {
+    _rev: lead._rev,
+    type: 'lead',
+    user_id: lead.user_id || '',
+    id: lead._id,
+    name: lead.name || '',
+    phone: lead.phone || '',
+    email: lead.email || '',
+    source: lead.source || 'web',
+    status: normalizeLeadStatus(lead.status),
+    interestedVehicle: lead.interestedVehicle || lead.vehicleInterest || '',
+    vehicleInterest: lead.vehicleInterest || lead.interestedVehicle || '',
+    vehicleInterestId: lead.vehicleInterestId || '',
+    budget: lead.budget || '',
+    notes: lead.notes || '',
+    responsible: lead.responsible || 'Sin asignar',
+    tags: Array.isArray(lead.tags) ? lead.tags : [],
+    interactions: Array.isArray(lead.interactions) ? lead.interactions : [],
+    score: Number(lead.score || 0),
+    lastContact: lead.lastContact || '',
+    convertedAt: lead.convertedAt || '',
+    convertedToClientId: lead.convertedToClientId || '',
+    convertedToClientName: lead.convertedToClientName || '',
+    utm_source: lead.utm_source || '',
+    utm_medium: lead.utm_medium || '',
+    utm_campaign: lead.utm_campaign || '',
+    utm_content: lead.utm_content || '',
+    utm_term: lead.utm_term || '',
+    referrer: lead.referrer || '',
+    landing_page: lead.landing_page || '',
+    createdAt: lead.createdAt || new Date().toISOString(),
+    updatedAt: lead.updatedAt || lead.createdAt || new Date().toISOString(),
+    deletedAt: lead.deletedAt || null,
+  };
+}
+
+export async function listLeadsByUser(req, userId) {
+  const db = getLeadsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'lead' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function findDuplicateLeads(req, userId, candidateData) {
+  const leads = await listLeadsByUser(req, userId);
+  const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-9);
+  const normStr = (s) => String(s || '').trim().toLowerCase();
+
+  const phone = normPhone(candidateData.phone);
+  const email = normStr(candidateData.email);
+  const excludeId = candidateData.id || candidateData._id || '';
+
+  return leads.filter((l) => {
+    if (l._id === excludeId) return false;
+    if (email && normStr(l.email) === email) return true;
+    if (phone && phone.length >= 9 && normPhone(l.phone) === phone) return true;
+    return false;
+  }).map(sanitizeLead);
+}
+
+// ─── CLIENTS ──────────────────────────────────────────────────────────────────
+
+function normalizeClientStatus(value) {
+  const allowed = ['active', 'inactive', 'vip', 'blocked'];
+  return allowed.includes(String(value || '')) ? String(value) : 'active';
+}
+
+function normalizeClientType(value) {
+  const allowed = ['particular', 'empresa'];
+  return allowed.includes(String(value || '')) ? String(value) : 'particular';
+}
+
+function normalizeCommercialStatus(value) {
+  const allowed = ['prospect', 'active', 'negotiation', 'loyal', 'at_risk', 'churned', 'inactive'];
+  return allowed.includes(String(value || '')) ? String(value) : 'active';
+}
+
+function sanitizeAddress(addr) {
+  if (!addr || typeof addr !== 'object') return null;
+  return {
+    id: String(addr.id || `addr-${uuidv4()}`),
+    label: String(addr.label || addr.etiqueta || '').trim(),
+    street: String(addr.street || '').trim(),
+    postalCode: String(addr.postalCode || '').trim(),
+    city: String(addr.city || '').trim(),
+    state: String(addr.state || '').trim(),
+    country: String(addr.country || '').trim(),
+    isPrimary: Boolean(addr.isPrimary || addr.esPrincipal),
+  };
+}
+
+function sanitizeSocialLink(link) {
+  if (!link || typeof link !== 'object') return null;
+  return {
+    id: String(link.id || `social-${uuidv4()}`),
+    name: String(link.name || link.nombre || '').trim(),
+    url: String(link.url || '').trim(),
+  };
+}
+
+function sanitizeContactPerson(contact) {
+  if (!contact || typeof contact !== 'object') return null;
+  return {
+    id: String(contact.id || `contact-${uuidv4()}`),
+    name: String(contact.name || contact.nombre || '').trim(),
+    role: String(contact.role || contact.cargo || '').trim(),
+    email: String(contact.email || '').trim().toLowerCase(),
+    phone: String(contact.phone || contact.telefono || '').trim(),
+    notes: String(contact.notes || '').trim(),
+  };
+}
+
+export function buildClientDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `client-${uuidv4()}`;
+
+  const rawAddresses = Array.isArray(data.addresses) ? data.addresses : (existing?.addresses || []);
+  const rawSocialLinks = Array.isArray(data.socialLinks) ? data.socialLinks : (existing?.socialLinks || []);
+  const rawContacts = Array.isArray(data.contacts) ? data.contacts : (existing?.contacts || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'client',
+    id,
+    user_id: userId,
+    clientType: normalizeClientType(data.clientType || data.tipo || existing?.clientType),
+    name: String(data.name || '').trim(),
+    phone: String(data.phone || '').trim(),
+    phonePrefix: String(data.phonePrefix || existing?.phonePrefix || '+34').trim(),
+    email: String(data.email || '').trim().toLowerCase(),
+    dni: String(data.dni || '').trim(),
+    legalName: String(data.legalName || existing?.legalName || '').trim(),
+    fiscalId: String(data.fiscalId || existing?.fiscalId || '').trim(),
+    fiscalAddress: String(data.fiscalAddress || existing?.fiscalAddress || '').trim(),
+    fiscalCity: String(data.fiscalCity || existing?.fiscalCity || '').trim(),
+    fiscalPostalCode: String(data.fiscalPostalCode || existing?.fiscalPostalCode || '').trim(),
+    fiscalCountry: String(data.fiscalCountry || existing?.fiscalCountry || 'España').trim(),
+    commercialStatus: normalizeCommercialStatus(data.commercialStatus || existing?.commercialStatus),
+    address: String(data.address || '').trim(),
+    city: String(data.city || '').trim(),
+    postalCode: String(data.postalCode || '').trim(),
+    addresses: rawAddresses.map(sanitizeAddress).filter(Boolean),
+    socialLinks: rawSocialLinks.map(sanitizeSocialLink).filter(Boolean),
+    contacts: rawContacts.map(sanitizeContactPerson).filter(Boolean),
+    status: normalizeClientStatus(data.status),
+    responsible: String(data.responsible || 'Sin asignar'),
+    notes: String(data.notes || ''),
+    consents: {
+      dataProcessing: Boolean(data.consents?.dataProcessing),
+      commercial: Boolean(data.consents?.commercial),
+      thirdParty: Boolean(data.consents?.thirdParty),
+    },
+    vehiclesPurchased: Array.isArray(data.vehiclesPurchased)
+      ? data.vehiclesPurchased.map((v) => String(v))
+      : (existing?.vehiclesPurchased || []),
+    vehiclesSold: Array.isArray(data.vehiclesSold)
+      ? data.vehiclesSold.map((v) => String(v))
+      : (existing?.vehiclesSold || []),
+    documentsCount: Number(data.documentsCount || existing?.documentsCount || 0),
+    interactions: Array.isArray(data.interactions) ? data.interactions : (existing?.interactions || []),
+    documentsList: Array.isArray(data.documentsList) ? data.documentsList : (existing?.documentsList || []),
+    tags: Array.isArray(data.tags) ? data.tags.map((t) => String(t)) : (existing?.tags || []),
+    gdpr: data.gdpr != null ? data.gdpr : (existing?.gdpr || null),
+    defaultPaymentMethod: normalizePaymentMethod(data.defaultPaymentMethod || existing?.defaultPaymentMethod),
+    referralCode: String(data.referralCode || existing?.referralCode || '').trim(),
+    referredByAffiliateId: String(data.referredByAffiliateId || existing?.referredByAffiliateId || '').trim(),
+    createdAt: existing?.createdAt || (data.createdAt ? String(data.createdAt) : now),
+    updatedAt: now,
+  };
+}
+
+const ALLOWED_PAYMENT_METHODS = ['efectivo', 'tarjeta', 'transferencia', 'domiciliacion', 'bizum', 'cheque', 'pagare', 'confirming', 'otro'];
+
+function normalizePaymentMethod(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return ALLOWED_PAYMENT_METHODS.includes(v) ? v : '';
+}
+
+export function sanitizeClient(client) {
+  if (!client) return null;
+  return {
+    _rev: client._rev,
+    type: 'client',
+    user_id: client.user_id || '',
+    id: client._id,
+    clientType: client.clientType || 'particular',
+    name: client.name || '',
+    phone: client.phone || '',
+    phonePrefix: client.phonePrefix || '+34',
+    email: client.email || '',
+    dni: client.dni || '',
+    legalName: client.legalName || '',
+    fiscalId: client.fiscalId || '',
+    fiscalAddress: client.fiscalAddress || '',
+    fiscalCity: client.fiscalCity || '',
+    fiscalPostalCode: client.fiscalPostalCode || '',
+    fiscalCountry: client.fiscalCountry || 'España',
+    commercialStatus: client.commercialStatus || 'active',
+    address: client.address || '',
+    city: client.city || '',
+    postalCode: client.postalCode || '',
+    addresses: Array.isArray(client.addresses) ? client.addresses : [],
+    socialLinks: Array.isArray(client.socialLinks) ? client.socialLinks : [],
+    contacts: Array.isArray(client.contacts) ? client.contacts : [],
+    status: normalizeClientStatus(client.status),
+    responsible: client.responsible || 'Sin asignar',
+    notes: client.notes || '',
+    consents: {
+      dataProcessing: Boolean(client.consents?.dataProcessing),
+      commercial: Boolean(client.consents?.commercial),
+      thirdParty: Boolean(client.consents?.thirdParty),
+    },
+    vehiclesPurchased: Array.isArray(client.vehiclesPurchased) ? client.vehiclesPurchased : [],
+    vehiclesSold: Array.isArray(client.vehiclesSold) ? client.vehiclesSold : [],
+    documentsCount: Number(client.documentsCount || 0),
+    interactions: Array.isArray(client.interactions) ? client.interactions : [],
+    documentsList: Array.isArray(client.documentsList) ? client.documentsList : [],
+    tags: Array.isArray(client.tags) ? client.tags : [],
+    gdpr: client.gdpr || null,
+    defaultPaymentMethod: client.defaultPaymentMethod || '',
+    referralCode: client.referralCode || '',
+    referredByAffiliateId: client.referredByAffiliateId || '',
+    stats: {
+      totalOrders: client.stats?.totalOrders || 0,
+      lastOrderDate: client.stats?.lastOrderDate || null,
+      orderFrequencyDays: client.stats?.orderFrequencyDays || 0,
+      favoriteAddressId: client.stats?.favoriteAddressId || null,
+      totalSpent: client.stats?.totalSpent || 0,
+      createdFrom: client.stats?.createdFrom || 'crm',
+    },
+    loyalty: {
+      enrolled: Boolean(client.loyalty?.enrolled),
+      enrolledAt: client.loyalty?.enrolledAt || null,
+      points: client.loyalty?.points || 0,
+      level: client.loyalty?.level || 'bronze',
+      totalVisits: client.loyalty?.totalVisits || 0,
+    },
+    createdAt: client.createdAt || new Date().toISOString(),
+    updatedAt: client.updatedAt || client.createdAt || new Date().toISOString(),
+    deletedAt: client.deletedAt || null,
+  };
+}
+
+export async function listClientsByUser(req, userId) {
+  const db = getClientsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) {
+  const db = getClientsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  const q = String(phoneQuery || '').replace(/\s+/g, '');
+  if (!q) return [];
+  return docs
+    .filter((d) => {
+      if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return false;
+      const phone = String(d.phone || '').replace(/\s+/g, '');
+      return phone.includes(q);
+    })
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .slice(0, Number(limit) || 20);
+}
+
+// ─── CLIENT NOTES ────────────────────────────────────────────────────────────
+
+export function buildClientNoteDocument(userId, clientId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `client-note-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'client_note',
+    id,
+    user_id: userId,
+    clientId: String(clientId),
+    text: String(data.text || data.texto || '').trim(),
+    authorId: String(data.authorId || ''),
+    authorName: String(data.authorName || data.autor || '').trim(),
+    important: Boolean(data.important || data.importante),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeClientNote(note) {
+  if (!note) return null;
+  return {
+    id: note._id,
+    _rev: note._rev,
+    type: 'client_note',
+    user_id: note.user_id || '',
+    clientId: note.clientId || '',
+    text: note.text || '',
+    authorId: note.authorId || '',
+    authorName: note.authorName || '',
+    important: Boolean(note.important),
+    createdAt: note.createdAt || new Date().toISOString(),
+    updatedAt: note.updatedAt || note.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listClientNotesByClient(req, userId, clientId) {
+  const db = getClientsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'client_note' && !d?.deletedAt && d?.user_id === userId && d?.clientId === clientId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── CLIENT PROMOTIONS ───────────────────────────────────────────────────────
+
+function normalizePromocionEstado(value) {
+  const allowed = ['activa', 'programada', 'finalizada'];
+  return allowed.includes(String(value || '')) ? String(value) : 'activa';
+}
+
+function normalizePromocionTipo(value) {
+  const allowed = ['descuento', 'cupon', '2x1', 'regalo'];
+  return allowed.includes(String(value || '')) ? String(value) : 'descuento';
+}
+
+export function buildClientPromotionDocument(userId, clientId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `client-promo-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'client_promotion',
+    id,
+    user_id: userId,
+    clientId: String(clientId),
+    nombre: String(data.nombre || '').trim(),
+    tipo: normalizePromocionTipo(data.tipo),
+    descuento: data.descuento != null ? Number(data.descuento) : null,
+    codigo: String(data.codigo || '').trim().toUpperCase(),
+    fechaInicio: String(data.fechaInicio || now),
+    fechaFin: String(data.fechaFin || now),
+    estado: normalizePromocionEstado(data.estado),
+    usosRestantes: data.usosRestantes != null ? Number(data.usosRestantes) : null,
+    descripcion: String(data.descripcion || '').trim(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeClientPromotion(promo) {
+  if (!promo) return null;
+  return {
+    id: promo._id,
+    _rev: promo._rev,
+    type: 'client_promotion',
+    user_id: promo.user_id || '',
+    clientId: promo.clientId || '',
+    nombre: promo.nombre || '',
+    tipo: promo.tipo || 'descuento',
+    descuento: promo.descuento,
+    codigo: promo.codigo || '',
+    fechaInicio: promo.fechaInicio || '',
+    fechaFin: promo.fechaFin || '',
+    estado: promo.estado || 'activa',
+    usosRestantes: promo.usosRestantes,
+    descripcion: promo.descripcion || '',
+    createdAt: promo.createdAt || new Date().toISOString(),
+    updatedAt: promo.updatedAt || promo.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listClientPromotionsByClient(req, userId, clientId) {
+  const db = getClientsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'client_promotion' && !d?.deletedAt && d?.user_id === userId && d?.clientId === clientId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function findDuplicateClients(req, userId, candidateData) {
+  const clients = await listClientsByUser(req, userId);
+  const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-9);
+  const normStr = (s) => String(s || '').trim().toLowerCase();
+
+  const phone = normPhone(candidateData.phone);
+  const email = normStr(candidateData.email);
+  const dni = normStr(candidateData.dni);
+  const excludeId = candidateData.id || candidateData._id || '';
+
+  return clients.filter((c) => {
+    if (c._id === excludeId) return false;
+    if (email && normStr(c.email) === email) return true;
+    if (phone && phone.length >= 9 && normPhone(c.phone) === phone) return true;
+    if (dni && normStr(c.dni) === dni) return true;
+    return false;
+  }).map(sanitizeClient);
+}
+
+// ─── BANK RECONCILIATION ──────────────────────────────────────────────────────
+
+export function getBankTransactionsDbName() {
+  return normalizeDbName(
+    process.env.VITE_BANK_TX_DB || `${getDbPrefix()}-bank-transactions`,
+  );
+}
+
+const BANK_TX_STATUS = ['unmatched', 'matched', 'ignored', 'manual'];
+
+function normalizeBankTxStatus(value) {
+  return BANK_TX_STATUS.includes(String(value || '')) ? String(value) : 'unmatched';
+}
+
+export function buildBankTransaction(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data._id || data.id || `bank-tx-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, id,
+    type: 'bank_transaction', user_id: userId,
+    date: String(data.date || now.slice(0, 10)),
+    valueDate: String(data.valueDate || existing?.valueDate || ''),
+    description: String(data.description || '').trim(),
+    amount: Number(data.amount || 0),
+    balance: data.balance !== undefined ? Number(data.balance) : existing?.balance ?? undefined,
+    reference: String(data.reference || existing?.reference || '').trim() || undefined,
+    category: String(data.category || existing?.category || '').trim() || undefined,
+    bankName: String(data.bankName || existing?.bankName || '').trim() || undefined,
+    status: normalizeBankTxStatus(data.status ?? existing?.status),
+    matchType: data.matchType || existing?.matchType || undefined,
+    matchedMovementId: data.matchedMovementId || existing?.matchedMovementId || undefined,
+    matchedMovementRef: data.matchedMovementRef || existing?.matchedMovementRef || undefined,
+    matchedEntityId: data.matchedEntityId || existing?.matchedEntityId || undefined,
+    matchedEntityRef: data.matchedEntityRef || existing?.matchedEntityRef || undefined,
+    source: String(data.source || existing?.source || 'manual'),
+    notes: String(data.notes || existing?.notes || '').trim(),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeBankTransaction(doc) {
+  if (!doc || doc.type !== 'bank_transaction') return null;
+  return {
+    _id: doc._id, _rev: doc._rev, id: doc._id,
+    type: 'bank_transaction', user_id: doc.user_id || '',
+    date: doc.date || '', valueDate: doc.valueDate || '',
+    description: doc.description || '', amount: Number(doc.amount || 0),
+    balance: doc.balance !== undefined ? Number(doc.balance) : undefined,
+    reference: doc.reference || undefined, category: doc.category || undefined,
+    bankName: doc.bankName || undefined,
+    status: normalizeBankTxStatus(doc.status),
+    matchType: doc.matchType || undefined,
+    matchedMovementId: doc.matchedMovementId || undefined,
+    matchedMovementRef: doc.matchedMovementRef || undefined,
+    matchedEntityId: doc.matchedEntityId || undefined,
+    matchedEntityRef: doc.matchedEntityRef || undefined,
+    source: doc.source || 'manual', notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listBankTransactionsByUser(req, userId) {
+  const db = getBankTransactionsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'bank_transaction' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ─── FINANCE ──────────────────────────────────────────────────────────────────
+
+function normalizeFinanceType(value) {
+  const allowed = ['cobro', 'pago'];
+  return allowed.includes(String(value || '')) ? String(value) : 'cobro';
+}
+
+function normalizeFinanceStatus(value) {
+  const allowed = ['paid', 'pending'];
+  return allowed.includes(String(value || '')) ? String(value) : 'paid';
+}
+
+export function buildFinanceDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `finance-${uuidv4()}`;
+  const amountBase = Number(data.amountBase || 0);
+  const taxRate = Number(data.taxRate || 0);
+  const taxAmount = Number((amountBase * (taxRate / 100)).toFixed(2));
+  const totalAmount = Number((amountBase + taxAmount).toFixed(2));
+
+  const linkedDocs = Array.isArray(data.linkedDocuments)
+    ? data.linkedDocuments.map((d) => ({
+        id: String(d.id || ''),
+        type: String(d.type || 'file'),
+        name: String(d.name || ''),
+        url: String(d.url || ''),
+      }))
+    : existing?.linkedDocuments || [];
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    id,
+    type: normalizeFinanceType(data.type),
+    user_id: userId,
+    companyName: String(data.companyName || '').trim(),
+    concept: String(data.concept || '').trim(),
+    reference: String(data.reference || '').trim(),
+    category: String(data.category || '').trim(),
+    categoryIcon: String(data.categoryIcon || ''),
+    categoryColor: String(data.categoryColor || ''),
+    amountBase,
+    taxRate,
+    taxAmount: existing ? Number(data.taxAmount ?? taxAmount) : taxAmount,
+    totalAmount: existing ? Number(data.totalAmount ?? totalAmount) : totalAmount,
+    date: String(data.date || now.slice(0, 10)),
+    payMethod: String(data.payMethod || '').trim(),
+    notes: String(data.notes || '').trim(),
+    status: normalizeFinanceStatus(data.status ?? existing?.status),
+    dueDate: String(data.dueDate || existing?.dueDate || ''),
+    paidAt: String(data.paidAt || existing?.paidAt || ''),
+    reconciled: Boolean(data.reconciled ?? existing?.reconciled ?? false),
+    reconciledBankTxId: String(data.reconciledBankTxId || existing?.reconciledBankTxId || ''),
+    linkedDocuments: linkedDocs,
+    attachmentUrl: String(data.attachmentUrl || existing?.attachmentUrl || ''),
+    source: String(data.source || existing?.source || 'manual'),
+    sourceRef: String(data.sourceRef || existing?.sourceRef || ''),
+    dismissedDuplicates: Array.isArray(data.dismissedDuplicates)
+      ? data.dismissedDuplicates
+      : existing?.dismissedDuplicates || [],
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeFinance(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    id: doc._id,
+    type: normalizeFinanceType(doc.type),
+    user_id: doc.user_id || '',
+    companyName: doc.companyName || '',
+    concept: doc.concept || '',
+    reference: doc.reference || '',
+    category: doc.category || '',
+    categoryIcon: doc.categoryIcon || '',
+    categoryColor: doc.categoryColor || '',
+    amountBase: Number(doc.amountBase || 0),
+    taxRate: Number(doc.taxRate || 0),
+    taxAmount: Number(doc.taxAmount || 0),
+    totalAmount: Number(doc.totalAmount || 0),
+    date: doc.date || new Date().toISOString().slice(0, 10),
+    payMethod: doc.payMethod || '',
+    notes: doc.notes || '',
+    status: doc.status || 'paid',
+    dueDate: doc.dueDate || '',
+    paidAt: doc.paidAt || '',
+    reconciled: Boolean(doc.reconciled),
+    reconciledBankTxId: doc.reconciledBankTxId || '',
+    linkedDocuments: Array.isArray(doc.linkedDocuments) ? doc.linkedDocuments : [],
+    attachmentUrl: doc.attachmentUrl || '',
+    source: doc.source || 'manual',
+    sourceRef: doc.sourceRef || '',
+    dismissedDuplicates: Array.isArray(doc.dismissedDuplicates) ? doc.dismissedDuplicates : [],
+    bankAccountId: doc.bankAccountId || undefined,
+    bankAccountName: doc.bankAccountName || undefined,
+    linkedInvoiceId: doc.linkedInvoiceId || undefined,
+    linkedInvoiceType: doc.linkedInvoiceType || undefined,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listFinanceByUser(req, userId) {
+  const db = getFinanceDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => (doc?.type === 'cobro' || doc?.type === 'pago') && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => {
+      const d = String(b.date || '').localeCompare(String(a.date || ''));
+      return d !== 0 ? d : String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+}
+
+// ─── BANK ACCOUNTS ────────────────────────────────────────────────────────────
+
+export function buildBankAccountDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `bank_account-${uuidv4()}`;
+  const initialBalance = Number(data.initialBalance || 0);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    id,
+    type: 'bank_account',
+    user_id: userId,
+    name: String(data.name || '').trim() || 'Cuenta principal',
+    bankName: String(data.bankName || '').trim(),
+    iban: String(data.iban || '').trim(),
+    swift: String(data.swift || '').trim() || undefined,
+    accountNumber: String(data.accountNumber || '').trim() || undefined,
+    currency: String(data.currency || 'EUR').trim(),
+    initialBalance,
+    currentBalance: existing ? Number(data.currentBalance ?? existing.currentBalance ?? initialBalance) : initialBalance,
+    isDefault: Boolean(data.isDefault),
+    color: String(data.color || '#3b82f6').trim(),
+    icon: String(data.icon || '🏦').trim(),
+    active: data.active !== false,
+    notes: String(data.notes || '').trim(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeBankAccount(doc) {
+  if (!doc || doc.type !== 'bank_account') return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    id: doc._id,
+    type: 'bank_account',
+    user_id: doc.user_id || '',
+    name: doc.name || '',
+    bankName: doc.bankName || '',
+    iban: doc.iban || '',
+    swift: doc.swift || undefined,
+    accountNumber: doc.accountNumber || undefined,
+    currency: doc.currency || 'EUR',
+    initialBalance: Number(doc.initialBalance || 0),
+    currentBalance: Number(doc.currentBalance || 0),
+    isDefault: Boolean(doc.isDefault),
+    color: doc.color || '#3b82f6',
+    icon: doc.icon || '🏦',
+    active: doc.active !== false,
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listBankAccountsByUser(req, userId) {
+  const db = getFinanceDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'bank_account' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => {
+      if (a.isDefault && !b.isDefault) return -1;
+      if (!a.isDefault && b.isDefault) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}
+
+// ─── TAX OBLIGATIONS ──────────────────────────────────────────────────────────
+
+export function buildTaxObligationDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `tax_obligation-${uuidv4()}`;
+  const validStatuses = ['pending', 'in_progress', 'filed', 'paid', 'overdue'];
+  const status = validStatuses.includes(data.status) ? data.status : (existing?.status || 'pending');
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    id,
+    type: 'tax_obligation',
+    user_id: userId,
+    model: String(data.model || existing?.model || 'custom').trim(),
+    modelName: String(data.modelName || existing?.modelName || '').trim(),
+    period: String(data.period || existing?.period || '').trim(),
+    periodLabel: String(data.periodLabel || existing?.periodLabel || '').trim(),
+    dueDate: String(data.dueDate || existing?.dueDate || '').trim(),
+    filingDate: data.filingDate ? String(data.filingDate).trim() : (existing?.filingDate || undefined),
+    status,
+    estimatedAmount: data.estimatedAmount != null ? Number(data.estimatedAmount) : (existing?.estimatedAmount ?? undefined),
+    actualAmount: data.actualAmount != null ? Number(data.actualAmount) : (existing?.actualAmount ?? undefined),
+    documentId: String(data.documentId || existing?.documentId || '').trim() || undefined,
+    notes: String(data.notes ?? existing?.notes ?? '').trim(),
+    reminderDaysBefore: Number(data.reminderDaysBefore ?? existing?.reminderDaysBefore ?? 7),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeTaxObligation(doc) {
+  if (!doc || doc.type !== 'tax_obligation') return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    id: doc._id,
+    type: 'tax_obligation',
+    user_id: doc.user_id || '',
+    model: doc.model || 'custom',
+    modelName: doc.modelName || '',
+    period: doc.period || '',
+    periodLabel: doc.periodLabel || '',
+    dueDate: doc.dueDate || '',
+    filingDate: doc.filingDate || undefined,
+    status: doc.status || 'pending',
+    estimatedAmount: doc.estimatedAmount != null ? Number(doc.estimatedAmount) : undefined,
+    actualAmount: doc.actualAmount != null ? Number(doc.actualAmount) : undefined,
+    documentId: doc.documentId || undefined,
+    notes: doc.notes || '',
+    reminderDaysBefore: Number(doc.reminderDaysBefore ?? 7),
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listTaxObligationsByUser(req, userId, year) {
+  const db = getFinanceDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => {
+      if (doc?.type !== 'tax_obligation' || doc?.deletedAt || doc?.user_id !== userId) return false;
+      if (year && !String(doc.period || '').startsWith(String(year)) && !String(doc.dueDate || '').startsWith(String(year))) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+}
+
+// ─── INVOICES (CRM) ───────────────────────────────────────────────────────────
+
+function normalizeInvoiceStatus(value) {
+  const allowed = ['paid', 'pending', 'overdue', 'draft', 'partial'];
+  return allowed.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+function sanitizeInvoiceLines(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) return [];
+  return lines.map((l) => ({
+    id: String(l.id || uuidv4()),
+    description: String(l.description || '').trim(),
+    quantity: Number(l.quantity || 1),
+    unitPrice: Number(l.unitPrice || 0),
+    discountPercent: Number(l.discountPercent || 0),
+    taxRate: Number(l.taxRate || 21),
+    lineTotal: Number(l.lineTotal || 0),
+  }));
+}
+
+function calcInvoiceTotals(lines) {
+  const sanitized = sanitizeInvoiceLines(lines);
+  let subtotal = 0;
+  let discountAmount = 0;
+  let taxAmount = 0;
+
+  for (const line of sanitized) {
+    const gross = line.quantity * line.unitPrice;
+    const discount = gross * (line.discountPercent / 100);
+    const net = gross - discount;
+    const tax = net * (line.taxRate / 100);
+    subtotal += net;
+    discountAmount += discount;
+    taxAmount += tax;
+  }
+
+  return {
+    subtotal: Number(subtotal.toFixed(2)),
+    discountAmount: Number(discountAmount.toFixed(2)),
+    taxAmount: Number(taxAmount.toFixed(2)),
+    amountBase: Number(subtotal.toFixed(2)),
+    total: Number((subtotal + taxAmount).toFixed(2)),
+  };
+}
+
+export function buildInvoiceDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `client-invoice-${uuidv4()}`;
+  const lines = sanitizeInvoiceLines(data.lines || existing?.lines || []);
+  const totals = lines.length > 0 ? calcInvoiceTotals(lines) : null;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'client_invoice',
+    id,
+    user_id: userId,
+
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || '').trim(),
+    clientNif: String(data.clientNif || existing?.clientNif || '').trim(),
+    clientAddress: String(data.clientAddress || existing?.clientAddress || '').trim(),
+    clientCity: String(data.clientCity || existing?.clientCity || '').trim(),
+    clientPostalCode: String(data.clientPostalCode || existing?.clientPostalCode || '').trim(),
+    clientEmail: String(data.clientEmail || existing?.clientEmail || '').trim(),
+
+    issuerName: String(data.issuerName || existing?.issuerName || '').trim(),
+    issuerNif: String(data.issuerNif || existing?.issuerNif || '').trim(),
+    issuerAddress: String(data.issuerAddress || existing?.issuerAddress || '').trim(),
+    issuerCity: String(data.issuerCity || existing?.issuerCity || '').trim(),
+    issuerPostalCode: String(data.issuerPostalCode || existing?.issuerPostalCode || '').trim(),
+    issuerEmail: String(data.issuerEmail || existing?.issuerEmail || '').trim(),
+    issuerPhone: String(data.issuerPhone || existing?.issuerPhone || '').trim(),
+
+    number: String(data.number || '').trim(),
+    series: String(data.series || existing?.series || 'FAC').trim(),
+    sequenceNumber: Number(data.sequenceNumber || existing?.sequenceNumber || 0),
+
+    vehicleName: String(data.vehicleName || '').trim(),
+    vehiclePlate: String(data.vehiclePlate || '').trim().toUpperCase(),
+    date: String(data.date || now),
+    dueDate: String(data.dueDate || data.date || now),
+
+    lines,
+    subtotal: totals ? totals.subtotal : Number(data.subtotal || 0),
+    discountAmount: totals ? totals.discountAmount : Number(data.discountAmount || 0),
+    taxAmount: totals ? totals.taxAmount : Number(data.taxAmount || 0),
+    amountBase: totals ? totals.amountBase : Number(data.amountBase || 0),
+    total: totals ? totals.total : Number(data.total || 0),
+    paid: Number(data.paid || 0),
+
+    status: normalizeInvoiceStatus(data.status),
+    paymentMethod: String(data.paymentMethod || ''),
+    notes: String(data.notes || ''),
+
+    sourceType: data.sourceType || existing?.sourceType || null,
+    sourceQuoteId: data.sourceQuoteId || existing?.sourceQuoteId || null,
+    sourceSaleId: data.sourceSaleId || existing?.sourceSaleId || null,
+    financeMovementId: data.financeMovementId || existing?.financeMovementId || null,
+
+    sentAt: data.sentAt || existing?.sentAt || null,
+    sentTo: data.sentTo || existing?.sentTo || null,
+
+    payments: Array.isArray(data.payments) ? data.payments : (existing?.payments || []),
+
+    serviceIds: Array.isArray(data.serviceIds) ? data.serviceIds.map(String) : (existing?.serviceIds || []),
+    contractId: String(data.contractId || existing?.contractId || ''),
+    recurrence: normalizeInvoiceRecurrence(data.recurrence || existing?.recurrence),
+    periodStart: String(data.periodStart || existing?.periodStart || ''),
+    periodEnd: String(data.periodEnd || existing?.periodEnd || ''),
+    pdfUrl: String(data.pdfUrl || existing?.pdfUrl || ''),
+    paidAt: String(data.paidAt || existing?.paidAt || ''),
+    linkedFinanceId: String(data.linkedFinanceId || existing?.linkedFinanceId || ''),
+    origin: normalizeInvoiceOrigin(data.origin || existing?.origin),
+    vertical: String(data.vertical || existing?.vertical || ''),
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeInvoice(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev,
+    type: 'client_invoice',
+    id: doc._id,
+    user_id: doc.user_id || '',
+
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientNif: doc.clientNif || '',
+    clientAddress: doc.clientAddress || '',
+    clientCity: doc.clientCity || '',
+    clientPostalCode: doc.clientPostalCode || '',
+    clientEmail: doc.clientEmail || '',
+
+    issuerName: doc.issuerName || '',
+    issuerNif: doc.issuerNif || '',
+    issuerAddress: doc.issuerAddress || '',
+    issuerCity: doc.issuerCity || '',
+    issuerPostalCode: doc.issuerPostalCode || '',
+    issuerEmail: doc.issuerEmail || '',
+    issuerPhone: doc.issuerPhone || '',
+
+    number: doc.number || '',
+    series: doc.series || 'FAC',
+    sequenceNumber: Number(doc.sequenceNumber || 0),
+
+    vehicleName: doc.vehicleName || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    date: doc.date || new Date().toISOString(),
+    dueDate: doc.dueDate || doc.date || new Date().toISOString(),
+
+    lines: sanitizeInvoiceLines(doc.lines || []),
+    subtotal: Number(doc.subtotal || 0),
+    discountAmount: Number(doc.discountAmount || 0),
+    taxAmount: Number(doc.taxAmount || 0),
+    amountBase: Number(doc.amountBase || 0),
+    total: Number(doc.total || 0),
+    paid: Number(doc.paid || 0),
+
+    status: normalizeInvoiceStatus(doc.status),
+    paymentMethod: doc.paymentMethod || '',
+    notes: doc.notes || '',
+
+    sourceType: doc.sourceType || null,
+    sourceQuoteId: doc.sourceQuoteId || null,
+    sourceSaleId: doc.sourceSaleId || null,
+    financeMovementId: doc.financeMovementId || null,
+
+    sentAt: doc.sentAt || null,
+    sentTo: doc.sentTo || null,
+
+    payments: Array.isArray(doc.payments) ? doc.payments : [],
+
+    serviceIds: Array.isArray(doc.serviceIds) ? doc.serviceIds : [],
+    contractId: doc.contractId || '',
+    recurrence: normalizeInvoiceRecurrence(doc.recurrence),
+    periodStart: doc.periodStart || '',
+    periodEnd: doc.periodEnd || '',
+    pdfUrl: doc.pdfUrl || '',
+    paidAt: doc.paidAt || '',
+    linkedFinanceId: doc.linkedFinanceId || '',
+    origin: normalizeInvoiceOrigin(doc.origin),
+    vertical: doc.vertical || '',
+
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listInvoicesByUser(req, userId) {
+  const db = getInvoicesDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'client_invoice' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ─── DOCUMENTS ────────────────────────────────────────────────────────────────
+
+function normalizeDocumentStatus(value) {
+  const allowed = ['draft', 'pending_signature', 'signed', 'rejected', 'expired'];
+  return allowed.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+const VALID_DOC_SUB_CATEGORIES = [
+  'permiso_circulacion', 'ficha_tecnica', 'contrato_compra', 'contrato_venta',
+  'factura_compra', 'factura_venta', 'itv', 'reparacion', 'justificante',
+  'doc_cliente', 'anexo', 'seguro', 'informe_trafico', 'otro',
+  // Scrapyard-specific
+  'baja_temporal', 'baja_definitiva', 'certificado_destruccion',
+  'certificado_descontaminacion', 'acta_retirada', 'albaran_grua',
+  'justificante_deposito', 'informe_medioambiental', 'licencia_actividad',
+  'registro_productor_residuos', 'garantia_pieza', 'informe_pieza',
+  'albaran_venta_pieza', 'acta_adjudicacion', 'doc_tasacion',
+];
+
+function normalizeDocSubCategory(value) {
+  return VALID_DOC_SUB_CATEGORIES.includes(String(value || '')) ? String(value) : 'otro';
+}
+
+export function buildDocumentRecord(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `doc-${uuidv4()}`;
+  const nextVersion = existing ? Number(existing.version || 1) + 1 : 1;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'document',
+    id,
+    user_id: userId,
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || '').trim(),
+    vehicleId: String(data.vehicleId || ''),
+    vehicleName: String(data.vehicleName || '').trim(),
+    saleId: String(data.saleId || ''),
+    name: String(data.name || '').trim(),
+    category: String(data.category || 'otro').trim(),
+    docSubCategory: normalizeDocSubCategory(data.docSubCategory || existing?.docSubCategory),
+    status: normalizeDocumentStatus(data.status),
+    content: String(data.content || ''),
+    version: existing ? nextVersion : 1,
+    previousVersionId: existing ? id : '',
+    signedAt: data.status === 'signed'
+      ? (data.signedAt || existing?.signedAt || now)
+      : (existing?.signedAt || ''),
+    signedByClientAt: data.signedByClientAt ? String(data.signedByClientAt) : (existing?.signedByClientAt || ''),
+    expiresAt: String(data.expiresAt || ''),
+    notes: String(data.notes || ''),
+    tags: Array.isArray(data.tags) ? data.tags.map(String) : [],
+    fileUrl: String(data.fileUrl || ''),
+    fileSize: Number(data.fileSize || 0),
+    mimeType: String(data.mimeType || ''),
+    registrationPlate: String(data.registrationPlate || existing?.registrationPlate || ''),
+    vin: String(data.vin || existing?.vin || ''),
+    itvExpiryDate: String(data.itvExpiryDate || existing?.itvExpiryDate || ''),
+    isRequired: Boolean(data.isRequired ?? existing?.isRequired ?? false),
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || '').trim(),
+    archived: Boolean(data.archived ?? existing?.archived ?? false),
+    entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
+    ocrData: data.ocrData || existing?.ocrData || null,
+    ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
+    ocrProcessedAt: data.ocrProcessedAt || existing?.ocrProcessedAt || '',
+    ocrConfidence: Number(data.ocrConfidence || existing?.ocrConfidence || 0),
+    ocrSource: data.ocrSource || existing?.ocrSource || '',
+    linkedModule: data.linkedModule || existing?.linkedModule || '',
+    linkedDocId: data.linkedDocId || existing?.linkedDocId || '',
+    partId: String(data.partId || existing?.partId || ''),
+    partName: String(data.partName || existing?.partName || '').trim(),
+    partCode: String(data.partCode || existing?.partCode || '').trim(),
+    acquisitionId: String(data.acquisitionId || existing?.acquisitionId || ''),
+    deregistrationId: String(data.deregistrationId || existing?.deregistrationId || ''),
+    deregistrationType: data.deregistrationType || existing?.deregistrationType || null,
+    deregistrationDate: data.deregistrationDate || existing?.deregistrationDate || null,
+    expiryDate: data.expiryDate || existing?.expiryDate || null,
+    isScrapyard: Boolean(data.isScrapyard ?? existing?.isScrapyard ?? false),
+    documentHash: String(data.documentHash || existing?.documentHash || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function getScrapyardRequiredDocs(vehicleStatus) {
+  const BASE = ['permiso_circulacion', 'ficha_tecnica', 'contrato_compra'];
+  const POST_RECEPTION = [...BASE, 'certificado_descontaminacion'];
+  const POST_DEREGISTRATION = [...POST_RECEPTION, 'baja_definitiva', 'certificado_destruccion'];
+  switch (vehicleStatus) {
+    case 'received': return BASE;
+    case 'dismantling':
+    case 'partially_dismantled':
+    case 'fully_dismantled':
+      return POST_RECEPTION;
+    case 'compacted':
+      return POST_DEREGISTRATION;
+    default: return BASE;
+  }
+}
+
+export function sanitizeDocumentRecord(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev,
+    type: 'document',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    vehicleId: doc.vehicleId || '',
+    vehicleName: doc.vehicleName || '',
+    saleId: doc.saleId || '',
+    name: doc.name || '',
+    category: doc.category || 'otro',
+    docSubCategory: doc.docSubCategory || 'otro',
+    status: normalizeDocumentStatus(doc.status),
+    content: doc.content || '',
+    version: Number(doc.version || 1),
+    previousVersionId: doc.previousVersionId || '',
+    signedAt: doc.signedAt || '',
+    signedByClientAt: doc.signedByClientAt || '',
+    expiresAt: doc.expiresAt || '',
+    notes: doc.notes || '',
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    fileUrl: doc.fileUrl || '',
+    fileSize: Number(doc.fileSize || 0),
+    mimeType: doc.mimeType || '',
+    registrationPlate: doc.registrationPlate || '',
+    vin: doc.vin || '',
+    itvExpiryDate: doc.itvExpiryDate || '',
+    isRequired: doc.isRequired || false,
+    supplierId: doc.supplierId || '',
+    supplierName: doc.supplierName || '',
+    archived: doc.archived || false,
+    entryMethod: doc.entryMethod || 'manual',
+    ocrData: doc.ocrData || null,
+    ocrImageBase64: doc.ocrImageBase64 || '',
+    ocrProcessedAt: doc.ocrProcessedAt || '',
+    ocrConfidence: Number(doc.ocrConfidence || 0),
+    ocrSource: doc.ocrSource || '',
+    linkedModule: doc.linkedModule || '',
+    linkedDocId: doc.linkedDocId || '',
+    partId: doc.partId || '',
+    partName: doc.partName || '',
+    partCode: doc.partCode || '',
+    acquisitionId: doc.acquisitionId || '',
+    deregistrationId: doc.deregistrationId || '',
+    deregistrationType: doc.deregistrationType || null,
+    deregistrationDate: doc.deregistrationDate || null,
+    expiryDate: doc.expiryDate || null,
+    isScrapyard: doc.isScrapyard || false,
+    documentHash: doc.documentHash || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listDocumentsByUser(req, userId) {
+  const db = getDocumentsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'document' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── SIGNATURE REQUESTS ───────────────────────────────────────────────────────
+
+const SIGNATURE_REQUEST_STATUSES = ['draft', 'pending', 'partially_signed', 'completed', 'rejected', 'expired', 'cancelled'];
+const SIGNER_STATUSES = ['pending', 'viewed', 'signed', 'rejected', 'expired'];
+const SIGNER_ROLES = ['signer', 'reviewer', 'cc'];
+const SIG_ENTITY_TYPES = ['client', 'supplier', 'team_member', 'external'];
+
+function normalizeSignatureStatus(value) {
+  return SIGNATURE_REQUEST_STATUSES.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+function normalizeSignerStatus(value) {
+  return SIGNER_STATUSES.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+function normalizeSigner(s, index) {
+  const id = s.id || `signer-${uuidv4()}`;
+  return {
+    id,
+    name: String(s.name || '').trim(),
+    email: String(s.email || '').trim().toLowerCase(),
+    phone: String(s.phone || '').trim(),
+    role: SIGNER_ROLES.includes(s.role) ? s.role : 'signer',
+    status: normalizeSignerStatus(s.status),
+    order: Number(s.order ?? index),
+    entityType: SIG_ENTITY_TYPES.includes(s.entityType) ? s.entityType : 'external',
+    entityId: String(s.entityId || ''),
+    signedAt: s.signedAt || '',
+    rejectedAt: s.rejectedAt || '',
+    viewedAt: s.viewedAt || '',
+    rejectionReason: String(s.rejectionReason || ''),
+    ipAddress: String(s.ipAddress || ''),
+    userAgent: String(s.userAgent || ''),
+    signatureImageUrl: String(s.signatureImageUrl || ''),
+  };
+}
+
+function normalizeSignatureEvent(e) {
+  return {
+    id: e.id || `evt-${uuidv4()}`,
+    timestamp: e.timestamp || new Date().toISOString(),
+    action: String(e.action || ''),
+    actorName: String(e.actorName || ''),
+    actorEmail: String(e.actorEmail || ''),
+    signerId: String(e.signerId || ''),
+    details: String(e.details || ''),
+    metadata: e.metadata || {},
+  };
+}
+
+export function buildSignatureRequest(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `sigreq-${uuidv4()}`;
+  const signers = Array.isArray(data.signers) ? data.signers.map((s, i) => normalizeSigner(s, i)) : (existing?.signers || []);
+  const events = Array.isArray(data.events) ? data.events.map(normalizeSignatureEvent) : (existing?.events || []);
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'signature_request', id, user_id: userId,
+    documentId: String(data.documentId || existing?.documentId || ''),
+    documentName: String(data.documentName || existing?.documentName || '').trim(),
+    status: normalizeSignatureStatus(data.status ?? existing?.status),
+    signers, signingOrder: data.signingOrder === 'sequential' ? 'sequential' : 'parallel',
+    message: String(data.message ?? existing?.message ?? ''),
+    expiresAt: String(data.expiresAt || existing?.expiresAt || ''),
+    reminderEnabled: data.reminderEnabled ?? existing?.reminderEnabled ?? true,
+    reminderIntervalDays: Number(data.reminderIntervalDays ?? existing?.reminderIntervalDays ?? 3),
+    lastReminderAt: data.lastReminderAt || existing?.lastReminderAt || '',
+    sourceFileUrl: String(data.sourceFileUrl || existing?.sourceFileUrl || ''),
+    sourceFileName: String(data.sourceFileName || existing?.sourceFileName || '').trim(),
+    sourceMimeType: String(data.sourceMimeType || existing?.sourceMimeType || ''),
+    sourceFileSize: Number(data.sourceFileSize || existing?.sourceFileSize || 0),
+    signedFileUrl: String(data.signedFileUrl || existing?.signedFileUrl || ''),
+    signedFileName: String(data.signedFileName || existing?.signedFileName || '').trim(),
+    signedMimeType: String(data.signedMimeType || existing?.signedMimeType || ''),
+    signedFileSize: Number(data.signedFileSize || existing?.signedFileSize || 0),
+    linkedEntityType: SIG_ENTITY_TYPES.includes(data.linkedEntityType) ? data.linkedEntityType : (existing?.linkedEntityType || ''),
+    linkedEntityId: String(data.linkedEntityId || existing?.linkedEntityId || ''),
+    linkedEntityName: String(data.linkedEntityName || existing?.linkedEntityName || '').trim(),
+    provider: String(data.provider || existing?.provider || 'internal'),
+    providerRequestId: String(data.providerRequestId || existing?.providerRequestId || ''),
+    providerData: data.providerData || existing?.providerData || {},
+    events, tags: Array.isArray(data.tags) ? data.tags.map(String) : (existing?.tags || []),
+    notes: String(data.notes ?? existing?.notes ?? ''),
+    createdBy: String(data.createdBy || existing?.createdBy || userId),
+    createdByName: String(data.createdByName || existing?.createdByName || '').trim(),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+    completedAt: data.completedAt || existing?.completedAt || '',
+    cancelledAt: data.cancelledAt || existing?.cancelledAt || '',
+  };
+}
+
+export function sanitizeSignatureRequest(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev, type: 'signature_request', id: doc._id,
+    user_id: doc.user_id || '', documentId: doc.documentId || '',
+    documentName: doc.documentName || '',
+    status: normalizeSignatureStatus(doc.status),
+    signers: Array.isArray(doc.signers) ? doc.signers.map((s, i) => normalizeSigner(s, i)) : [],
+    signingOrder: doc.signingOrder === 'sequential' ? 'sequential' : 'parallel',
+    message: doc.message || '', expiresAt: doc.expiresAt || '',
+    reminderEnabled: doc.reminderEnabled ?? true,
+    reminderIntervalDays: Number(doc.reminderIntervalDays || 3),
+    lastReminderAt: doc.lastReminderAt || '',
+    sourceFileUrl: doc.sourceFileUrl || '', sourceFileName: doc.sourceFileName || '',
+    sourceMimeType: doc.sourceMimeType || '', sourceFileSize: Number(doc.sourceFileSize || 0),
+    signedFileUrl: doc.signedFileUrl || '', signedFileName: doc.signedFileName || '',
+    signedMimeType: doc.signedMimeType || '', signedFileSize: Number(doc.signedFileSize || 0),
+    linkedEntityType: doc.linkedEntityType || '', linkedEntityId: doc.linkedEntityId || '',
+    linkedEntityName: doc.linkedEntityName || '',
+    provider: doc.provider || 'internal', providerRequestId: doc.providerRequestId || '',
+    providerData: doc.providerData || {},
+    events: Array.isArray(doc.events) ? doc.events.map(normalizeSignatureEvent) : [],
+    tags: Array.isArray(doc.tags) ? doc.tags : [], notes: doc.notes || '',
+    createdBy: doc.createdBy || '', createdByName: doc.createdByName || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    completedAt: doc.completedAt || '', cancelledAt: doc.cancelledAt || '',
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export function addSignatureEvent(doc, event) {
+  const events = Array.isArray(doc.events) ? [...doc.events] : [];
+  events.push(normalizeSignatureEvent(event));
+  return events;
+}
+
+export function recalcSignatureStatus(signers) {
+  const required = signers.filter((s) => s.role === 'signer');
+  if (required.length === 0) return 'draft';
+  if (required.some((s) => s.status === 'rejected')) return 'rejected';
+  if (required.every((s) => s.status === 'signed')) return 'completed';
+  if (required.some((s) => s.status === 'signed')) return 'partially_signed';
+  if (required.some((s) => s.status === 'expired')) return 'expired';
+  return 'pending';
+}
+
+export async function listSignatureRequestsByUser(req, userId) {
+  const db = getDocumentsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'signature_request' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function listSignatureRequestsByDocument(req, userId, documentId) {
+  const db = getDocumentsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'signature_request' && !doc?.deletedAt && doc?.user_id === userId && doc?.documentId === documentId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function listSignatureRequestsByEntity(req, userId, entityType, entityId) {
+  const db = getDocumentsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'signature_request' && !doc?.deletedAt && doc?.user_id === userId && doc?.linkedEntityType === entityType && doc?.linkedEntityId === entityId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── LOCATIONS ────────────────────────────────────────────────────────────────
+
+function normalizeLocationCategory(value) {
+  const allowed = ['indoor', 'outdoor', 'workshop', 'storage', 'other'];
+  return allowed.includes(String(value || '')) ? String(value) : 'other';
+}
+
+export function buildLocationDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `location-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'location',
+    id,
+    user_id: userId,
+    name: String(data.name || '').trim(),
+    description: String(data.description || '').trim(),
+    capacity: Number(data.capacity || 0),
+    category: normalizeLocationCategory(data.category),
+    address: String(data.address || '').trim(),
+    notes: String(data.notes || '').trim(),
+    active: data.active !== false,
+    vehicleIds: Array.isArray(data.vehicleIds)
+      ? data.vehicleIds.map(String)
+      : (existing?.vehicleIds || []),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeLocation(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev,
+    type: 'location',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    name: doc.name || '',
+    description: doc.description || '',
+    capacity: Number(doc.capacity || 0),
+    occupiedSpots: Array.isArray(doc.vehicleIds) ? doc.vehicleIds.length : 0,
+    category: normalizeLocationCategory(doc.category),
+    address: doc.address || '',
+    notes: doc.notes || '',
+    active: doc.active !== false,
+    vehicleIds: Array.isArray(doc.vehicleIds) ? doc.vehicleIds : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listLocationsByUser(req, userId) {
+  const db = getLocationsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'location' && !doc?.deletedAt && doc?.user_id === userId && doc?.active !== false)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+// ─── GDPR / RGPD ─────────────────────────────────────────────────────────────
+
+export function getGdprConsentsDbName() {
+  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  return `${prefix}-gdpr-consents`;
+}
+
+export function getGdprRequestsDbName() {
+  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  return `${prefix}-gdpr-requests`;
+}
+
+const CONSENT_PURPOSES = ['marketing', 'analytics', 'functional', 'communications', 'data_transfer', 'profiling', 'other'];
+const CONSENT_CHANNELS = ['web', 'phone', 'email', 'in_person', 'app', 'other'];
+const GDPR_RIGHT_TYPES = ['access', 'rectification', 'erasure', 'portability', 'objection', 'restriction'];
+const GDPR_REQUEST_STATUSES = ['pending', 'in_progress', 'completed', 'rejected'];
+
+export function buildGdprConsentDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `consent-${uuidv4()}`;
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'gdpr_consent',
+    user_id: userId,
+    clientId: String(data.clientId || '').trim(),
+    clientName: String(data.clientName || '').trim(),
+    clientEmail: String(data.clientEmail || '').trim().toLowerCase(),
+    clientPhone: String(data.clientPhone || '').trim(),
+    clientDni: String(data.clientDni || '').trim(),
+    purpose: CONSENT_PURPOSES.includes(data.purpose) ? data.purpose : 'other',
+    purposeDescription: String(data.purposeDescription || '').trim(),
+    channel: CONSENT_CHANNELS.includes(data.channel) ? data.channel : 'other',
+    granted: data.granted !== false,
+    grantedAt: data.granted !== false ? (existing?.grantedAt || now) : null,
+    revokedAt: data.granted === false ? now : (existing?.revokedAt || null),
+    expiresAt: data.expiresAt ? String(data.expiresAt) : null,
+    ipAddress: String(data.ipAddress || '').trim(),
+    notes: String(data.notes || '').trim(),
+    legalBasis: String(data.legalBasis || 'consent').trim(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeGdprConsent(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev,
+    type: 'gdpr_consent',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientEmail: doc.clientEmail || '',
+    clientPhone: doc.clientPhone || '',
+    clientDni: doc.clientDni || '',
+    purpose: doc.purpose || 'other',
+    purposeDescription: doc.purposeDescription || '',
+    channel: doc.channel || 'other',
+    granted: doc.granted !== false,
+    grantedAt: doc.grantedAt || null,
+    revokedAt: doc.revokedAt || null,
+    expiresAt: doc.expiresAt || null,
+    ipAddress: doc.ipAddress || '',
+    notes: doc.notes || '',
+    legalBasis: doc.legalBasis || 'consent',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listGdprConsentsByUser(req, userId) {
+  const db = getGdprConsentsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'gdpr_consent' && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export function buildGdprRequestDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `gdpr-request-${uuidv4()}`;
+  const deadline = new Date(now);
+  deadline.setDate(deadline.getDate() + 30);
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'gdpr_request',
+    user_id: userId,
+    clientId: String(data.clientId || '').trim(),
+    clientName: String(data.clientName || '').trim(),
+    clientEmail: String(data.clientEmail || '').trim().toLowerCase(),
+    clientPhone: String(data.clientPhone || '').trim(),
+    clientDni: String(data.clientDni || '').trim(),
+    rightType: GDPR_RIGHT_TYPES.includes(data.rightType) ? data.rightType : 'access',
+    status: GDPR_REQUEST_STATUSES.includes(data.status) ? data.status : (GDPR_REQUEST_STATUSES.includes(existing?.status) ? existing.status : 'pending'),
+    description: String(data.description || existing?.description || '').trim(),
+    response: String(data.response || existing?.response || '').trim(),
+    assignedTo: String(data.assignedTo || existing?.assignedTo || '').trim(),
+    legalDeadline: existing?.legalDeadline || deadline.toISOString(),
+    completedAt: (data.status === 'completed' || existing?.status === 'completed') ? (existing?.completedAt || now) : null,
+    rejectedAt: (data.status === 'rejected' || existing?.status === 'rejected') ? (existing?.rejectedAt || now) : null,
+    notes: String(data.notes || existing?.notes || '').trim(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeGdprRequest(doc) {
+  if (!doc) return null;
+  return {
+    _rev: doc._rev,
+    type: 'gdpr_request',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientEmail: doc.clientEmail || '',
+    clientPhone: doc.clientPhone || '',
+    clientDni: doc.clientDni || '',
+    rightType: doc.rightType || 'access',
+    status: doc.status || 'pending',
+    description: doc.description || '',
+    response: doc.response || '',
+    assignedTo: doc.assignedTo || '',
+    legalDeadline: doc.legalDeadline || null,
+    completedAt: doc.completedAt || null,
+    rejectedAt: doc.rejectedAt || null,
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listGdprRequestsByUser(req, userId) {
+  const db = getGdprRequestsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'gdpr_request' && doc?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── Business (multi-tenant) ──────────────────────────────────────────────────
+
+function generateCompanyCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+export function buildBusinessDocument({ ownerUserId, name, legalName = '', taxId = '', address = '', city = '', phone = '', email = '', logo = '', groupId = null, businessType = 'carDealership', companyCode = '' }) {
+  const businessId = uuidv4();
+  const now = new Date().toISOString();
+  return {
+    _id: `business:${businessId}`,
+    type: 'business',
+    business_id: businessId,
+    owner_user_id: String(ownerUserId || '').trim(),
+    group_id: groupId || null,
+    businessType: String(businessType || 'carDealership').trim(),
+    name: String(name || '').trim(),
+    legalName: String(legalName || '').trim(),
+    taxId: String(taxId || '').trim(),
+    address: String(address || '').trim(),
+    city: String(city || '').trim(),
+    phone: String(phone || '').trim(),
+    email: String(email || '').trim().toLowerCase(),
+    logo: String(logo || '').trim(),
+    companyCode: String(companyCode || generateCompanyCode()).toUpperCase(),
+    branches: [],
+    members: [
+      {
+        user_id: String(ownerUserId || '').trim(),
+        fullName: '',
+        email: '',
+        role: 'Admin',
+        branch_id: null,
+        permissions: buildDefaultPermissionMatrix('Admin'),
+        joinedAt: now,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeBusiness(business) {
+  if (!business) return null;
+  return {
+    id: business._id,
+    _rev: business._rev,
+    business_id: business.business_id,
+    owner_user_id: business.owner_user_id || '',
+    group_id: business.group_id || null,
+    businessType: business.businessType || 'carDealership',
+    name: business.name || '',
+    legalName: business.legalName || '',
+    taxId: business.taxId || '',
+    address: business.address || '',
+    city: business.city || '',
+    phone: business.phone || '',
+    email: business.email || '',
+    logo: business.logo || '',
+    branches: Array.isArray(business.branches)
+      ? business.branches.map((b) => ({
+          branch_id: b.branch_id || '',
+          name: b.name || '',
+          address: b.address || '',
+          city: b.city || '',
+          phone: b.phone || '',
+          managerUserId: b.managerUserId || '',
+          createdAt: b.createdAt || '',
+        }))
+      : [],
+    members: Array.isArray(business.members)
+      ? business.members.map((m) => ({
+          user_id: m.user_id || '',
+          fullName: m.fullName || '',
+          email: m.email || '',
+          role: m.role || 'Usuario',
+          branch_id: m.branch_id || null,
+          permissions: normalizePermissionMatrix(m.permissions, m.role || 'Usuario'),
+          joinedAt: m.joinedAt || business.createdAt || '',
+        }))
+      : [],
+    companyCode: business.companyCode || '',
+    createdAt: business.createdAt || '',
+    updatedAt: business.updatedAt || '',
+    deletedAt: business.deletedAt || null,
+  };
+}
+
+export async function saveBusiness(req, business) {
+  if (!business?._id) throw new Error('Documento de empresa inválido');
+  await ensureDatabase(req, BUSINESSES_DB);
+  const result = await putDocument(req, BUSINESSES_DB, business._id, business);
+  return { ...business, _rev: result.rev };
+}
+
+export async function findBusinessById(req, businessId) {
+  if (!businessId) return null;
+  await ensureDatabase(req, BUSINESSES_DB);
+  return getDocument(req, BUSINESSES_DB, `business:${businessId}`);
+}
+
+// ─── WORKSHOP (TALLER) ────────────────────────────────────────────────────────
+
+export function getWorkshopDbName() {
+  return normalizeDbName(process.env.VITE_WORKSHOP_DB || `${getDbPrefix()}-workshop`);
+}
+
+export function getPartsDbName() {
+  return normalizeDbName(process.env.VITE_PARTS_DB || `${getDbPrefix()}-parts`);
+}
+
+function normalizeWorkOrderStatus(value) {
+  const allowed = ['pending', 'in_progress', 'completed', 'invoiced', 'cancelled'];
+  return allowed.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+function normalizeWorkOrderPriority(value) {
+  const allowed = ['low', 'normal', 'high', 'urgent'];
+  return allowed.includes(String(value || '')) ? String(value) : 'normal';
+}
+
+export function buildWorkOrderDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `wo-${uuidv4()}`;
+  const woNumber = existing?.woNumber || `OT-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const laborItems = Array.isArray(data.laborItems) ? data.laborItems : (existing?.laborItems || []);
+  const materialItems = Array.isArray(data.materialItems) ? data.materialItems : (existing?.materialItems || []);
+  const timeEntries = Array.isArray(data.timeEntries) ? data.timeEntries : (existing?.timeEntries || []);
+
+  const totalLaborCost = laborItems.reduce((s, i) => s + Number(i.total || 0), 0);
+  const totalMaterialsCost = materialItems.reduce((s, i) => s + Number(i.total || 0), 0);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'work_order',
+    id,
+    woNumber,
+    user_id: userId,
+    vehicleId: String(data.vehicleId || ''),
+    vehicleBrand: String(data.vehicleBrand || ''),
+    vehicleModel: String(data.vehicleModel || ''),
+    vehiclePlate: String(data.vehiclePlate || '').toUpperCase(),
+    vehicleVin: String(data.vehicleVin || ''),
+    vehicleMileage: data.vehicleMileage ? Number(data.vehicleMileage) || 0 : 0,
+    clientId: String(data.clientId || ''),
+    clientName: String(data.clientName || ''),
+    clientPhone: String(data.clientPhone || ''),
+    clientEmail: String(data.clientEmail || ''),
+    status: normalizeWorkOrderStatus(data.status),
+    priority: normalizeWorkOrderPriority(data.priority),
+    serviceType: String(data.serviceType || 'revision'),
+    description: String(data.description || ''),
+    responsible: String(data.responsible || 'Sin asignar'),
+    laborItems,
+    materialItems,
+    timeEntries,
+    totalLaborCost,
+    totalMaterialsCost,
+    totalCost: totalLaborCost + totalMaterialsCost,
+    mechanicSignature: String(data.mechanicSignature || existing?.mechanicSignature || ''),
+    clientSignature: String(data.clientSignature || existing?.clientSignature || ''),
+    photos: Array.isArray(data.photos) ? data.photos : (existing?.photos || []),
+    notes: String(data.notes || ''),
+    invoiceId: String(data.invoiceId || existing?.invoiceId || ''),
+    estimatedCompletion: String(data.estimatedCompletion || ''),
+    completedAt: normalizeWorkOrderStatus(data.status) === 'completed' && !existing?.completedAt
+      ? now
+      : String(data.completedAt || existing?.completedAt || ''),
+    invoicedAt: normalizeWorkOrderStatus(data.status) === 'invoiced' && !existing?.invoicedAt
+      ? now
+      : String(data.invoicedAt || existing?.invoicedAt || ''),
+    stageHistory: Array.isArray(data.stageHistory) ? data.stageHistory : (existing?.stageHistory || []),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeWorkOrder(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'work_order',
+    id: doc._id,
+    woNumber: doc.woNumber || '',
+    user_id: doc.user_id,
+    vehicleId: doc.vehicleId || '',
+    vehicleBrand: doc.vehicleBrand || '',
+    vehicleModel: doc.vehicleModel || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    vehicleVin: doc.vehicleVin || '',
+    vehicleMileage: Number(doc.vehicleMileage || 0),
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientPhone: doc.clientPhone || '',
+    clientEmail: doc.clientEmail || '',
+    status: normalizeWorkOrderStatus(doc.status),
+    priority: normalizeWorkOrderPriority(doc.priority),
+    serviceType: doc.serviceType || 'revision',
+    description: doc.description || '',
+    responsible: doc.responsible || 'Sin asignar',
+    laborItems: Array.isArray(doc.laborItems) ? doc.laborItems : [],
+    materialItems: Array.isArray(doc.materialItems) ? doc.materialItems : [],
+    timeEntries: Array.isArray(doc.timeEntries) ? doc.timeEntries : [],
+    totalLaborCost: Number(doc.totalLaborCost || 0),
+    totalMaterialsCost: Number(doc.totalMaterialsCost || 0),
+    totalCost: Number(doc.totalCost || 0),
+    mechanicSignature: doc.mechanicSignature || '',
+    clientSignature: doc.clientSignature || '',
+    photos: Array.isArray(doc.photos) ? doc.photos : [],
+    notes: doc.notes || '',
+    invoiceId: doc.invoiceId || '',
+    estimatedCompletion: doc.estimatedCompletion || '',
+    completedAt: doc.completedAt || '',
+    invoicedAt: doc.invoicedAt || '',
+    stageHistory: Array.isArray(doc.stageHistory) ? doc.stageHistory : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listWorkOrdersByUser(req, userId) {
+  const db = getWorkshopDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'work_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export function buildPartDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `part-${uuidv4()}`;
+  const partNumber = existing?.partNumber || `P-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'part',
+    id,
+    partNumber,
+    user_id: userId,
+    name: String(data.name || ''),
+    reference: String(data.reference || ''),
+    category: String(data.category || 'otro'),
+    brand: String(data.brand || ''),
+    unitCost: Number(data.unitCost || 0),
+    salePrice: Number(data.salePrice || 0),
+    stockQuantity: Number(data.stockQuantity ?? existing?.stockQuantity ?? 0),
+    minStock: Number(data.minStock || 0),
+    location: String(data.location || ''),
+    notes: String(data.notes || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizePart(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'part',
+    id: doc._id,
+    partNumber: doc.partNumber || '',
+    user_id: doc.user_id,
+    name: doc.name || '',
+    reference: doc.reference || '',
+    category: doc.category || 'otro',
+    brand: doc.brand || '',
+    unitCost: Number(doc.unitCost || 0),
+    salePrice: Number(doc.salePrice || 0),
+    stockQuantity: Number(doc.stockQuantity || 0),
+    minStock: Number(doc.minStock || 0),
+    location: doc.location || '',
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPartsByUser(req, userId) {
+  const db = getPartsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'part' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── DELIVERY ─────────────────────────────────────────────────────────────────
+
+export function getDeliveryDbName() {
+  return normalizeDbName(process.env.VITE_DELIVERY_DB || `${getDbPrefix()}-delivery`);
+}
+
+export function getCatalogDbName() {
+  return normalizeDbName(process.env.VITE_CATALOG_DB || `${getDbPrefix()}-catalog`);
+}
+
+const DELIVERY_STATUS_MIGRATION = {
+  pending: 'nuevo', preparing: 'nuevo', kitchen: 'cocina',
+  assembly: 'listo', delivery: 'listo', delivered: 'entregado',
+};
+
+function normalizeDeliveryOrderStatus(value) {
+  const v = String(value || '');
+  if (DELIVERY_STATUS_MIGRATION[v]) return DELIVERY_STATUS_MIGRATION[v];
+  const allowed = ['nuevo', 'cocina', 'listo', 'entregado', 'cancelled', 'incident'];
+  return allowed.includes(v) ? v : 'nuevo';
+}
+
+function normalizeDeliveryType(value) {
+  const allowed = ['domicilio', 'recogida', 'sala'];
+  return allowed.includes(String(value || '')) ? String(value) : 'domicilio';
+}
+
+function normalizePaymentStatus(value) {
+  const allowed = ['pending', 'paid', 'partial', 'refunded'];
+  return allowed.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `dord-${uuidv4()}`;
+  const orderNumber = existing?.orderNumber || `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const items = Array.isArray(data.items) ? data.items.map((i) => ({
+    id: i.id || '',
+    name: i.name || '',
+    quantity: Number(i.quantity || 0),
+    unitPrice: Number(i.unitPrice || 0),
+    total: Number(i.total || 0),
+    notes: i.notes || '',
+    catalogItemId: i.catalogItemId || '',
+    category: i.category || '',
+    extras: Array.isArray(i.extras) ? i.extras : [],
+    allergens: Array.isArray(i.allergens) ? i.allergens : [],
+    ingredients: Array.isArray(i.ingredients) ? i.ingredients : [],
+    outOfStock: Boolean(i.outOfStock),
+    outOfStockAt: i.outOfStockAt || '',
+  })) : (existing?.items || []);
+  const totalAmount = items.reduce((s, i) => s + Number(i.total || 0), 0);
+
+  const newStatus = normalizeDeliveryOrderStatus(data.status);
+  const oldStatus = existing ? normalizeDeliveryOrderStatus(existing.status) : null;
+  const statusChanged = existing && newStatus !== oldStatus;
+
+  let kitchenStartedAt = String(data.kitchenStartedAt || existing?.kitchenStartedAt || '');
+  let kitchenCompletedAt = String(data.kitchenCompletedAt || existing?.kitchenCompletedAt || '');
+  let assemblyStartedAt = String(data.assemblyStartedAt || existing?.assemblyStartedAt || '');
+  let assemblyCompletedAt = String(data.assemblyCompletedAt || existing?.assemblyCompletedAt || '');
+
+  if (statusChanged) {
+    if (newStatus === 'cocina' && !kitchenStartedAt) kitchenStartedAt = now;
+    if (newStatus === 'listo') {
+      if (!kitchenCompletedAt) kitchenCompletedAt = now;
+      if (!assemblyStartedAt) assemblyStartedAt = now;
+    }
+    if (newStatus === 'entregado' && !assemblyCompletedAt) assemblyCompletedAt = now;
+  }
+
+  const stageHistory = Array.isArray(data.stageHistory)
+    ? [...data.stageHistory]
+    : [...(existing?.stageHistory || [])];
+  if (statusChanged) {
+    stageHistory.push({
+      status: newStatus,
+      date: now,
+      user: data._transitionUser || userId,
+      notes: data._transitionNotes || '',
+    });
+  }
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'delivery_order',
+    id,
+    orderNumber,
+    user_id: userId,
+
+    clientId: String(data.clientId || existing?.clientId || ''),
+    customerName: String(data.customerName || ''),
+    customerPhone: String(data.customerPhone || ''),
+    customerEmail: String(data.customerEmail || ''),
+    customerAddress: String(data.customerAddress || ''),
+    customerZone: String(data.customerZone || existing?.customerZone || ''),
+
+    channel: String(data.channel || existing?.channel || 'direct'),
+    deliveryType: normalizeDeliveryType(data.deliveryType || existing?.deliveryType),
+    status: newStatus,
+    priority: String(data.priority || 'normal'),
+
+    salesPointId: String(data.salesPointId || existing?.salesPointId || ''),
+    salesPointName: String(data.salesPointName || existing?.salesPointName || ''),
+    tableNumber: data.tableNumber != null ? Number(data.tableNumber) : (existing?.tableNumber ?? null),
+
+    takenBy: String(data.takenBy || existing?.takenBy || ''),
+    takenByName: String(data.takenByName || existing?.takenByName || ''),
+    takenAt: String(data.takenAt || existing?.takenAt || ''),
+
+    items,
+    totalAmount,
+    notes: String(data.notes || ''),
+    observations: String(data.observations || existing?.observations || ''),
+    kitchenNotes: String(data.kitchenNotes || existing?.kitchenNotes || ''),
+    kitchenPriority: Number(data.kitchenPriority ?? existing?.kitchenPriority ?? 99),
+
+    paymentMethod: String(data.paymentMethod || existing?.paymentMethod || ''),
+    paymentStatus: normalizePaymentStatus(data.paymentStatus || existing?.paymentStatus),
+    paidAmount: Number(data.paidAmount ?? existing?.paidAmount ?? 0),
+    paidAt: String(data.paidAt || existing?.paidAt || ''),
+
+    assignedDriver: String(data.assignedDriver || ''),
+    estimatedDelivery: String(data.estimatedDelivery || ''),
+    deliveredAt: newStatus === 'entregado' && !existing?.deliveredAt
+      ? now
+      : String(data.deliveredAt || existing?.deliveredAt || ''),
+    kitchenStartedAt,
+    kitchenCompletedAt,
+    assemblyStartedAt,
+    assemblyCompletedAt,
+
+    cancelReason: String(data.cancelReason || existing?.cancelReason || ''),
+    cancelledAt: String(data.cancelledAt || existing?.cancelledAt || ''),
+    cancelledBy: String(data.cancelledBy || existing?.cancelledBy || ''),
+    reopenedAt: String(data.reopenedAt || existing?.reopenedAt || ''),
+    reopenedBy: String(data.reopenedBy || existing?.reopenedBy || ''),
+
+    externalOrderId: String(data.externalOrderId || existing?.externalOrderId || ''),
+
+    incidentNotes: String(data.incidentNotes || existing?.incidentNotes || ''),
+    incidentType: String(data.incidentType || existing?.incidentType || ''),
+    stageHistory,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeDeliveryOrder(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'delivery_order',
+    id: doc._id,
+    orderNumber: doc.orderNumber || '',
+    user_id: doc.user_id,
+
+    clientId: doc.clientId || '',
+    customerName: doc.customerName || '',
+    customerPhone: doc.customerPhone || '',
+    customerEmail: doc.customerEmail || '',
+    customerAddress: doc.customerAddress || '',
+    customerZone: doc.customerZone || '',
+
+    channel: doc.channel || 'direct',
+    deliveryType: normalizeDeliveryType(doc.deliveryType),
+    status: normalizeDeliveryOrderStatus(doc.status),
+    priority: doc.priority || 'normal',
+
+    salesPointId: doc.salesPointId || '',
+    salesPointName: doc.salesPointName || '',
+    tableNumber: doc.tableNumber ?? null,
+
+    takenBy: doc.takenBy || '',
+    takenByName: doc.takenByName || '',
+    takenAt: doc.takenAt || '',
+
+    items: Array.isArray(doc.items) ? doc.items : [],
+    totalAmount: Number(doc.totalAmount || 0),
+    notes: doc.notes || '',
+    observations: doc.observations || '',
+    kitchenNotes: doc.kitchenNotes || '',
+    kitchenPriority: Number(doc.kitchenPriority ?? 99),
+
+    paymentMethod: doc.paymentMethod || '',
+    paymentStatus: normalizePaymentStatus(doc.paymentStatus),
+    paidAmount: Number(doc.paidAmount || 0),
+    paidAt: doc.paidAt || '',
+
+    assignedDriver: doc.assignedDriver || '',
+    driverId: doc.driverId || '',
+    estimatedDelivery: doc.estimatedDelivery || '',
+    estimatedDeliveryMinutes: doc.estimatedDeliveryMinutes ?? null,
+    estimatedArrivalAt: doc.estimatedArrivalAt || '',
+    departedAt: doc.departedAt || '',
+    deliveredAt: doc.deliveredAt || '',
+    kitchenStartedAt: doc.kitchenStartedAt || '',
+    kitchenCompletedAt: doc.kitchenCompletedAt || '',
+    assemblyStartedAt: doc.assemblyStartedAt || '',
+    assemblyCompletedAt: doc.assemblyCompletedAt || '',
+    zone: doc.zone || '',
+    deliveryDistance: doc.deliveryDistance ?? null,
+    paymentCollected: Boolean(doc.paymentCollected),
+    paymentCollectedAt: doc.paymentCollectedAt || '',
+    paymentCollectedBy: doc.paymentCollectedBy || '',
+
+    cancelReason: doc.cancelReason || '',
+    cancelledAt: doc.cancelledAt || '',
+    cancelledBy: doc.cancelledBy || '',
+    reopenedAt: doc.reopenedAt || '',
+    reopenedBy: doc.reopenedBy || '',
+
+    externalOrderId: doc.externalOrderId || '',
+
+    incidentNotes: doc.incidentNotes || '',
+    incidentType: doc.incidentType || '',
+    stageHistory: Array.isArray(doc.stageHistory) ? doc.stageHistory : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listDeliveryOrdersByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'delivery_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── DELIVERY CONFIG ──────────────────────────────────────────────────────────
+
+const DEFAULT_DELIVERY_CONFIG = {
+  hasDineIn: false, hasTakeaway: true, hasOwnDelivery: true,
+  hasPlatformDelivery: false, platforms: [],
+  hasPhysicalTables: false, tableCount: 0,
+  hasKitchen: true, hasAssemblyStation: true, hasCashRegister: true,
+  defaultPrepTime: 20, maxKitchenCapacity: 15,
+  delayThresholdMinutes: 30, kitchenSaturationThreshold: 10,
+  cashCloseReminder: true, cashCloseReminderTime: '23:00',
+  activeChannels: ['direct', 'phone', 'web', 'app'],
+  activeTimeSlots: [
+    { id: 'lunch', label: 'Comida', start: '12:00', end: '16:00' },
+    { id: 'dinner', label: 'Cena', start: '19:00', end: '23:30' },
+  ],
+};
+
+export function buildDeliveryConfigDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `dlvconf-${userId}`;
+  const base = { ...DEFAULT_DELIVERY_CONFIG, ...(existing || {}), ...(data || {}) };
+  return {
+    _id: id, _rev: existing?._rev, type: 'delivery_config', id, user_id: userId,
+    hasDineIn: Boolean(base.hasDineIn), hasTakeaway: Boolean(base.hasTakeaway),
+    hasOwnDelivery: Boolean(base.hasOwnDelivery), hasPlatformDelivery: Boolean(base.hasPlatformDelivery),
+    platforms: Array.isArray(base.platforms) ? base.platforms : [],
+    hasPhysicalTables: Boolean(base.hasPhysicalTables), tableCount: Number(base.tableCount) || 0,
+    hasKitchen: Boolean(base.hasKitchen), hasAssemblyStation: Boolean(base.hasAssemblyStation),
+    hasCashRegister: Boolean(base.hasCashRegister),
+    defaultPrepTime: Number(base.defaultPrepTime) || 20,
+    maxKitchenCapacity: Number(base.maxKitchenCapacity) || 15,
+    delayThresholdMinutes: Number(base.delayThresholdMinutes) || 30,
+    kitchenSaturationThreshold: Number(base.kitchenSaturationThreshold) || 10,
+    cashCloseReminder: Boolean(base.cashCloseReminder),
+    cashCloseReminderTime: String(base.cashCloseReminderTime || '23:00'),
+    activeChannels: Array.isArray(base.activeChannels) ? base.activeChannels : ['direct'],
+    activeTimeSlots: Array.isArray(base.activeTimeSlots) ? base.activeTimeSlots : [],
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeDeliveryConfig(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'delivery_config', id: doc._id, user_id: doc.user_id,
+    hasDineIn: Boolean(doc.hasDineIn), hasTakeaway: Boolean(doc.hasTakeaway),
+    hasOwnDelivery: Boolean(doc.hasOwnDelivery), hasPlatformDelivery: Boolean(doc.hasPlatformDelivery),
+    platforms: Array.isArray(doc.platforms) ? doc.platforms : [],
+    hasPhysicalTables: Boolean(doc.hasPhysicalTables), tableCount: Number(doc.tableCount) || 0,
+    hasKitchen: Boolean(doc.hasKitchen), hasAssemblyStation: Boolean(doc.hasAssemblyStation),
+    hasCashRegister: Boolean(doc.hasCashRegister),
+    defaultPrepTime: Number(doc.defaultPrepTime) || 20,
+    maxKitchenCapacity: Number(doc.maxKitchenCapacity) || 15,
+    delayThresholdMinutes: Number(doc.delayThresholdMinutes) || 30,
+    kitchenSaturationThreshold: Number(doc.kitchenSaturationThreshold) || 10,
+    cashCloseReminder: Boolean(doc.cashCloseReminder),
+    cashCloseReminderTime: doc.cashCloseReminderTime || '23:00',
+    activeChannels: Array.isArray(doc.activeChannels) ? doc.activeChannels : ['direct'],
+    activeTimeSlots: Array.isArray(doc.activeTimeSlots) ? doc.activeTimeSlots : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+// ─── DRIVERS (Repartidores) ──────────────────────────────────────────────────
+
+export function buildDriverDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `driver-${uuidv4()}`;
+
+  const validStatuses = ['active', 'offline', 'on_break', 'unavailable'];
+  const status = validStatuses.includes(String(data.status || ''))
+    ? String(data.status)
+    : (existing?.status || 'active');
+
+  const validVehicles = ['moto', 'coche', 'bicicleta', 'a_pie', 'otro'];
+  const vehicleType = validVehicles.includes(String(data.vehicleType || ''))
+    ? String(data.vehicleType)
+    : (existing?.vehicleType || '');
+
+  const zones = Array.isArray(data.zones) ? data.zones.map(String) : (existing?.zones || []);
+  const existingStats = existing?.stats || {};
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'driver',
+    id,
+    user_id: userId,
+    teamMemberId: String(data.teamMemberId || existing?.teamMemberId || ''),
+    name: String(data.name || existing?.name || ''),
+    phone: String(data.phone || existing?.phone || ''),
+    email: String(data.email || existing?.email || ''),
+    avatar: String(data.avatar || existing?.avatar || ''),
+    status,
+    zones,
+    maxConcurrentOrders: Number(data.maxConcurrentOrders ?? existing?.maxConcurrentOrders ?? 3),
+    vehicleType,
+    currentLocation: data.currentLocation || existing?.currentLocation || null,
+    stats: {
+      totalDelivered: Number(data.stats?.totalDelivered ?? existingStats.totalDelivered ?? 0),
+      averageDeliveryMinutes: Number(data.stats?.averageDeliveryMinutes ?? existingStats.averageDeliveryMinutes ?? 0),
+      rating: data.stats?.rating != null ? Number(data.stats.rating) : (existingStats.rating ?? null),
+    },
+    isManager: Boolean(data.isManager ?? existing?.isManager ?? false),
+    active: data.active != null ? Boolean(data.active) : (existing?.active ?? true),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeDriver(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'driver',
+    id: doc._id,
+    user_id: doc.user_id,
+    teamMemberId: doc.teamMemberId || '',
+    name: doc.name || '',
+    phone: doc.phone || '',
+    email: doc.email || '',
+    avatar: doc.avatar || '',
+    status: doc.status || 'offline',
+    zones: Array.isArray(doc.zones) ? doc.zones : [],
+    maxConcurrentOrders: Number(doc.maxConcurrentOrders || 3),
+    vehicleType: doc.vehicleType || '',
+    currentLocation: doc.currentLocation || null,
+    stats: {
+      totalDelivered: Number(doc.stats?.totalDelivered || 0),
+      averageDeliveryMinutes: Number(doc.stats?.averageDeliveryMinutes || 0),
+      rating: doc.stats?.rating ?? null,
+    },
+    isManager: Boolean(doc.isManager),
+    active: doc.active !== false,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listDriversByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'driver' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+// ─── REPARTO CONFIG ──────────────────────────────────────────────────────────
+
+export function buildRepartoConfigDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `reparto_config:${userId}`;
+
+  const validModes = ['load', 'proximity', 'hybrid'];
+  const autoAssignMode = validModes.includes(String(data.autoAssignMode || ''))
+    ? String(data.autoAssignMode)
+    : (existing?.autoAssignMode || 'load');
+
+  const zones = Array.isArray(data.zones) ? data.zones.map(z => ({
+    id: String(z.id || `zone-${uuidv4().slice(0, 8)}`),
+    name: String(z.name || ''),
+    postalCodes: Array.isArray(z.postalCodes) ? z.postalCodes.map(String) : [],
+    baseDeliveryMinutes: Number(z.baseDeliveryMinutes ?? 20),
+    surcharge: Number(z.surcharge ?? 0),
+  })) : (existing?.zones || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'reparto_config',
+    user_id: userId,
+    autoAssign: Boolean(data.autoAssign ?? existing?.autoAssign ?? false),
+    autoAssignMode,
+    autoAssignOnAssemblyComplete: Boolean(data.autoAssignOnAssemblyComplete ?? existing?.autoAssignOnAssemblyComplete ?? false),
+    maxOrdersPerDriver: Number(data.maxOrdersPerDriver ?? existing?.maxOrdersPerDriver ?? 3),
+    alertDelayMinutes: Number(data.alertDelayMinutes ?? existing?.alertDelayMinutes ?? 10),
+    alertDeliveryDelayMinutes: Number(data.alertDeliveryDelayMinutes ?? existing?.alertDeliveryDelayMinutes ?? 45),
+    zones,
+    estimatedMinutesPerKm: Number(data.estimatedMinutesPerKm ?? existing?.estimatedMinutesPerKm ?? 3),
+    basePreparationMinutes: Number(data.basePreparationMinutes ?? existing?.basePreparationMinutes ?? 5),
+    ownDeliveryEnabled: Boolean(data.ownDeliveryEnabled ?? existing?.ownDeliveryEnabled ?? false),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeRepartoConfig(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'reparto_config',
+    user_id: doc.user_id,
+    autoAssign: Boolean(doc.autoAssign),
+    autoAssignMode: doc.autoAssignMode || 'load',
+    autoAssignOnAssemblyComplete: Boolean(doc.autoAssignOnAssemblyComplete),
+    maxOrdersPerDriver: Number(doc.maxOrdersPerDriver || 3),
+    alertDelayMinutes: Number(doc.alertDelayMinutes || 10),
+    alertDeliveryDelayMinutes: Number(doc.alertDeliveryDelayMinutes || 45),
+    zones: Array.isArray(doc.zones) ? doc.zones : [],
+    estimatedMinutesPerKm: Number(doc.estimatedMinutesPerKm || 3),
+    basePreparationMinutes: Number(doc.basePreparationMinutes || 5),
+    ownDeliveryEnabled: Boolean(doc.ownDeliveryEnabled),
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+// ─── DRIVER CASH SESSIONS ─────────────────────────────────────────────────────
+
+export function buildDriverCashSessionDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `dcash-${uuidv4()}`;
+
+  const transactions = Array.isArray(data.transactions) ? data.transactions : (existing?.transactions || []);
+  const status = ['open', 'pending_review', 'closed'].includes(String(data.status || '')) ? String(data.status) : (existing?.status || 'open');
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'driver_cash_session',
+    id,
+    user_id: userId,
+    driverName: String(data.driverName || existing?.driverName || ''),
+    driverUserId: data.driverUserId || existing?.driverUserId || '',
+    status,
+    initialFloat: Number(data.initialFloat ?? existing?.initialFloat ?? 0),
+    openedAt: existing?.openedAt || now,
+    closedAt: (status === 'closed' || status === 'pending_review') ? (data.closedAt || existing?.closedAt || now) : '',
+    transactions,
+    expectedCash: Number(data.expectedCash ?? existing?.expectedCash ?? 0),
+    actualCash: Number(data.actualCash ?? existing?.actualCash ?? 0),
+    difference: Number(data.difference ?? existing?.difference ?? 0),
+    closingNotes: String(data.closingNotes ?? existing?.closingNotes ?? ''),
+    reviewedBy: data.reviewedBy || existing?.reviewedBy || '',
+    reviewedAt: data.reviewedAt || existing?.reviewedAt || '',
+    reviewNotes: data.reviewNotes || existing?.reviewNotes || '',
+    reopenHistory: Array.isArray(data.reopenHistory) ? data.reopenHistory : (existing?.reopenHistory || []),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeDriverCashSession(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'driver_cash_session',
+    id: doc._id,
+    user_id: doc.user_id,
+    driverName: doc.driverName || '',
+    driverUserId: doc.driverUserId || '',
+    status: doc.status || 'open',
+    initialFloat: Number(doc.initialFloat || 0),
+    openedAt: doc.openedAt || '',
+    closedAt: doc.closedAt || '',
+    transactions: Array.isArray(doc.transactions) ? doc.transactions : [],
+    expectedCash: Number(doc.expectedCash || 0),
+    actualCash: Number(doc.actualCash || 0),
+    difference: Number(doc.difference || 0),
+    closingNotes: doc.closingNotes || '',
+    reviewedBy: doc.reviewedBy || '',
+    reviewedAt: doc.reviewedAt || '',
+    reviewNotes: doc.reviewNotes || '',
+    reopenHistory: Array.isArray(doc.reopenHistory) ? doc.reopenHistory : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listDriverCashSessionsByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── POINTS OF SALE ───────────────────────────────────────────────────────────
+
+export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `pdv-${uuidv4()}`;
+  const terminals = Array.isArray(data.terminals)
+    ? data.terminals.map((t) => ({
+        id: String(t.id || `term-${uuidv4().slice(0, 8)}`),
+        code: String(t.code || ''),
+        name: String(t.name || ''),
+        datafonName: String(t.datafonName || ''),
+        printerName: String(t.printerName || ''),
+        active: t.active !== false,
+      }))
+    : existing?.terminals || [];
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'point_of_sale',
+    id,
+    user_id: userId,
+    name: String(data.name || existing?.name || ''),
+    code: String(data.code || existing?.code || ''),
+    address: String(data.address || existing?.address || ''),
+    terminals,
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizePointOfSale(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'point_of_sale',
+    id: doc._id,
+    user_id: doc.user_id,
+    name: doc.name || '',
+    code: doc.code || '',
+    address: doc.address || '',
+    terminals: Array.isArray(doc.terminals)
+      ? doc.terminals.map((t) => ({
+          id: t.id || '',
+          code: t.code || '',
+          name: t.name || '',
+          datafonName: t.datafonName || '',
+          printerName: t.printerName || '',
+          active: t.active !== false,
+        }))
+      : [],
+    active: doc.active !== false,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPointsOfSaleByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'point_of_sale' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+// ─── TPV REGISTER SESSIONS ────────────────────────────────────────────────────
+
+function normalizeTpvRegisterStatus(value) {
+  return ['open', 'closed'].includes(String(value || '')) ? String(value) : 'open';
+}
+
+export function buildTpvRegisterSessionDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `tpvreg-${uuidv4()}`;
+  const status = normalizeTpvRegisterStatus(data.status);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'tpv_register_session',
+    id,
+    user_id: userId,
+
+    pointOfSaleId: String(data.pointOfSaleId || existing?.pointOfSaleId || ''),
+    pointOfSaleName: String(data.pointOfSaleName || existing?.pointOfSaleName || ''),
+
+    terminalId: String(data.terminalId || existing?.terminalId || ''),
+    terminalName: String(data.terminalName || existing?.terminalName || ''),
+    workerId: String(data.workerId || existing?.workerId || ''),
+    workerName: String(data.workerName || existing?.workerName || ''),
+    datafonId: String(data.datafonId || existing?.datafonId || ''),
+    datafonName: String(data.datafonName || existing?.datafonName || ''),
+    printerId: String(data.printerId || existing?.printerId || ''),
+    printerName: String(data.printerName || existing?.printerName || ''),
+
+    status,
+    openedAt: existing?.openedAt || now,
+    openedBy: String(data.openedBy || existing?.openedBy || ''),
+    openingCashCount: data.openingCashCount || existing?.openingCashCount || {},
+    initialCashAmount: Number(data.initialCashAmount ?? existing?.initialCashAmount ?? 0),
+
+    transactions: Array.isArray(data.transactions) ? data.transactions : (existing?.transactions || []),
+    cashCounts: Array.isArray(data.cashCounts) ? data.cashCounts : (existing?.cashCounts || []),
+
+    closedAt: status === 'closed' ? (data.closedAt || existing?.closedAt || now) : (existing?.closedAt || ''),
+    closedBy: String(data.closedBy || existing?.closedBy || ''),
+    closingCashCount: data.closingCashCount || existing?.closingCashCount || {},
+    finalCashAmount: Number(data.finalCashAmount ?? existing?.finalCashAmount ?? 0),
+    expectedCash: Number(data.expectedCash ?? existing?.expectedCash ?? 0),
+    difference: Number(data.difference ?? existing?.difference ?? 0),
+    closingNotes: String(data.closingNotes ?? existing?.closingNotes ?? ''),
+
+    summary: data.summary || existing?.summary || {},
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeTpvRegisterSession(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'tpv_register_session',
+    id: doc._id,
+    user_id: doc.user_id,
+
+    pointOfSaleId: doc.pointOfSaleId || '',
+    pointOfSaleName: doc.pointOfSaleName || '',
+
+    terminalId: doc.terminalId || '',
+    terminalName: doc.terminalName || '',
+    workerId: doc.workerId || '',
+    workerName: doc.workerName || '',
+    datafonId: doc.datafonId || '',
+    datafonName: doc.datafonName || '',
+    printerId: doc.printerId || '',
+    printerName: doc.printerName || '',
+
+    status: normalizeTpvRegisterStatus(doc.status),
+    openedAt: doc.openedAt || '',
+    openedBy: doc.openedBy || '',
+    openingCashCount: doc.openingCashCount || {},
+    initialCashAmount: Number(doc.initialCashAmount || 0),
+
+    transactions: Array.isArray(doc.transactions) ? doc.transactions : [],
+    cashCounts: Array.isArray(doc.cashCounts) ? doc.cashCounts : [],
+
+    closedAt: doc.closedAt || '',
+    closedBy: doc.closedBy || '',
+    closingCashCount: doc.closingCashCount || {},
+    finalCashAmount: Number(doc.finalCashAmount || 0),
+    expectedCash: Number(doc.expectedCash || 0),
+    difference: Number(doc.difference || 0),
+    closingNotes: doc.closingNotes || '',
+
+    summary: doc.summary || {},
+
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listTpvRegisterSessionsByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── CLEANING ─────────────────────────────────────────────────────────────────
+
+export function getCleaningDbName() {
+  return normalizeDbName(process.env.VITE_CLEANING_DB || `${getDbPrefix()}-cleaning`);
+}
+
+function normalizeCleaningServiceStatus(value) {
+  const allowed = ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'];
+  return allowed.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+export function buildCleaningServiceDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `csvc-${uuidv4()}`;
+  const serviceNumber = existing?.serviceNumber || `SVC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const tasks = Array.isArray(data.tasks) ? data.tasks : (existing?.tasks || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'cleaning_service',
+    id,
+    serviceNumber,
+    user_id: userId,
+    clientName: String(data.clientName || existing?.clientName || ''),
+    clientPhone: String(data.clientPhone || existing?.clientPhone || ''),
+    clientEmail: String(data.clientEmail || existing?.clientEmail || ''),
+    address: String(data.address || existing?.address || ''),
+    clientType: String(data.clientType || existing?.clientType || 'house'),
+    date: String(data.date || existing?.date || ''),
+    time: String(data.time || existing?.time || ''),
+    duration: String(data.duration || existing?.duration || ''),
+    cleaningType: String(data.cleaningType || existing?.cleaningType || 'general'),
+    workerId: String(data.workerId || existing?.workerId || ''),
+    assignedTo: String(data.assignedTo || existing?.assignedTo || ''),
+    assignedToName: String(data.assignedToName || existing?.assignedToName || ''),
+    status: normalizeCleaningServiceStatus(data.status ?? existing?.status),
+    tasks,
+    checkInAt: String(data.checkInAt || existing?.checkInAt || ''),
+    checkOutAt: String(data.checkOutAt || existing?.checkOutAt || ''),
+    employeeNotes: String(data.employeeNotes || existing?.employeeNotes || ''),
+    photosBefore: Array.isArray(data.photosBefore) ? data.photosBefore : (existing?.photosBefore || []),
+    photosAfter: Array.isArray(data.photosAfter) ? data.photosAfter : (existing?.photosAfter || []),
+    qualityOk: data.qualityOk != null ? Boolean(data.qualityOk) : (existing?.qualityOk ?? null),
+    qualityRating: Number(data.qualityRating || existing?.qualityRating || 0),
+    qualityNotes: String(data.qualityNotes || existing?.qualityNotes || ''),
+    clientRating: Number(data.clientRating || existing?.clientRating || 0),
+    clientReview: String(data.clientReview || existing?.clientReview || ''),
+    clientReviewAt: String(data.clientReviewAt || existing?.clientReviewAt || ''),
+    price: Number(data.price || existing?.price || 0),
+    invoiceId: String(data.invoiceId || existing?.invoiceId || ''),
+    clientId: String(data.clientId || existing?.clientId || ''),
+    contractId: String(data.contractId || existing?.contractId || ''),
+    contractNumber: String(data.contractNumber || existing?.contractNumber || ''),
+    billingStatus: normalizeCleaningBillingStatus(data.billingStatus ?? existing?.billingStatus),
+    lastInvoiceDate: String(data.lastInvoiceDate || existing?.lastInvoiceDate || ''),
+    priceHistory: Array.isArray(data.priceHistory) ? data.priceHistory.map((p) => ({
+      price: Number(p.price || 0),
+      effectiveFrom: String(p.effectiveFrom || ''),
+      reason: String(p.reason || ''),
+    })) : (existing?.priceHistory || []),
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeCleaningService(doc) {
+  if (!doc) return null;
+  const recurrence = doc.recurrence || {};
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'cleaning_service',
+    id: doc._id,
+    serviceNumber: doc.serviceNumber || '',
+    user_id: doc.user_id,
+    clientName: doc.clientName || '',
+    clientPhone: doc.clientPhone || '',
+    clientEmail: doc.clientEmail || '',
+    address: doc.address || '',
+    clientType: doc.clientType || 'house',
+    date: doc.date || '',
+    time: doc.time || '',
+    duration: doc.duration || '',
+    cleaningType: doc.cleaningType || 'general',
+    assignedTo: doc.assignedTo || '',
+    assignedToName: doc.assignedToName || '',
+    status: normalizeCleaningServiceStatus(doc.status),
+    priority: doc.priority || 'normal',
+    recurrence: {
+      type: recurrence.type || 'none',
+      days: Array.isArray(recurrence.days) ? recurrence.days : [],
+      endDate: recurrence.endDate || '',
+    },
+    zone: doc.zone || '',
+    routeId: doc.routeId || '',
+    recurrenceParentId: doc.recurrenceParentId || '',
+    tasks: Array.isArray(doc.tasks) ? doc.tasks : [],
+    execution: buildServiceExecution(doc.execution, migrateExecution(doc)),
+    checkInAt: doc.checkInAt || '',
+    checkOutAt: doc.checkOutAt || '',
+    employeeNotes: doc.employeeNotes || '',
+    photosBefore: Array.isArray(doc.photosBefore) ? doc.photosBefore : [],
+    photosAfter: Array.isArray(doc.photosAfter) ? doc.photosAfter : [],
+    qualityOk: doc.qualityOk ?? null,
+    qualityRating: Number(doc.qualityRating || 0),
+    qualityNotes: doc.qualityNotes || '',
+    clientRating: Number(doc.clientRating || 0),
+    clientReview: doc.clientReview || '',
+    clientReviewAt: doc.clientReviewAt || '',
+    price: Number(doc.price || 0),
+    invoiceId: doc.invoiceId || '',
+    contractId: doc.contractId || '',
+    contractNumber: doc.contractNumber || '',
+    materialsUsed: Array.isArray(doc.materialsUsed) ? doc.materialsUsed : [],
+    materialCost: Number(doc.materialCost || 0),
+    laborCost: Number(doc.laborCost || 0),
+    totalCost: Number(doc.totalCost || 0),
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCleaningServicesByUser(req, userId) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_service' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function listCleaningServicesByDate(req, userId, date) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_service' && !doc?.deletedAt && doc?.user_id === userId && doc?.date === date)
+    .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+}
+
+// ─── CLEANING WORKERS ────────────────────────────────────────────────────────
+
+const CLEANING_CONTRACT_TYPES = ['full_time', 'part_time', 'temporary', 'freelance', 'internship'];
+const CLEANING_WORKER_STATUSES = ['active', 'inactive', 'on_leave', 'trial'];
+const CLEANING_VEHICLE_TYPES = ['coche', 'moto', 'bicicleta', 'transporte_publico', 'a_pie'];
+const CLEANING_DOC_TYPES = ['dni', 'contract', 'prl', 'driving_license', 'social_security', 'medical', 'certification', 'other'];
+const MATERIAL_CONDITIONS = ['good', 'fair', 'poor', 'needs_replacement'];
+
+function normalizeCleaningWorkerStatus(value) {
+  return CLEANING_WORKER_STATUSES.includes(String(value || '')) ? String(value) : 'active';
+}
+
+function buildDayAvailability(d) {
+  if (!d || typeof d !== 'object') return { available: false };
+  return {
+    available: Boolean(d.available),
+    startTime: String(d.startTime || ''),
+    endTime: String(d.endTime || ''),
+    breakStart: String(d.breakStart || ''),
+    breakEnd: String(d.breakEnd || ''),
+  };
+}
+
+function buildWorkerAvailability(data, existing) {
+  const src = (data && typeof data === 'object') ? data : (existing || {});
+  const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const result = {};
+  for (const day of days) result[day] = buildDayAvailability(src[day]);
+  return result;
+}
+
+export function buildCleaningWorkerDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `clwk-${uuidv4()}`;
+  const documents = Array.isArray(data.documents) ? data.documents.map(d => ({
+    id: String(d.id || `doc-${uuidv4()}`),
+    name: String(d.name || ''),
+    documentType: CLEANING_DOC_TYPES.includes(String(d.documentType)) ? String(d.documentType) : 'other',
+    url: String(d.url || ''),
+    expiresAt: String(d.expiresAt || ''),
+    uploadedAt: String(d.uploadedAt || now),
+    verified: Boolean(d.verified),
+  })) : (existing?.documents || []);
+  const assignedMaterials = Array.isArray(data.assignedMaterials) ? data.assignedMaterials.map(m => ({
+    id: String(m.id || `mat-${uuidv4()}`),
+    name: String(m.name || ''),
+    catalogItemId: String(m.catalogItemId || ''),
+    quantity: Number(m.quantity || 1),
+    assignedAt: String(m.assignedAt || now),
+    returnedAt: String(m.returnedAt || ''),
+    condition: MATERIAL_CONDITIONS.includes(String(m.condition)) ? String(m.condition) : 'good',
+    notes: String(m.notes || ''),
+  })) : (existing?.assignedMaterials || []);
+  const zones = Array.isArray(data.zones) ? data.zones.map(String) : (existing?.zones || []);
+  const specializations = Array.isArray(data.specializations) ? data.specializations.map(String) : (existing?.specializations || []);
+  const languages = Array.isArray(data.languages) ? data.languages.map(String) : (existing?.languages || []);
+  return {
+    _id: id, _rev: existing?._rev, type: 'cleaning_worker', id, user_id: userId,
+    name: String(data.name || existing?.name || ''),
+    phone: String(data.phone || existing?.phone || ''),
+    email: String(data.email || existing?.email || ''),
+    avatar: String(data.avatar || existing?.avatar || ''),
+    address: String(data.address || existing?.address || ''),
+    teamMemberId: String(data.teamMemberId || existing?.teamMemberId || ''),
+    documents,
+    contractType: CLEANING_CONTRACT_TYPES.includes(String(data.contractType)) ? String(data.contractType) : (existing?.contractType || 'full_time'),
+    hourlyCost: Number(data.hourlyCost ?? existing?.hourlyCost ?? 0),
+    hourlyRate: Number(data.hourlyRate ?? existing?.hourlyRate ?? 0),
+    weeklyHours: Number(data.weeklyHours ?? existing?.weeklyHours ?? 40),
+    startDate: String(data.startDate || existing?.startDate || ''),
+    endDate: String(data.endDate || existing?.endDate || ''),
+    socialSecurityNumber: String(data.socialSecurityNumber || existing?.socialSecurityNumber || ''),
+    availability: buildWorkerAvailability(data.availability, existing?.availability),
+    zones, preferredZone: String(data.preferredZone || existing?.preferredZone || ''),
+    hasOwnVehicle: data.hasOwnVehicle != null ? Boolean(data.hasOwnVehicle) : (existing?.hasOwnVehicle ?? false),
+    vehicleType: CLEANING_VEHICLE_TYPES.includes(String(data.vehicleType)) ? String(data.vehicleType) : (existing?.vehicleType || ''),
+    vehicleOwnership: ['own', 'company'].includes(String(data.vehicleOwnership)) ? String(data.vehicleOwnership) : (existing?.vehicleOwnership || ''),
+    licensePlate: String(data.licensePlate || existing?.licensePlate || ''),
+    assignedMaterials,
+    status: normalizeCleaningWorkerStatus(data.status ?? existing?.status),
+    specializations, languages,
+    notes: String(data.notes || existing?.notes || ''),
+    workerPermissions: {
+      canViewOwnDocs: Boolean(data.workerPermissions?.canViewOwnDocs ?? existing?.workerPermissions?.canViewOwnDocs ?? false),
+      canViewOwnStats: Boolean(data.workerPermissions?.canViewOwnStats ?? existing?.workerPermissions?.canViewOwnStats ?? false),
+      canViewOwnSchedule: Boolean(data.workerPermissions?.canViewOwnSchedule ?? existing?.workerPermissions?.canViewOwnSchedule ?? true),
+    },
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeCleaningWorker(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'cleaning_worker', id: doc._id, user_id: doc.user_id,
+    name: doc.name || '', phone: doc.phone || '', email: doc.email || '',
+    avatar: doc.avatar || '', address: doc.address || '',
+    teamMemberId: doc.teamMemberId || '',
+    documents: Array.isArray(doc.documents) ? doc.documents : [],
+    contractType: doc.contractType || 'full_time',
+    hourlyCost: Number(doc.hourlyCost || 0), hourlyRate: Number(doc.hourlyRate || 0),
+    weeklyHours: Number(doc.weeklyHours || 40),
+    startDate: doc.startDate || '', endDate: doc.endDate || '',
+    socialSecurityNumber: doc.socialSecurityNumber || '',
+    availability: doc.availability || {},
+    zones: Array.isArray(doc.zones) ? doc.zones : [],
+    preferredZone: doc.preferredZone || '',
+    hasOwnVehicle: Boolean(doc.hasOwnVehicle),
+    vehicleType: doc.vehicleType || '', vehicleOwnership: doc.vehicleOwnership || '',
+    licensePlate: doc.licensePlate || '',
+    assignedMaterials: Array.isArray(doc.assignedMaterials) ? doc.assignedMaterials : [],
+    status: normalizeCleaningWorkerStatus(doc.status),
+    specializations: Array.isArray(doc.specializations) ? doc.specializations : [],
+    languages: Array.isArray(doc.languages) ? doc.languages : [],
+    notes: doc.notes || '',
+    workerPermissions: doc.workerPermissions || { canViewOwnDocs: false, canViewOwnStats: false, canViewOwnSchedule: true },
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCleaningWorkersByUser(req, userId) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_worker' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── CLEANING ROUTES ──────────────────────────────────────────────────────────
+
+const ROUTE_STATUSES = ['draft', 'active', 'completed', 'cancelled'];
+const ROUTE_ENTRY_STATUSES = ['pending', 'in_transit', 'in_progress', 'completed', 'skipped'];
+
+function normalizeRouteStatus(value) {
+  return ROUTE_STATUSES.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+function normalizeRouteEntryStatus(value) {
+  return ROUTE_ENTRY_STATUSES.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+function sanitizeRouteEntry(entry, idx) {
+  return {
+    serviceId: String(entry.serviceId || ''),
+    order: Number(entry.order ?? idx + 1),
+    estimatedStartTime: String(entry.estimatedStartTime || ''),
+    estimatedEndTime: String(entry.estimatedEndTime || ''),
+    actualStartTime: String(entry.actualStartTime || ''),
+    actualEndTime: String(entry.actualEndTime || ''),
+    status: normalizeRouteEntryStatus(entry.status),
+    travelTimeMin: Number(entry.travelTimeMin || 0),
+    clientName: String(entry.clientName || ''),
+    address: String(entry.address || ''),
+    cleaningType: String(entry.cleaningType || ''),
+    duration: String(entry.duration || ''),
+    priority: entry.priority || 'normal',
+    zone: String(entry.zone || ''),
+    overlap: Boolean(entry.overlap),
+  };
+}
+
+export function buildCleaningRouteDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `croute-${uuidv4()}`;
+  const entries = (Array.isArray(data.entries) ? data.entries : (existing?.entries || []))
+    .map((e, i) => sanitizeRouteEntry(e, i));
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'cleaning_route',
+    id,
+    user_id: userId,
+    date: String(data.date || existing?.date || ''),
+    workerId: String(data.workerId || existing?.workerId || ''),
+    workerName: String(data.workerName || existing?.workerName || ''),
+    status: normalizeRouteStatus(data.status ?? existing?.status),
+    entries,
+    zone: String(data.zone || existing?.zone || ''),
+    totalEstimatedMinutes: Number(data.totalEstimatedMinutes || existing?.totalEstimatedMinutes || 0),
+    totalActualMinutes: Number(data.totalActualMinutes || existing?.totalActualMinutes || 0),
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeCleaningRoute(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'cleaning_route',
+    id: doc._id,
+    user_id: doc.user_id,
+    date: doc.date || '',
+    workerId: doc.workerId || '',
+    workerName: doc.workerName || '',
+    status: normalizeRouteStatus(doc.status),
+    entries: Array.isArray(doc.entries) ? doc.entries.map((e, i) => sanitizeRouteEntry(e, i)) : [],
+    zone: doc.zone || '',
+    totalEstimatedMinutes: Number(doc.totalEstimatedMinutes || 0),
+    totalActualMinutes: Number(doc.totalActualMinutes || 0),
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCleaningRoutesByUser(req, userId) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_route' && !doc?.deletedAt && doc?.user_id === userId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+export async function listCleaningRoutesByDate(req, userId, date) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_route' && !doc?.deletedAt && doc?.user_id === userId && doc?.date === date)
+    .sort((a, b) => String(a.workerName || '').localeCompare(String(b.workerName || '')));
+}
+
+export async function listCleaningRoutesByWorker(req, userId, workerId) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_route' && !doc?.deletedAt && doc?.user_id === userId && doc?.workerId === workerId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ─── CLEANING INCIDENTS ───────────────────────────────────────────────────────
+
+const INCIDENT_TYPES = ['falta_limpieza', 'rotura', 'ausencia', 'queja_cliente', 'urgencia_extra', 'material_faltante', 'acceso_no_permitido'];
+const INCIDENT_STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'reopened'];
+const INCIDENT_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+
+function normalizeIncidentStatus(value) {
+  return INCIDENT_STATUSES.includes(String(value || '')) ? String(value) : 'open';
+}
+
+function normalizeIncidentPriority(value) {
+  return INCIDENT_PRIORITIES.includes(String(value || '')) ? String(value) : 'medium';
+}
+
+function normalizeIncidentType(value) {
+  return INCIDENT_TYPES.includes(String(value || '')) ? String(value) : 'falta_limpieza';
+}
+
+export function buildCleaningIncidentDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cinc-${uuidv4()}`;
+  const incidentNumber = existing?.incidentNumber || `INC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const historyEntry = [];
+  if (existing && existing.status !== normalizeIncidentStatus(data.status)) {
+    historyEntry.push({
+      date: now,
+      from: existing.status,
+      to: normalizeIncidentStatus(data.status),
+      user: data._changedBy || '',
+      notes: data._changeNotes || '',
+    });
+  }
+
+  return {
+    _id: id,
+    _rev: existing?._rev || undefined,
+    type: 'cleaning_incident',
+    user_id: userId,
+    incidentNumber,
+    incidentType: normalizeIncidentType(data.incidentType),
+    clientId: data.clientId || existing?.clientId || '',
+    clientName: data.clientName || existing?.clientName || '',
+    serviceId: data.serviceId || existing?.serviceId || '',
+    serviceNumber: data.serviceNumber || existing?.serviceNumber || '',
+    date: data.date || existing?.date || now.slice(0, 10),
+    workerId: data.workerId || existing?.workerId || '',
+    workerName: data.workerName || existing?.workerName || '',
+    priority: normalizeIncidentPriority(data.priority),
+    description: data.description || existing?.description || '',
+    photos: Array.isArray(data.photos) ? data.photos : (existing?.photos || []),
+    status: normalizeIncidentStatus(data.status),
+    responsibleId: data.responsibleId || existing?.responsibleId || '',
+    responsibleName: data.responsibleName || existing?.responsibleName || '',
+    resolution: data.resolution || existing?.resolution || '',
+    resolvedAt: data.resolvedAt || existing?.resolvedAt || '',
+    resolvedBy: data.resolvedBy || existing?.resolvedBy || '',
+    dueDate: data.dueDate || existing?.dueDate || '',
+    reopenCount: Number(data.reopenCount || existing?.reopenCount || 0),
+    statusHistory: [...(existing?.statusHistory || []), ...historyEntry],
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    deletedAt: data.deletedAt || existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeCleaningIncident(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'cleaning_incident',
+    user_id: doc.user_id,
+    incidentNumber: doc.incidentNumber || '',
+    incidentType: doc.incidentType || 'falta_limpieza',
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    serviceId: doc.serviceId || '',
+    serviceNumber: doc.serviceNumber || '',
+    date: doc.date || '',
+    workerId: doc.workerId || '',
+    workerName: doc.workerName || '',
+    priority: doc.priority || 'medium',
+    description: doc.description || '',
+    photos: Array.isArray(doc.photos) ? doc.photos : [],
+    status: doc.status || 'open',
+    responsibleId: doc.responsibleId || '',
+    responsibleName: doc.responsibleName || '',
+    resolution: doc.resolution || '',
+    resolvedAt: doc.resolvedAt || '',
+    resolvedBy: doc.resolvedBy || '',
+    dueDate: doc.dueDate || '',
+    reopenCount: Number(doc.reopenCount || 0),
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCleaningIncidentsByUser(req, userId) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'cleaning_incident' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── CLEANING SERVICE CONTRACTS ───────────────────────────────────────────────
+
+const CONTRACT_STATUSES = ['draft', 'active', 'paused', 'pending_renewal', 'expired', 'cancelled'];
+const SERVICE_FREQUENCIES = ['daily', 'daily_all', 'weekly_1', 'weekly_2', 'weekly_3', 'weekly_4', 'weekly_5', 'biweekly', 'monthly', 'on_demand', 'custom'];
+const PRICING_MODELS = ['monthly', 'per_service', 'per_hour'];
+const SERVICE_CLIENT_TYPES = ['office', 'community', 'shop', 'warehouse', 'gym', 'home', 'post_construction', 'restaurant', 'clinic', 'hotel', 'school', 'other'];
+
+function normalizeContractStatus(value) {
+  return CONTRACT_STATUSES.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+function normalizeServiceFrequency(value) {
+  return SERVICE_FREQUENCIES.includes(String(value || '')) ? String(value) : 'weekly_1';
+}
+
+function normalizePricingModel(value) {
+  return PRICING_MODELS.includes(String(value || '')) ? String(value) : 'monthly';
+}
+
+function normalizeServiceClientType(value) {
+  return SERVICE_CLIENT_TYPES.includes(String(value || '')) ? String(value) : 'other';
+}
+
+export function buildServiceContractDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `scontract-${uuidv4()}`;
+  const contractNumber = existing?.contractNumber || `CTR-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const scheduleDays = Array.isArray(data.scheduleDays) ? data.scheduleDays : (existing?.scheduleDays || []);
+  const materials = Array.isArray(data.materials) ? data.materials : (existing?.materials || []);
+  const linkedInvoiceIds = Array.isArray(data.linkedInvoiceIds) ? data.linkedInvoiceIds : (existing?.linkedInvoiceIds || []);
+  const customFrequencyDays = Array.isArray(data.customFrequencyDays) ? data.customFrequencyDays : (existing?.customFrequencyDays || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'service_contract',
+    id,
+    contractNumber,
+    user_id: userId,
+
+    clientId: String(data.clientId || existing?.clientId || ''),
+    clientName: String(data.clientName || existing?.clientName || ''),
+    clientPhone: String(data.clientPhone || existing?.clientPhone || ''),
+    clientEmail: String(data.clientEmail || existing?.clientEmail || ''),
+    clientType: normalizeServiceClientType(data.clientType ?? existing?.clientType),
+
+    address: String(data.address || existing?.address || ''),
+    addressLine2: String(data.addressLine2 || existing?.addressLine2 || ''),
+    city: String(data.city || existing?.city || ''),
+    postalCode: String(data.postalCode || existing?.postalCode || ''),
+    coordinates: data.coordinates || existing?.coordinates || null,
+    zone: String(data.zone || existing?.zone || ''),
+
+    cleaningType: String(data.cleaningType || existing?.cleaningType || 'general'),
+    frequency: normalizeServiceFrequency(data.frequency ?? existing?.frequency),
+    customFrequencyDays,
+    scheduleDays,
+    contractedHoursPerVisit: Number(data.contractedHoursPerVisit || existing?.contractedHoursPerVisit || 0),
+    contractedVisitsPerMonth: data.contractedVisitsPerMonth != null ? Number(data.contractedVisitsPerMonth) : (existing?.contractedVisitsPerMonth ?? null),
+
+    pricingModel: normalizePricingModel(data.pricingModel ?? existing?.pricingModel),
+    monthlyPrice: Number(data.monthlyPrice || existing?.monthlyPrice || 0),
+    pricePerService: Number(data.pricePerService || existing?.pricePerService || 0),
+    pricePerHour: Number(data.pricePerHour || existing?.pricePerHour || 0),
+    taxRate: data.taxRate != null ? Number(data.taxRate) : (existing?.taxRate ?? 21),
+    taxIncluded: data.taxIncluded != null ? Boolean(data.taxIncluded) : (existing?.taxIncluded ?? false),
+
+    assignedWorkerId: String(data.assignedWorkerId || existing?.assignedWorkerId || ''),
+    assignedWorkerName: String(data.assignedWorkerName || existing?.assignedWorkerName || ''),
+    backupWorkerId: String(data.backupWorkerId || existing?.backupWorkerId || ''),
+    backupWorkerName: String(data.backupWorkerName || existing?.backupWorkerName || ''),
+
+    materials,
+    materialsIncluded: data.materialsIncluded != null ? Boolean(data.materialsIncluded) : (existing?.materialsIncluded ?? true),
+
+    contractStatus: normalizeContractStatus(data.contractStatus ?? existing?.contractStatus),
+    startDate: String(data.startDate || existing?.startDate || ''),
+    endDate: String(data.endDate || existing?.endDate || ''),
+    renewalDate: String(data.renewalDate || existing?.renewalDate || ''),
+    autoRenew: data.autoRenew != null ? Boolean(data.autoRenew) : (existing?.autoRenew ?? false),
+    renewalNoticeDays: Number(data.renewalNoticeDays || existing?.renewalNoticeDays || 30),
+
+    observations: String(data.observations || existing?.observations || ''),
+    clientInstructions: String(data.clientInstructions || existing?.clientInstructions || ''),
+
+    billingEnabled: data.billingEnabled != null ? Boolean(data.billingEnabled) : (existing?.billingEnabled ?? false),
+    billingDay: data.billingDay != null ? Number(data.billingDay) : (existing?.billingDay ?? 1),
+    linkedInvoiceIds,
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeServiceContract(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'service_contract',
+    id: doc._id,
+    contractNumber: doc.contractNumber || '',
+    user_id: doc.user_id,
+
+    clientId: doc.clientId || '',
+    clientName: doc.clientName || '',
+    clientPhone: doc.clientPhone || '',
+    clientEmail: doc.clientEmail || '',
+    clientType: normalizeServiceClientType(doc.clientType),
+
+    address: doc.address || '',
+    addressLine2: doc.addressLine2 || '',
+    city: doc.city || '',
+    postalCode: doc.postalCode || '',
+    coordinates: doc.coordinates || null,
+    zone: doc.zone || '',
+
+    cleaningType: doc.cleaningType || 'general',
+    frequency: normalizeServiceFrequency(doc.frequency),
+    customFrequencyDays: Array.isArray(doc.customFrequencyDays) ? doc.customFrequencyDays : [],
+    scheduleDays: Array.isArray(doc.scheduleDays) ? doc.scheduleDays : [],
+    contractedHoursPerVisit: Number(doc.contractedHoursPerVisit || 0),
+    contractedVisitsPerMonth: doc.contractedVisitsPerMonth ?? null,
+
+    pricingModel: normalizePricingModel(doc.pricingModel),
+    monthlyPrice: Number(doc.monthlyPrice || 0),
+    pricePerService: Number(doc.pricePerService || 0),
+    pricePerHour: Number(doc.pricePerHour || 0),
+    taxRate: doc.taxRate ?? 21,
+    taxIncluded: Boolean(doc.taxIncluded),
+
+    assignedWorkerId: doc.assignedWorkerId || '',
+    assignedWorkerName: doc.assignedWorkerName || '',
+    backupWorkerId: doc.backupWorkerId || '',
+    backupWorkerName: doc.backupWorkerName || '',
+
+    materials: Array.isArray(doc.materials) ? doc.materials : [],
+    materialsIncluded: doc.materialsIncluded ?? true,
+
+    contractStatus: normalizeContractStatus(doc.contractStatus),
+    startDate: doc.startDate || '',
+    endDate: doc.endDate || '',
+    renewalDate: doc.renewalDate || '',
+    autoRenew: Boolean(doc.autoRenew),
+    renewalNoticeDays: Number(doc.renewalNoticeDays || 30),
+
+    observations: doc.observations || '',
+    clientInstructions: doc.clientInstructions || '',
+
+    billingEnabled: Boolean(doc.billingEnabled),
+    billingDay: Number(doc.billingDay || 1),
+    linkedInvoiceIds: Array.isArray(doc.linkedInvoiceIds) ? doc.linkedInvoiceIds : [],
+
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listServiceContractsByUser(req, userId, filters = {}) {
+  const db = getCleaningDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  let results = docs
+    .filter((doc) => doc?.type === 'service_contract' && !doc?.deletedAt && (!userId || doc?.user_id === userId));
+
+  if (filters.status) results = results.filter((d) => d.contractStatus === filters.status);
+  if (filters.clientId) results = results.filter((d) => d.clientId === filters.clientId);
+  if (filters.workerId) results = results.filter((d) => d.assignedWorkerId === filters.workerId);
+  if (filters.zone) results = results.filter((d) => d.zone === filters.zone);
+
+  return results.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── CONSTRUCTION (Constructora) ──────────────────────────────────────────────
+
+export function getConstructionDbName() {
+  return normalizeDbName(process.env.VITE_CONSTRUCTION_DB || `${getDbPrefix()}-construction`);
+}
+
+const CONSTRUCTION_PROJECT_TYPES = [
+  'casa', 'local', 'piso', 'nave', 'promoción', 'colegio', 'gimnasio', 'oficina', 'otro',
+];
+
+const CONSTRUCTION_GUILDS = [
+  'albanileria', 'carpinteria', 'carpinteria_aluminio', 'electricidad', 'fontaneria',
+  'lampisteria', 'pladur', 'yeso', 'pintura', 'herreria_cerrajeria',
+  'pavimentos_revestimientos', 'climatizacion', 'cristaleria', 'impermeabilizacion',
+  'cubiertas_tejados', 'excavaciones_derribos', 'mobiliario_cocina_bano',
+  'limpieza_final_obra', 'personalizado',
+];
+
+const CONSTRUCTION_GUILD_LABELS = {
+  albanileria: 'Albañilería',
+  carpinteria: 'Carpintería',
+  carpinteria_aluminio: 'Carpintería de aluminio',
+  electricidad: 'Electricidad',
+  fontaneria: 'Fontanería',
+  lampisteria: 'Lampistería',
+  pladur: 'Pladur',
+  yeso: 'Yeso',
+  pintura: 'Pintura',
+  herreria_cerrajeria: 'Herrería / Cerrajería',
+  pavimentos_revestimientos: 'Pavimentos y revestimientos',
+  climatizacion: 'Climatización',
+  cristaleria: 'Cristalería',
+  impermeabilizacion: 'Impermeabilización',
+  cubiertas_tejados: 'Cubiertas / Tejados',
+  excavaciones_derribos: 'Excavaciones / Derribos',
+  mobiliario_cocina_bano: 'Mobiliario de cocina / baño',
+  limpieza_final_obra: 'Limpieza final de obra',
+  personalizado: 'Personalizado',
+};
+
+const GUILD_MIGRATION_MAP = {
+  'carpintería': 'carpinteria',
+  'peletería': 'personalizado',
+  'lampistería': 'lampisteria',
+  'pradurista': 'pladur',
+  'yesero': 'yeso',
+  'pintor': 'pintura',
+  'herrero': 'herreria_cerrajeria',
+  'electricista': 'electricidad',
+  'fontanero': 'fontaneria',
+  'albañil': 'albanileria',
+  'otro': 'personalizado',
+};
+
+const CONSTRUCTION_UNITS = [
+  { key: 'ud', label: 'Unidad (ud)' },
+  { key: 'm2', label: 'Metro cuadrado (m²)' },
+  { key: 'm3', label: 'Metro cúbico (m³)' },
+  { key: 'ml', label: 'Metro lineal (ml)' },
+  { key: 'kg', label: 'Kilogramo (kg)' },
+  { key: 'h', label: 'Hora (h)' },
+  { key: 'pa', label: 'Partida alzada (pa)' },
+  { key: 'global', label: 'Global' },
+];
+
+function migrateGuildType(tipo) {
+  if (!tipo) return 'personalizado';
+  const s = String(tipo);
+  if (CONSTRUCTION_GUILDS.includes(s)) return s;
+  if (GUILD_MIGRATION_MAP[s]) return GUILD_MIGRATION_MAP[s];
+  return s;
+}
+
+export function buildConstructionPredefinedPartidaDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cppt-${uuidv4()}`;
+  const codigo = existing?.codigo || `PPT-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const precioMateriales = Number(data.precioMateriales ?? existing?.precioMateriales ?? 0);
+  const precioManoObra = Number(data.precioManoObra ?? existing?.precioManoObra ?? 0);
+  const precioEstructural = Number(data.precioEstructural ?? existing?.precioEstructural ?? 0);
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_predefined_partida',
+    id,
+    user_id: userId,
+    codigo,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    gremio: migrateGuildType(data.gremio ?? existing?.gremio),
+    categoria: String(data.categoria || existing?.categoria || ''),
+    unidad: String(data.unidad || existing?.unidad || 'ud'),
+    precioMateriales,
+    precioManoObra,
+    precioEstructural,
+    precioUnitario: precioMateriales + precioManoObra + precioEstructural,
+    materialesVinculados: Array.isArray(data.materialesVinculados) ? data.materialesVinculados.map(m => ({
+      catalogItemId: String(m.catalogItemId || ''),
+      nombre: String(m.nombre || ''),
+      cantidadPorUnidad: Number(m.cantidadPorUnidad ?? 0),
+      unidad: String(m.unidad || ''),
+    })) : (existing?.materialesVinculados || []),
+    precioActualizado: String(data.precioActualizado || existing?.precioActualizado || now.slice(0, 10)),
+    precioValidadoPor: String(data.precioValidadoPor || existing?.precioValidadoPor || ''),
+    precioValidadoPorNombre: String(data.precioValidadoPorNombre || existing?.precioValidadoPorNombre || ''),
+    historialPrecios: Array.isArray(data.historialPrecios) ? data.historialPrecios : (existing?.historialPrecios || []),
+    activa: data.activa !== undefined ? Boolean(data.activa) : (existing?.activa !== undefined ? existing.activa : true),
+    orden: Number(data.orden ?? existing?.orden ?? 0),
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionPredefinedPartida(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_predefined_partida', id: doc._id,
+    user_id: doc.user_id,
+    codigo: doc.codigo || '',
+    nombre: doc.nombre || '', descripcion: doc.descripcion || '',
+    gremio: migrateGuildType(doc.gremio), categoria: doc.categoria || '',
+    unidad: doc.unidad || 'ud',
+    precioMateriales: Number(doc.precioMateriales || 0),
+    precioManoObra: Number(doc.precioManoObra || 0),
+    precioEstructural: Number(doc.precioEstructural || 0),
+    precioUnitario: Number(doc.precioUnitario || 0),
+    materialesVinculados: Array.isArray(doc.materialesVinculados) ? doc.materialesVinculados : [],
+    precioActualizado: doc.precioActualizado || '',
+    precioValidadoPor: doc.precioValidadoPor || '',
+    precioValidadoPorNombre: doc.precioValidadoPorNombre || '',
+    historialPrecios: Array.isArray(doc.historialPrecios) ? doc.historialPrecios : [],
+    activa: doc.activa !== false,
+    orden: Number(doc.orden || 0),
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+const BUDGET_STATES = ['borrador', 'enviado', 'aceptado', 'rechazado'];
+const PAYMENT_METHODS = ['contado', 'plazos', 'transferencia'];
+
+function normalizeConstructionStatus(value) {
+  const allowed = ['pendiente_planificacion', 'planificación', 'en_obra', 'pausada', 'finalizada', 'cerrada'];
+  return allowed.includes(String(value || '')) ? String(value) : 'planificación';
+}
+
+function normalizeBudgetStatus(value) {
+  return BUDGET_STATES.includes(String(value || '')) ? String(value) : 'borrador';
+}
+
+// ── Clients ──
+
+const CONSTRUCTION_CLIENT_TYPES = ['particular', 'empresa', 'autonomo', 'comunidad_propietarios', 'promotora', 'administracion_publica'];
+const CONSTRUCTION_COMMERCIAL_STATUSES = ['prospecto', 'contactado', 'presupuestado', 'en_obra', 'fidelizado', 'inactivo', 'perdido'];
+const CONSTRUCTION_IVA_REGIMES = ['general', 'simplificado', 'recargo_equivalencia', 'exento', 'intracomunitario'];
+const CONSTRUCTION_CLIENT_ORIGINS = ['directo', 'referido', 'web', 'publicidad', 'inmobiliaria', 'arquitecto', 'otro'];
+const CONSTRUCTION_ADDRESS_TYPES = ['obra', 'domicilio', 'fiscal', 'correspondencia', 'otro'];
+const CONSTRUCTION_INMUEBLE_TYPES = ['vivienda', 'local_comercial', 'nave_industrial', 'terreno', 'garaje', 'oficina', 'edificio', 'otro'];
+const CONSTRUCTION_INMUEBLE_STATES = ['planificado', 'en_obra', 'finalizado', 'entregado'];
+const CONSTRUCTION_NOTE_TYPES = ['llamada', 'visita', 'email', 'reunion', 'nota_interna', 'cambio_estado', 'otro'];
+
+function sanitizeConstructionClientAddress(d, i) {
+  if (!d || typeof d !== 'object') return null;
+  return {
+    id: d.id || `dir-${i}-${Date.now()}`,
+    etiqueta: String(d.etiqueta || ''),
+    tipo: CONSTRUCTION_ADDRESS_TYPES.includes(String(d.tipo)) ? String(d.tipo) : 'otro',
+    calle: String(d.calle || ''),
+    numero: String(d.numero || ''),
+    piso: String(d.piso || ''),
+    codigoPostal: String(d.codigoPostal || ''),
+    ciudad: String(d.ciudad || ''),
+    provincia: String(d.provincia || ''),
+    pais: String(d.pais || 'España'),
+    esPrincipal: Boolean(d.esPrincipal),
+    coordenadas: d.coordenadas || null,
+  };
+}
+
+function sanitizeConstructionClientContact(c, i) {
+  if (!c || typeof c !== 'object') return null;
+  return {
+    id: c.id || `cnt-${i}-${Date.now()}`,
+    nombre: String(c.nombre || ''),
+    cargo: String(c.cargo || ''),
+    telefono: String(c.telefono || ''),
+    email: String(c.email || ''),
+    notas: String(c.notas || ''),
+    esPrincipal: Boolean(c.esPrincipal),
+  };
+}
+
+function sanitizeConstructionClientInmueble(inm, i) {
+  if (!inm || typeof inm !== 'object') return null;
+  return {
+    id: inm.id || `inm-${i}-${Date.now()}`,
+    tipo: CONSTRUCTION_INMUEBLE_TYPES.includes(String(inm.tipo)) ? String(inm.tipo) : 'otro',
+    descripcion: String(inm.descripcion || ''),
+    direccion: String(inm.direccion || ''),
+    referenciaCatastral: String(inm.referenciaCatastral || ''),
+    superficie: Number(inm.superficie || 0),
+    obraId: String(inm.obraId || ''),
+    obraNombre: String(inm.obraNombre || ''),
+    estado: CONSTRUCTION_INMUEBLE_STATES.includes(String(inm.estado)) ? String(inm.estado) : 'planificado',
+    notas: String(inm.notas || ''),
+  };
+}
+
+function sanitizeConstructionClientNote(n, i) {
+  if (!n || typeof n !== 'object') return null;
+  return {
+    id: n.id || `nota-${i}-${Date.now()}`,
+    texto: String(n.texto || ''),
+    tipo: CONSTRUCTION_NOTE_TYPES.includes(String(n.tipo)) ? String(n.tipo) : 'otro',
+    autor: String(n.autor || ''),
+    autorNombre: String(n.autorNombre || ''),
+    fecha: String(n.fecha || new Date().toISOString()),
+    obraId: String(n.obraId || ''),
+    obraNombre: String(n.obraNombre || ''),
+    adjuntos: Array.isArray(n.adjuntos) ? n.adjuntos.map(a => ({
+      nombre: String(a.nombre || ''), url: String(a.url || ''), mimeType: String(a.mimeType || ''),
+    })) : [],
+  };
+}
+
+export function buildConstructionClientDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `ccli-${uuidv4()}`;
+
+  const documentos = Array.isArray(data.documentos) ? data.documentos.map((d, i) => ({
+    id: d.id || `doc-${i}-${Date.now()}`,
+    nombre: String(d.nombre || ''),
+    tipo: String(d.tipo || 'otro'),
+    url: String(d.url || ''),
+    fecha: String(d.fecha || ''),
+    ocrData: d.ocrData || null,
+    fileBase64: String(d.fileBase64 || ''),
+    fileMimeType: String(d.fileMimeType || ''),
+  })) : (existing?.documentos || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_client',
+    id,
+    user_id: userId,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    cif: String(data.cif || existing?.cif || ''),
+    telefono: String(data.telefono || existing?.telefono || ''),
+    email: String(data.email || existing?.email || ''),
+    direccion: String(data.direccion || existing?.direccion || ''),
+
+    tipoCliente: CONSTRUCTION_CLIENT_TYPES.includes(String(data.tipoCliente))
+      ? String(data.tipoCliente) : (existing?.tipoCliente || 'particular'),
+    razonSocial: String(data.razonSocial ?? existing?.razonSocial ?? ''),
+    direccionFiscal: String(data.direccionFiscal ?? existing?.direccionFiscal ?? ''),
+    ciudadFiscal: String(data.ciudadFiscal ?? existing?.ciudadFiscal ?? ''),
+    cpFiscal: String(data.cpFiscal ?? existing?.cpFiscal ?? ''),
+    provinciaFiscal: String(data.provinciaFiscal ?? existing?.provinciaFiscal ?? ''),
+    paisFiscal: String(data.paisFiscal ?? existing?.paisFiscal ?? 'España'),
+    regimenIva: CONSTRUCTION_IVA_REGIMES.includes(String(data.regimenIva))
+      ? String(data.regimenIva) : (existing?.regimenIva || 'general'),
+
+    estadoComercial: CONSTRUCTION_COMMERCIAL_STATUSES.includes(String(data.estadoComercial))
+      ? String(data.estadoComercial) : (existing?.estadoComercial || 'prospecto'),
+    responsableId: String(data.responsableId ?? existing?.responsableId ?? ''),
+    responsableNombre: String(data.responsableNombre ?? existing?.responsableNombre ?? ''),
+    origenCliente: CONSTRUCTION_CLIENT_ORIGINS.includes(String(data.origenCliente))
+      ? String(data.origenCliente) : (existing?.origenCliente || 'directo'),
+    referidoPor: String(data.referidoPor ?? existing?.referidoPor ?? ''),
+
+    direcciones: Array.isArray(data.direcciones)
+      ? data.direcciones.map(sanitizeConstructionClientAddress).filter(Boolean)
+      : (existing?.direcciones || []),
+    contactos: Array.isArray(data.contactos)
+      ? data.contactos.map(sanitizeConstructionClientContact).filter(Boolean)
+      : (existing?.contactos || []),
+    inmuebles: Array.isArray(data.inmuebles)
+      ? data.inmuebles.map(sanitizeConstructionClientInmueble).filter(Boolean)
+      : (existing?.inmuebles || []),
+
+    notasEstructuradas: Array.isArray(data.notasEstructuradas)
+      ? data.notasEstructuradas.map(sanitizeConstructionClientNote).filter(Boolean)
+      : (existing?.notasEstructuradas || []),
+
+    tags: Array.isArray(data.tags) ? data.tags.map(t => String(t)) : (existing?.tags || []),
+    crmClientId: String(data.crmClientId ?? existing?.crmClientId ?? ''),
+    crmLeadId: String(data.crmLeadId ?? existing?.crmLeadId ?? ''),
+
+    consentimientos: {
+      proteccionDatos: Boolean(data.consentimientos?.proteccionDatos ?? existing?.consentimientos?.proteccionDatos),
+      comunicacionesComerciales: Boolean(data.consentimientos?.comunicacionesComerciales ?? existing?.consentimientos?.comunicacionesComerciales),
+      cesionTerceros: Boolean(data.consentimientos?.cesionTerceros ?? existing?.consentimientos?.cesionTerceros),
+    },
+
+    documentos,
+    notas: String(data.notas ?? existing?.notas ?? ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionClient(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_client', id: doc._id,
+    user_id: doc.user_id,
+    nombre: doc.nombre || '', cif: doc.cif || '', telefono: doc.telefono || '',
+    email: doc.email || '', direccion: doc.direccion || '', notas: doc.notas || '',
+
+    tipoCliente: doc.tipoCliente || 'particular',
+    razonSocial: doc.razonSocial || '',
+    direccionFiscal: doc.direccionFiscal || '',
+    ciudadFiscal: doc.ciudadFiscal || '',
+    cpFiscal: doc.cpFiscal || '',
+    provinciaFiscal: doc.provinciaFiscal || '',
+    paisFiscal: doc.paisFiscal || 'España',
+    regimenIva: doc.regimenIva || 'general',
+
+    estadoComercial: doc.estadoComercial || 'prospecto',
+    responsableId: doc.responsableId || '',
+    responsableNombre: doc.responsableNombre || '',
+    origenCliente: doc.origenCliente || 'directo',
+    referidoPor: doc.referidoPor || '',
+
+    direcciones: Array.isArray(doc.direcciones) ? doc.direcciones : [],
+    contactos: Array.isArray(doc.contactos) ? doc.contactos : [],
+    inmuebles: Array.isArray(doc.inmuebles) ? doc.inmuebles : [],
+    notasEstructuradas: Array.isArray(doc.notasEstructuradas) ? doc.notasEstructuradas : [],
+
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    crmClientId: doc.crmClientId || '',
+    crmLeadId: doc.crmLeadId || '',
+
+    consentimientos: {
+      proteccionDatos: Boolean(doc.consentimientos?.proteccionDatos),
+      comunicacionesComerciales: Boolean(doc.consentimientos?.comunicacionesComerciales),
+      cesionTerceros: Boolean(doc.consentimientos?.cesionTerceros),
+    },
+
+    documentos: Array.isArray(doc.documentos) ? doc.documentos : [],
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Guilds (Gremios) ──
+
+export function buildConstructionGuildDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cgld-${uuidv4()}`;
+  const tipo = migrateGuildType(data.tipo ?? existing?.tipo);
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_guild',
+    id,
+    user_id: userId,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    tipo,
+    contacto: String(data.contacto || existing?.contacto || ''),
+    telefono: String(data.telefono || existing?.telefono || ''),
+    email: String(data.email || existing?.email || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    precioMateriales: Number(data.precioMateriales ?? existing?.precioMateriales ?? 0),
+    precioManoObra: Number(data.precioManoObra ?? existing?.precioManoObra ?? 0),
+    precioEstructural: Number(data.precioEstructural ?? existing?.precioEstructural ?? 0),
+    precioTotal: Number(data.precioMateriales ?? existing?.precioMateriales ?? 0)
+      + Number(data.precioManoObra ?? existing?.precioManoObra ?? 0)
+      + Number(data.precioEstructural ?? existing?.precioEstructural ?? 0),
+    tarifaHora: Number(data.tarifaHora ?? existing?.tarifaHora ?? 0),
+    margenDefecto: Number(data.margenDefecto ?? existing?.margenDefecto ?? 0),
+    totalPartidas: Number(data.totalPartidas ?? existing?.totalPartidas ?? 0),
+    preciosActualizados: String(data.preciosActualizados || existing?.preciosActualizados || ''),
+    esPersonalizado: tipo === 'personalizado' ? true : Boolean(data.esPersonalizado ?? existing?.esPersonalizado ?? false),
+    color: String(data.color || existing?.color || ''),
+    icono: String(data.icono || existing?.icono || ''),
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionGuild(doc) {
+  if (!doc) return null;
+  const tipo = migrateGuildType(doc.tipo);
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_guild', id: doc._id,
+    user_id: doc.user_id,
+    nombre: doc.nombre || '', tipo,
+    contacto: doc.contacto || '', telefono: doc.telefono || '', email: doc.email || '',
+    descripcion: doc.descripcion || '',
+    precioMateriales: Number(doc.precioMateriales || 0),
+    precioManoObra: Number(doc.precioManoObra || 0),
+    precioEstructural: Number(doc.precioEstructural || 0),
+    precioTotal: Number(doc.precioTotal || 0),
+    tarifaHora: Number(doc.tarifaHora || 0),
+    margenDefecto: Number(doc.margenDefecto || 0),
+    totalPartidas: Number(doc.totalPartidas || 0),
+    preciosActualizados: doc.preciosActualizados || '',
+    esPersonalizado: tipo === 'personalizado' || Boolean(doc.esPersonalizado),
+    color: doc.color || '', icono: doc.icono || '',
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Projects (Obras) ──
+
+export function buildConstructionProjectDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cprj-${uuidv4()}`;
+  const tipoObra = CONSTRUCTION_PROJECT_TYPES.includes(String(data.tipoObra)) ? String(data.tipoObra) : (existing?.tipoObra || 'casa');
+
+  const partidas = Array.isArray(data.partidas) ? data.partidas.map((p, i) => ({
+    id: p.id || i + 1,
+    gremio: String(p.gremio || ''),
+    descripcion: String(p.descripcion || ''),
+    materiales: Number(p.materiales ?? 0),
+    manoObra: Number(p.manoObra ?? 0),
+    estructural: Number(p.estructural ?? 0),
+    subtotal: Number(p.materiales ?? 0) + Number(p.manoObra ?? 0) + Number(p.estructural ?? 0),
+  })) : (existing?.partidas || []);
+
+  const gremios = Array.isArray(data.gremios) ? data.gremios.map(String) : (existing?.gremios || []);
+
+  const historial = Array.isArray(data.historial) ? data.historial.map(h => ({
+    fecha: String(h.fecha || ''),
+    accion: String(h.accion || ''),
+    actor: String(h.actor || ''),
+    detalle: String(h.detalle || ''),
+  })) : (existing?.historial || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_project',
+    id,
+    user_id: userId,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    tipoObra,
+    ubicacion: String(data.ubicacion || existing?.ubicacion || ''),
+    clienteId: String(data.clienteId || existing?.clienteId || ''),
+    clienteNombre: String(data.clienteNombre || existing?.clienteNombre || ''),
+    fechaInicio: String(data.fechaInicio || existing?.fechaInicio || ''),
+    fechaFinPrevista: String(data.fechaFinPrevista || existing?.fechaFinPrevista || ''),
+    presupuestoId: String(data.presupuestoId || existing?.presupuestoId || ''),
+    presupuestoRef: String(data.presupuestoRef || existing?.presupuestoRef || ''),
+    importeTotal: Number(data.importeTotal ?? existing?.importeTotal ?? 0),
+    partidas,
+    gremios,
+    responsableId: String(data.responsableId || existing?.responsableId || ''),
+    responsableNombre: String(data.responsableNombre || existing?.responsableNombre || ''),
+    fechaAceptacion: String(data.fechaAceptacion || existing?.fechaAceptacion || ''),
+    origenAutoConversion: data.origenAutoConversion != null ? Boolean(data.origenAutoConversion) : (existing?.origenAutoConversion ?? false),
+    historial,
+    estado: normalizeConstructionStatus(data.estado ?? existing?.estado),
+    progreso: Math.min(100, Math.max(0, Number(data.progreso ?? existing?.progreso ?? 0))),
+    horasEstimadas: Number(data.horasEstimadas ?? existing?.horasEstimadas ?? 0),
+    horasAcumuladas: Number(data.horasAcumuladas ?? existing?.horasAcumuladas ?? 0),
+    costeAcumulado: Number(data.costeAcumulado ?? existing?.costeAcumulado ?? 0),
+    notas: String(data.notas || existing?.notas || ''),
+    archivada: Boolean(data.archivada ?? existing?.archivada ?? false),
+    fechaCierre: String(data.fechaCierre || existing?.fechaCierre || ''),
+    cerradoPor: String(data.cerradoPor || existing?.cerradoPor || ''),
+    cerradoPorNombre: String(data.cerradoPorNombre || existing?.cerradoPorNombre || ''),
+    motivoCierre: String(data.motivoCierre || existing?.motivoCierre || ''),
+    resumenCierre: data.resumenCierre || existing?.resumenCierre || null,
+    fechaReapertura: String(data.fechaReapertura || existing?.fechaReapertura || ''),
+    reabiertoPor: String(data.reabiertoPor || existing?.reabiertoPor || ''),
+    reabiertoPorNombre: String(data.reabiertoPorNombre || existing?.reabiertoPorNombre || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionProject(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_project', id: doc._id,
+    user_id: doc.user_id,
+    nombre: doc.nombre || '', tipoObra: doc.tipoObra || 'casa',
+    ubicacion: doc.ubicacion || '',
+    clienteId: doc.clienteId || '', clienteNombre: doc.clienteNombre || '',
+    fechaInicio: doc.fechaInicio || '', fechaFinPrevista: doc.fechaFinPrevista || '',
+    presupuestoId: doc.presupuestoId || '',
+    presupuestoRef: doc.presupuestoRef || '',
+    importeTotal: Number(doc.importeTotal || 0),
+    partidas: Array.isArray(doc.partidas) ? doc.partidas : [],
+    gremios: Array.isArray(doc.gremios) ? doc.gremios : [],
+    responsableId: doc.responsableId || '', responsableNombre: doc.responsableNombre || '',
+    fechaAceptacion: doc.fechaAceptacion || '',
+    origenAutoConversion: Boolean(doc.origenAutoConversion),
+    historial: Array.isArray(doc.historial) ? doc.historial : [],
+    estado: normalizeConstructionStatus(doc.estado),
+    progreso: Number(doc.progreso || 0),
+    horasEstimadas: Number(doc.horasEstimadas || 0),
+    horasAcumuladas: Number(doc.horasAcumuladas || 0),
+    costeAcumulado: Number(doc.costeAcumulado || 0),
+    notas: doc.notas || '',
+    archivada: Boolean(doc.archivada),
+    fechaCierre: doc.fechaCierre || '',
+    cerradoPor: doc.cerradoPor || '',
+    cerradoPorNombre: doc.cerradoPorNombre || '',
+    motivoCierre: doc.motivoCierre || '',
+    resumenCierre: doc.resumenCierre || null,
+    fechaReapertura: doc.fechaReapertura || '',
+    reabiertoPor: doc.reabiertoPor || '',
+    reabiertoPorNombre: doc.reabiertoPorNombre || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Budgets (Presupuestos) ──
+
+export function buildConstructionBudgetDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cbud-${uuidv4()}`;
+  const referencia = existing?.referencia || `PRE-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const partidas = Array.isArray(data.partidas) ? data.partidas.map((p, i) => {
+    const qty = Number(p.cantidad ?? 1);
+    const puMat = Number(p.precioUnitarioMateriales ?? p.materiales ?? 0);
+    const puMo = Number(p.precioUnitarioManoObra ?? p.manoObra ?? 0);
+    const puEst = Number(p.precioUnitarioEstructural ?? p.estructural ?? 0);
+    const pu = puMat + puMo + puEst;
+    return {
+      id: p.id || `bp-${i + 1}-${Date.now()}`,
+      partidaPredefinidaId: String(p.partidaPredefinidaId || ''),
+      gremio: String(p.gremio || ''),
+      nombre: String(p.nombre || ''),
+      descripcion: String(p.descripcion || ''),
+      unidad: String(p.unidad || 'ud'),
+      cantidad: qty,
+      precioUnitarioMateriales: puMat,
+      precioUnitarioManoObra: puMo,
+      precioUnitarioEstructural: puEst,
+      precioUnitario: pu,
+      materiales: qty * puMat,
+      manoObra: qty * puMo,
+      estructural: qty * puEst,
+      subtotal: qty * pu,
+    };
+  }) : (existing?.partidas || []);
+
+  const totalPartidas = partidas.reduce((s, p) => s + p.subtotal, 0);
+
+  const subtotalesPorGremio = Object.entries(
+    partidas.reduce((acc, p) => { const k = p.gremio || 'sin_gremio'; acc[k] = (acc[k] || 0) + p.subtotal; return acc; }, {})
+  ).map(([gremio, subtotal]) => ({ gremio, subtotal }));
+
+  const pagos = Array.isArray(data.pagos) ? data.pagos.map((pg, i) => ({
+    id: pg.id || i + 1,
+    concepto: String(pg.concepto || ''),
+    importe: Number(pg.importe ?? 0),
+    fecha: String(pg.fecha || ''),
+    pagado: Boolean(pg.pagado),
+    fechaPago: String(pg.fechaPago || ''),
+    justificante: String(pg.justificante || ''),
+    metodo: String(pg.metodo || ''),
+  })) : (existing?.pagos || []);
+
+  const totalPagado = pagos.filter(p => p.pagado).reduce((s, p) => s + p.importe, 0);
+
+  const pagosProveedor = Array.isArray(data.pagosProveedor) ? data.pagosProveedor.map((pp, i) => ({
+    id: pp.id || i + 1,
+    gremioId: String(pp.gremioId || ''),
+    gremioNombre: String(pp.gremioNombre || ''),
+    concepto: String(pp.concepto || ''),
+    importe: Number(pp.importe ?? 0),
+    fechaVencimiento: String(pp.fechaVencimiento || ''),
+    pagado: Boolean(pp.pagado),
+    fechaPago: String(pp.fechaPago || ''),
+    justificante: String(pp.justificante || ''),
+    observaciones: String(pp.observaciones || ''),
+  })) : (existing?.pagosProveedor || []);
+
+  const rawClienteFiscal = data.clienteDireccionFiscal || existing?.clienteDireccionFiscal || {};
+
+  const documentos = Array.isArray(data.documentos) ? data.documentos.map((d, i) => ({
+    id: d.id || `bdoc-${i}-${Date.now()}`,
+    nombre: String(d.nombre || ''),
+    tipo: String(d.tipo || 'otro'),
+    url: String(d.url || ''),
+    fecha: String(d.fecha || ''),
+    fileBase64: String(d.fileBase64 || ''),
+    fileMimeType: String(d.fileMimeType || ''),
+  })) : (existing?.documentos || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_budget',
+    id,
+    user_id: userId,
+    referencia,
+    proyectoId: String(data.proyectoId || existing?.proyectoId || ''),
+    proyectoNombre: String(data.proyectoNombre || existing?.proyectoNombre || ''),
+    clienteId: String(data.clienteId || existing?.clienteId || ''),
+    clienteNombre: String(data.clienteNombre || existing?.clienteNombre || ''),
+    clienteCif: String(data.clienteCif || existing?.clienteCif || ''),
+    clienteTelefono: String(data.clienteTelefono || existing?.clienteTelefono || ''),
+    clienteEmail: String(data.clienteEmail || existing?.clienteEmail || ''),
+    clienteDireccionFiscal: {
+      calle: String(rawClienteFiscal.calle || ''),
+      codigoPostal: String(rawClienteFiscal.codigoPostal || ''),
+      ciudad: String(rawClienteFiscal.ciudad || ''),
+      provincia: String(rawClienteFiscal.provincia || ''),
+      pais: String(rawClienteFiscal.pais || ''),
+    },
+    clienteFormaPago: PAYMENT_METHODS.includes(String(data.clienteFormaPago)) ? String(data.clienteFormaPago) : (existing?.clienteFormaPago || ''),
+    tipoObra: CONSTRUCTION_PROJECT_TYPES.includes(String(data.tipoObra)) ? String(data.tipoObra) : (existing?.tipoObra || 'casa'),
+    direccionObra: String(data.direccionObra || existing?.direccionObra || ''),
+    descripcionObra: String(data.descripcionObra || existing?.descripcionObra || ''),
+    fecha: String(data.fecha || existing?.fecha || ''),
+    partidas,
+    totalPartidas,
+    subtotalesPorGremio,
+    margen: Number(data.margen ?? existing?.margen ?? 15),
+    margenMinimo: Number(data.margenMinimo ?? existing?.margenMinimo ?? 10),
+    totalConMargen: totalPartidas * (1 + Number(data.margen ?? existing?.margen ?? 15) / 100),
+    estado: normalizeBudgetStatus(data.estado ?? existing?.estado),
+    metodoPago: PAYMENT_METHODS.includes(String(data.metodoPago)) ? String(data.metodoPago) : (existing?.metodoPago || ''),
+    numPlazos: Number(data.numPlazos ?? existing?.numPlazos ?? 1),
+    pagos,
+    totalPagado,
+    pendientePago: totalPartidas * (1 + Number(data.margen ?? existing?.margen ?? 15) / 100) - totalPagado,
+    pagosProveedor,
+    motivoRechazo: String(data.motivoRechazo || existing?.motivoRechazo || ''),
+    enviadoAt: String(data.enviadoAt || existing?.enviadoAt || ''),
+    creadoPor: String(data.creadoPor || existing?.creadoPor || ''),
+    creadoPorNombre: String(data.creadoPorNombre || existing?.creadoPorNombre || ''),
+    documentos,
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionBudget(doc) {
+  if (!doc) return null;
+  const partidas = Array.isArray(doc.partidas) ? doc.partidas : [];
+  const pagos = Array.isArray(doc.pagos) ? doc.pagos : [];
+  const rawFiscal = doc.clienteDireccionFiscal || {};
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_budget', id: doc._id,
+    user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    proyectoId: doc.proyectoId || '', proyectoNombre: doc.proyectoNombre || '',
+    clienteId: doc.clienteId || '', clienteNombre: doc.clienteNombre || '',
+    clienteCif: doc.clienteCif || '', clienteTelefono: doc.clienteTelefono || '',
+    clienteEmail: doc.clienteEmail || '',
+    clienteDireccionFiscal: {
+      calle: rawFiscal.calle || '', codigoPostal: rawFiscal.codigoPostal || '',
+      ciudad: rawFiscal.ciudad || '', provincia: rawFiscal.provincia || '', pais: rawFiscal.pais || '',
+    },
+    clienteFormaPago: doc.clienteFormaPago || '',
+    tipoObra: doc.tipoObra || 'casa',
+    direccionObra: doc.direccionObra || '', descripcionObra: doc.descripcionObra || '',
+    fecha: doc.fecha || '',
+    partidas, totalPartidas: Number(doc.totalPartidas || 0),
+    margen: Number(doc.margen ?? 15),
+    margenMinimo: Number(doc.margenMinimo ?? 10),
+    totalConMargen: Number(doc.totalConMargen || 0),
+    estado: normalizeBudgetStatus(doc.estado),
+    metodoPago: doc.metodoPago || '',
+    numPlazos: Number(doc.numPlazos || 1),
+    pagos, totalPagado: Number(doc.totalPagado || 0),
+    pendientePago: Number(doc.pendientePago || 0),
+    motivoRechazo: doc.motivoRechazo || '',
+    enviadoAt: doc.enviadoAt || '',
+    creadoPor: doc.creadoPor || '', creadoPorNombre: doc.creadoPorNombre || '',
+    documentos: Array.isArray(doc.documentos) ? doc.documentos : [],
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Budget Templates (Plantillas de partidas) ──
+
+export function buildConstructionBudgetTemplateDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cbtpl-${uuidv4()}`;
+
+  const partidas = Array.isArray(data.partidas) ? data.partidas.map((p, i) => ({
+    id: p.id || i + 1,
+    gremio: String(p.gremio || ''),
+    descripcion: String(p.descripcion || ''),
+    materiales: Number(p.materiales ?? 0),
+    manoObra: Number(p.manoObra ?? 0),
+    estructural: Number(p.estructural ?? 0),
+    subtotal: Number(p.materiales ?? 0) + Number(p.manoObra ?? 0) + Number(p.estructural ?? 0),
+  })) : (existing?.partidas || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_budget_template',
+    id,
+    user_id: userId,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    gremio: String(data.gremio || existing?.gremio || ''),
+    partidas,
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionBudgetTemplate(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_budget_template', id: doc._id,
+    user_id: doc.user_id,
+    nombre: doc.nombre || '', gremio: doc.gremio || '',
+    partidas: Array.isArray(doc.partidas) ? doc.partidas : [],
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Workers (Trabajadores) ──
+
+export function buildConstructionWorkerDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cwrk-${uuidv4()}`;
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_worker',
+    id,
+    user_id: userId,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    dni: String(data.dni || existing?.dni || ''),
+    telefono: String(data.telefono || existing?.telefono || ''),
+    email: String(data.email || existing?.email || ''),
+    gremio: migrateGuildType(data.gremio ?? existing?.gremio),
+    obraAsignada: String(data.obraAsignada || existing?.obraAsignada || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    ubicacionObra: String(data.ubicacionObra || existing?.ubicacionObra || ''),
+    documentos: Array.isArray(data.documentos) ? data.documentos.map(d => ({
+      id: String(d.id || d._id || `wdoc-${uuidv4()}`),
+      tipo: String(d.tipo || 'otro'),
+      nombre: String(d.nombre || ''),
+      url: String(d.url || ''),
+      fechaEmision: String(d.fechaEmision || d.fecha || ''),
+      fechaCaducidad: String(d.fechaCaducidad || ''),
+      verificado: Boolean(d.verificado ?? false),
+      verificadoPor: String(d.verificadoPor || ''),
+      verificadoAt: String(d.verificadoAt || ''),
+      observaciones: String(d.observaciones || ''),
+    })) : (existing?.documentos || []),
+    activo: data.activo != null ? Boolean(data.activo) : (existing?.activo ?? true),
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionWorker(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_worker', id: doc._id,
+    user_id: doc.user_id,
+    nombre: doc.nombre || '', dni: doc.dni || '',
+    telefono: doc.telefono || '', email: doc.email || '',
+    gremio: doc.gremio || 'otro',
+    obraAsignada: doc.obraAsignada || '', obraNombre: doc.obraNombre || '',
+    ubicacionObra: doc.ubicacionObra || '',
+    documentos: Array.isArray(doc.documentos) ? doc.documentos : [],
+    activo: doc.activo ?? true,
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── List helpers ──
+
+export async function listConstructionDocsByType(req, userId, docType) {
+  const db = getConstructionDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === docType && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ── Tasks (Tareas de obra para trabajadores) ──
+
+const TASK_STATUSES = ['pendiente', 'en_progreso', 'completada', 'cancelada'];
+
+export function buildConstructionTaskDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `ctsk-${uuidv4()}`;
+
+  const fotos = Array.isArray(data.fotos) ? data.fotos.map((f, i) => ({
+    id: f.id || `foto-${i}-${Date.now()}`,
+    url: String(f.url || ''),
+    base64: String(f.base64 || ''),
+    mimeType: String(f.mimeType || 'image/jpeg'),
+    descripcion: String(f.descripcion || ''),
+    fecha: String(f.fecha || now),
+  })) : (existing?.fotos || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_task',
+    id,
+    user_id: userId,
+    titulo: String(data.titulo || existing?.titulo || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    trabajadorId: String(data.trabajadorId || existing?.trabajadorId || ''),
+    trabajadorNombre: String(data.trabajadorNombre || existing?.trabajadorNombre || ''),
+    gremio: migrateGuildType(data.gremio ?? existing?.gremio),
+    prioridad: ['baja', 'media', 'alta', 'urgente'].includes(String(data.prioridad)) ? String(data.prioridad) : (existing?.prioridad || 'media'),
+    estado: TASK_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'pendiente'),
+    fechaLimite: String(data.fechaLimite || existing?.fechaLimite || ''),
+    fotos,
+    notasAdmin: String(data.notasAdmin || existing?.notasAdmin || ''),
+    notasTrabajador: String(data.notasTrabajador || existing?.notasTrabajador || ''),
+    creadoPor: String(data.creadoPor || existing?.creadoPor || ''),
+    creadoPorNombre: String(data.creadoPorNombre || existing?.creadoPorNombre || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionTask(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_task', id: doc._id,
+    user_id: doc.user_id,
+    titulo: doc.titulo || '', descripcion: doc.descripcion || '',
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    trabajadorId: doc.trabajadorId || '', trabajadorNombre: doc.trabajadorNombre || '',
+    gremio: doc.gremio || '',
+    prioridad: doc.prioridad || 'media',
+    estado: doc.estado || 'pendiente',
+    fechaLimite: doc.fechaLimite || '',
+    fotos: Array.isArray(doc.fotos) ? doc.fotos : [],
+    notasAdmin: doc.notasAdmin || '',
+    notasTrabajador: doc.notasTrabajador || '',
+    creadoPor: doc.creadoPor || '', creadoPorNombre: doc.creadoPorNombre || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Daily Reports (Partes diarios de obra) ──
+
+const DAILY_REPORT_STATUSES = ['borrador', 'enviado', 'validado', 'rechazado'];
+const CONSTRUCTION_INCIDENT_TYPES = ['seguridad', 'calidad', 'material', 'maquinaria', 'accidente', 'clima', 'otro'];
+const CONSTRUCTION_INCIDENT_SEVERITIES = ['baja', 'media', 'alta', 'critica'];
+const CONSTRUCTION_INCIDENT_STATUSES = ['abierta', 'en_revision', 'resuelta', 'cerrada'];
+
+function sanitizeFotoArray(arr, now) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map((f, i) => ({
+    id: f.id || `foto-${i}-${Date.now()}`,
+    url: String(f.url || ''),
+    base64: String(f.base64 || ''),
+    mimeType: String(f.mimeType || 'image/jpeg'),
+    descripcion: String(f.descripcion || ''),
+    fecha: String(f.fecha || now),
+  }));
+}
+
+export function buildConstructionDailyReportDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cdrt-${uuidv4()}`;
+  const ref = existing?.referencia || `PARTE-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const materiales = Array.isArray(data.materiales) ? data.materiales.map(m => ({
+    materialId: String(m.materialId || ''),
+    nombre: String(m.nombre || ''),
+    cantidad: Number(m.cantidad ?? 0),
+    unidad: String(m.unidad || 'unidades'),
+    costeUnitario: Number(m.costeUnitario ?? 0),
+    costeTotal: Number(m.costeTotal ?? 0),
+  })) : (existing?.materiales || []);
+
+  const fotos = sanitizeFotoArray(data.fotos, now).length ? sanitizeFotoArray(data.fotos, now) : (existing?.fotos || []);
+
+  const horasTrabajadas = Number(data.horasTrabajadas ?? existing?.horasTrabajadas ?? 0);
+  const tarifaHora = Number(data.tarifaHora ?? existing?.tarifaHora ?? 0);
+  const costeMateriales = materiales.reduce((s, m) => s + (Number(m.costeTotal) || 0), 0);
+  const costeTotal = (horasTrabajadas * tarifaHora) + costeMateriales;
+
+  const tieneIncidencia = Boolean(data.tieneIncidencia ?? existing?.tieneIncidencia ?? false);
+  let incidencia = null;
+  if (tieneIncidencia && (data.incidencia || existing?.incidencia)) {
+    const src = data.incidencia || existing?.incidencia || {};
+    incidencia = {
+      tipo: CONSTRUCTION_INCIDENT_TYPES.includes(String(src.tipo)) ? String(src.tipo) : 'otro',
+      descripcion: String(src.descripcion || ''),
+      gravedad: CONSTRUCTION_INCIDENT_SEVERITIES.includes(String(src.gravedad)) ? String(src.gravedad) : 'media',
+      fotos: sanitizeFotoArray(src.fotos, now),
+      incidenciaId: String(src.incidenciaId || ''),
+    };
+  }
+
+  const historial = Array.isArray(data.historial) ? data.historial : (existing?.historial || []);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_daily_report',
+    id,
+    user_id: userId,
+    referencia: ref,
+    fecha: String(data.fecha || existing?.fecha || now.slice(0, 10)),
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    trabajadorId: String(data.trabajadorId || existing?.trabajadorId || ''),
+    trabajadorNombre: String(data.trabajadorNombre || existing?.trabajadorNombre || ''),
+    gremio: String(data.gremio || existing?.gremio || ''),
+    tareaId: String(data.tareaId || existing?.tareaId || ''),
+    tareaNombre: String(data.tareaNombre || existing?.tareaNombre || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    horasTrabajadas,
+    horasPrevistas: Number(data.horasPrevistas ?? existing?.horasPrevistas ?? 0),
+    tarifaHora,
+    costeTotal,
+    materiales,
+    fotos,
+    observaciones: String(data.observaciones || existing?.observaciones || ''),
+    tieneIncidencia,
+    incidencia,
+    estado: DAILY_REPORT_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'borrador'),
+    validadoPor: String(data.validadoPor || existing?.validadoPor || ''),
+    validadoPorNombre: String(data.validadoPorNombre || existing?.validadoPorNombre || ''),
+    validadoAt: String(data.validadoAt || existing?.validadoAt || ''),
+    motivoRechazo: String(data.motivoRechazo || existing?.motivoRechazo || ''),
+    clockinId: String(data.clockinId || existing?.clockinId || ''),
+    creadoPor: String(data.creadoPor || existing?.creadoPor || ''),
+    creadoPorNombre: String(data.creadoPorNombre || existing?.creadoPorNombre || ''),
+    historial,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionDailyReport(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_daily_report', id: doc._id,
+    user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    fecha: doc.fecha || '',
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    trabajadorId: doc.trabajadorId || '', trabajadorNombre: doc.trabajadorNombre || '',
+    gremio: doc.gremio || '',
+    tareaId: doc.tareaId || '', tareaNombre: doc.tareaNombre || '',
+    descripcion: doc.descripcion || '',
+    horasTrabajadas: Number(doc.horasTrabajadas || 0),
+    horasPrevistas: Number(doc.horasPrevistas || 0),
+    tarifaHora: Number(doc.tarifaHora || 0),
+    costeTotal: Number(doc.costeTotal || 0),
+    materiales: Array.isArray(doc.materiales) ? doc.materiales : [],
+    fotos: Array.isArray(doc.fotos) ? doc.fotos : [],
+    observaciones: doc.observaciones || '',
+    tieneIncidencia: Boolean(doc.tieneIncidencia),
+    incidencia: doc.incidencia || null,
+    estado: doc.estado || 'borrador',
+    validadoPor: doc.validadoPor || '', validadoPorNombre: doc.validadoPorNombre || '',
+    validadoAt: doc.validadoAt || '',
+    motivoRechazo: doc.motivoRechazo || '',
+    clockinId: doc.clockinId || '',
+    creadoPor: doc.creadoPor || '', creadoPorNombre: doc.creadoPorNombre || '',
+    historial: Array.isArray(doc.historial) ? doc.historial : [],
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Obra documents (documentación por obra) ──
+
+const OBRA_DOC_CATEGORIES = [
+  'presupuesto', 'aceptacion', 'contrato', 'licencia', 'plano', 'foto', 'factura',
+  'justificante', 'doc_cliente', 'doc_gerencia', 'instruccion', 'seguro', 'certificado',
+  'licencia_obra', 'permiso_municipal', 'seguro_rc', 'seguro_todo_riesgo', 'plan_seguridad_salud',
+  'evaluacion_riesgos', 'certificado_tecnico', 'acta_replanteo', 'contrato_obra', 'certificacion_obra',
+  'albaran', 'memoria_tecnica', 'otro',
+];
+const OBRA_DOC_ESTADOS = ['borrador', 'pendiente', 'pendiente_firma', 'firmado', 'validado', 'vigente', 'archivado', 'caducado', 'rechazado'];
+
+const OBRA_DOC_WORKER_VISIBLE_CATEGORIES = new Set(['plano', 'foto', 'instruccion']);
+const OBRA_DOC_WORKER_CREATABLE_CATEGORIES = new Set(['foto', 'instruccion']);
+const OBRA_DOC_REQUIRED_BY_DEFAULT = new Set([
+  'presupuesto', 'aceptacion', 'contrato', 'licencia', 'plano', 'factura', 'seguro',
+  'licencia_obra', 'seguro_rc', 'plan_seguridad_salud',
+]);
+
+const OCR_TO_OBRA_CATEGORY = {
+  factura_proveedor: 'factura', factura_cliente: 'factura', presupuesto: 'presupuesto',
+  contrato: 'contrato', licencia: 'licencia', certificado: 'certificado',
+  seguro: 'seguro', nomina: 'doc_gerencia', ticket: 'justificante', albaran: 'albaran',
+};
+
+export function getDefaultObraDocumentRowsForTipo(tipoObra) {
+  const t = String(tipoObra || 'casa');
+  const base = [
+    { categoria: 'licencia_obra', nombre: 'Licencia de obra', obligatorio: true },
+    { categoria: 'seguro_rc', nombre: 'Seguro RC', obligatorio: true },
+    { categoria: 'plan_seguridad_salud', nombre: 'Plan de seguridad y salud', obligatorio: true },
+  ];
+  if (t === 'local' || t === 'oficina') {
+    return [...base, { categoria: 'memoria_tecnica', nombre: 'Memoria técnica', obligatorio: true }];
+  }
+  if (t === 'promoción' || t === 'colegio' || t === 'gimnasio') {
+    return [
+      ...base,
+      { categoria: 'memoria_tecnica', nombre: 'Memoria técnica', obligatorio: true },
+      { categoria: 'evaluacion_riesgos', nombre: 'Evaluación de riesgos', obligatorio: true },
+    ];
+  }
+  return base;
+}
+
+export function buildConstructionObraDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `codb-${uuidv4()}`;
+  const cat = OBRA_DOC_CATEGORIES.includes(String(data.categoria)) ? String(data.categoria) : (existing?.categoria || 'otro');
+  const historial = Array.isArray(data.historial) ? data.historial : (existing?.historial || []);
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_obra_document',
+    id,
+    user_id: userId,
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    clienteId: String(data.clienteId || existing?.clienteId || ''),
+    clienteNombre: String(data.clienteNombre || existing?.clienteNombre || ''),
+    categoria: cat,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    estado: OBRA_DOC_ESTADOS.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'pendiente'),
+    fechaEmision: String(data.fechaEmision || existing?.fechaEmision || ''),
+    fechaCaducidad: String(data.fechaCaducidad || existing?.fechaCaducidad || ''),
+    obligatorio: data.obligatorio != null ? Boolean(data.obligatorio) : (existing?.obligatorio ?? OBRA_DOC_REQUIRED_BY_DEFAULT.has(cat)),
+    visibleTrabajador: data.visibleTrabajador != null ? Boolean(data.visibleTrabajador) : (existing?.visibleTrabajador ?? OBRA_DOC_WORKER_VISIBLE_CATEGORIES.has(cat)),
+    archivoUrl: String(data.archivoUrl || existing?.archivoUrl || ''),
+    archivoBase64: String(data.archivoBase64 || existing?.archivoBase64 || ''),
+    archivoMimeType: String(data.archivoMimeType || existing?.archivoMimeType || ''),
+    archivoNombre: String(data.archivoNombre || existing?.archivoNombre || ''),
+    archivoSize: Number(data.archivoSize ?? existing?.archivoSize ?? 0),
+    firmaSolicitadaId: String(data.firmaSolicitadaId || existing?.firmaSolicitadaId || ''),
+    firmaEstado: data.firmaEstado || existing?.firmaEstado || null,
+    firmadoAt: String(data.firmadoAt || existing?.firmadoAt || ''),
+    firmadoPor: String(data.firmadoPor || existing?.firmadoPor || ''),
+    ocrData: data.ocrData || existing?.ocrData || null,
+    ocrProcessedAt: String(data.ocrProcessedAt || existing?.ocrProcessedAt || ''),
+    ocrConfidence: Number(data.ocrConfidence ?? existing?.ocrConfidence ?? 0),
+    entidadOrigenId: String(data.entidadOrigenId || existing?.entidadOrigenId || ''),
+    entidadOrigenTipo: String(data.entidadOrigenTipo || existing?.entidadOrigenTipo || ''),
+    tags: Array.isArray(data.tags) ? data.tags.map(String) : (existing?.tags || []),
+    subidoPor: String(data.subidoPor || existing?.subidoPor || ''),
+    subidoPorId: String(data.subidoPorId || existing?.subidoPorId || ''),
+    notas: String(data.notas || existing?.notas || ''),
+    historial,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionObraDocument(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_obra_document', id: doc._id,
+    user_id: doc.user_id,
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    clienteId: doc.clienteId || '', clienteNombre: doc.clienteNombre || '',
+    categoria: doc.categoria || 'otro',
+    nombre: doc.nombre || '',
+    descripcion: doc.descripcion || '',
+    estado: doc.estado || 'pendiente',
+    fechaEmision: doc.fechaEmision || '',
+    fechaCaducidad: doc.fechaCaducidad || '',
+    obligatorio: Boolean(doc.obligatorio),
+    visibleTrabajador: Boolean(doc.visibleTrabajador),
+    archivoUrl: doc.archivoUrl || '',
+    archivoBase64: doc.archivoBase64 || '',
+    archivoMimeType: doc.archivoMimeType || '',
+    archivoNombre: doc.archivoNombre || '',
+    archivoSize: Number(doc.archivoSize || 0),
+    firmaSolicitadaId: doc.firmaSolicitadaId || '',
+    firmaEstado: doc.firmaEstado || null,
+    firmadoAt: doc.firmadoAt || '',
+    firmadoPor: doc.firmadoPor || '',
+    ocrData: doc.ocrData || null,
+    ocrProcessedAt: doc.ocrProcessedAt || '',
+    ocrConfidence: Number(doc.ocrConfidence || 0),
+    entidadOrigenId: doc.entidadOrigenId || '',
+    entidadOrigenTipo: doc.entidadOrigenTipo || '',
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    subidoPor: doc.subidoPor || '',
+    subidoPorId: doc.subidoPorId || '',
+    notas: doc.notas || '',
+    historial: Array.isArray(doc.historial) ? doc.historial : [],
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+export function obraDocIsVisibleForWorker(doc) {
+  return Boolean(doc?.visibleTrabajador);
+}
+
+export function obraDocSuggestCategoryFromOcr(ocrDocumentType) {
+  return OCR_TO_OBRA_CATEGORY[ocrDocumentType] || 'otro';
+}
+
+export function findPossibleObraDocDuplicates(docs, candidate) {
+  const normName = String(candidate.nombre || '').toLowerCase().trim();
+  return docs.filter(d => {
+    if (d._id === candidate._id) return false;
+    if (d.obraId !== candidate.obraId) return false;
+    let score = 0;
+    if (String(d.nombre || '').toLowerCase().trim() === normName && normName) score++;
+    if (d.categoria === candidate.categoria) score++;
+    if (candidate.archivoSize && d.archivoSize === candidate.archivoSize) score++;
+    return score >= 2;
+  });
+}
+
+export async function seedDefaultObraDocumentsForProject(req, userId, projectDoc) {
+  const db = getConstructionDbName();
+  await ensureDatabase(req, db);
+  const rows = getDefaultObraDocumentRowsForTipo(projectDoc.tipoObra);
+  for (const row of rows) {
+    const doc = buildConstructionObraDocument(userId, {
+      obraId: projectDoc._id,
+      obraNombre: projectDoc.nombre || '',
+      categoria: row.categoria,
+      nombre: row.nombre,
+      obligatorio: row.obligatorio,
+      estado: 'pendiente',
+    });
+    await putDocument(req, db, doc._id, doc);
+  }
+}
+
+// ── Incidents (Incidencias de obra) ──
+
+const STANDALONE_INCIDENT_TYPES = ['falta_material', 'averia', 'retraso_gremio', 'cambio_cliente', 'error_tecnico', 'riesgo_seguridad', 'otro'];
+const CONSTRUCTION_INCIDENT_PRIORITIES = ['baja', 'media', 'alta', 'critica'];
+const FULL_INCIDENT_STATUSES = ['abierta', 'en_revision', 'resuelta', 'cerrada', 'reabierta'];
+
+function normalizeIncidentTypeConstruction(value) {
+  const v = String(value || '');
+  if (STANDALONE_INCIDENT_TYPES.includes(v)) return v;
+  if (CONSTRUCTION_INCIDENT_TYPES.includes(v)) return v;
+  return 'otro';
+}
+
+export function buildConstructionIncidentDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cinc-${uuidv4()}`;
+  const ref = existing?.referencia || `INC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const desc = String(data.descripcion || existing?.descripcion || '');
+  const titulo = String(data.titulo || existing?.titulo || (desc ? desc.slice(0, 120) : 'Incidencia'));
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_incident',
+    id,
+    user_id: userId,
+    referencia: ref,
+    titulo,
+    fecha: String(data.fecha || existing?.fecha || now.slice(0, 10)),
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    trabajadorId: String(data.trabajadorId || existing?.trabajadorId || ''),
+    trabajadorNombre: String(data.trabajadorNombre || existing?.trabajadorNombre || ''),
+    parteId: String(data.parteId || existing?.parteId || ''),
+    parteReferencia: String(data.parteReferencia || existing?.parteReferencia || ''),
+    documentoId: String(data.documentoId || existing?.documentoId || ''),
+    documentoNombre: String(data.documentoNombre || existing?.documentoNombre || ''),
+    reportadoPor: String(data.reportadoPor || existing?.reportadoPor || ''),
+    reportadoPorNombre: String(data.reportadoPorNombre || existing?.reportadoPorNombre || ''),
+    tipo: normalizeIncidentTypeConstruction(data.tipo) !== 'otro' ? normalizeIncidentTypeConstruction(data.tipo) : (existing?.tipo || 'otro'),
+    descripcion: desc,
+    prioridad: CONSTRUCTION_INCIDENT_PRIORITIES.includes(String(data.prioridad)) ? String(data.prioridad) : (existing?.prioridad || existing?.gravedad || 'media'),
+    gravedad: CONSTRUCTION_INCIDENT_SEVERITIES.includes(String(data.gravedad)) ? String(data.gravedad) : (existing?.gravedad || 'media'),
+    costeEstimado: Number(data.costeEstimado ?? existing?.costeEstimado ?? 0),
+    fechaDeteccion: String(data.fechaDeteccion || existing?.fechaDeteccion || now),
+    fotos: sanitizeFotoArray(data.fotos, now).length ? sanitizeFotoArray(data.fotos, now) : (existing?.fotos || []),
+    estado: FULL_INCIDENT_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'abierta'),
+    asignadoA: String(data.asignadoA || existing?.asignadoA || ''),
+    asignadoANombre: String(data.asignadoANombre || existing?.asignadoANombre || ''),
+    resolucion: String(data.resolucion || existing?.resolucion || ''),
+    fechaResolucion: String(data.fechaResolucion || existing?.fechaResolucion || ''),
+    resueltoPor: String(data.resueltoPor || existing?.resueltoPor || ''),
+    fechaLimite: String(data.fechaLimite || existing?.fechaLimite || ''),
+    reabiertaCount: Number(data.reabiertaCount || existing?.reabiertaCount || 0),
+    historial: Array.isArray(data.historial) ? data.historial : (existing?.historial || []),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionIncident(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_incident', id: doc._id,
+    user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    titulo: doc.titulo || '',
+    fecha: doc.fecha || '',
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    trabajadorId: doc.trabajadorId || '', trabajadorNombre: doc.trabajadorNombre || '',
+    parteId: doc.parteId || '', parteReferencia: doc.parteReferencia || '',
+    documentoId: doc.documentoId || '', documentoNombre: doc.documentoNombre || '',
+    reportadoPor: doc.reportadoPor || '', reportadoPorNombre: doc.reportadoPorNombre || '',
+    tipo: doc.tipo || 'otro',
+    descripcion: doc.descripcion || '',
+    prioridad: doc.prioridad || doc.gravedad || 'media',
+    gravedad: doc.gravedad || doc.prioridad || 'media',
+    costeEstimado: Number(doc.costeEstimado || 0),
+    fechaDeteccion: doc.fechaDeteccion || '',
+    fotos: Array.isArray(doc.fotos) ? doc.fotos : [],
+    estado: doc.estado || 'abierta',
+    asignadoA: doc.asignadoA || '', asignadoANombre: doc.asignadoANombre || '',
+    resolucion: doc.resolucion || '',
+    fechaResolucion: doc.fechaResolucion || '',
+    resueltoPor: doc.resueltoPor || '',
+    fechaLimite: doc.fechaLimite || '',
+    reabiertaCount: Number(doc.reabiertaCount || 0),
+    historial: Array.isArray(doc.historial) ? doc.historial : [],
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Payments (líneas de pago interno: gremio / proveedor / gasto general) ──
+
+export const PAYMENT_LINE_TYPES = ['gremio', 'proveedor', 'gasto_general'];
+export const PAYMENT_LINE_STATUSES = ['pendiente', 'parcial', 'pagado', 'anulado'];
+
+export function buildConstructionPaymentDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cpay-${uuidv4()}`;
+  const ref =
+    existing?.referencia ||
+    (data.referencia ? String(data.referencia) : `PAG-${Date.now().toString(36).toUpperCase().slice(-6)}`);
+
+  const mapPago = (p) => ({
+    id: p.id || `inst-${uuidv4()}`,
+    concepto: String(p.concepto || ''),
+    importe: Number(p.importe ?? 0),
+    fecha: String(p.fecha || ''),
+    pagado: Boolean(p.pagado),
+    fechaPago: String(p.fechaPago || ''),
+    metodoPago: String(p.metodoPago || ''),
+    justificanteUrl: String(p.justificanteUrl || ''),
+    justificanteBase64: String(p.justificanteBase64 || ''),
+    justificanteMimeType: String(p.justificanteMimeType || ''),
+    justificanteNombre: String(p.justificanteNombre || ''),
+    facturaProveedorId: String(p.facturaProveedorId || ''),
+    ocrData: p.ocrData || null,
+    faseId: String(p.faseId || ''),
+    faseNombre: String(p.faseNombre || ''),
+    notas: String(p.notas || ''),
+  });
+
+  const pagos = Array.isArray(data.pagos) ? data.pagos.map(mapPago) : (existing?.pagos || []).map(mapPago);
+
+  const totalPagado = pagos.filter((p) => p.pagado).reduce((s, p) => s + p.importe, 0);
+  const importePactado = Number(data.importePactado ?? existing?.importePactado ?? 0);
+  const pendiente = Math.max(0, importePactado - totalPagado);
+
+  const fases = Array.isArray(data.fases)
+    ? data.fases.map((f, i) => ({
+        id: f.id ?? i + 1,
+        nombre: String(f.nombre || ''),
+        importe: Number(f.importe ?? 0),
+        porcentaje: Number(f.porcentaje ?? 0),
+        completada: Boolean(f.completada),
+        fechaPrevista: String(f.fechaPrevista || ''),
+      }))
+    : existing?.fases || [];
+
+  let estado;
+  if (data.estado === 'anulado' || existing?.estado === 'anulado') {
+    estado = 'anulado';
+  } else if (totalPagado === 0) {
+    estado = 'pendiente';
+  } else if (importePactado > 0 && totalPagado >= importePactado) {
+    estado = 'pagado';
+  } else {
+    estado = 'parcial';
+  }
+
+  const tipoIn = String(data.tipo || existing?.tipo || 'gremio');
+  const tipo = PAYMENT_LINE_TYPES.includes(tipoIn) ? tipoIn : 'gremio';
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_payment',
+    id,
+    user_id: userId,
+
+    referencia: ref,
+    nombre: String(data.nombre || existing?.nombre || ''),
+    tipo,
+
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+
+    gremioId: String(data.gremioId || existing?.gremioId || ''),
+    gremioNombre: String(data.gremioNombre || existing?.gremioNombre || ''),
+    gremioTipo: String(data.gremioTipo || existing?.gremioTipo || ''),
+
+    proveedorId: String(data.proveedorId || existing?.proveedorId || ''),
+    proveedorNombre: String(data.proveedorNombre || existing?.proveedorNombre || ''),
+
+    presupuestoId: String(data.presupuestoId || existing?.presupuestoId || ''),
+
+    importePactado,
+    totalPagado,
+    pendiente,
+    estado,
+
+    fechaPrevista: String(data.fechaPrevista || existing?.fechaPrevista || ''),
+
+    fases,
+    pagos,
+
+    documentoUrl: String(data.documentoUrl || existing?.documentoUrl || ''),
+    documentoBase64: String(data.documentoBase64 || existing?.documentoBase64 || ''),
+    documentoMimeType: String(data.documentoMimeType || existing?.documentoMimeType || ''),
+    documentoNombre: String(data.documentoNombre || existing?.documentoNombre || ''),
+
+    observaciones: String(data.observaciones || existing?.observaciones || ''),
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionPayment(doc) {
+  if (!doc) return null;
+  const pagos = Array.isArray(doc.pagos)
+    ? doc.pagos.map((p) => ({
+        ...p,
+        justificanteBase64: p.justificanteBase64 ? '[omitted]' : '',
+      }))
+    : [];
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'construction_payment',
+    id: doc.id || doc._id,
+    user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    nombre: doc.nombre || '',
+    tipo: doc.tipo || 'gremio',
+    obraId: doc.obraId || '',
+    obraNombre: doc.obraNombre || '',
+    gremioId: doc.gremioId || '',
+    gremioNombre: doc.gremioNombre || '',
+    gremioTipo: doc.gremioTipo || '',
+    proveedorId: doc.proveedorId || '',
+    proveedorNombre: doc.proveedorNombre || '',
+    presupuestoId: doc.presupuestoId || '',
+    importePactado: Number(doc.importePactado || 0),
+    totalPagado: Number(doc.totalPagado || 0),
+    pendiente: Number(doc.pendiente || 0),
+    estado: doc.estado || 'pendiente',
+    fechaPrevista: doc.fechaPrevista || '',
+    fases: Array.isArray(doc.fases) ? doc.fases : [],
+    pagos,
+    documentoUrl: doc.documentoUrl || '',
+    documentoNombre: doc.documentoNombre || '',
+    observaciones: doc.observaciones || '',
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+  };
+}
+
+// ── Collections (Cobros de obra) ──
+
+const COLLECTION_TYPES = ['contado', 'plazos', 'fases', 'hitos', 'anticipo_parciales_cierre'];
+const COLLECTION_STATUSES = ['pendiente', 'parcial', 'cobrado', 'vencido'];
+const ENTREGA_TYPES = ['anticipo', 'plazo', 'fase', 'hito', 'parcial', 'cierre', 'contado'];
+const ENTREGA_STATUSES = ['pendiente', 'parcial', 'cobrado', 'vencido'];
+
+function normalizeCollectionStatus(val) {
+  return COLLECTION_STATUSES.includes(val) ? val : 'pendiente';
+}
+function normalizeEntregaStatus(val) {
+  return ENTREGA_STATUSES.includes(val) ? val : 'pendiente';
+}
+
+export function buildConstructionCollectionDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `ccol-${uuidv4()}`;
+  const referencia = existing?.referencia || `COB-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const entregas = Array.isArray(data.entregas) ? data.entregas.map((e, i) => {
+    const importe = Number(e.importe ?? 0);
+    const cobradoParcial = Number(e.cobradoParcial ?? 0);
+    const cobradoTotal = Number(e.cobradoTotal ?? 0);
+    return {
+      id: e.id || i + 1,
+      concepto: String(e.concepto || ''),
+      tipo: ENTREGA_TYPES.includes(e.tipo) ? e.tipo : 'plazo',
+      importe,
+      fechaPrevista: String(e.fechaPrevista || ''),
+      fechaCobro: String(e.fechaCobro || ''),
+      estado: normalizeEntregaStatus(e.estado),
+      cobradoParcial,
+      cobradoTotal,
+      observaciones: String(e.observaciones || ''),
+      financeMovementId: String(e.financeMovementId || ''),
+    };
+  }) : (existing?.entregas || []);
+
+  const importeTotal = Number(data.importeTotal ?? existing?.importeTotal ?? 0);
+  const importeCobrado = entregas.reduce((s, e) => s + (e.cobradoTotal || 0) + (e.cobradoParcial || 0), 0);
+  const saldoPendiente = Math.max(0, importeTotal - importeCobrado);
+
+  let estadoCobro;
+  if (data.estadoCobro && COLLECTION_STATUSES.includes(data.estadoCobro)) {
+    estadoCobro = data.estadoCobro;
+  } else if (importeCobrado >= importeTotal && importeTotal > 0) {
+    estadoCobro = 'cobrado';
+  } else if (importeCobrado > 0) {
+    estadoCobro = 'parcial';
+  } else {
+    const today = now.slice(0, 10);
+    const hasOverdue = entregas.some(e => e.estado !== 'cobrado' && e.fechaPrevista && e.fechaPrevista < today);
+    estadoCobro = hasOverdue ? 'vencido' : 'pendiente';
+  }
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'construction_collection',
+    id,
+    user_id: userId,
+    referencia,
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    clienteId: String(data.clienteId || existing?.clienteId || ''),
+    clienteNombre: String(data.clienteNombre || existing?.clienteNombre || ''),
+    presupuestoId: String(data.presupuestoId || existing?.presupuestoId || ''),
+    tipoCobro: COLLECTION_TYPES.includes(data.tipoCobro) ? data.tipoCobro : (existing?.tipoCobro || 'contado'),
+    importeTotal,
+    importeCobrado: Math.round(importeCobrado * 100) / 100,
+    saldoPendiente: Math.round(saldoPendiente * 100) / 100,
+    estadoCobro,
+    entregas,
+    observaciones: String(data.observaciones || existing?.observaciones || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionCollection(doc) {
+  if (!doc) return null;
+  const entregas = Array.isArray(doc.entregas) ? doc.entregas : [];
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_collection', id: doc._id,
+    user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    clienteId: doc.clienteId || '', clienteNombre: doc.clienteNombre || '',
+    presupuestoId: doc.presupuestoId || '',
+    tipoCobro: doc.tipoCobro || 'contado',
+    importeTotal: Number(doc.importeTotal || 0),
+    importeCobrado: Number(doc.importeCobrado || 0),
+    saldoPendiente: Number(doc.saldoPendiente || 0),
+    estadoCobro: doc.estadoCobro || 'pendiente',
+    entregas,
+    observaciones: doc.observaciones || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Planning Entries (Planificación de obra) ──────────────────────────────────
+
+const PLANNING_RESOURCE_TYPES = ['trabajador', 'subcontrata', 'maquinaria'];
+const PLANNING_STATUSES = ['planificado', 'confirmado', 'en_curso', 'completado', 'cancelado'];
+const PLANNING_PRIORITIES = ['baja', 'media', 'alta', 'urgente'];
+const RECURRENCE_TYPES = ['diaria', 'semanal', 'quincenal', 'mensual'];
+
+export function buildConstructionPlanningEntryDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cple-${uuidv4()}`;
+  const ref = existing?.referencia || `PLAN-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const tipoRecurso = PLANNING_RESOURCE_TYPES.includes(String(data.tipoRecurso)) ? String(data.tipoRecurso) : (existing?.tipoRecurso || 'trabajador');
+  const estado = PLANNING_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'planificado');
+  const prioridad = PLANNING_PRIORITIES.includes(String(data.prioridad)) ? String(data.prioridad) : (existing?.prioridad || 'media');
+
+  const materialesPrevistos = Array.isArray(data.materialesPrevistos) ? data.materialesPrevistos.map(m => ({
+    materialId: String(m.materialId || ''),
+    nombre: String(m.nombre || ''),
+    cantidad: Number(m.cantidad ?? 0),
+    unidad: String(m.unidad || 'unidades'),
+    fechaNecesaria: String(m.fechaNecesaria || ''),
+    estado: String(m.estado || 'previsto'),
+  })) : (existing?.materialesPrevistos || []);
+
+  const conflictos = Array.isArray(data.conflictos) ? data.conflictos.map(c => ({
+    tipo: String(c.tipo || ''),
+    mensaje: String(c.mensaje || ''),
+    entryId: String(c.entryId || ''),
+    obraNombre: String(c.obraNombre || ''),
+    fechas: String(c.fechas || ''),
+  })) : (existing?.conflictos || []);
+
+  const historial = Array.isArray(data.historial) ? data.historial.map(h => ({
+    accion: String(h.accion || ''),
+    usuario: String(h.usuario || ''),
+    fecha: String(h.fecha || ''),
+    detalle: String(h.detalle || ''),
+  })) : (existing?.historial || []);
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'construction_planning_entry', id, user_id: userId,
+    referencia: ref,
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    tipoRecurso,
+    recursoId: String(data.recursoId || existing?.recursoId || ''),
+    recursoNombre: String(data.recursoNombre || existing?.recursoNombre || ''),
+    gremio: String(data.gremio || existing?.gremio || ''),
+    tareaId: String(data.tareaId || existing?.tareaId || ''),
+    tareaNombre: String(data.tareaNombre || existing?.tareaNombre || ''),
+    fechaInicio: String(data.fechaInicio || existing?.fechaInicio || ''),
+    fechaFin: String(data.fechaFin || existing?.fechaFin || ''),
+    horaInicio: String(data.horaInicio || existing?.horaInicio || '08:00'),
+    horaFin: String(data.horaFin || existing?.horaFin || '17:00'),
+    todoElDia: Boolean(data.todoElDia ?? existing?.todoElDia ?? false),
+    diasSemana: Array.isArray(data.diasSemana) ? data.diasSemana.map(Number) : (existing?.diasSemana || [1, 2, 3, 4, 5]),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    prioridad, estado, color: String(data.color || existing?.color || ''),
+    materialesPrevistos,
+    requiereConfirmacion: Boolean(data.requiereConfirmacion ?? existing?.requiereConfirmacion ?? (tipoRecurso === 'subcontrata')),
+    confirmado: Boolean(data.confirmado ?? existing?.confirmado ?? false),
+    confirmadoAt: String(data.confirmadoAt || existing?.confirmadoAt || ''),
+    confirmadoPor: String(data.confirmadoPor || existing?.confirmadoPor || ''),
+    responsableId: String(data.responsableId || existing?.responsableId || ''),
+    responsableNombre: String(data.responsableNombre || existing?.responsableNombre || ''),
+    notas: String(data.notas || existing?.notas || ''),
+    notasGerencia: String(data.notasGerencia || existing?.notasGerencia || ''),
+    esRecurrente: Boolean(data.esRecurrente ?? existing?.esRecurrente ?? false),
+    reglaRecurrencia: (data.esRecurrente || existing?.esRecurrente) ? {
+      tipo: RECURRENCE_TYPES.includes(String(data.reglaRecurrencia?.tipo)) ? String(data.reglaRecurrencia?.tipo) : (existing?.reglaRecurrencia?.tipo || 'semanal'),
+      intervalo: Number(data.reglaRecurrencia?.intervalo ?? existing?.reglaRecurrencia?.intervalo ?? 1),
+      finRepeticion: String(data.reglaRecurrencia?.finRepeticion || existing?.reglaRecurrencia?.finRepeticion || ''),
+    } : (existing?.reglaRecurrencia || null),
+    conflictos, historial,
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionPlanningEntry(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_planning_entry', id: doc._id, user_id: doc.user_id,
+    referencia: doc.referencia || '',
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    tipoRecurso: doc.tipoRecurso || 'trabajador',
+    recursoId: doc.recursoId || '', recursoNombre: doc.recursoNombre || '',
+    gremio: doc.gremio || '',
+    tareaId: doc.tareaId || '', tareaNombre: doc.tareaNombre || '',
+    fechaInicio: doc.fechaInicio || '', fechaFin: doc.fechaFin || '',
+    horaInicio: doc.horaInicio || '08:00', horaFin: doc.horaFin || '17:00',
+    todoElDia: Boolean(doc.todoElDia), diasSemana: Array.isArray(doc.diasSemana) ? doc.diasSemana : [1, 2, 3, 4, 5],
+    descripcion: doc.descripcion || '', prioridad: doc.prioridad || 'media',
+    estado: doc.estado || 'planificado', color: doc.color || '',
+    materialesPrevistos: Array.isArray(doc.materialesPrevistos) ? doc.materialesPrevistos : [],
+    requiereConfirmacion: Boolean(doc.requiereConfirmacion),
+    confirmado: Boolean(doc.confirmado),
+    confirmadoAt: doc.confirmadoAt || '', confirmadoPor: doc.confirmadoPor || '',
+    responsableId: doc.responsableId || '', responsableNombre: doc.responsableNombre || '',
+    notas: doc.notas || '', notasGerencia: doc.notasGerencia || '',
+    esRecurrente: Boolean(doc.esRecurrente), reglaRecurrencia: doc.reglaRecurrencia || null,
+    conflictos: Array.isArray(doc.conflictos) ? doc.conflictos : [],
+    historial: Array.isArray(doc.historial) ? doc.historial : [],
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Milestones (Hitos de obra) ────────────────────────────────────────────────
+
+const MILESTONE_TYPES = ['inicio_obra', 'fin_fase', 'entrega_parcial', 'recepcion_material', 'inspeccion', 'permiso', 'entrega_final', 'otro'];
+const MILESTONE_STATUSES = ['pendiente', 'cumplido', 'retrasado', 'cancelado'];
+
+export function buildConstructionMilestoneDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cmst-${uuidv4()}`;
+  const tipo = MILESTONE_TYPES.includes(String(data.tipo)) ? String(data.tipo) : (existing?.tipo || 'otro');
+  const estado = MILESTONE_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'pendiente');
+
+  const documentos = Array.isArray(data.documentos) ? data.documentos.map(d => ({
+    id: String(d.id || uuidv4()), nombre: String(d.nombre || ''),
+    url: String(d.url || ''), base64: String(d.base64 || ''),
+    mimeType: String(d.mimeType || ''), fecha: String(d.fecha || now),
+  })) : (existing?.documentos || []);
+
+  const fechaStr = String(data.fecha || existing?.fecha || '');
+  const fechaOriginal = existing?.fechaOriginal || fechaStr;
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'construction_milestone', id, user_id: userId,
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    nombre: String(data.nombre || existing?.nombre || ''),
+    descripcion: String(data.descripcion || existing?.descripcion || ''),
+    tipo, fecha: fechaStr,
+    fechaReal: String(data.fechaReal || existing?.fechaReal || ''),
+    fechaOriginal,
+    estado,
+    responsableId: String(data.responsableId || existing?.responsableId || ''),
+    responsableNombre: String(data.responsableNombre || existing?.responsableNombre || ''),
+    diasRetraso: Number(data.diasRetraso ?? existing?.diasRetraso ?? 0),
+    motivoRetraso: String(data.motivoRetraso || existing?.motivoRetraso || ''),
+    dependeDe: String(data.dependeDe || existing?.dependeDe || ''),
+    dependeDeNombre: String(data.dependeDeNombre || existing?.dependeDeNombre || ''),
+    documentos,
+    notas: String(data.notas || existing?.notas || ''),
+    color: String(data.color || existing?.color || ''),
+    icono: String(data.icono || existing?.icono || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionMilestone(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_milestone', id: doc._id, user_id: doc.user_id,
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    nombre: doc.nombre || '', descripcion: doc.descripcion || '',
+    tipo: doc.tipo || 'otro', fecha: doc.fecha || '',
+    fechaReal: doc.fechaReal || '', fechaOriginal: doc.fechaOriginal || '',
+    estado: doc.estado || 'pendiente',
+    responsableId: doc.responsableId || '', responsableNombre: doc.responsableNombre || '',
+    diasRetraso: Number(doc.diasRetraso || 0), motivoRetraso: doc.motivoRetraso || '',
+    dependeDe: doc.dependeDe || '', dependeDeNombre: doc.dependeDeNombre || '',
+    documentos: Array.isArray(doc.documentos) ? doc.documentos : [],
+    notas: doc.notas || '', color: doc.color || '', icono: doc.icono || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+// ── Material Needs (Necesidades de material) ──────────────────────────────────
+
+const MATERIAL_NEED_STATUSES = ['previsto', 'solicitado', 'pedido', 'recibido', 'cancelado'];
+
+export function buildConstructionMaterialNeedDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `cmnd-${uuidv4()}`;
+  const estado = MATERIAL_NEED_STATUSES.includes(String(data.estado)) ? String(data.estado) : (existing?.estado || 'previsto');
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'construction_material_need', id, user_id: userId,
+    obraId: String(data.obraId || existing?.obraId || ''),
+    obraNombre: String(data.obraNombre || existing?.obraNombre || ''),
+    planningEntryId: String(data.planningEntryId || existing?.planningEntryId || ''),
+    materialId: String(data.materialId || existing?.materialId || ''),
+    materialNombre: String(data.materialNombre || existing?.materialNombre || ''),
+    categoria: String(data.categoria || existing?.categoria || ''),
+    cantidad: Number(data.cantidad ?? existing?.cantidad ?? 0),
+    unidad: String(data.unidad || existing?.unidad || 'unidades'),
+    costeEstimado: Number(data.costeEstimado ?? existing?.costeEstimado ?? 0),
+    fechaNecesaria: String(data.fechaNecesaria || existing?.fechaNecesaria || ''),
+    fechaSolicitud: String(data.fechaSolicitud || existing?.fechaSolicitud || ''),
+    fechaRecepcion: String(data.fechaRecepcion || existing?.fechaRecepcion || ''),
+    estado,
+    pedidoCompraId: String(data.pedidoCompraId || existing?.pedidoCompraId || ''),
+    proveedorId: String(data.proveedorId || existing?.proveedorId || ''),
+    proveedorNombre: String(data.proveedorNombre || existing?.proveedorNombre || ''),
+    stockDisponible: Number(data.stockDisponible ?? existing?.stockDisponible ?? 0),
+    requiereCompra: Boolean(data.requiereCompra ?? existing?.requiereCompra ?? true),
+    notas: String(data.notas || existing?.notas || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeConstructionMaterialNeed(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'construction_material_need', id: doc._id, user_id: doc.user_id,
+    obraId: doc.obraId || '', obraNombre: doc.obraNombre || '',
+    planningEntryId: doc.planningEntryId || '',
+    materialId: doc.materialId || '', materialNombre: doc.materialNombre || '',
+    categoria: doc.categoria || '',
+    cantidad: Number(doc.cantidad || 0), unidad: doc.unidad || 'unidades',
+    costeEstimado: Number(doc.costeEstimado || 0),
+    fechaNecesaria: doc.fechaNecesaria || '', fechaSolicitud: doc.fechaSolicitud || '',
+    fechaRecepcion: doc.fechaRecepcion || '', estado: doc.estado || 'previsto',
+    pedidoCompraId: doc.pedidoCompraId || '',
+    proveedorId: doc.proveedorId || '', proveedorNombre: doc.proveedorNombre || '',
+    stockDisponible: Number(doc.stockDisponible || 0),
+    requiereCompra: Boolean(doc.requiereCompra),
+    notas: doc.notas || '',
+    createdAt: doc.createdAt || '', updatedAt: doc.updatedAt || '', deletedAt: doc.deletedAt || null,
+  };
+}
+
+export { CONSTRUCTION_PROJECT_TYPES, CONSTRUCTION_GUILDS, CONSTRUCTION_GUILD_LABELS, CONSTRUCTION_UNITS, BUDGET_STATES, PAYMENT_METHODS, TASK_STATUSES, DAILY_REPORT_STATUSES, INCIDENT_TYPES, CONSTRUCTION_INCIDENT_TYPES, CONSTRUCTION_INCIDENT_SEVERITIES, CONSTRUCTION_INCIDENT_STATUSES, STANDALONE_INCIDENT_TYPES, CONSTRUCTION_INCIDENT_PRIORITIES, FULL_INCIDENT_STATUSES, COLLECTION_TYPES, COLLECTION_STATUSES, ENTREGA_TYPES, ENTREGA_STATUSES, PLANNING_RESOURCE_TYPES, PLANNING_STATUSES, PLANNING_PRIORITIES, MILESTONE_TYPES, MILESTONE_STATUSES, MATERIAL_NEED_STATUSES, OBRA_DOC_CATEGORIES, OBRA_DOC_ESTADOS, OBRA_DOC_WORKER_VISIBLE_CATEGORIES, OBRA_DOC_WORKER_CREATABLE_CATEGORIES, OBRA_DOC_REQUIRED_BY_DEFAULT, OCR_TO_OBRA_CATEGORY };
+
+// ─── BRANDS (Marcas comerciales) ──────────────────────────────────────────────
+
+export function buildBrandDocument(businessId, userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `brand-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'brand',
+    id,
+    business_id: String(businessId || ''),
+    user_id: String(userId || ''),
+    name: String(data.name || '').trim(),
+    description: String(data.description || '').trim(),
+    logo: String(data.logo || existing?.logo || ''),
+    website: String(data.website || '').trim(),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeBrand(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'brand',
+    id: doc._id,
+    business_id: doc.business_id || '',
+    user_id: doc.user_id || '',
+    name: doc.name || '',
+    description: doc.description || '',
+    logo: doc.logo || '',
+    website: doc.website || '',
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listBrandsByBusiness(req, businessId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'brand' && !doc?.deletedAt && doc?.business_id === businessId)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── CATALOG ITEMS ────────────────────────────────────────────────────────────
+
+export function buildCatalogItemDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `catitem-${uuidv4()}`;
+  const sku = data.sku || existing?.sku || `ART-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const validItemTypes = ['product', 'service', 'combo'];
+  const itemType = validItemTypes.includes(data.itemType) ? data.itemType : (existing?.itemType || 'product');
+  const validModules = ['stock', 'catalog'];
+  const module = validModules.includes(data.module) ? data.module : (existing?.module || 'catalog');
+
+  const sanitizeArticles = (arr) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(a => a && a.articleId).map(a => ({
+      articleId: String(a.articleId),
+      articleName: String(a.articleName || ''),
+      quantity: Number(a.quantity || 1),
+      unit: String(a.unit || 'ud'),
+    }));
+  };
+
+  const sanitizeComboItems = (arr) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(a => a && a.productId).map(a => ({
+      productId: String(a.productId),
+      productName: String(a.productName || ''),
+      quantity: Number(a.quantity || 1),
+    }));
+  };
+
+  const sanitizeSalesChannels = (arr) => {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(a => a && a.channelId).map(a => ({
+      channelId: String(a.channelId),
+      channelName: String(a.channelName || ''),
+      customPrice: a.customPrice !== undefined && a.customPrice !== null && a.customPrice !== '' ? Number(a.customPrice) : null,
+    }));
+  };
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'catalog_item',
+    id,
+    sku,
+    user_id: userId,
+    module,
+    itemType,
+    vertical: String(data.vertical || existing?.vertical || ''),
+    name: String(data.name || ''),
+    description: String(data.description || ''),
+    category: String(data.category || 'general'),
+    unitPrice: Number(data.unitPrice || 0),
+    costPrice: Number(data.costPrice || 0),
+    taxRate: data.taxRate !== undefined ? Number(data.taxRate) : (existing?.taxRate ?? 21),
+    stockQuantity: Number(data.stockQuantity ?? existing?.stockQuantity ?? 0),
+    minStock: Number(data.minStock || 0),
+    reorderQuantity: Number(data.reorderQuantity ?? existing?.reorderQuantity ?? 0),
+    autoReorder: data.autoReorder !== undefined ? Boolean(data.autoReorder) : (existing?.autoReorder ?? false),
+    unit: String(data.unit || 'ud'),
+    supplierId: String(data.supplierId || ''),
+    supplierName: String(data.supplierName || ''),
+    allergens: Array.isArray(data.allergens) ? data.allergens : (existing?.allergens || []),
+    image: String(data.image || existing?.image || ''),
+    images: Array.isArray(data.images) ? data.images.map(String) : (existing?.images || []),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    webVisible: data.webVisible !== undefined ? Boolean(data.webVisible) : (existing?.webVisible ?? true),
+    available: data.available !== undefined ? Boolean(data.available) : (existing?.available ?? true),
+    notes: String(data.notes || ''),
+    barcode: String(data.barcode || existing?.barcode || ''),
+    brandIds: Array.isArray(data.brandIds) ? data.brandIds.map(String) : (existing?.brandIds || []),
+    articles: sanitizeArticles(data.articles ?? existing?.articles),
+    comboItems: sanitizeComboItems(data.comboItems ?? existing?.comboItems),
+    salesChannels: sanitizeSalesChannels(data.salesChannels ?? existing?.salesChannels),
+    stockCategory: VALID_STOCK_CATEGORIES.includes(data.stockCategory) ? data.stockCategory : (existing?.stockCategory || 'other'),
+    stockSubcategory: String(data.stockSubcategory || existing?.stockSubcategory || ''),
+    isStockItem: data.isStockItem !== undefined ? Boolean(data.isStockItem) : (existing?.isStockItem ?? false),
+    isCritical: data.isCritical !== undefined ? Boolean(data.isCritical) : (existing?.isCritical ?? false),
+    workCenterId: String(data.workCenterId || existing?.workCenterId || ''),
+    workCenterName: String(data.workCenterName || existing?.workCenterName || ''),
+    warehouseStock: Array.isArray(data.warehouseStock)
+      ? data.warehouseStock.map((ws) => ({
+          warehouseId: String(ws.warehouseId || ''),
+          warehouseName: String(ws.warehouseName || ''),
+          quantity: Number(ws.quantity || 0),
+          minStock: Number(ws.minStock || 0),
+        }))
+      : (existing?.warehouseStock || []),
+    maxStock: Number(data.maxStock ?? existing?.maxStock ?? 0),
+    lastPurchasePrice: Number(data.lastPurchasePrice ?? existing?.lastPurchasePrice ?? 0),
+    lastPurchaseDate: String(data.lastPurchaseDate || existing?.lastPurchaseDate || ''),
+    customFields: (data.customFields && typeof data.customFields === 'object') ? { ...data.customFields } : (existing?.customFields || {}),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export const VALID_STOCK_CATEGORIES = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable', 'finished_product', 'other'];
+
+export function sanitizeCatalogItem(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'catalog_item',
+    id: doc._id,
+    sku: doc.sku || '',
+    user_id: doc.user_id,
+    module: doc.module || 'catalog',
+    itemType: doc.itemType || 'product',
+    vertical: doc.vertical || '',
+    name: doc.name || '',
+    description: doc.description || '',
+    category: doc.category || 'general',
+    unitPrice: Number(doc.unitPrice || 0),
+    costPrice: Number(doc.costPrice || 0),
+    taxRate: doc.taxRate !== undefined ? Number(doc.taxRate) : 21,
+    stockQuantity: Number(doc.stockQuantity || 0),
+    minStock: Number(doc.minStock || 0),
+    reorderQuantity: Number(doc.reorderQuantity || 0),
+    autoReorder: doc.autoReorder !== undefined ? Boolean(doc.autoReorder) : false,
+    unit: doc.unit || 'ud',
+    supplierId: doc.supplierId || '',
+    supplierName: doc.supplierName || '',
+    allergens: Array.isArray(doc.allergens) ? doc.allergens : [],
+    image: doc.image || '',
+    images: Array.isArray(doc.images) ? doc.images : [],
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    webVisible: doc.webVisible !== undefined ? Boolean(doc.webVisible) : true,
+    available: doc.available !== undefined ? Boolean(doc.available) : true,
+    notes: doc.notes || '',
+    barcode: doc.barcode || '',
+    brandIds: Array.isArray(doc.brandIds) ? doc.brandIds : [],
+    articles: Array.isArray(doc.articles) ? doc.articles : [],
+    comboItems: Array.isArray(doc.comboItems) ? doc.comboItems : [],
+    salesChannels: Array.isArray(doc.salesChannels) ? doc.salesChannels : [],
+    stockCategory: doc.stockCategory || 'other',
+    stockSubcategory: doc.stockSubcategory || '',
+    isStockItem: doc.isStockItem !== undefined ? Boolean(doc.isStockItem) : false,
+    warehouseStock: Array.isArray(doc.warehouseStock) ? doc.warehouseStock : [],
+    maxStock: Number(doc.maxStock || 0),
+    lastPurchasePrice: Number(doc.lastPurchasePrice || 0),
+    lastPurchaseDate: doc.lastPurchaseDate || '',
+    customFields: (doc.customFields && typeof doc.customFields === 'object') ? { ...doc.customFields } : {},
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCatalogItemsByUser(req, userId, { module: filterModule } = {}) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => {
+      if (!doc || doc.type !== 'catalog_item' || doc.deletedAt) return false;
+      if (userId && doc.user_id !== userId) return false;
+      if (filterModule && (doc.module || 'catalog') !== filterModule) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+
+export function buildSupplierDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `sup-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'supplier',
+    id,
+    user_id: userId,
+    name: String(data.name || ''),
+    cif: String(data.cif || ''),
+    email: String(data.email || ''),
+    phone: String(data.phone || ''),
+    address: String(data.address || ''),
+    contactPerson: String(data.contactPerson || ''),
+    category: String(data.category || 'general'),
+    paymentTerms: String(data.paymentTerms || '30 días'),
+    notes: String(data.notes || ''),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    validated: data.validated !== undefined ? Boolean(data.validated) : (existing?.validated ?? false),
+    validatedAt: data.validatedAt || existing?.validatedAt || '',
+    validatedBy: data.validatedBy || existing?.validatedBy || '',
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeSupplier(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'supplier',
+    id: doc._id,
+    user_id: doc.user_id,
+    name: doc.name || '',
+    cif: doc.cif || '',
+    email: doc.email || '',
+    phone: doc.phone || '',
+    address: doc.address || '',
+    contactPerson: doc.contactPerson || '',
+    category: doc.category || 'general',
+    paymentTerms: doc.paymentTerms || '30 días',
+    notes: doc.notes || '',
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    validated: doc.validated !== undefined ? Boolean(doc.validated) : false,
+    validatedAt: doc.validatedAt || '',
+    validatedBy: doc.validatedBy || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listSuppliersByUser(req, userId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'supplier' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── PURCHASE INVOICES ────────────────────────────────────────────────────────
+
+export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `pinv-${uuidv4()}`;
+  const invoiceNumber = existing?.invoiceNumber || `FC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const lines = Array.isArray(data.lines) ? data.lines : (existing?.lines || []);
+  const subtotal = lines.reduce((s, l) => s + Number(l.total || 0), 0);
+  const taxRate = Number(data.taxRate ?? existing?.taxRate ?? 21);
+  const taxAmount = subtotal * (taxRate / 100);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'purchase_invoice',
+    id,
+    invoiceNumber,
+    user_id: userId,
+    supplierId: String(data.supplierId || ''),
+    supplierName: String(data.supplierName || ''),
+    date: String(data.date || now.split('T')[0]),
+    dueDate: String(data.dueDate || ''),
+    status: String(data.status || 'pending'),
+    lines,
+    subtotal,
+    taxRate,
+    taxAmount,
+    total: subtotal + taxAmount,
+    notes: String(data.notes || ''),
+    paidAt: String(data.paidAt || existing?.paidAt || ''),
+    linkedPurchaseOrderId: data.linkedPurchaseOrderId || existing?.linkedPurchaseOrderId || '',
+    linkedPurchaseOrderNumber: data.linkedPurchaseOrderNumber || existing?.linkedPurchaseOrderNumber || '',
+    costCenterId: data.costCenterId || existing?.costCenterId || '',
+    costCenterName: data.costCenterName || existing?.costCenterName || '',
+    entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
+    ocrData: data.ocrData || existing?.ocrData || null,
+    ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizePurchaseInvoice(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'purchase_invoice',
+    id: doc._id,
+    invoiceNumber: doc.invoiceNumber || '',
+    user_id: doc.user_id,
+    supplierId: doc.supplierId || '',
+    supplierName: doc.supplierName || '',
+    supplierCif: doc.supplierCif || '',
+    supplierMatched: Boolean(doc.supplierMatched),
+    supplierMatchMethod: doc.supplierMatchMethod || '',
+    date: doc.date || '',
+    dueDate: doc.dueDate || '',
+    status: normalizePurchaseInvoiceStatus(doc.status),
+    paymentStatus: normalizePaymentStatus(doc.paymentStatus),
+    lines: Array.isArray(doc.lines) ? doc.lines : [],
+    subtotal: Number(doc.subtotal || 0),
+    taxRate: Number(doc.taxRate || 21),
+    taxAmount: Number(doc.taxAmount || 0),
+    total: Number(doc.total || 0),
+    currency: doc.currency || 'EUR',
+    proposedCategory: doc.proposedCategory || '',
+    proposedPayMethod: doc.proposedPayMethod || '',
+    notes: doc.notes || '',
+    paidAt: doc.paidAt || '',
+    linkedPurchaseOrderId: doc.linkedPurchaseOrderId || '',
+    linkedPurchaseOrderNumber: doc.linkedPurchaseOrderNumber || '',
+    linkedFinanceId: doc.linkedFinanceId || '',
+    costCenterId: doc.costCenterId || '',
+    costCenterName: doc.costCenterName || '',
+    entryMethod: doc.entryMethod || 'manual',
+    source: doc.source || 'manual',
+    sourceEmailId: doc.sourceEmailId || '',
+    sourceEmailFrom: doc.sourceEmailFrom || '',
+    sourceEmailSubject: doc.sourceEmailSubject || '',
+    sourceEmailDate: doc.sourceEmailDate || '',
+    attachments: Array.isArray(doc.attachments) ? doc.attachments : [],
+    ocrData: doc.ocrData || null,
+    ocrImageBase64: doc.ocrImageBase64 || '',
+    ocrConfidence: doc.ocrConfidence || '',
+    flags: {
+      duplicate: Boolean(doc.flags?.duplicate),
+      duplicateOf: doc.flags?.duplicateOf || '',
+      noAttachment: Boolean(doc.flags?.noAttachment),
+      supplierNotFound: Boolean(doc.flags?.supplierNotFound),
+      ocrFailed: Boolean(doc.flags?.ocrFailed),
+      manualReview: Boolean(doc.flags?.manualReview),
+    },
+    reviewNotes: doc.reviewNotes || '',
+    reviewedBy: doc.reviewedBy || '',
+    reviewedAt: doc.reviewedAt || null,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPurchaseInvoicesByUser(req, userId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'purchase_invoice' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+export async function findDuplicatePurchaseInvoice(req, userId, invoiceNumber, supplierId, total) {
+  if (!invoiceNumber) return null;
+  const invoices = await listPurchaseInvoicesByUser(req, userId);
+  return invoices.find((inv) => {
+    if (inv.invoiceNumber !== invoiceNumber) return false;
+    if (supplierId && inv.supplierId && inv.supplierId !== supplierId) return false;
+    if (total != null && inv.total != null) {
+      const diff = Math.abs(Number(inv.total) - Number(total));
+      if (diff > 0.01) return false;
+    }
+    return true;
+  }) || null;
+}
+
+export async function findPurchaseInvoiceByEmailId(req, userId, messageId) {
+  if (!messageId) return null;
+  const invoices = await listPurchaseInvoicesByUser(req, userId);
+  return invoices.find((inv) => inv.sourceEmailId === messageId) || null;
+}
+
+export async function generateExpenseFromInvoice(req, userId, invoice) {
+  const db = getFinanceDbName();
+  await ensureDatabase(req, db);
+  const id = `finance-${uuidv4()}`;
+  const now = new Date().toISOString();
+  const doc = {
+    _id: id,
+    id,
+    type: 'pago',
+    user_id: userId,
+    companyName: invoice.supplierName || '',
+    concept: `Factura ${invoice.invoiceNumber || ''} — ${invoice.supplierName || 'Proveedor'}`,
+    reference: invoice.invoiceNumber || '',
+    category: 'compras_proveedor',
+    categoryIcon: 'Receipt',
+    categoryColor: '#7c3aed',
+    amountBase: Number(invoice.subtotal || 0),
+    taxRate: Number(invoice.taxRate || 0),
+    taxAmount: Number(invoice.taxAmount || 0),
+    totalAmount: Number(invoice.total || 0),
+    date: invoice.date || now.slice(0, 10),
+    payMethod: 'transferencia',
+    notes: `Generado automáticamente desde factura de proveedor ${invoice._id}`,
+    linkedPurchaseInvoiceId: invoice._id,
+    costCenterId: invoice.costCenterId || '',
+    costCenterName: invoice.costCenterName || '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const saved = await putDocument(req, db, id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
+export async function generateInputTaxFromInvoice(req, userId, invoice) {
+  const db = getFinanceDbName();
+  await ensureDatabase(req, db);
+  const id = `finance-${uuidv4()}`;
+  const now = new Date().toISOString();
+  const doc = {
+    _id: id,
+    id,
+    type: 'pago',
+    user_id: userId,
+    companyName: invoice.supplierName || '',
+    concept: `IVA Soportado — Factura ${invoice.invoiceNumber || ''} — ${invoice.supplierName || 'Proveedor'}`,
+    reference: invoice.invoiceNumber || '',
+    category: 'iva_soportado',
+    categoryIcon: 'Receipt',
+    categoryColor: '#dc2626',
+    amountBase: Number(invoice.subtotal || 0),
+    taxRate: Number(invoice.taxRate || 0),
+    taxAmount: Number(invoice.taxAmount || 0),
+    totalAmount: Number(invoice.taxAmount || 0),
+    date: invoice.date || now.slice(0, 10),
+    payMethod: 'transferencia',
+    notes: `IVA soportado generado desde factura de proveedor ${invoice._id}`,
+    linkedPurchaseInvoiceId: invoice._id,
+    taxType: 'iva_soportado',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const saved = await putDocument(req, db, id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
+export async function createDocumentFromInvoice(req, userId, invoice) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const id = `doc-${uuidv4()}`;
+  const now = new Date().toISOString();
+  const doc = {
+    _id: id,
+    id,
+    type: 'document',
+    user_id: userId,
+    name: `Factura ${invoice.invoiceNumber || ''} — ${invoice.supplierName || 'Proveedor'}`,
+    category: 'financial',
+    subcategory: 'facturas_proveedor',
+    description: `Factura de proveedor ${invoice.supplierName || ''}, fecha ${invoice.date || ''}, total ${Number(invoice.total || 0).toFixed(2)}€`,
+    fileUrl: invoice.pdfUrl || '',
+    linkedEntityType: 'purchase_invoice',
+    linkedEntityId: invoice._id,
+    tags: ['factura', 'proveedor', invoice.supplierName].filter(Boolean),
+    date: invoice.date || now.slice(0, 10),
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const saved = await putDocument(req, db, id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
+// ─── PURCHASE ORDERS ──────────────────────────────────────────────────────────
+
+function normalizePurchaseOrderStatus(value) {
+  const allowed = ['draft', 'pending', 'sent', 'partial', 'received', 'cancelled'];
+  return allowed.includes(String(value || '')) ? String(value) : 'draft';
+}
+
+export function buildPurchaseOrderDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `po-${uuidv4()}`;
+  const orderNumber = existing?.orderNumber || `PO-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const items = Array.isArray(data.items) ? data.items.map((item, idx) => ({
+    id: item.id || `poi-${idx}-${uuidv4().slice(0, 8)}`,
+    catalogItemId: String(item.catalogItemId || ''),
+    sku: String(item.sku || ''),
+    name: String(item.name || ''),
+    quantity: Number(item.quantity || 0),
+    unitCost: Number(item.unitCost || 0),
+    total: Number(item.quantity || 0) * Number(item.unitCost || 0),
+    received: Number(item.received ?? 0),
+    notes: String(item.notes || ''),
+  })) : (existing?.items || []);
+
+  const subtotal = items.reduce((s, l) => s + Number(l.total || 0), 0);
+  const taxRate = Number(data.taxRate ?? existing?.taxRate ?? 21);
+  const taxAmount = subtotal * (taxRate / 100);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'purchase_order',
+    id,
+    orderNumber,
+    user_id: userId,
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || ''),
+    status: normalizePurchaseOrderStatus(data.status || existing?.status),
+    items,
+    subtotal,
+    taxRate,
+    taxAmount,
+    total: subtotal + taxAmount,
+    notes: String(data.notes || existing?.notes || ''),
+    source: String(data.source || existing?.source || 'manual'),
+    expectedDate: String(data.expectedDate || existing?.expectedDate || ''),
+    sentAt: String(data.sentAt || existing?.sentAt || ''),
+    receivedAt: String(data.receivedAt || existing?.receivedAt || ''),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizePurchaseOrder(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'purchase_order',
+    id: doc._id,
+    orderNumber: doc.orderNumber || '',
+    user_id: doc.user_id,
+    supplierId: doc.supplierId || '',
+    supplierName: doc.supplierName || '',
+    status: normalizePurchaseOrderStatus(doc.status),
+    items: Array.isArray(doc.items) ? doc.items : [],
+    subtotal: Number(doc.subtotal || 0),
+    taxRate: Number(doc.taxRate || 21),
+    taxAmount: Number(doc.taxAmount || 0),
+    total: Number(doc.total || 0),
+    notes: doc.notes || '',
+    source: doc.source || 'manual',
+    expectedDate: doc.expectedDate || '',
+    sentAt: doc.sentAt || '',
+    receivedAt: doc.receivedAt || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPurchaseOrdersByUser(req, userId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'purchase_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── WAREHOUSES (Almacenes) ──────────────────────────────────────────────────
+
+export function buildWarehouseDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `wh-${uuidv4()}`;
+  const validTypes = ['general', 'store', 'workshop', 'cold', 'external'];
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'warehouse',
+    id,
+    user_id: userId,
+    name: String(data.name || '').trim(),
+    code: String(data.code || '').trim().toUpperCase() || (existing?.code || `ALM-${Date.now().toString(36).toUpperCase().slice(-4)}`),
+    address: String(data.address || ''),
+    isDefault: data.isDefault !== undefined ? Boolean(data.isDefault) : (existing?.isDefault ?? false),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    notes: String(data.notes || ''),
+    contactPerson: String(data.contactPerson || ''),
+    phone: String(data.phone || ''),
+    email: String(data.email || ''),
+    warehouseType: validTypes.includes(data.warehouseType) ? data.warehouseType : (existing?.warehouseType || 'general'),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeWarehouse(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'warehouse',
+    id: doc._id,
+    user_id: doc.user_id,
+    name: doc.name || '',
+    code: doc.code || '',
+    address: doc.address || '',
+    isDefault: Boolean(doc.isDefault),
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    notes: doc.notes || '',
+    contactPerson: doc.contactPerson || '',
+    phone: doc.phone || '',
+    email: doc.email || '',
+    warehouseType: doc.warehouseType || 'general',
+    assignedWorkerId: doc.assignedWorkerId || '',
+    assignedWorkerName: doc.assignedWorkerName || '',
+    vehiclePlate: doc.vehiclePlate || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listWarehousesByUser(req, userId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'warehouse' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── BUSINESSES ───────────────────────────────────────────────────────────────
+
+export async function listBusinessesByUser(req, userId) {
+  if (!userId) return [];
+  await ensureDatabase(req, BUSINESSES_DB);
+  const docs = await getAllDocuments(req, BUSINESSES_DB);
+  return docs
+    .filter(
+      (doc) =>
+        doc?.type === 'business' &&
+        !doc?.deletedAt &&
+        (doc.owner_user_id === userId ||
+          (Array.isArray(doc.members) && doc.members.some((m) => m.user_id === userId))),
+    )
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── BusinessGroup (Holding / Grupo empresarial) ─────────────────────────────
+
+export const GROUPS_DB = 'businesses';
+
+export function buildGroupDocument({ ownerUserId, name, description = '', logo = '' }) {
+  const groupId = uuidv4();
+  const now = new Date().toISOString();
+  return {
+    _id: `group:${groupId}`,
+    type: 'group',
+    group_id: groupId,
+    owner_user_id: String(ownerUserId || '').trim(),
+    name: String(name || '').trim(),
+    description: String(description || '').trim(),
+    logo: String(logo || '').trim(),
+    business_ids: [],
+    admins: [
+      {
+        user_id: String(ownerUserId || '').trim(),
+        fullName: '',
+        email: '',
+        role: 'GerenteGrupo',
+        joinedAt: now,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeGroup(doc) {
+  if (!doc) return null;
+  return {
+    id: doc._id,
+    _rev: doc._rev,
+    group_id: doc.group_id,
+    owner_user_id: doc.owner_user_id || '',
+    name: doc.name || '',
+    description: doc.description || '',
+    logo: doc.logo || '',
+    business_ids: Array.isArray(doc.business_ids) ? doc.business_ids : [],
+    admins: Array.isArray(doc.admins)
+      ? doc.admins.map((a) => ({
+          user_id: a.user_id || '',
+          fullName: a.fullName || '',
+          email: a.email || '',
+          role: a.role || 'GerenteGrupo',
+          joinedAt: a.joinedAt || doc.createdAt || '',
+        }))
+      : [],
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function saveGroup(req, group) {
+  if (!group?._id) throw new Error('Documento de grupo inválido');
+  await ensureDatabase(req, GROUPS_DB);
+  const result = await putDocument(req, GROUPS_DB, group._id, group);
+  return { ...group, _rev: result.rev };
+}
+
+export async function findGroupById(req, groupId) {
+  if (!groupId) return null;
+  await ensureDatabase(req, GROUPS_DB);
+  return getDocument(req, GROUPS_DB, `group:${groupId}`);
+}
+
+export async function listGroupsByUser(req, userId) {
+  if (!userId) return [];
+  await ensureDatabase(req, GROUPS_DB);
+  const docs = await getAllDocuments(req, GROUPS_DB);
+  return docs
+    .filter(
+      (doc) =>
+        doc?.type === 'group' &&
+        !doc?.deletedAt &&
+        (doc.owner_user_id === userId ||
+          (Array.isArray(doc.admins) && doc.admins.some((a) => a.user_id === userId))),
+    )
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// ─── Branch (Sede / Delegación dentro de una empresa) ────────────────────────
+
+export function buildBranchObject({ name, address = '', city = '', phone = '', managerUserId = '' }) {
+  const branchId = uuidv4();
+  const now = new Date().toISOString();
+  return {
+    branch_id: branchId,
+    name: String(name || '').trim(),
+    address: String(address || '').trim(),
+    city: String(city || '').trim(),
+    phone: String(phone || '').trim(),
+    managerUserId: String(managerUserId || '').trim(),
+    createdAt: now,
+  };
+}
+
+export function sanitizeBranch(branch) {
+  if (!branch) return null;
+  return {
+    branch_id: branch.branch_id || '',
+    name: branch.name || '',
+    address: branch.address || '',
+    city: branch.city || '',
+    phone: branch.phone || '',
+    managerUserId: branch.managerUserId || '',
+    createdAt: branch.createdAt || '',
+  };
+}
+
+// ─── S-07: Gestión de sesiones ────────────────────────────────────────────────
+
+export async function saveSession(req, account, rawRefreshToken, sessionId, ip = '', userAgent = '') {
+  const expiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+  const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+
+  const newSession = {
+    sessionId: String(sessionId),
+    refreshTokenHash: hashToken(rawRefreshToken),
+    expiry,
+    deviceInfo: parseUserAgent(userAgent),
+    ipAddress: String(ip || ''),
+    lastActiveAt: now,
+    createdAt: now,
+  };
+
+  const existingSessions = normalizeSessions(fresh.sessions || []);
+  const sessions = [...existingSessions, newSession].slice(-10);
+
+  return saveAccount(req, {
+    ...fresh,
+    sessions,
+    refreshTokenHash: hashToken(rawRefreshToken),
+    refreshTokenExpiry: expiry,
+    updatedAt: now,
+  });
+}
+
+export async function revokeSession(req, account, sessionId) {
+  if (!sessionId) return account;
+  const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+  const sessions = normalizeSessions(fresh.sessions || []).filter((s) => s.sessionId !== sessionId);
+  return saveAccount(req, {
+    ...fresh,
+    sessions,
+    refreshTokenHash: sessions.length === 0 ? null : fresh.refreshTokenHash,
+    refreshTokenExpiry: sessions.length === 0 ? null : fresh.refreshTokenExpiry,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function revokeAllSessions(req, account, exceptSessionId = null) {
+  const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+  const sessions = exceptSessionId
+    ? normalizeSessions(fresh.sessions || []).filter((s) => s.sessionId === exceptSessionId)
+    : [];
+  return saveAccount(req, {
+    ...fresh,
+    sessions,
+    refreshTokenHash: null,
+    refreshTokenExpiry: null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+// Compat: revokeRefreshToken → revocar todas las sesiones
+export async function revokeRefreshToken(req, account) {
+  return revokeAllSessions(req, account);
+}
+
+// ─── WEB STOREFRONT ──────────────────────────────────────────────────────────
+
+export function getWebDbName() {
+  return normalizeDbName(process.env.VITE_WEB_DB || `${getDbPrefix()}-web`);
+}
+
+export function buildWebConfigDocument(businessId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `webconfig-${businessId}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'web_config',
+    id,
+    business_id: businessId,
+    slug: String(data.slug || existing?.slug || ''),
+    enabled: data.enabled !== undefined ? Boolean(data.enabled) : (existing?.enabled ?? false),
+
+    storeName: String(data.storeName || existing?.storeName || ''),
+    storeDescription: String(data.storeDescription || existing?.storeDescription || ''),
+    storeLogo: String(data.storeLogo || existing?.storeLogo || ''),
+    bannerImage: String(data.bannerImage || existing?.bannerImage || ''),
+
+    primaryColor: String(data.primaryColor || existing?.primaryColor || '#f59e0b'),
+    secondaryColor: String(data.secondaryColor || existing?.secondaryColor || '#1f2937'),
+    accentColor: String(data.accentColor || existing?.accentColor || '#10b981'),
+    backgroundColor: String(data.backgroundColor || existing?.backgroundColor || '#ffffff'),
+
+    welcomeMessage: String(data.welcomeMessage || existing?.welcomeMessage || '¡Bienvenido a nuestra tienda!'),
+    orderConfirmMessage: String(data.orderConfirmMessage || existing?.orderConfirmMessage || 'Tu pedido ha sido recibido. Te contactaremos pronto.'),
+    closedMessage: String(data.closedMessage || existing?.closedMessage || 'Estamos cerrados en este momento.'),
+
+    deliveryEnabled: data.deliveryEnabled !== undefined ? Boolean(data.deliveryEnabled) : (existing?.deliveryEnabled ?? true),
+    pickupEnabled: data.pickupEnabled !== undefined ? Boolean(data.pickupEnabled) : (existing?.pickupEnabled ?? true),
+    deliveryFee: Number(data.deliveryFee ?? existing?.deliveryFee ?? 0),
+    minimumOrder: Number(data.minimumOrder ?? existing?.minimumOrder ?? 0),
+    estimatedDeliveryTime: String(data.estimatedDeliveryTime || existing?.estimatedDeliveryTime || '30-45 min'),
+    deliveryRadius: String(data.deliveryRadius || existing?.deliveryRadius || ''),
+
+    shippingMode: String(data.shippingMode || existing?.shippingMode || 'fixed'),
+    shippingZones: Array.isArray(data.shippingZones) ? data.shippingZones : (existing?.shippingZones || []),
+
+    categories: Array.isArray(data.categories) ? data.categories : (existing?.categories || []),
+    promos: Array.isArray(data.promos) ? data.promos : (existing?.promos || []),
+    volumeDiscounts: Array.isArray(data.volumeDiscounts) ? data.volumeDiscounts : (existing?.volumeDiscounts || []),
+
+    schedule: data.schedule || existing?.schedule || {},
+    isOpen: data.isOpen !== undefined ? Boolean(data.isOpen) : (existing?.isOpen ?? true),
+
+    phone: String(data.phone || existing?.phone || ''),
+    address: String(data.address || existing?.address || ''),
+    currency: String(data.currency || existing?.currency || 'EUR'),
+    taxRate: Number(data.taxRate ?? existing?.taxRate ?? 21),
+
+    integrations: data.integrations || existing?.integrations || {
+      uber:    { enabled: false, token: '' },
+      globo:   { enabled: false, token: '' },
+      justead: { enabled: false, token: '' },
+    },
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+function sanitizeIntegrationEntry(entry) {
+  if (!entry || typeof entry !== 'object') return { enabled: false, token: '' };
+  return { enabled: Boolean(entry.enabled), token: String(entry.token || '') };
+}
+
+export function sanitizeWebConfig(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'web_config',
+    id: doc._id,
+    business_id: doc.business_id || '',
+    slug: doc.slug || '',
+    enabled: Boolean(doc.enabled),
+    storeName: doc.storeName || '',
+    storeDescription: doc.storeDescription || '',
+    storeLogo: doc.storeLogo || '',
+    bannerImage: doc.bannerImage || '',
+    primaryColor: doc.primaryColor || '#f59e0b',
+    secondaryColor: doc.secondaryColor || '#1f2937',
+    accentColor: doc.accentColor || '#10b981',
+    backgroundColor: doc.backgroundColor || '#ffffff',
+    welcomeMessage: doc.welcomeMessage || '',
+    orderConfirmMessage: doc.orderConfirmMessage || '',
+    closedMessage: doc.closedMessage || '',
+    deliveryEnabled: Boolean(doc.deliveryEnabled),
+    pickupEnabled: Boolean(doc.pickupEnabled),
+    deliveryFee: Number(doc.deliveryFee || 0),
+    minimumOrder: Number(doc.minimumOrder || 0),
+    estimatedDeliveryTime: doc.estimatedDeliveryTime || '30-45 min',
+    deliveryRadius: doc.deliveryRadius || '',
+    shippingMode: doc.shippingMode || 'fixed',
+    shippingZones: Array.isArray(doc.shippingZones) ? doc.shippingZones : [],
+    categories: Array.isArray(doc.categories) ? doc.categories : [],
+    promos: Array.isArray(doc.promos) ? doc.promos : [],
+    volumeDiscounts: Array.isArray(doc.volumeDiscounts) ? doc.volumeDiscounts : [],
+    schedule: doc.schedule || {},
+    isOpen: Boolean(doc.isOpen),
+    phone: doc.phone || '',
+    address: doc.address || '',
+    currency: doc.currency || 'EUR',
+    taxRate: Number(doc.taxRate || 21),
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+  };
+}
+
+export function sanitizeDeliveryIntegrations(doc) {
+  if (!doc) return null;
+  const integrations = doc.integrations || {};
+  return {
+    uber:    sanitizeIntegrationEntry(integrations.uber),
+    globo:   sanitizeIntegrationEntry(integrations.globo),
+    justead: sanitizeIntegrationEntry(integrations.justead),
+  };
+}
+
+export async function getWebConfigByBusinessId(req, businessId) {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  const id = `webconfig-${businessId}`;
+  try {
+    const doc = await getDocument(req, db, id);
+    return doc && doc.type === 'web_config' ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getWebConfigBySlug(req, slug) {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs.find((d) => d?.type === 'web_config' && d?.slug === slug && !d?.deletedAt) || null;
+}
+
+function normalizeWebOrderStatus(value) {
+  const allowed = ['pending', 'confirmed', 'preparing', 'ready', 'delivering', 'delivered', 'cancelled'];
+  return allowed.includes(String(value || '')) ? String(value) : 'pending';
+}
+
+export function buildWebOrderDocument(businessId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `webord-${uuidv4()}`;
+  const orderNumber = existing?.orderNumber || `WEB-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+
+  const items = Array.isArray(data.items) ? data.items : (existing?.items || []);
+  const subtotal = items.reduce((s, i) => s + Number(i.total || 0), 0);
+  const deliveryFee = Number(data.deliveryFee ?? existing?.deliveryFee ?? 0);
+  const promoDisc = Number(data.promoDiscount || 0);
+  const volumeDisc = Number(data.volumeDiscount || 0);
+  const totalAmount = Math.max(0, subtotal + deliveryFee - promoDisc - volumeDisc);
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'web_order',
+    id,
+    orderNumber,
+    business_id: businessId,
+    customerName: String(data.customerName || ''),
+    customerPhone: String(data.customerPhone || ''),
+    customerEmail: String(data.customerEmail || ''),
+    customerAddress: String(data.customerAddress || ''),
+    customerPostalCode: String(data.customerPostalCode || ''),
+    orderType: String(data.orderType || 'delivery'),
+    status: normalizeWebOrderStatus(data.status),
+    items,
+    subtotal,
+    deliveryFee,
+    shippingCarrier: String(data.shippingCarrier || ''),
+    shippingZoneName: String(data.shippingZoneName || ''),
+    totalAmount,
+    notes: String(data.notes || ''),
+    promoCode: String(data.promoCode || ''),
+    promoDiscount: Number(data.promoDiscount || 0),
+    volumeDiscount: Number(data.volumeDiscount || 0),
+    volumeDiscountLabel: String(data.volumeDiscountLabel || ''),
+    estimatedTime: String(data.estimatedTime || ''),
+    statusHistory: Array.isArray(data.statusHistory) ? data.statusHistory : (existing?.statusHistory || []),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeWebOrder(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'web_order',
+    id: doc._id,
+    orderNumber: doc.orderNumber || '',
+    business_id: doc.business_id || '',
+    customerName: doc.customerName || '',
+    customerPhone: doc.customerPhone || '',
+    customerEmail: doc.customerEmail || '',
+    customerAddress: doc.customerAddress || '',
+    customerPostalCode: doc.customerPostalCode || '',
+    orderType: doc.orderType || 'delivery',
+    status: normalizeWebOrderStatus(doc.status),
+    items: Array.isArray(doc.items) ? doc.items : [],
+    subtotal: Number(doc.subtotal || 0),
+    deliveryFee: Number(doc.deliveryFee || 0),
+    shippingCarrier: doc.shippingCarrier || '',
+    shippingZoneName: doc.shippingZoneName || '',
+    totalAmount: Number(doc.totalAmount || 0),
+    notes: doc.notes || '',
+    promoCode: doc.promoCode || '',
+    promoDiscount: Number(doc.promoDiscount || 0),
+    volumeDiscount: Number(doc.volumeDiscount || 0),
+    volumeDiscountLabel: doc.volumeDiscountLabel || '',
+    estimatedTime: doc.estimatedTime || '',
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : [],
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listWebOrdersByBusiness(req, businessId) {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'web_order' && !doc?.deletedAt && doc?.business_id === businessId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── PUNTOS DE VENTA ──────────────────────────────────────────────────────────
+
+export function buildPuntoVentaDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `pv-${uuidv4()}`;
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'punto_venta',
+    id,
+    user_id: userId,
+    name: String(data.name || ''),
+    code: String(data.code || existing?.code || `PV-${Date.now().toString(36).toUpperCase().slice(-4)}`),
+    address: String(data.address || ''),
+    phone: String(data.phone || ''),
+    email: String(data.email || ''),
+    manager: String(data.manager || ''),
+    city: String(data.city || ''),
+    province: String(data.province || ''),
+    notes: String(data.notes || ''),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizePuntoVenta(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'punto_venta',
+    id: doc._id,
+    user_id: doc.user_id,
+    name: doc.name || '',
+    code: doc.code || '',
+    address: doc.address || '',
+    phone: doc.phone || '',
+    email: doc.email || '',
+    manager: doc.manager || '',
+    city: doc.city || '',
+    province: doc.province || '',
+    notes: doc.notes || '',
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPuntosVentaByUser(req, userId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'punto_venta' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
+// S-07: Busca cuenta y sesión activa por token raw — soporta array sessions + campo legacy
+export async function findAccountByRefreshToken(req, rawToken) {
+  const tokenHash = hashToken(rawToken);
+  const accounts = await listAccounts(req);
+  const now = new Date();
+
+  for (const a of accounts) {
+    const sessions = normalizeSessions(a.sessions || []);
+    const session = sessions.find((s) => s.refreshTokenHash === tokenHash);
+    if (session) {
+      return { account: a, session };
+    }
+    // Fallback legacy
+    if (
+      a.refreshTokenHash === tokenHash &&
+      a.refreshTokenExpiry &&
+      new Date(a.refreshTokenExpiry) > now
+    ) {
+      return { account: a, session: null };
+    }
+  }
+  return null;
+}
+
+// ─── Join Requests: solicitudes de usuarios para unirse a empresas ──────────
+
+export const JOIN_REQUESTS_DB = 'join_requests';
+
+export function buildJoinRequestDocument({ userId, userFullName, userEmail, businessId, businessName, message = '' }) {
+  const requestId = uuidv4();
+  const now = new Date().toISOString();
+  return {
+    _id: `join_request:${requestId}`,
+    type: 'join_request',
+    request_id: requestId,
+    user_id: String(userId || '').trim(),
+    userFullName: String(userFullName || '').trim(),
+    userEmail: String(userEmail || '').trim(),
+    business_id: String(businessId || '').trim(),
+    businessName: String(businessName || '').trim(),
+    message: String(message || '').trim(),
+    status: 'pending',
+    reviewedBy: '',
+    reviewedAt: '',
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function saveJoinRequest(req, doc) {
+  if (!doc?._id) throw new Error('Documento de solicitud inválido');
+  await ensureDatabase(req, JOIN_REQUESTS_DB);
+  const result = await putDocument(req, JOIN_REQUESTS_DB, doc._id, doc);
+  return { ...doc, _rev: result.rev };
+}
+
+export async function findJoinRequestById(req, requestId) {
+  if (!requestId) return null;
+  await ensureDatabase(req, JOIN_REQUESTS_DB);
+  return getDocument(req, JOIN_REQUESTS_DB, `join_request:${requestId}`);
+}
+
+export async function listJoinRequestsByBusiness(req, businessId) {
+  if (!businessId) return [];
+  await ensureDatabase(req, JOIN_REQUESTS_DB);
+  const docs = await getAllDocuments(req, JOIN_REQUESTS_DB);
+  return docs.filter((d) => d?.type === 'join_request' && d?.business_id === businessId && !d?.deletedAt);
+}
+
+export async function listJoinRequestsByUser(req, userId) {
+  if (!userId) return [];
+  await ensureDatabase(req, JOIN_REQUESTS_DB);
+  const docs = await getAllDocuments(req, JOIN_REQUESTS_DB);
+  return docs.filter((d) => d?.type === 'join_request' && d?.user_id === userId && !d?.deletedAt);
+}
+
+export async function findPendingJoinRequest(req, userId, businessId) {
+  if (!userId || !businessId) return null;
+  await ensureDatabase(req, JOIN_REQUESTS_DB);
+  const docs = await getAllDocuments(req, JOIN_REQUESTS_DB);
+  return docs.find(
+    (d) => d?.type === 'join_request' && d?.user_id === userId && d?.business_id === businessId && d?.status === 'pending' && !d?.deletedAt,
+  ) || null;
+}
+
+export async function listAllBusinesses(req) {
+  await ensureDatabase(req, BUSINESSES_DB);
+  const docs = await getAllDocuments(req, BUSINESSES_DB);
+  return docs.filter((d) => d?.type === 'business' && !d?.deletedAt);
+}
+
+export async function findBusinessByCompanyCode(req, companyCode) {
+  if (!companyCode) return null;
+  const code = String(companyCode).trim().toUpperCase();
+  await ensureDatabase(req, BUSINESSES_DB);
+  const docs = await getAllDocuments(req, BUSINESSES_DB);
+  return docs.find((d) => d?.type === 'business' && !d?.deletedAt && String(d.companyCode || '').toUpperCase() === code) || null;
+}
+
+export async function findTeamMemberByUsername(req, businessId, username) {
+  if (!businessId || !username) return null;
+  const normalizedUsername = String(username).trim().toLowerCase();
+  const accounts = await listAccounts(req);
+  return accounts.find((a) =>
+    a.linkedBusinessId === businessId &&
+    String(a.username || '').trim().toLowerCase() === normalizedUsername
+  ) || null;
+}
+
+// ─── Fleet Management ─────────────────────────────────────────────────────────
+
+const FLEET_OWNERSHIP_TYPES = ['owned', 'rental', 'renting', 'leasing', 'other'];
+const FLEET_COST_CATEGORIES = ['fuel', 'maintenance', 'repair', 'insurance', 'tax', 'parking', 'toll', 'fine', 'other'];
+const FLEET_DOC_TYPES = ['circulation_permit', 'insurance_policy', 'technical_sheet', 'incident_report', 'contract', 'other'];
+const FLEET_VEHICLE_STATUSES = ['active', 'inactive', 'maintenance', 'decommissioned'];
+
+function normalizeFleetOwnership(value) {
+  return FLEET_OWNERSHIP_TYPES.includes(String(value || '').trim().toLowerCase())
+    ? String(value).trim().toLowerCase()
+    : 'owned';
+}
+
+function normalizeFleetStatus(value) {
+  return FLEET_VEHICLE_STATUSES.includes(String(value || '').trim().toLowerCase())
+    ? String(value).trim().toLowerCase()
+    : 'active';
+}
+
+export function buildFleetVehicleDocument(userId, data = {}, existing = null, businessId = null) {
+  const now = new Date().toISOString();
+
+  const rawCosts = Array.isArray(data.costs)
+    ? data.costs
+    : Array.isArray(existing?.costs) ? existing.costs : [];
+  const costs = rawCosts.filter(Boolean).map((c) => ({
+    id: c.id || `fc:${uuidv4()}`,
+    category: FLEET_COST_CATEGORIES.includes(c.category) ? c.category : 'other',
+    description: String(c.description || '').trim(),
+    amount: Number.isFinite(Number(c.amount)) ? Number(c.amount) : 0,
+    date: String(c.date || now.slice(0, 10)).trim(),
+    mileage: Number.isFinite(Number(c.mileage)) ? Number(c.mileage) : undefined,
+    receipt: String(c.receipt || '').trim() || undefined,
+  }));
+
+  const rawDocs = Array.isArray(data.documents)
+    ? data.documents
+    : Array.isArray(existing?.documents) ? existing.documents : [];
+  const documents = rawDocs.filter(Boolean).map((d) => ({
+    id: d.id || `fd:${uuidv4()}`,
+    docType: FLEET_DOC_TYPES.includes(d.docType) ? d.docType : 'other',
+    name: String(d.name || '').trim(),
+    fileUrl: String(d.fileUrl || '').trim() || undefined,
+    expiryDate: String(d.expiryDate || '').trim() || undefined,
+    notes: String(d.notes || '').trim() || undefined,
+    uploadedAt: d.uploadedAt || now,
+  }));
+
+  const rawAssignment = data.assignedTo || existing?.assignedTo || null;
+  const assignedTo = rawAssignment && rawAssignment.memberId
+    ? {
+        memberId: String(rawAssignment.memberId).trim(),
+        memberName: String(rawAssignment.memberName || '').trim(),
+        assignedDate: rawAssignment.assignedDate || now,
+      }
+    : null;
+
+  const defaultAlerts = { itvReminder: true, insuranceReminder: true, maintenanceReminder: true, documentExpiry: true };
+  const rawAlerts = data.alerts || existing?.alerts || {};
+  const alerts = {
+    itvReminder: rawAlerts.itvReminder !== undefined ? Boolean(rawAlerts.itvReminder) : defaultAlerts.itvReminder,
+    insuranceReminder: rawAlerts.insuranceReminder !== undefined ? Boolean(rawAlerts.insuranceReminder) : defaultAlerts.insuranceReminder,
+    maintenanceReminder: rawAlerts.maintenanceReminder !== undefined ? Boolean(rawAlerts.maintenanceReminder) : defaultAlerts.maintenanceReminder,
+    documentExpiry: rawAlerts.documentExpiry !== undefined ? Boolean(rawAlerts.documentExpiry) : defaultAlerts.documentExpiry,
+  };
+
+  return {
+    _id: existing?._id || `fleet:${uuidv4()}`,
+    _rev: existing?._rev,
+    type: 'fleet_vehicle',
+    active: true,
+    user_id: userId,
+    business_id: businessId || data.business_id || existing?.business_id || undefined,
+
+    brand: normalizeText(data.brand),
+    model: normalizeText(data.model),
+    vehicleType: normalizeOptionalText(data.vehicleType) || 'car',
+    registrationPlate: normalizeText(data.registrationPlate).toUpperCase(),
+    vin: normalizeOptionalText(data.vin)?.toUpperCase(),
+    year: normalizeRequiredNumber(data.year),
+    color: normalizeText(data.color),
+    fuelType: normalizeFuelType(data.fuelType),
+    mileage: normalizeOptionalNumber(data.mileage),
+    transmission: normalizeTransmission(data.transmission),
+
+    ownershipType: normalizeFleetOwnership(data.ownershipType),
+    ownershipDetails: {
+      provider: String(data.ownershipDetails?.provider || existing?.ownershipDetails?.provider || '').trim(),
+      contractNumber: String(data.ownershipDetails?.contractNumber || existing?.ownershipDetails?.contractNumber || '').trim(),
+      startDate: String(data.ownershipDetails?.startDate || existing?.ownershipDetails?.startDate || '').trim() || undefined,
+      endDate: String(data.ownershipDetails?.endDate || existing?.ownershipDetails?.endDate || '').trim() || undefined,
+      monthlyPayment: normalizeOptionalNumber(data.ownershipDetails?.monthlyPayment ?? existing?.ownershipDetails?.monthlyPayment),
+      notes: String(data.ownershipDetails?.notes || existing?.ownershipDetails?.notes || '').trim() || undefined,
+    },
+
+    status: normalizeFleetStatus(data.status),
+
+    itvDate: normalizeOptionalText(data.itvDate),
+    itvExpiryDate: normalizeOptionalText(data.itvExpiryDate),
+    insuranceCompany: normalizeOptionalText(data.insuranceCompany),
+    insurancePolicyNumber: normalizeOptionalText(data.insurancePolicyNumber),
+    insuranceExpiryDate: normalizeOptionalText(data.insuranceExpiryDate),
+    insuranceType: normalizeOptionalText(data.insuranceType),
+
+    assignedTo,
+    costs,
+    documents,
+    alerts,
+
+    nextMaintenanceDate: normalizeOptionalText(data.nextMaintenanceDate),
+    nextMaintenanceMileage: normalizeOptionalNumber(data.nextMaintenanceMileage),
+
+    notes: normalizeOptionalText(data.notes),
+    images: Array.isArray(data.images) ? data.images.filter(Boolean) : [],
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeFleetVehicle(vehicle) {
+  if (!vehicle) return null;
+  return {
+    id: vehicle._id,
+    _rev: vehicle._rev,
+    type: vehicle.type || 'fleet_vehicle',
+    active: vehicle.active !== false,
+    user_id: vehicle.user_id,
+    business_id: vehicle.business_id || null,
+    brand: vehicle.brand || '',
+    model: vehicle.model || '',
+    vehicleType: vehicle.vehicleType || 'car',
+    registrationPlate: vehicle.registrationPlate || '',
+    vin: vehicle.vin || null,
+    year: vehicle.year || 0,
+    color: vehicle.color || '',
+    fuelType: vehicle.fuelType || null,
+    mileage: vehicle.mileage || null,
+    transmission: vehicle.transmission || null,
+    ownershipType: vehicle.ownershipType || 'owned',
+    ownershipDetails: vehicle.ownershipDetails || {},
+    status: vehicle.status || 'active',
+    itvDate: vehicle.itvDate || null,
+    itvExpiryDate: vehicle.itvExpiryDate || null,
+    insuranceCompany: vehicle.insuranceCompany || null,
+    insurancePolicyNumber: vehicle.insurancePolicyNumber || null,
+    insuranceExpiryDate: vehicle.insuranceExpiryDate || null,
+    insuranceType: vehicle.insuranceType || null,
+    assignedTo: vehicle.assignedTo || null,
+    costs: Array.isArray(vehicle.costs) ? vehicle.costs : [],
+    documents: Array.isArray(vehicle.documents) ? vehicle.documents : [],
+    alerts: vehicle.alerts || { itvReminder: true, insuranceReminder: true, maintenanceReminder: true, documentExpiry: true },
+    nextMaintenanceDate: vehicle.nextMaintenanceDate || null,
+    nextMaintenanceMileage: vehicle.nextMaintenanceMileage || null,
+    notes: vehicle.notes || null,
+    images: Array.isArray(vehicle.images) ? vehicle.images : [],
+    createdAt: vehicle.createdAt,
+    updatedAt: vehicle.updatedAt,
+    deletedAt: vehicle.deletedAt || null,
+    pendingAlerts: computeFleetAlerts(vehicle),
+  };
+}
+
+export function computeFleetAlerts(vehicle) {
+  if (!vehicle) return [];
+  const alerts = [];
+  const now = new Date();
+  const DAYS_30 = 30 * 86400000;
+
+  const vehicleAlerts = vehicle.alerts || {};
+
+  if (vehicleAlerts.itvReminder !== false && vehicle.itvExpiryDate) {
+    const expiry = new Date(vehicle.itvExpiryDate);
+    if (!Number.isNaN(expiry.getTime())) {
+      const diff = expiry.getTime() - now.getTime();
+      if (diff < 0) alerts.push({ type: 'itv_expired', severity: 'critical', message: 'ITV caducada', date: vehicle.itvExpiryDate });
+      else if (diff < DAYS_30) alerts.push({ type: 'itv_soon', severity: 'warning', message: 'ITV próxima (menos de 30 días)', date: vehicle.itvExpiryDate });
+    }
+  }
+
+  if (vehicleAlerts.insuranceReminder !== false && vehicle.insuranceExpiryDate) {
+    const expiry = new Date(vehicle.insuranceExpiryDate);
+    if (!Number.isNaN(expiry.getTime())) {
+      const diff = expiry.getTime() - now.getTime();
+      if (diff < 0) alerts.push({ type: 'insurance_expired', severity: 'critical', message: 'Seguro caducado', date: vehicle.insuranceExpiryDate });
+      else if (diff < DAYS_30) alerts.push({ type: 'insurance_soon', severity: 'warning', message: 'Seguro próximo a vencer (menos de 30 días)', date: vehicle.insuranceExpiryDate });
+    }
+  }
+
+  if (vehicleAlerts.maintenanceReminder !== false && vehicle.nextMaintenanceDate) {
+    const maint = new Date(vehicle.nextMaintenanceDate);
+    if (!Number.isNaN(maint.getTime())) {
+      const diff = maint.getTime() - now.getTime();
+      if (diff < 0) alerts.push({ type: 'maintenance_overdue', severity: 'critical', message: 'Revisión/mantenimiento atrasado', date: vehicle.nextMaintenanceDate });
+      else if (diff < DAYS_30) alerts.push({ type: 'maintenance_soon', severity: 'warning', message: 'Revisión/mantenimiento próximo (menos de 30 días)', date: vehicle.nextMaintenanceDate });
+    }
+  }
+
+  if (vehicleAlerts.documentExpiry !== false && Array.isArray(vehicle.documents)) {
+    for (const doc of vehicle.documents) {
+      if (!doc.expiryDate) continue;
+      const expiry = new Date(doc.expiryDate);
+      if (Number.isNaN(expiry.getTime())) continue;
+      const diff = expiry.getTime() - now.getTime();
+      if (diff < 0) alerts.push({ type: 'document_expired', severity: 'critical', message: `Documento "${doc.name}" caducado`, documentId: doc.id, date: doc.expiryDate });
+      else if (diff < DAYS_30) alerts.push({ type: 'document_expiring', severity: 'warning', message: `Documento "${doc.name}" próximo a caducar`, documentId: doc.id, date: doc.expiryDate });
+    }
+  }
+
+  return alerts;
+}
+
+export async function listFleetVehiclesByUser(req, userId, businessId = null) {
+  await ensureDatabase(req, FLEET_DB);
+  const docs = await getAllDocuments(req, FLEET_DB);
+  return docs.filter((doc) => {
+    if (!doc || doc.type !== 'fleet_vehicle' || doc.active === false || doc.deletedAt) return false;
+    if (businessId) return doc.business_id === businessId;
+    return doc.user_id === userId && !doc.business_id;
+  });
+}
+
+// ─── SETUP PROGRESS (Onboarding operativo) ──────────────────────────────────
+
+export function buildSetupProgressDocument({ userId, businessId, businessType, requestedModules }) {
+  const now = new Date().toISOString();
+  const steps = computeSetupSteps(businessType, requestedModules);
+
+  return {
+    _id: `setup_progress:${userId}`,
+    type: 'setup_progress',
+    user_id: String(userId || '').trim(),
+    business_id: String(businessId || '').trim(),
+    businessType: String(businessType || '').trim(),
+    requestedModules: requestedModules && typeof requestedModules === 'object' ? { ...requestedModules } : {},
+    steps,
+    overallCompleted: false,
+    overallCompletedAt: null,
+    trialStartDate: null,
+    trialEndDate: null,
+    welcomeEmailSent: false,
+    skippedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeSetupProgress(doc) {
+  if (!doc) return null;
+
+  return {
+    id: doc._id,
+    user_id: doc.user_id,
+    business_id: doc.business_id || '',
+    businessType: doc.businessType || '',
+    requestedModules: doc.requestedModules || {},
+    steps: Array.isArray(doc.steps) ? doc.steps : [],
+    overallCompleted: Boolean(doc.overallCompleted),
+    overallCompletedAt: doc.overallCompletedAt || null,
+    trialStartDate: doc.trialStartDate || null,
+    trialEndDate: doc.trialEndDate || null,
+    welcomeEmailSent: Boolean(doc.welcomeEmailSent),
+    skippedAt: doc.skippedAt || null,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+export async function findSetupProgressByUserId(req, userId) {
+  if (!userId) return null;
+  await ensureDatabase(req, ACCOUNTS_DB);
+  return getDocument(req, ACCOUNTS_DB, `setup_progress:${userId}`);
+}
+
+export async function saveSetupProgress(req, doc) {
+  if (!doc?._id) throw new Error('Documento de setup_progress inválido');
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const result = await putDocument(req, ACCOUNTS_DB, doc._id, doc);
+  return { ...doc, _rev: result.rev };
+}
+
+// ─── OCR PROCESSING LOGS ──────────────────────────────────────────────────────
+
+export function buildOcrLogDocument(userId, data = {}) {
+  const now = new Date().toISOString();
+  const id = `ocr-log-${uuidv4()}`;
+
+  return {
+    _id: id,
+    type: 'ocr_processing_log',
+    id,
+    user_id: userId,
+
+    sourceFileName: String(data.sourceFileName || ''),
+    sourceMimeType: String(data.sourceMimeType || ''),
+    sourceSize: Number(data.sourceSize || 0),
+    sourceHash: String(data.sourceHash || ''),
+
+    detectedDocumentType: String(data.detectedDocumentType || 'otro'),
+    confidence: Number(data.confidence || 0),
+    ocrData: data.ocrData || null,
+    ocrFingerprint: String(data.ocrFingerprint || ''),
+    processingTimeMs: Number(data.processingTimeMs || 0),
+    model: String(data.model || 'gpt-4o'),
+    tokensUsed: data.tokensUsed || { prompt: 0, completion: 0 },
+
+    matchedEntities: Array.isArray(data.matchedEntities) ? data.matchedEntities : [],
+
+    routedTo: data.routedTo || null,
+
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    errors: Array.isArray(data.errors) ? data.errors : [],
+
+    status: data.status || 'completed',
+    reviewedBy: data.reviewedBy || null,
+    reviewedAt: data.reviewedAt || null,
+
+    isDuplicate: Boolean(data.isDuplicate),
+    duplicateOf: data.duplicateOf || null,
+
+    proposalId: data.proposalId || null,
+
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeOcrLog(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'ocr_processing_log',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    sourceFileName: doc.sourceFileName || '',
+    sourceMimeType: doc.sourceMimeType || '',
+    sourceSize: Number(doc.sourceSize || 0),
+    sourceHash: doc.sourceHash || '',
+    detectedDocumentType: doc.detectedDocumentType || 'otro',
+    confidence: Number(doc.confidence || 0),
+    ocrData: doc.ocrData || null,
+    ocrFingerprint: doc.ocrFingerprint || '',
+    processingTimeMs: Number(doc.processingTimeMs || 0),
+    model: doc.model || 'gpt-4o',
+    tokensUsed: doc.tokensUsed || { prompt: 0, completion: 0 },
+    matchedEntities: Array.isArray(doc.matchedEntities) ? doc.matchedEntities : [],
+    routedTo: doc.routedTo || null,
+    warnings: Array.isArray(doc.warnings) ? doc.warnings : [],
+    errors: Array.isArray(doc.errors) ? doc.errors : [],
+    status: doc.status || 'completed',
+    reviewedBy: doc.reviewedBy || null,
+    reviewedAt: doc.reviewedAt || null,
+    isDuplicate: Boolean(doc.isDuplicate),
+    duplicateOf: doc.duplicateOf || null,
+    proposalId: doc.proposalId || null,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listOcrLogsByUser(req, userId) {
+  const db = getOcrLogsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'ocr_processing_log' && !d?.deletedAt && d?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function findOcrLogByHash(req, userId, sourceHash) {
+  const db = getOcrLogsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs.find((d) =>
+    d?.type === 'ocr_processing_log' && d?.user_id === userId && d?.sourceHash === sourceHash,
+  ) || null;
+}
+
+export async function findOcrLogByFingerprint(req, userId, fingerprint) {
+  const db = getOcrLogsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs.find((d) =>
+    d?.type === 'ocr_processing_log' && d?.user_id === userId && d?.ocrFingerprint === fingerprint,
+  ) || null;
+}
+
+// ─── OCR PROPOSALS ────────────────────────────────────────────────────────────
+
+export function buildOcrProposalDocument(userId, data = {}) {
+  const now = new Date().toISOString();
+  const id = `ocr-proposal-${uuidv4()}`;
+
+  return {
+    _id: id,
+    type: 'ocr_proposal',
+    id,
+    user_id: userId,
+    ocrLogId: String(data.ocrLogId || ''),
+
+    destination: data.destination || null,
+    fields: data.fields || {},
+    entity: data.entity || null,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+
+    status: data.status || 'pending_review',
+    autoApproved: Boolean(data.autoApproved),
+    approvedBy: data.approvedBy || null,
+    approvedAt: data.approvedAt || null,
+    rejectedBy: data.rejectedBy || null,
+    rejectedAt: data.rejectedAt || null,
+
+    createdDocumentId: data.createdDocumentId || null,
+    createdDocumentDb: data.createdDocumentDb || null,
+
+    sourceFileName: String(data.sourceFileName || ''),
+    sourceImageBase64: data.sourceImageBase64 || '',
+
+    ocrData: data.ocrData || null,
+
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeOcrProposal(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'ocr_proposal',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    ocrLogId: doc.ocrLogId || '',
+    destination: doc.destination || null,
+    fields: doc.fields || {},
+    entity: doc.entity || null,
+    warnings: Array.isArray(doc.warnings) ? doc.warnings : [],
+    status: doc.status || 'pending_review',
+    autoApproved: Boolean(doc.autoApproved),
+    approvedBy: doc.approvedBy || null,
+    approvedAt: doc.approvedAt || null,
+    rejectedBy: doc.rejectedBy || null,
+    rejectedAt: doc.rejectedAt || null,
+    createdDocumentId: doc.createdDocumentId || null,
+    createdDocumentDb: doc.createdDocumentDb || null,
+    sourceFileName: doc.sourceFileName || '',
+    sourceImageBase64: doc.sourceImageBase64 || '',
+    ocrData: doc.ocrData || null,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listOcrProposalsByUser(req, userId) {
+  const db = getOcrLogsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'ocr_proposal' && d?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── SCALE DEVICES ────────────────────────────────────────────────────────────
+
+const VALID_SCALE_CONNECTION_TYPES = ['usb_serial', 'bluetooth', 'network'];
+const VALID_SCALE_READ_PROTOCOLS = ['sics_mt', 'cas', 'epelsa', 'dibal', 'generic_ascii', 'continuous', 'custom'];
+const VALID_SCALE_READ_MODES = ['on_demand', 'continuous'];
+const VALID_WEIGH_UNITS = ['kg', 'g', 'lb'];
+
+function sanitizeScaleSerial(data) {
+  const d = data || {};
+  return {
+    baudRate: [2400, 4800, 9600, 19200, 38400, 57600, 115200].includes(Number(d.baudRate)) ? Number(d.baudRate) : 9600,
+    dataBits: [7, 8].includes(Number(d.dataBits)) ? Number(d.dataBits) : 8,
+    stopBits: [1, 2].includes(Number(d.stopBits)) ? Number(d.stopBits) : 1,
+    parity: ['none', 'even', 'odd'].includes(d.parity) ? d.parity : 'none',
+    flowControl: ['none', 'hardware'].includes(d.flowControl) ? d.flowControl : 'none',
+    vendorId: String(d.vendorId || ''),
+    productId: String(d.productId || ''),
+  };
+}
+
+function sanitizeScaleBluetooth(data) {
+  const d = data || {};
+  return {
+    deviceName: String(d.deviceName || ''),
+    serviceUuid: String(d.serviceUuid || ''),
+    characteristicUuid: String(d.characteristicUuid || ''),
+  };
+}
+
+function sanitizeScaleNetwork(data) {
+  const d = data || {};
+  return {
+    host: String(d.host || ''),
+    port: Math.max(0, Math.min(65535, Number(d.port) || 0)),
+    protocol: ['tcp', 'websocket', 'http'].includes(d.protocol) ? d.protocol : 'tcp',
+    path: String(d.path || ''),
+  };
+}
+
+function sanitizeScaleParser(data) {
+  const d = data || {};
+  return {
+    regex: String(d.regex || ''),
+    weightGroup: Math.max(0, Number(d.weightGroup) || 1),
+    unitGroup: Math.max(0, Number(d.unitGroup) || 2),
+    decimalSeparator: d.decimalSeparator === ',' ? ',' : '.',
+    encoding: d.encoding === 'utf-8' ? 'utf-8' : 'ascii',
+    stableIndicator: String(d.stableIndicator || ''),
+  };
+}
+
+function sanitizeScaleWeighing(data) {
+  const d = data || {};
+  return {
+    unit: VALID_WEIGH_UNITS.includes(d.unit) ? d.unit : 'kg',
+    maxWeight: Math.max(0.001, Number(d.maxWeight) || 30),
+    minWeight: Math.max(0, Number(d.minWeight) || 0.001),
+    precision: Math.max(0, Math.min(6, Number(d.precision) || 3)),
+    tareSupported: Boolean(d.tareSupported),
+    tareCommand: String(d.tareCommand || 'T\r\n'),
+    zeroCommand: String(d.zeroCommand || 'Z\r\n'),
+  };
+}
+
+export function buildScaleDeviceDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `scale-device-${uuidv4()}`;
+  const connectionType = VALID_SCALE_CONNECTION_TYPES.includes(data.connectionType)
+    ? data.connectionType
+    : (existing?.connectionType || 'usb_serial');
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'scale_device',
+    id,
+    user_id: userId,
+
+    name: String(data.name || existing?.name || ''),
+    brand: String(data.brand || existing?.brand || ''),
+    model: String(data.model || existing?.model || ''),
+    serialNumber: String(data.serialNumber || existing?.serialNumber || ''),
+
+    connectionType,
+    serial: sanitizeScaleSerial(data.serial || existing?.serial),
+    bluetooth: sanitizeScaleBluetooth(data.bluetooth || existing?.bluetooth),
+    network: sanitizeScaleNetwork(data.network || existing?.network),
+
+    readProtocol: VALID_SCALE_READ_PROTOCOLS.includes(data.readProtocol)
+      ? data.readProtocol
+      : (existing?.readProtocol || 'generic_ascii'),
+    readMode: VALID_SCALE_READ_MODES.includes(data.readMode)
+      ? data.readMode
+      : (existing?.readMode || 'on_demand'),
+    readCommand: String(data.readCommand ?? existing?.readCommand ?? 'S\r\n'),
+    readIntervalMs: Math.max(50, Number(data.readIntervalMs || existing?.readIntervalMs || 500)),
+
+    parser: sanitizeScaleParser(data.parser || existing?.parser),
+    weighing: sanitizeScaleWeighing(data.weighing || existing?.weighing),
+
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
+    notes: String(data.notes || existing?.notes || ''),
+
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeScaleDevice(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'scale_device',
+    id: doc._id,
+    user_id: doc.user_id || '',
+    name: doc.name || '',
+    brand: doc.brand || '',
+    model: doc.model || '',
+    serialNumber: doc.serialNumber || '',
+    connectionType: VALID_SCALE_CONNECTION_TYPES.includes(doc.connectionType) ? doc.connectionType : 'usb_serial',
+    serial: sanitizeScaleSerial(doc.serial),
+    bluetooth: sanitizeScaleBluetooth(doc.bluetooth),
+    network: sanitizeScaleNetwork(doc.network),
+    readProtocol: VALID_SCALE_READ_PROTOCOLS.includes(doc.readProtocol) ? doc.readProtocol : 'generic_ascii',
+    readMode: VALID_SCALE_READ_MODES.includes(doc.readMode) ? doc.readMode : 'on_demand',
+    readCommand: doc.readCommand ?? 'S\r\n',
+    readIntervalMs: Number(doc.readIntervalMs) || 500,
+    parser: sanitizeScaleParser(doc.parser),
+    weighing: sanitizeScaleWeighing(doc.weighing),
+    active: doc.active !== false,
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listScaleDevicesByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'scale_device' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export const FLEET_DESIGN_VIEWS = {
+  by_user_status: {
+    map: `function(doc){if(doc.type==='fleet_vehicle'&&doc.active!==false){emit([doc.user_id,doc.status],1);}}`,
+    reduce: '_count',
+  },
+  by_user_ownership: {
+    map: `function(doc){if(doc.type==='fleet_vehicle'&&doc.active!==false){emit([doc.user_id,doc.ownershipType],1);}}`,
+    reduce: '_count',
+  },
+  costs_by_user_month: {
+    map: `function(doc){if(doc.type==='fleet_vehicle'&&doc.active!==false&&doc.costs){for(var i=0;i<doc.costs.length;i++){var c=doc.costs[i];var m=(c.date||'').slice(0,7);if(m)emit([doc.user_id,m,c.category],c.amount||0);}}}`,
+    reduce: '_sum',
+  },
+  by_assignment: {
+    map: `function(doc){if(doc.type==='fleet_vehicle'&&doc.active!==false&&doc.assignedTo&&doc.assignedTo.memberId){emit([doc.user_id,doc.assignedTo.memberId],1);}}`,
+    reduce: '_count',
+  },
+};
+
+// --- BUTCHER SHOP (Carniceria) -----------------------------------------------
+
+export function getButcherDbName() {
+  return normalizeDbName(process.env.VITE_BUTCHER_DB || `${getDbPrefix()}-butcher`);
+}
+
+export function buildButcherProductDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `bprod-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_product', id, user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
+    name: String(data.name || existing?.name || ''),
+    category: String(data.category || existing?.category || 'general'),
+    subcategory: String(data.subcategory || existing?.subcategory || ''),
+    sku: data.sku || existing?.sku || `CARN-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+    pricePerKg: Number(data.pricePerKg ?? existing?.pricePerKg ?? 0),
+    priceUpdatedAt: data.priceUpdatedAt || existing?.priceUpdatedAt || now,
+    stockKg: Number(data.stockKg ?? existing?.stockKg ?? 0),
+    minStockKg: Number(data.minStockKg ?? existing?.minStockKg ?? 0),
+    unit: String(data.unit || existing?.unit || 'kg'),
+    active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
+    conservation: String(data.conservation || existing?.conservation || 'refrigerado'),
+    image: String(data.image || existing?.image || ''),
+    allergens: Array.isArray(data.allergens) ? data.allergens : (existing?.allergens || []),
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || ''),
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeButcherProduct(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'butcher_product', id: doc._id, user_id: doc.user_id,
+    business_id: doc.business_id || '', name: doc.name || '',
+    category: doc.category || 'general', subcategory: doc.subcategory || '',
+    sku: doc.sku || '', pricePerKg: Number(doc.pricePerKg || 0),
+    costPerKg: Number(doc.costPerKg || 0),
+    priceUpdatedAt: doc.priceUpdatedAt || '', stockKg: Number(doc.stockKg || 0),
+    minStockKg: Number(doc.minStockKg || 0), unit: doc.unit || 'kg',
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    conservation: doc.conservation || 'refrigerado', image: doc.image || '',
+    allergens: Array.isArray(doc.allergens) ? doc.allergens : [],
+    supplierId: doc.supplierId || '', supplierName: doc.supplierName || '',
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherProductsByUser(req, userId) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'butcher_product' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export function buildButcherBatchDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `bbatch-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_batch', id, user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
+    productId: String(data.productId || existing?.productId || ''),
+    productName: String(data.productName || existing?.productName || ''),
+    batchNumber: data.batchNumber || existing?.batchNumber || `LOT-${Date.now().toString(36).toUpperCase().slice(-8)}`,
+    origin: String(data.origin || existing?.origin || ''),
+    slaughterhouse: String(data.slaughterhouse || existing?.slaughterhouse || ''),
+    healthGuide: String(data.healthGuide || existing?.healthGuide || ''),
+    animalId: String(data.animalId || existing?.animalId || ''),
+    receptionDate: data.receptionDate || existing?.receptionDate || now,
+    expirationDate: data.expirationDate || existing?.expirationDate || '',
+    receptionWeightKg: Number(data.receptionWeightKg ?? existing?.receptionWeightKg ?? 0),
+    currentWeightKg: Number(data.currentWeightKg ?? existing?.currentWeightKg ?? 0),
+    status: String(data.status || existing?.status || 'active'),
+    temperature: data.temperature !== undefined ? Number(data.temperature) : (existing?.temperature ?? null),
+    healthStatus: String(data.healthStatus || existing?.healthStatus || 'approved'),
+    zone: String(data.zone || existing?.zone || ''),
+    purchaseOrderId: String(data.purchaseOrderId || existing?.purchaseOrderId || ''),
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeButcherBatch(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'butcher_batch', id: doc._id, user_id: doc.user_id,
+    business_id: doc.business_id || '', productId: doc.productId || '',
+    productName: doc.productName || '', batchNumber: doc.batchNumber || '',
+    origin: doc.origin || '', slaughterhouse: doc.slaughterhouse || '',
+    healthGuide: doc.healthGuide || '', animalId: doc.animalId || '',
+    receptionDate: doc.receptionDate || '', expirationDate: doc.expirationDate || '',
+    receptionWeightKg: Number(doc.receptionWeightKg || 0),
+    currentWeightKg: Number(doc.currentWeightKg || 0),
+    status: doc.status || 'active',
+    temperature: doc.temperature !== undefined && doc.temperature !== null ? Number(doc.temperature) : null,
+    healthStatus: doc.healthStatus || 'approved', zone: doc.zone || '',
+    purchaseOrderId: doc.purchaseOrderId || '', notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherBatchesByUser(req, userId) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'butcher_batch' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.receptionDate || '').localeCompare(String(a.receptionDate || '')));
+}
+
+export function buildButcherWasteDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `bwaste-${uuidv4()}`;
+  const VALID_WASTE_TYPES = ['hueso', 'grasa', 'recortes', 'caducado', 'rotura', 'perdida_manual'];
+  const VALID_REVIEW_STATUSES = ['pending', 'approved', 'rejected'];
+  const VALID_SEVERITIES = ['low', 'medium', 'high'];
+
+  const wasteType = VALID_WASTE_TYPES.includes(data.wasteType) ? data.wasteType
+    : VALID_WASTE_TYPES.includes(existing?.wasteType) ? existing.wasteType : 'perdida_manual';
+  const reviewStatus = VALID_REVIEW_STATUSES.includes(data.reviewStatus) ? data.reviewStatus
+    : VALID_REVIEW_STATUSES.includes(existing?.reviewStatus) ? existing.reviewStatus : 'pending';
+  const estimatedCost = Number(data.estimatedCost ?? existing?.estimatedCost ?? 0);
+  const severity = VALID_SEVERITIES.includes(data.severity) ? data.severity
+    : VALID_SEVERITIES.includes(existing?.severity) ? existing.severity
+    : estimatedCost > 50 ? 'high' : estimatedCost > 20 ? 'medium' : 'low';
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_waste', id, user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
+    productId: String(data.productId || existing?.productId || ''),
+    productName: String(data.productName || existing?.productName || ''),
+    batchId: String(data.batchId || existing?.batchId || ''),
+    date: data.date || existing?.date || now.slice(0, 10),
+    wasteKg: Number(data.wasteKg ?? existing?.wasteKg ?? 0),
+    reason: String(data.reason || existing?.reason || ''),
+    category: String(data.category || existing?.category || 'proceso'),
+    notes: String(data.notes || existing?.notes || ''),
+    registeredBy: String(data.registeredBy || existing?.registeredBy || userId),
+    wasteType,
+    catalogItemId: String(data.catalogItemId || existing?.catalogItemId || ''),
+    catalogItemName: String(data.catalogItemName || existing?.catalogItemName || ''),
+    estimatedCost,
+    costPriceAtTime: Number(data.costPriceAtTime ?? existing?.costPriceAtTime ?? 0),
+    registeredByName: String(data.registeredByName || existing?.registeredByName || ''),
+    reviewStatus,
+    reviewedBy: String(data.reviewedBy || existing?.reviewedBy || ''),
+    reviewedByName: String(data.reviewedByName || existing?.reviewedByName || ''),
+    reviewNotes: String(data.reviewNotes || existing?.reviewNotes || ''),
+    reviewedAt: String(data.reviewedAt || existing?.reviewedAt || ''),
+    stockMovementId: String(data.stockMovementId || existing?.stockMovementId || ''),
+    financeMovementId: String(data.financeMovementId || existing?.financeMovementId || ''),
+    severity,
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeButcherWaste(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'butcher_waste', id: doc._id, user_id: doc.user_id,
+    business_id: doc.business_id || '', productId: doc.productId || '',
+    productName: doc.productName || '', batchId: doc.batchId || '',
+    date: doc.date || '', wasteKg: Number(doc.wasteKg || 0),
+    reason: doc.reason || '', category: doc.category || 'proceso',
+    notes: doc.notes || '', registeredBy: doc.registeredBy || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherWasteByUser(req, userId, dateFrom, dateTo, filters = {}) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => {
+      if (!doc || doc.type !== 'butcher_waste' || doc.deletedAt) return false;
+      if (userId && doc.user_id !== userId) return false;
+      if (dateFrom && doc.date < dateFrom) return false;
+      if (dateTo && doc.date > dateTo) return false;
+      if (filters.wasteType && doc.wasteType !== filters.wasteType) return false;
+      if (filters.reviewStatus && doc.reviewStatus !== filters.reviewStatus) return false;
+      if (filters.registeredBy && doc.registeredBy !== filters.registeredBy) return false;
+      if (filters.catalogItemId && doc.catalogItemId !== filters.catalogItemId) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+export function buildButcherScaleStatusDocument(data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `bscale-${data.business_id || 'unknown'}-${data.scaleId || uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_scale_status', id,
+    business_id: String(data.business_id || existing?.business_id || ''),
+    scaleId: String(data.scaleId || existing?.scaleId || ''),
+    name: String(data.name || existing?.name || ''),
+    connected: data.connected !== undefined ? Boolean(data.connected) : (existing?.connected ?? true),
+    lastPingAt: data.lastPingAt || existing?.lastPingAt || now,
+    ip: String(data.ip || existing?.ip || ''),
+    model: String(data.model || existing?.model || ''),
+    location: String(data.location || existing?.location || 'mostrador'),
+    lastWeight: data.lastWeight !== undefined ? Number(data.lastWeight) : (existing?.lastWeight ?? null),
+    lastStatus: String(data.lastStatus || existing?.lastStatus || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeButcherScaleStatus(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'butcher_scale_status', id: doc._id,
+    business_id: doc.business_id || '', scaleId: doc.scaleId || '',
+    name: doc.name || '', connected: Boolean(doc.connected),
+    lastPingAt: doc.lastPingAt || '', ip: doc.ip || '',
+    model: doc.model || '', location: doc.location || 'mostrador',
+    lastWeight: doc.lastWeight !== undefined && doc.lastWeight !== null ? Number(doc.lastWeight) : null,
+    lastStatus: doc.lastStatus || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherScalesByBusiness(req, businessId) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'butcher_scale_status' && !doc?.deletedAt && (!businessId || doc?.business_id === businessId));
+}
+
+export function buildButcherInventoryCountDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `binvcount-${uuidv4()}`;
+  const items = Array.isArray(data.items) ? data.items.map((item) => ({
+    productId: String(item.productId || ''),
+    productName: String(item.productName || ''),
+    expectedKg: Number(item.expectedKg || 0),
+    countedKg: Number(item.countedKg || 0),
+    differenceKg: Number(item.countedKg || 0) - Number(item.expectedKg || 0),
+    differencePct: Number(item.expectedKg || 0) > 0
+      ? Math.round(((Number(item.countedKg || 0) - Number(item.expectedKg || 0)) / Number(item.expectedKg)) * 1000) / 10
+      : 0,
+  })) : (existing?.items || []);
+  const totalDifferenceKg = items.reduce((sum, i) => sum + i.differenceKg, 0);
+
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_inventory_count', id, user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
+    date: data.date || existing?.date || now.slice(0, 10),
+    countedBy: String(data.countedBy || existing?.countedBy || userId),
+    status: String(data.status || existing?.status || 'completed'),
+    items, totalDifferenceKg,
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+  };
+}
+
+export function sanitizeButcherInventoryCount(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, type: 'butcher_inventory_count', id: doc._id,
+    user_id: doc.user_id, business_id: doc.business_id || '',
+    date: doc.date || '', countedBy: doc.countedBy || '',
+    status: doc.status || 'completed',
+    items: Array.isArray(doc.items) ? doc.items : [],
+    totalDifferenceKg: Number(doc.totalDifferenceKg || 0),
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherInventoryCountsByUser(req, userId) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'butcher_inventory_count' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PREPARATION EXPENSES (vehicle preparation costs)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const PREPARATION_EXPENSE_TYPES = ['pintura', 'mecanica', 'chapa', 'electricidad', 'tapiceria', 'limpieza', 'itv', 'transporte', 'documentacion', 'otro'];
+export const PREPARATION_EXPENSE_STATUSES = ['pendiente', 'aprobado', 'pagado', 'rechazado'];
+
+export function buildPreparationExpenseDocument(userId, data = {}, existing = null, businessId = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `prep-expense-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'preparation_expense', id,
+    user_id: userId,
+    business_id: businessId || data.business_id || existing?.business_id || '',
+    active: data.active !== false,
+    vehicleId: String(data.vehicleId || existing?.vehicleId || ''),
+    vehiclePlate: String(data.vehiclePlate || existing?.vehiclePlate || ''),
+    vehicleLabel: String(data.vehicleLabel || existing?.vehicleLabel || ''),
+    expenseType: PREPARATION_EXPENSE_TYPES.includes(data.expenseType) ? data.expenseType : (existing?.expenseType || 'otro'),
+    status: PREPARATION_EXPENSE_STATUSES.includes(data.status) ? data.status : (existing?.status || 'pendiente'),
+    description: String(data.description || existing?.description || ''),
+    amount: Number(data.amount ?? existing?.amount ?? 0),
+    date: String(data.date || existing?.date || now.slice(0, 10)),
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || ''),
+    documentId: String(data.documentId || existing?.documentId || ''),
+    invoiceNumber: String(data.invoiceNumber || existing?.invoiceNumber || ''),
+    notes: String(data.notes || existing?.notes || ''),
+    createdBy: String(data.createdBy || existing?.createdBy || userId),
+    approvedBy: String(data.approvedBy || existing?.approvedBy || ''),
+    approvedAt: data.approvedAt || existing?.approvedAt || null,
+    createdAt: existing?.createdAt || now, updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizePreparationExpense(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, id: doc._id, type: 'preparation_expense',
+    user_id: doc.user_id, business_id: doc.business_id || '',
+    vehicleId: doc.vehicleId || '', vehiclePlate: doc.vehiclePlate || '', vehicleLabel: doc.vehicleLabel || '',
+    expenseType: doc.expenseType || 'otro', status: doc.status || 'pendiente',
+    description: doc.description || '', amount: Number(doc.amount || 0),
+    date: doc.date || '', supplierId: doc.supplierId || '', supplierName: doc.supplierName || '',
+    documentId: doc.documentId || '', invoiceNumber: doc.invoiceNumber || '',
+    notes: doc.notes || '', createdBy: doc.createdBy || '',
+    approvedBy: doc.approvedBy || '', approvedAt: doc.approvedAt || null,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listPreparationExpensesByUser(req, userId, businessId = null) {
+  await ensureDatabase(req, VEHICLES_DB);
+  const docs = await getAllDocuments(req, VEHICLES_DB);
+  return docs.filter((d) => {
+    if (d?.type !== 'preparation_expense' || d?.active === false || d?.deletedAt) return false;
+    if (businessId) return d.business_id === businessId;
+    return d.user_id === userId;
+  }).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+export async function listPreparationExpensesByVehicle(req, userId, vehicleId) {
+  const all = await listPreparationExpensesByUser(req, userId);
+  return all.filter((d) => d.vehicleId === vehicleId);
+}
+
+export async function getPreparationExpenseTotalByVehicle(req, userId, vehicleId) {
+  const expenses = await listPreparationExpensesByVehicle(req, userId, vehicleId);
+  return expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVICE EXECUTION (cleaning service execution tracking)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function buildServiceExecution(data = {}, existing = null) {
+  return {
+    status: String(data.status || existing?.status || 'not_started'),
+    checkInAt: data.checkInAt || existing?.checkInAt || null,
+    checkInGeo: data.checkInGeo || existing?.checkInGeo || null,
+    checkOutAt: data.checkOutAt || existing?.checkOutAt || null,
+    checkOutGeo: data.checkOutGeo || existing?.checkOutGeo || null,
+    plannedMinutes: Number(data.plannedMinutes ?? existing?.plannedMinutes ?? 0),
+    realMinutes: Number(data.realMinutes ?? existing?.realMinutes ?? 0),
+    deviationMinutes: Number(data.deviationMinutes ?? existing?.deviationMinutes ?? 0),
+    workerNotes: String(data.workerNotes || existing?.workerNotes || ''),
+    pauseLog: Array.isArray(data.pauseLog) ? data.pauseLog : (existing?.pauseLog || []),
+    incidents: Array.isArray(data.incidents) ? data.incidents : (existing?.incidents || []),
+    photosBefore: Array.isArray(data.photosBefore) ? data.photosBefore : (existing?.photosBefore || []),
+    photosAfter: Array.isArray(data.photosAfter) ? data.photosAfter : (existing?.photosAfter || []),
+    validatedBy: data.validatedBy || existing?.validatedBy || '',
+    validatedAt: data.validatedAt || existing?.validatedAt || null,
+    validationNotes: String(data.validationNotes || existing?.validationNotes || ''),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLEANING CONTRACTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function getCleaningContractsDbName() { return 'cleaning_contracts'; }
+
+export function buildCleaningContractDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `cleaning-contract-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'cleaning_contract', id,
+    user_id: userId, business_id: data.business_id || existing?.business_id || '',
+    clientId: String(data.clientId || existing?.clientId || ''),
+    clientName: String(data.clientName || existing?.clientName || ''),
+    title: String(data.title || existing?.title || ''),
+    description: String(data.description || existing?.description || ''),
+    startDate: String(data.startDate || existing?.startDate || ''),
+    endDate: String(data.endDate || existing?.endDate || ''),
+    amount: Number(data.amount ?? existing?.amount ?? 0),
+    frequency: String(data.frequency || existing?.frequency || 'mensual'),
+    status: String(data.status || existing?.status || 'activo'),
+    services: Array.isArray(data.services) ? data.services : (existing?.services || []),
+    notes: String(data.notes || existing?.notes || ''),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeCleaningContract(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, id: doc._id, type: 'cleaning_contract',
+    user_id: doc.user_id, business_id: doc.business_id || '',
+    clientId: doc.clientId || '', clientName: doc.clientName || '',
+    title: doc.title || '', description: doc.description || '',
+    startDate: doc.startDate || '', endDate: doc.endDate || '',
+    amount: Number(doc.amount || 0), frequency: doc.frequency || 'mensual',
+    status: doc.status || 'activo',
+    services: Array.isArray(doc.services) ? doc.services : [],
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listCleaningContractsByUser(req, userId) {
+  const db = getCleaningContractsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'cleaning_contract' && !d?.deletedAt && d?.user_id === userId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BUTCHER PURCHASE ENTRIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export function buildButcherPurchaseEntryDocument(userId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data.id || `butcher-purchase-${uuidv4()}`;
+  return {
+    _id: id, _rev: existing?._rev, type: 'butcher_purchase_entry', id,
+    user_id: userId, business_id: data.business_id || existing?.business_id || '',
+    supplierId: String(data.supplierId || existing?.supplierId || ''),
+    supplierName: String(data.supplierName || existing?.supplierName || ''),
+    date: String(data.date || existing?.date || now.slice(0, 10)),
+    items: Array.isArray(data.items) ? data.items : (existing?.items || []),
+    totalKg: Number(data.totalKg ?? existing?.totalKg ?? 0),
+    totalAmount: Number(data.totalAmount ?? existing?.totalAmount ?? 0),
+    invoiceNumber: String(data.invoiceNumber || existing?.invoiceNumber || ''),
+    notes: String(data.notes || existing?.notes || ''),
+    status: String(data.status || existing?.status || 'recibido'),
+    createdAt: existing?.createdAt || now, updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeButcherPurchaseEntry(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id, _rev: doc._rev, id: doc._id, type: 'butcher_purchase_entry',
+    user_id: doc.user_id, business_id: doc.business_id || '',
+    supplierId: doc.supplierId || '', supplierName: doc.supplierName || '',
+    date: doc.date || '',
+    items: Array.isArray(doc.items) ? doc.items : [],
+    totalKg: Number(doc.totalKg || 0), totalAmount: Number(doc.totalAmount || 0),
+    invoiceNumber: doc.invoiceNumber || '', notes: doc.notes || '',
+    status: doc.status || 'recibido',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listButcherPurchaseEntriesByUser(req, userId) {
+  const db = getButcherDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'butcher_purchase_entry' && !d?.deletedAt && d?.user_id === userId)
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function listAlertsByBusiness(req, userId, businessId) {
+  const db = 'alerts';
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((d) => d?.type === 'alert' && !d?.deletedAt && d?.business_id === businessId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function getAlertsSummary(req, userId, businessId) {
+  const alerts = await listAlertsByBusiness(req, userId, businessId);
+  const unread = alerts.filter((a) => !a.readAt).length;
+  const critical = alerts.filter((a) => a.severity === 'critical' && !a.readAt).length;
+  return { total: alerts.length, unread, critical };
+}
+
+// ── Vehicle Acquisition (Compras y Retiradas) ─────────────────────────────────
+
+export const ACQUISITION_TYPES = ['compra_particular', 'compra_empresa', 'subasta', 'retirada', 'grua_externa'];
+export const ACQUISITION_STATUSES = ['borrador', 'pendiente_aprobacion', 'aprobada', 'rechazada', 'en_transito', 'recibida', 'documentada', 'cerrada', 'cancelada'];
+export const ACQUISITION_PAYMENT_METHODS = ['efectivo', 'transferencia', 'cheque', 'aplazado', 'compensacion', 'otro'];
+export const ACQUISITION_PAYMENT_STATUSES = ['pendiente', 'parcial', 'pagado'];
+export const ACQUISITION_SELLER_TYPES = ['particular', 'empresa', 'aseguradora', 'subasta', 'organismo'];
+
+export const SCRAPYARD_COST_CATEGORIES = [
+  'compra', 'transporte', 'gestoria', 'documentacion', 'descontaminacion',
+  'compactacion', 'almacenamiento', 'reparacion_pieza', 'otro',
+];
+
+const ACQUISITION_STATUS_TRANSITIONS = {
+  borrador: ['pendiente_aprobacion', 'cancelada'],
+  pendiente_aprobacion: ['aprobada', 'rechazada', 'cancelada'],
+  aprobada: ['en_transito', 'recibida', 'cancelada'],
+  rechazada: ['borrador', 'cancelada'],
+  en_transito: ['recibida', 'cancelada'],
+  recibida: ['documentada', 'cerrada'],
+  documentada: ['cerrada'],
+  cerrada: [],
+  cancelada: [],
+};
+
+export function isValidAcquisitionTransition(from, to) {
+  return (ACQUISITION_STATUS_TRANSITIONS[from] || []).includes(to);
+}
+
+export function recalcAcquisitionTotalCost(doc) {
+  return (
+    (Number(doc.costCompra) || 0) +
+    (Number(doc.costTransporte) || 0) +
+    (Number(doc.costGestoria) || 0) +
+    (Number(doc.costDocumentacion) || 0) +
+    (Number(doc.costDescontaminacion) || 0) +
+    (Number(doc.costOtros) || 0)
+  );
+}
+
+export function buildVehicleAcquisitionDocument(userId, data = {}, existing = null, businessId = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || `vacq:${uuidv4()}`;
+
+  const costCompra = normalizeRequiredNumber(data.costCompra);
+  const costTransporte = normalizeRequiredNumber(data.costTransporte);
+  const costGestoria = normalizeRequiredNumber(data.costGestoria);
+  const costDocumentacion = normalizeRequiredNumber(data.costDocumentacion);
+  const costDescontaminacion = normalizeRequiredNumber(data.costDescontaminacion);
+  const costOtros = normalizeRequiredNumber(data.costOtros);
+  const costTotal = costCompra + costTransporte + costGestoria + costDocumentacion + costDescontaminacion + costOtros;
+
+  const rawChecklist = Array.isArray(data.requiredDocsChecklist)
+    ? data.requiredDocsChecklist
+    : existing?.requiredDocsChecklist || [];
+  const requiredDocsChecklist = rawChecklist.map((c) => ({
+    docType: String(c.docType || ''),
+    present: Boolean(c.present),
+    documentId: c.documentId || null,
+  }));
+  const hasRequiredDocs = requiredDocsChecklist.length > 0 && requiredDocsChecklist.every((c) => c.present);
+
+  const statusHistory = Array.isArray(data.statusHistory)
+    ? data.statusHistory
+    : existing?.statusHistory || [{ status: 'borrador', date: now, userId, note: '' }];
+
+  return {
+    _id: id,
+    _rev: existing?._rev,
+    type: 'vehicle_acquisition',
+    user_id: userId,
+    business_id: businessId || data.business_id || existing?.business_id || undefined,
+    vehicleId: normalizeText(data.vehicleId || existing?.vehicleId || ''),
+    registrationPlate: normalizeText(data.registrationPlate || existing?.registrationPlate || '').toUpperCase(),
+    acquisitionType: ACQUISITION_TYPES.includes(data.acquisitionType) ? data.acquisitionType : 'compra_particular',
+    sellerType: ACQUISITION_SELLER_TYPES.includes(data.sellerType) ? data.sellerType : 'particular',
+    sellerName: normalizeText(data.sellerName || existing?.sellerName || ''),
+    sellerNif: normalizeOptionalText(data.sellerNif),
+    sellerPhone: normalizeOptionalText(data.sellerPhone),
+    sellerEmail: normalizeOptionalText(data.sellerEmail),
+    sellerAddress: normalizeOptionalText(data.sellerAddress),
+    supplierId: normalizeOptionalText(data.supplierId),
+    costCompra,
+    costTransporte,
+    costGestoria,
+    costDocumentacion,
+    costDescontaminacion,
+    costOtros,
+    costOtrosDetalle: normalizeOptionalText(data.costOtrosDetalle),
+    costTotal,
+    paymentMethod: ACQUISITION_PAYMENT_METHODS.includes(data.paymentMethod) ? data.paymentMethod : 'transferencia',
+    paymentReference: normalizeOptionalText(data.paymentReference),
+    paymentDate: normalizeOptionalText(data.paymentDate),
+    paymentStatus: ACQUISITION_PAYMENT_STATUSES.includes(data.paymentStatus) ? data.paymentStatus : 'pendiente',
+    paymentNotes: normalizeOptionalText(data.paymentNotes),
+    status: ACQUISITION_STATUSES.includes(data.status || existing?.status) ? (data.status || existing?.status) : 'borrador',
+    statusHistory,
+    approvedBy: normalizeOptionalText(data.approvedBy || existing?.approvedBy),
+    approvedAt: normalizeOptionalText(data.approvedAt || existing?.approvedAt),
+    linkedDocumentIds: Array.isArray(data.linkedDocumentIds) ? data.linkedDocumentIds : existing?.linkedDocumentIds || [],
+    linkedInvoiceIds: Array.isArray(data.linkedInvoiceIds) ? data.linkedInvoiceIds : existing?.linkedInvoiceIds || [],
+    hasRequiredDocs,
+    requiredDocsChecklist,
+    ocrData: data.ocrData || existing?.ocrData || null,
+    acquisitionDate: normalizeOptionalText(data.acquisitionDate) || now.slice(0, 10),
+    receptionDate: normalizeOptionalText(data.receptionDate || existing?.receptionDate),
+    closedAt: normalizeOptionalText(data.closedAt || existing?.closedAt),
+    notes: normalizeOptionalText(data.notes),
+    internalNotes: normalizeOptionalText(data.internalNotes || existing?.internalNotes),
+    createdBy: existing?.createdBy || userId,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeVehicleAcquisition(doc) {
+  if (!doc) return null;
+  return {
+    id: doc._id,
+    _rev: doc._rev,
+    type: 'vehicle_acquisition',
+    user_id: doc.user_id,
+    business_id: doc.business_id || undefined,
+    vehicleId: doc.vehicleId || '',
+    registrationPlate: doc.registrationPlate || '',
+    acquisitionType: doc.acquisitionType || 'compra_particular',
+    sellerType: doc.sellerType || 'particular',
+    sellerName: doc.sellerName || '',
+    sellerNif: doc.sellerNif || '',
+    sellerPhone: doc.sellerPhone || '',
+    sellerEmail: doc.sellerEmail || '',
+    sellerAddress: doc.sellerAddress || '',
+    supplierId: doc.supplierId || '',
+    costCompra: Number(doc.costCompra) || 0,
+    costTransporte: Number(doc.costTransporte) || 0,
+    costGestoria: Number(doc.costGestoria) || 0,
+    costDocumentacion: Number(doc.costDocumentacion) || 0,
+    costDescontaminacion: Number(doc.costDescontaminacion) || 0,
+    costOtros: Number(doc.costOtros) || 0,
+    costOtrosDetalle: doc.costOtrosDetalle || '',
+    costTotal: Number(doc.costTotal) || 0,
+    paymentMethod: doc.paymentMethod || 'transferencia',
+    paymentReference: doc.paymentReference || '',
+    paymentDate: doc.paymentDate || '',
+    paymentStatus: doc.paymentStatus || 'pendiente',
+    paymentNotes: doc.paymentNotes || '',
+    status: doc.status || 'borrador',
+    statusHistory: Array.isArray(doc.statusHistory) ? doc.statusHistory : [],
+    approvedBy: doc.approvedBy || '',
+    approvedAt: doc.approvedAt || '',
+    linkedDocumentIds: Array.isArray(doc.linkedDocumentIds) ? doc.linkedDocumentIds : [],
+    linkedInvoiceIds: Array.isArray(doc.linkedInvoiceIds) ? doc.linkedInvoiceIds : [],
+    hasRequiredDocs: Boolean(doc.hasRequiredDocs),
+    requiredDocsChecklist: Array.isArray(doc.requiredDocsChecklist) ? doc.requiredDocsChecklist : [],
+    ocrData: doc.ocrData || null,
+    acquisitionDate: doc.acquisitionDate || '',
+    receptionDate: doc.receptionDate || '',
+    closedAt: doc.closedAt || '',
+    notes: doc.notes || '',
+    internalNotes: doc.internalNotes || '',
+    createdBy: doc.createdBy || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listVehicleAcquisitionsByUser(req, userId) {
+  await ensureDatabase(req, VEHICLES_DB);
+  const docs = await getAllDocuments(req, VEHICLES_DB);
+  return docs
+    .filter((d) => d?.type === 'vehicle_acquisition' && !d?.deletedAt && (!userId || d?.user_id === userId))
+    .sort((a, b) => String(b.acquisitionDate || b.createdAt || '').localeCompare(String(a.acquisitionDate || a.createdAt || '')));
+}

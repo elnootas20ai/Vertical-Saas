@@ -1,0 +1,51 @@
+# Entorno y secretos — NUNCA versionar
+.env
+.env.*
+!.env.example
+
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Build / dist
+dist/
+build/
+.vite/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Cobertura y tests
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Cache
+.eslintcache
+.cache/
+.parcel-cache/
+
+# Plugin data (agent persistence)
+.plugin-data/
+
+# Payment gateway keys (secrets)
+.gateway-keys.json

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INVENTARIO - Módulo Equipo | UDAR EDGE</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 20px auto; padding: 20px; background: #f5f5f5; }
+        .container { background: white; padding: 40px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; border-bottom: 2px solid #ecf0f1; padding-bottom: 8px; }
+        h3 { color: #7f8c8d; margin-top: 20px; }
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 10px; font-size: 0.85em; margin: 0 5px; }
+        .base { background: #d4edda; color: #155724; }
+        .flag { background: #fff3cd; color: #856404; }
+        .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 10px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: bold; }
+        ul { line-height: 1.8; }
+        .print-btn { position: fixed; bottom: 20px; right: 20px; background: #3498db; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        @media print { .print-btn { display: none; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH</h1>
+        <p><strong>UDAR EDGE | Versión 1.0 | 4 Febrero 2026</strong></p>
+        <p><em>Sistema multiempresa, multivertical, multipaís</em></p>
+        
+        <hr>
+        
+        <h2>📊 Resumen Ejecutivo</h2>
+        <table>
+            <tr><th>Métrica</th><th>Valor</th></tr>
+            <tr><td>Funcionalidades inventariadas</td><td>150+</td></tr>
+            <tr><td>Pestañas principales</td><td>6</td></tr>
+            <tr><td>Pestañas panel detalle empleado</td><td>8</td></tr>
+            <tr><td>Permisos del sistema</td><td>71</td></tr>
+            <tr><td>FLAGS del módulo</td><td>9</td></tr>
+        </table>
+
+        <h2>ESTRUCTURA GENERAL DEL MÓDULO</h2>
+        
+        <h3>Navegación por Pestañas (Tabs Principales)</h3>
+        <ol>
+            <li><strong>Equipo</strong> <span class="badge base">BASE</span> - siempre visible</li>
+            <li><strong>Horarios</strong> <span class="badge flag">FLAG: schedules</span></li>
+            <li><strong>Fichajes</strong> <span class="badge base">BASE</span> - siempre visible</li>
+            <li><strong>Vacaciones</strong> <span class="badge flag">FLAG: vacations</span></li>
+            <li><strong>Consumos</strong> <span class="badge flag">FLAG: consumptions</span></li>
+            <li><strong>Gastos</strong> <span class="badge flag">FLAG: expenses</span></li>
+        </ol>
+
+        <h3>Panel Lateral de Detalle de Empleado</h3>
+        <p>Al hacer clic en un empleado, se abre panel lateral con estas pestañas:</p>
+        <ol>
+            <li><strong>Información</strong> - siempre visible</li>
+            <li><strong>Horarios</strong> <span class="badge flag">FLAG: schedules</span></li>
+            <li><strong>Fichajes</strong> - siempre visible</li>
+            <li><strong>Vacaciones</strong> <span class="badge flag">FLAG: vacations</span></li>
+            <li><strong>Documentos</strong> - siempre visible</li>
+            <li><strong>Permisos</strong> - siempre visible</li>
+            <li><strong>Puesto</strong> <span class="badge flag">FLAG: jobdescription</span></li>
+            <li><strong>Historial</strong> <span class="badge flag">FLAG: audit</span></li>
+        </ol>
+
+        <hr>
+
+        <h2>1. PESTAÑA: EQUIPO <span class="badge base">BASE</span></h2>
+
+        <h3>1.1 LISTADO DE TRABAJADORES</h3>
+        
+        <h4>1.1.1 Visualización del Listado</h4>
+        <p><strong>Función:</strong> Mostrar todos los trabajadores de la empresa</p>
+        <p><strong>Rol:</strong> Gerente</p>
+        <p><strong>Funcionalidades:</strong></p>
+        <ul>
+            <li>Contador de trabajadores total</li>
+            <li>Toggle vista: Tarjetas / Tabla</li>
+            <li>Ordenamiento por: Nombre, Email, Rol, Estado</li>
+            <li>Estado visual: Activo / Inactivo</li>
+            <li>Avatar con inicial del nombre</li>
+        </ul>
+
+        <h4>1.1.2 Vista en Tarjetas (Cards)</h4>
+        <p><strong>Información mostrada:</strong></p>
+        <ul>
+            <li>Avatar / Inicial</li>
+            <li>Nombre completo</li>
+            <li>Rol del empleado</li>
+            <li>Email y Estado</li>
+            <li>Botones: "Enviar mensaje" y "Ver perfil completo"</li>
+        </ul>
+
+        <h4>1.1.3 Vista en Tabla</h4>
+        <p><strong>Columnas:</strong> Trabajador, Email, Rol, Estado, Acciones</p>
+
+        <h4>1.1.4 Añadir Nuevo Empleado</h4>
+        <p><strong>Campos del formulario:</strong></p>
+        <ul>
+            <li><strong>Datos Personales:</strong> Nombre, Email, DNI, Fecha nacimiento, Dirección, Teléfono, Contacto emergencia</li>
+            <li><strong>Datos Laborales:</strong> Tipo contrato, Jornada, Horas semanales, Salario, Centro trabajo, Fecha inicio, Convenio</li>
+            <li><strong>Datos Administrativos (España):</strong> Nº Seguridad Social, Código SEPE, Grupo cotización, Mutua, CCC empresa, % IRPF</li>
+        </ul>
+
+        <div class="warning">
+            <strong>⚠ DECISIONES PENDIENTES:</strong>
+            <ul>
+                <li>¿Enviar invitación automática?</li>
+                <li>¿Iniciar onboarding automático?</li>
+                <li>¿Asignar permisos por defecto según rol?</li>
+            </ul>
+        </div>
+
+        <h3>1.2 PANEL DE DETALLE DEL EMPLEADO</h3>
+
+        <h4>1.2.1 Pestaña: INFORMACIÓN</h4>
+        <p><strong>Secciones:</strong></p>
+        <ul>
+            <li><strong>Datos Personales:</strong> DNI, Fecha nacimiento, Dirección, Email, IBAN, Contacto emergencia</li>
+            <li><strong>Datos Laborales:</strong> Tipo contrato, Jornada, Horas semanales, Salario, Centro trabajo, Estado</li>
+            <li><strong>Datos Administrativos:</strong> Seguridad Social, SEPE, Grupo cotización, Mutua, % IRPF</li>
+            <li><strong>Badge de Estado:</strong> Activo / Inactivo / Pendiente / Invitado</li>
+        </ul>
+
+        <h4>1.2.2 Pestaña: HORARIOS <span class="badge flag">FLAG: schedules</span></h4>
+        <ul>
+            <li>Visualización de horario semanal asignado</li>
+            <li>Edición de horario individual</li>
+            <li>Historial de cambios de horario</li>
+        </ul>
+
+        <h4>1.2.3 Pestaña: FICHAJES</h4>
+        <ul>
+            <li><strong>KPIs:</strong> Fichajes totales, % Puntualidad, Incidencias, Horas trabajadas</li>
+            <li>Solicitud de ajuste de fichaje (Trabajador)</li>
+            <li>Ajuste manual de fichaje (Gerente)</li>
+            <li>Exportación de fichajes (Excel, CSV, PDF)</li>
+        </ul>
+
+        <h4>1.2.4 Pestaña: VACACIONES <span class="badge flag">FLAG: vacations</span></h4>
+        <ul>
+            <li><strong>Balance:</strong> Días totales, disfrutados, pendientes, solicitados</li>
+            <li>Calendario visual con color coding</li>
+            <li>Solicitar vacaciones (Trabajador)</li>
+            <li>Proponer vacaciones (Gerente)</li>
+            <li>Asignar vacaciones directamente (Gerente)</li>
+            <li>Aprobar/Rechazar solicitudes</li>
+        </ul>
+
+        <h4>1.2.5 Pestaña: DOCUMENTOS</h4>
+        <p><strong>Tipos de documentos:</strong></p>
+        <ul>
+            <li>Contrato laboral (obligatorio)</li>
+            <li>DNI/Pasaporte (obligatorio)</li>
+            <li>Títulos académicos, Certificados formación</li>
+            <li>Nóminas, Partes IT, Certificados médicos</li>
+        </ul>
+        <p><strong>Funcionalidades:</strong> Subir, descargar, previsualizar, eliminar, filtrar por tipo</p>
+
+        <h4>1.2.6 Pestaña: PERMISOS</h4>
+        <p><strong>Sistema de permisos:</strong></p>
+        <ul>
+            <li>Arquitectura fija: Permisos solo en roles</li>
+            <li>Usuarios heredan permisos del rol</li>
+            <li>4 niveles jerárquicos (N1-N4)</li>
+            <li>71 permisos en 6 módulos</li>
+        </ul>
+
+        <h4>1.2.7 Pestaña: PUESTO <span class="badge flag">FLAG: jobdescription</span></h4>
+        <p><strong>Información:</strong> Nombre puesto, Departamento, Reporta a, Supervisa a, Misión, Funciones, Competencias, Formación, Experiencia</p>
+
+        <h4>1.2.8 Pestaña: HISTORIAL <span class="badge flag">FLAG: audit</span></h4>
+        <p><strong>Eventos registrados:</strong> Cambios datos personales/laborales/administrativos, Cambios rol/permisos, Ajustes fichajes, Vacaciones, Documentos, Horarios</p>
+
+        <hr>
+
+        <h2>2. PESTAÑA: HORARIOS <span class="badge flag">FLAG: schedules</span></h2>
+        
+        <h3>2.1 VISTA GENERAL DE PLANIFICACIÓN HORARIA</h3>
+        <ul>
+            <li>Calendario mensual de horarios</li>
+            <li>Gestión de turnos</li>
+            <li>Plantillas de horario semanal</li>
+            <li>Asignación masiva de horarios</li>
+            <li>Copiar semana anterior</li>
+            <li>Alertas: Falta personal, Solapamiento, Exceso horas, Sin horario, Conflicto vacaciones, Descansos insuficientes</li>
+        </ul>
+
+        <hr>
+
+        <h2>3. PESTAÑA: FICHAJES <span class="badge base">BASE</span></h2>
+        
+        <h3>3.1 VISTA GENERAL DE FICHAJES</h3>
+        <p><strong>KPIs:</strong></p>
+        <ul>
+            <li>Fichados hoy (número y %)</li>
+            <li>Puntualidad (%)</li>
+            <li>Incidencias</li>
+            <li>Horas trabajadas hoy</li>
+            <li>Empleados activos ahora</li>
+        </ul>
+
+        <h3>3.2 CONFIGURACIÓN</h3>
+        <ul>
+            <li>Geolocalización</li>
+            <li>Dispositivos permitidos (móvil, tablet, web)</li>
+            <li>Horarios de fichaje (anticipación máxima, retraso máximo, ventana de salida)</li>
+        </ul>
+
+        <h3>3.3 FICHAJE MÓVIL (Trabajador)</h3>
+        <ul>
+            <li>Fichar entrada</li>
+            <li>Fichar salida</li>
+            <li>Olvidé fichar</li>
+        </ul>
+
+        <hr>
+
+        <h2>4. PESTAÑA: VACACIONES <span class="badge flag">FLAG: vacations</span></h2>
+        
+        <h3>4.1 VISTA GENERAL</h3>
+        <ul>
+            <li>Vista por centros de trabajo</li>
+            <li>Tarjetas resumen: Total días mes, Solicitudes pendientes, Total año</li>
+            <li>Calendario mensual con código de colores</li>
+            <li>Proponer/Asignar vacaciones</li>
+            <li>Modal solicitudes pendientes</li>
+        </ul>
+
+        <h3>4.2 CONFIGURACIÓN</h3>
+        <ul>
+            <li>Días por año según convenio</li>
+            <li>Períodos bloqueados</li>
+            <li>Anticipación mínima</li>
+        </ul>
+
+        <hr>
+
+        <h2>5. PESTAÑA: CONSUMOS <span class="badge flag">FLAG: consumptions</span></h2>
+        
+        <p><strong>Tarjetas resumen:</strong> Total este mes, Aprobaciones pendientes, Límites excedidos</p>
+        <p><strong>Gestión:</strong> Registrar consumo, Aprobar/Rechazar</p>
+        <p><strong>Configuración:</strong> Límites por empleado, Categorías (Comida, Bebidas, Snacks, Material, Otros)</p>
+
+        <hr>
+
+        <h2>6. PESTAÑA: GASTOS <span class="badge flag">FLAG: expenses</span></h2>
+        
+        <p><strong>Tarjetas resumen:</strong> Total gastos, Aprobaciones pendientes, Límites excedidos</p>
+        <p><strong>Gestión:</strong> Subir gasto (Trabajador), Aprobar/Rechazar, Solicitar más información</p>
+        <p><strong>Categorías:</strong> Transporte, Alojamiento, Manutención, Material, Otros</p>
+        <p><strong>Configuración:</strong> Límites, Categorías, Políticas, Integración nóminas</p>
+
+        <hr>
+
+        <h2>7. FUNCIONALIDADES ADICIONALES</h2>
+
+        <h3>7.1 SISTEMA DE ONBOARDING <span class="badge flag">FLAG: onboarding</span></h3>
+        <p><strong>Estados:</strong> Invitado, Pendiente datos, Pendiente gestoría, Activo, Inactivo</p>
+        <p><strong>Checklist:</strong> 12 tareas (Datos completos, Documentos, Permisos, Horario, Acceso app, etc.)</p>
+
+        <h3>7.2 INTEGRACIÓN GESTORÍA <span class="badge flag">FLAG: gestoria</span></h3>
+        <p><strong>Notificaciones:</strong> Alta/Baja empleado, Cambios administrativos, Cambios contractuales, IT</p>
+        <p><strong>Exportación:</strong> Empleados activos, Horas trabajadas, Horas extra, Gastos, Ausencias, Cambios</p>
+
+        <h3>7.3 MULTICENTRO <span class="badge flag">FLAG: multicenter</span></h3>
+        <p><strong>Gestión centros:</strong> Nombre, Dirección, Coordenadas, Color, Icono, Empleados, Estado</p>
+
+        <h3>7.4 COMUNICACIONES</h3>
+        <ul>
+            <li>Chat con empleado</li>
+            <li>Notificaciones: Push, Email, Badge, Panel</li>
+        </ul>
+
+        <hr>
+
+        <h2>8. MÓDULO DE INFORMES - EQUIPO</h2>
+        
+        <ul>
+            <li><strong>Informe Fichajes:</strong> KPIs, Evolución, Detalle por empleado, Alertas, Insights</li>
+            <li><strong>Informe Horas Trabajadas</strong></li>
+            <li><strong>Informe Asistencia y Absentismo</strong></li>
+            <li><strong>Informe Consumos Internos</strong></li>
+        </ul>
+
+        <hr>
+
+        <h2>9. SISTEMA DE PERMISOS (71 permisos)</h2>
+
+        <table>
+            <tr><th>Módulo</th><th>Permisos</th></tr>
+            <tr><td>Negocio / F1</td><td>11 permisos</td></tr>
+            <tr><td>Clientes</td><td>7 permisos</td></tr>
+            <tr><td>Almacén / Proveedores</td><td>10 permisos</td></tr>
+            <tr><td>Facturación / Contabilidad</td><td>10 permisos</td></tr>
+            <tr><td>Informes</td><td>7 permisos</td></tr>
+            <tr><td>RRHH / Equipo</td><td>32 permisos</td></tr>
+        </table>
+
+        <hr>
+
+        <h2>10. RESUMEN DE DEPENDENCIAS</h2>
+
+        <h3>Dependencias de Módulos</h3>
+        <ul>
+            <li><strong>RRHH / Trabajador:</strong> Datos empleados, permisos, roles</li>
+            <li><strong>Fichajes:</strong> Registro entradas/salidas, validación</li>
+            <li><strong>Documentación:</strong> Almacenamiento documentos, onboarding</li>
+            <li><strong>Facturación / Contabilidad:</strong> Gastos</li>
+            <li><strong>Informes:</strong> KPIs y métricas</li>
+        </ul>
+
+        <h3>Dependencias de País 🌍</h3>
+        <p><strong>España:</strong> Seguridad Social, CCC, SEPE, Convenios, Mutua</p>
+        <p><strong>Otros países:</strong> Identificación fiscal, Sistema seguridad social local, Convenios locales, Retenciones</p>
+
+        <h3>DECISIONES PENDIENTES CRÍTICAS</h3>
+        <div class="warning">
+            <ol>
+                <li><strong>Onboarding:</strong> ¿Automático? ¿Obligatorio?</li>
+                <li><strong>Fichajes:</strong> Límites ajustes, Notificaciones, Bloqueos</li>
+                <li><strong>Horarios:</strong> Horas extra, Cambios automáticos</li>
+                <li><strong>Vacaciones:</strong> Bloqueos capacidad, Forzar sin días</li>
+                <li><strong>Consumos/Gastos:</strong> Justificantes, Límites, Integraciones</li>
+                <li><strong>Permisos:</strong> Autorizaciones adicionales</li>
+                <li><strong>Gestoría:</strong> API directa, Formato A3</li>
+                <li><strong>Gamificación:</strong> Rankings, Premios</li>
+            </ol>
+        </div>
+
+        <h3>Configuraciones Previas Necesarias</h3>
+        <ol>
+            <li>Empresa creada y seleccionada</li>
+            <li>Sistema de permisos configurado</li>
+            <li>FLAGS RRHH activadas</li>
+            <li>Estructura organizativa</li>
+            <li>Configuración legal del país</li>
+            <li>Convenios colectivos cargados</li>
+            <li>Almacenamiento cloud</li>
+            <li>Tipos documentos definidos</li>
+            <li>Categorías consumos/gastos</li>
+            <li>Turnos básicos (si schedules)</li>
+            <li>Centros trabajo (si multicenter)</li>
+            <li>Gestoría (si FLAG activo)</li>
+            <li>Configuración geolocalización</li>
+            <li>Dispositivos fichaje</li>
+            <li>Políticas vacaciones</li>
+        </ol>
+
+        <hr>
+
+        <h2>ESTADÍSTICAS FINALES</h2>
+        <table>
+            <tr><td>Total funcionalidades</td><td>150+</td></tr>
+            <tr><td>Pestañas principales</td><td>6</td></tr>
+            <tr><td>Pestañas panel detalle</td><td>8</td></tr>
+            <tr><td>FLAGS totales</td><td>9</td></tr>
+            <tr><td>Dependencias módulos</td><td>5</td></tr>
+            <tr><td>Dependencias país</td><td>20+</td></tr>
+            <tr><td>Decisiones pendientes</td><td>10 áreas</td></tr>
+            <tr><td>Roles</td><td>3 (Gerente, Trabajador, RRHH)</td></tr>
+            <tr><td>Permisos sistema</td><td>71 en 6 módulos (N1-N4)</td></tr>
+        </table>
+
+        <hr>
+
+        <p style="text-align: center; color: #7f8c8d; margin-top: 40px;">
+            <strong>INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH</strong><br>
+            UDAR EDGE | Versión 1.0 | Febrero 2026<br>
+            <em>Documento para revisión técnica y planificación backend</em>
+        </p>
+    </div>
+
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</body>
+</html>

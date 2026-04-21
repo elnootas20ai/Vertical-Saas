@@ -1,0 +1,36 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+@import './dark-mode.css';
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* TipTap WYSIWYG editor */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9ca3af;
+  pointer-events: none;
+  height: 0;
+}
+
+.ProseMirror {
+  word-break: break-word;
+}
+
+.ProseMirror h1 { font-size: 1.5rem; font-weight: 700; margin: 0.75rem 0; }
+.ProseMirror h2 { font-size: 1.25rem; font-weight: 700; margin: 0.6rem 0; }
+.ProseMirror h3 { font-size: 1.1rem; font-weight: 600; margin: 0.5rem 0; }
+.ProseMirror p  { margin: 0.4rem 0; }
+.ProseMirror ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
+.ProseMirror ol { list-style: decimal; padding-left: 1.4rem; margin: 0.4rem 0; }
+.ProseMirror strong { font-weight: 700; }
+.ProseMirror em { font-style: italic; }
+.ProseMirror u { text-decoration: underline; }
+.ProseMirror s { text-decoration: line-through; }

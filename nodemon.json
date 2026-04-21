@@ -1,0 +1,20 @@
+{
+  "watch": [
+    "index.js",
+    "index-huella.js",
+    "config/",
+    "services/",
+    "routers/",
+    "middleware/",
+    "controllers/",
+    "src/plugin/server/"
+  ],
+  "ext": "js,mjs,json",
+  "ignore": [
+    "src/app/**",
+    ".plugin-data/**",
+    "node_modules/**",
+    "backups/**",
+    "dist/**"
+  ]
+}

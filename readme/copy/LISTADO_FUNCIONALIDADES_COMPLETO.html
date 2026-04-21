@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LISTADO COMPLETO DE FUNCIONALIDADES | Módulo Equipo UDAR EDGE</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        h1 { color: #1a1a1a; font-size: 2.2em; margin-bottom: 10px; border-bottom: 4px solid #2563eb; padding-bottom: 15px; }
+        h2 { color: #2c3e50; font-size: 1.8em; margin-top: 40px; margin-bottom: 20px; background: #ecf0f1; padding: 12px; border-left: 5px solid #3498db; }
+        h3 { color: #34495e; font-size: 1.4em; margin-top: 25px; margin-bottom: 15px; }
+        
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 30px 0; }
+        .stat-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2.5em; font-weight: bold; }
+        .stat-label { font-size: 1em; opacity: 0.95; margin-top: 5px; }
+        
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 0.95em; }
+        th { background: #2c3e50; color: white; padding: 12px; text-align: left; font-weight: 600; position: sticky; top: 0; }
+        td { padding: 10px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+        tr:hover { background: #f8f9fa; }
+        
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.85em; font-weight: 600; margin: 2px; }
+        .base { background: #d4edda; color: #155724; }
+        .flag { background: #fff3cd; color: #856404; }
+        .pending { background: #f8d7da; color: #721c24; }
+        
+        .tab-header { background: #3498db; color: white; padding: 15px; margin-top: 30px; font-size: 1.3em; font-weight: bold; border-radius: 8px 8px 0 0; }
+        
+        .func-id { font-family: 'Courier New', monospace; color: #6c757d; font-size: 0.85em; }
+        .print-btn { position: fixed; bottom: 20px; right: 20px; background: #2563eb; color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.2); z-index: 1000; }
+        .print-btn:hover { background: #1d4ed8; }
+        
+        @media print { 
+            .print-btn { display: none; } 
+            body { background: white; }
+            th { background: #2c3e50 !important; -webkit-print-color-adjust: exact; }
+        }
+        
+        .summary-box { background: #e3f2fd; border-left: 4px solid #2196f3; padding: 15px; margin: 20px 0; }
+        .warning-box { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 LISTADO COMPLETO DE FUNCIONALIDADES</h1>
+        <p style="font-size: 1.2em; color: #6c757d; margin-bottom: 20px;"><strong>Módulo Equipo y RRHH | UDAR EDGE</strong></p>
+        <p><em>Versión 1.0 | 4 Febrero 2026 | Sistema multiempresa, multivertical, multipaís</em></p>
+        
+        <hr style="margin: 30px 0;">
+        
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-number">162</div>
+                <div class="stat-label">Funcionalidades totales</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">6</div>
+                <div class="stat-label">Pestañas principales</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">8</div>
+                <div class="stat-label">Pestañas detalle empleado</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">9</div>
+                <div class="stat-label">FLAGS del módulo</div>
+            </div>
+        </div>
+
+        <div class="summary-box">
+            <h3>📌 Leyenda de clasificación:</h3>
+            <p><span class="badge base">BASE</span> Funcionalidad incluida en plan base, siempre visible</p>
+            <p><span class="badge flag">FLAG</span> Funcionalidad condicionada a flag activo en configuración</p>
+            <p><span class="badge pending">PENDIENTE</span> Decisión de negocio pendiente sobre implementación o comportamiento</p>
+        </div>
+
+        <!-- PESTAÑA 1: EQUIPO -->
+        <div class="tab-header">1️⃣ PESTAÑA: EQUIPO <span class="badge base">BASE</span></div>
+        
+        <h2>1.1 Listado de Trabajadores</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">EQ-001</td>
+                    <td><strong>Visualización del listado de trabajadores</strong></td>
+                    <td>Mostrar todos los trabajadores de la empresa con contador total</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-002</td>
+                    <td><strong>Toggle vista Tarjetas/Tabla</strong></td>
+                    <td>Cambiar entre vista de tarjetas y tabla</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-003</td>
+                    <td><strong>Ordenamiento de listado</strong></td>
+                    <td>Ordenar por: Nombre, Email, Rol, Estado</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-004</td>
+                    <td><strong>Vista en Tarjetas (Cards)</strong></td>
+                    <td>Visualización en formato tarjeta con información resumida y responsive (mobile: 1 col, tablet: 2 cols, desktop: 3 cols)</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-005</td>
+                    <td><strong>Vista en Tabla</strong></td>
+                    <td>Visualización en formato tabla con columnas: Trabajador, Email, Rol, Estado, Acciones</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-006</td>
+                    <td><strong>Click en tarjeta/fila → Abrir panel detalle</strong></td>
+                    <td>Acción de click abre panel lateral con detalle completo del empleado</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-007</td>
+                    <td><strong>Botón "Enviar mensaje"</strong></td>
+                    <td>Abre chat directo con el empleado seleccionado</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-008</td>
+                    <td><strong>Añadir Nuevo Empleado</strong></td>
+                    <td>Modal para crear registro de nuevo trabajador con todos los datos personales, laborales y administrativos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-009</td>
+                    <td><strong>Validación de email único</strong></td>
+                    <td>Sistema valida que el email no exista previamente</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-010</td>
+                    <td><strong>Validación DNI/NIF según país</strong></td>
+                    <td>Validación del formato de identificación según legislación del país</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-011</td>
+                    <td><strong>Invitación automática al crear empleado</strong></td>
+                    <td>Sistema envía invitación automática a email del empleado (si FLAG onboarding activo)</td>
+                    <td><span class="badge flag">FLAG: onboarding</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">EQ-012</td>
+                    <td><strong>Asignar permisos por defecto según rol</strong></td>
+                    <td>Al crear empleado, asignar automáticamente permisos del rol seleccionado</td>
+                    <td><span class="badge base">BASE</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>1.2 Panel de Detalle del Empleado</h2>
+        
+        <h3>1.2.1 Pestaña: INFORMACIÓN <span class="badge base">BASE</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">INFO-001</td>
+                    <td><strong>Visualizar Datos Personales</strong></td>
+                    <td>Mostrar DNI, fecha nacimiento, dirección, email, IBAN, contacto emergencia</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-002</td>
+                    <td><strong>Editar Datos Personales</strong></td>
+                    <td>Botón que abre modal contextual para editar solo datos personales</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-003</td>
+                    <td><strong>Validación IBAN</strong></td>
+                    <td>Validar formato IBAN según país al editar datos bancarios</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-004</td>
+                    <td><strong>Alerta cambio IBAN</strong></td>
+                    <td>Notificar a gestoría/nóminas si se cambia el IBAN</td>
+                    <td><span class="badge flag">FLAG: gestoria</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-005</td>
+                    <td><strong>Visualizar Datos Laborales</strong></td>
+                    <td>Mostrar tipo contrato, jornada, horas, salario, centro, convenio, estado</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-006</td>
+                    <td><strong>Editar Datos Laborales</strong></td>
+                    <td>Modal contextual para modificar datos contractuales</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-007</td>
+                    <td><strong>Marcar empleado como Inactivo</strong></td>
+                    <td>Opción especial en edición laboral para dar de baja + retirar permisos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-008</td>
+                    <td><strong>Validación salario mínimo</strong></td>
+                    <td>Salario debe ser >= salario mínimo del país</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-009</td>
+                    <td><strong>Validación horas semanales máximas</strong></td>
+                    <td>Horas no pueden exceder máximo legal del país</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-010</td>
+                    <td><strong>Visualizar Datos Administrativos</strong></td>
+                    <td>Mostrar Nº SS, SEPE, grupo cotización, mutua, CCC, % IRPF</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-011</td>
+                    <td><strong>Editar Datos Administrativos</strong></td>
+                    <td>Modal contextual para modificar datos fiscales y seguridad social</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-012</td>
+                    <td><strong>Notificar cambios a gestoría</strong></td>
+                    <td>Cambios en datos administrativos notifican automáticamente a gestoría</td>
+                    <td><span class="badge flag">FLAG: gestoria</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-013</td>
+                    <td><strong>Badge de Estado del empleado</strong></td>
+                    <td>Indicador visual: Activo, Inactivo, Pendiente, Invitado</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Todos</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INFO-014</td>
+                    <td><strong>Registro en historial (audit)</strong></td>
+                    <td>Todos los cambios se registran en historial si FLAG audit activo</td>
+                    <td><span class="badge flag">FLAG: audit</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.2 Pestaña: HORARIOS <span class="badge flag">FLAG: schedules</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">HOR-001</td>
+                    <td><strong>Visualizar horario semanal asignado</strong></td>
+                    <td>Vista calendario con turnos por día, horas totales, días libres</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-002</td>
+                    <td><strong>Color coding por tipo de turno</strong></td>
+                    <td>Cada turno tiene color identificativo en calendario</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Todos</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-003</td>
+                    <td><strong>Navegación mes a mes</strong></td>
+                    <td>Botones para avanzar/retroceder meses en vista horario</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Todos</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-004</td>
+                    <td><strong>Editar horario individual</strong></td>
+                    <td>Gerente puede modificar horario de un trabajador específico</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-005</td>
+                    <td><strong>Asignar turno por día</strong></td>
+                    <td>Seleccionar día y asignar turno desde lista de turnos creados</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-006</td>
+                    <td><strong>Copiar semana anterior</strong></td>
+                    <td>Función para replicar horario de semana anterior</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-007</td>
+                    <td><strong>Aplicar plantilla predefinida</strong></td>
+                    <td>Asignar plantilla de horario semanal guardada previamente</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-008</td>
+                    <td><strong>Validación no solapar vacaciones</strong></td>
+                    <td>Sistema verifica que horario no solape con vacaciones aprobadas</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-009</td>
+                    <td><strong>Validación descansos mínimos legales</strong></td>
+                    <td>Sistema valida cumplimiento de descansos según legislación país</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-010</td>
+                    <td><strong>Notificar cambio al trabajador</strong></td>
+                    <td>Empleado recibe notificación de cambios en su horario</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-011</td>
+                    <td><strong>Alerta cambio próximo (< 48h)</strong></td>
+                    <td>Alerta especial si se modifica horario con menos de 48h anticipación</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HOR-012</td>
+                    <td><strong>Historial de cambios de horario</strong></td>
+                    <td>Registro de modificaciones: fecha, usuario, horario anterior/nuevo, razón</td>
+                    <td><span class="badge flag">FLAG: schedules + audit</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.3 Pestaña: FICHAJES <span class="badge base">BASE</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">FIC-001</td>
+                    <td><strong>Resumen fichajes del empleado</strong></td>
+                    <td>KPIs: Fichajes totales mes, % Puntualidad, Incidencias, Horas trabajadas vs esperadas</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-002</td>
+                    <td><strong>Lista cronológica de fichajes</strong></td>
+                    <td>Listado con entrada/salida por día, estado, puntualidad, dispositivo, geolocalización</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-003</td>
+                    <td><strong>Filtros de fichajes</strong></td>
+                    <td>Filtrar por: rango fechas, estado (completo/activo/sin fichar), puntualidad</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-004</td>
+                    <td><strong>Solicitud de ajuste de fichaje (Trabajador)</strong></td>
+                    <td>Trabajador puede solicitar corrección de fichaje erróneo con justificación</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-005</td>
+                    <td><strong>Aprobar/Rechazar solicitud ajuste</strong></td>
+                    <td>Gerente revisa y aprueba o rechaza solicitudes de ajuste</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-006</td>
+                    <td><strong>Ajuste manual de fichaje (Gerente)</strong></td>
+                    <td>Gerente modifica fichaje directamente añadiendo comentario obligatorio</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-007</td>
+                    <td><strong>Exportación de fichajes</strong></td>
+                    <td>Descargar registros en Excel, CSV o PDF con filtros personalizables</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-008</td>
+                    <td><strong>Validación límite días atrás para solicitar</strong></td>
+                    <td>Sistema valida que no se soliciten ajustes más allá de X días</td>
+                    <td><span class="badge base">BASE</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FIC-009</td>
+                    <td><strong>Notificar al trabajador ajuste manual</strong></td>
+                    <td>Trabajador recibe notificación cuando gerente modifica su fichaje</td>
+                    <td><span class="badge base">BASE</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.4 Pestaña: VACACIONES <span class="badge flag">FLAG: vacations</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">VAC-001</td>
+                    <td><strong>Balance de vacaciones</strong></td>
+                    <td>Mostrar días totales anuales, disfrutados, pendientes, solicitados</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-002</td>
+                    <td><strong>Cálculo automático días según convenio</strong></td>
+                    <td>Sistema calcula días según convenio país + proporcional según fecha alta</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-003</td>
+                    <td><strong>Calendario visual de vacaciones</strong></td>
+                    <td>Vista mensual con color coding: verde (aprobadas), naranja (pendientes), rojo (rechazadas), azul (propuestas)</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-004</td>
+                    <td><strong>Click en día → Detalle solicitud</strong></td>
+                    <td>Mostrar modal con información completa de la solicitud</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-005</td>
+                    <td><strong>Solicitar vacaciones (Trabajador)</strong></td>
+                    <td>Proceso: seleccionar rango, sistema calcula días laborables, añadir comentario, enviar</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-006</td>
+                    <td><strong>Validación días disponibles suficientes</strong></td>
+                    <td>Sistema verifica que empleado tenga días disponibles antes de permitir solicitud</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-007</td>
+                    <td><strong>Validación no solapar vacaciones</strong></td>
+                    <td>Sistema valida que no solapen con otras vacaciones ya aprobadas</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-008</td>
+                    <td><strong>Proponer vacaciones (Gerente)</strong></td>
+                    <td>Gerente propone fechas al trabajador que puede aceptar/rechazar/contraproponer</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-009</td>
+                    <td><strong>Asignar vacaciones directamente (Gerente)</strong></td>
+                    <td>Gerente asigna vacaciones sin solicitud previa, marcando como aprobadas directamente</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-010</td>
+                    <td><strong>Aprobar solicitudes</strong></td>
+                    <td>Gerente aprueba solicitudes pendientes con un click + confirmación</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-011</td>
+                    <td><strong>Rechazar solicitudes</strong></td>
+                    <td>Gerente rechaza solicitud añadiendo motivo obligatorio</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-012</td>
+                    <td><strong>Notificaciones automáticas</strong></td>
+                    <td>Sistema notifica: nueva solicitud (a gerente), aprobación/rechazo (a trabajador)</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VAC-013</td>
+                    <td><strong>Permitir forzar sin días disponibles</strong></td>
+                    <td>Gerente puede asignar vacaciones aunque empleado no tenga días</td>
+                    <td><span class="badge flag">FLAG: vacations</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.5 Pestaña: DOCUMENTOS <span class="badge base">BASE</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">DOC-001</td>
+                    <td><strong>Listado de documentos del empleado</strong></td>
+                    <td>Repositorio con tipos: contrato, DNI, títulos, nóminas, IT, certificados, otros</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-002</td>
+                    <td><strong>Información por documento</strong></td>
+                    <td>Mostrar: nombre, tipo, fecha subida, subido por, tamaño, estado (pendiente/aprobado/rechazado)</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-003</td>
+                    <td><strong>Descargar documento</strong></td>
+                    <td>Botón para descargar archivo a equipo local</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-004</td>
+                    <td><strong>Previsualizar documento</strong></td>
+                    <td>Visor en modal si formato compatible (PDF, imágenes)</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-005</td>
+                    <td><strong>Eliminar documento</strong></td>
+                    <td>Solo gerente puede eliminar documentos con confirmación</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-006</td>
+                    <td><strong>Filtrar por tipo de documento</strong></td>
+                    <td>Dropdown para filtrar lista por categoría de documento</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-007</td>
+                    <td><strong>Subir nuevo documento</strong></td>
+                    <td>Modal para arrastrar/seleccionar archivo, tipo, descripción</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-008</td>
+                    <td><strong>Validación formatos permitidos</strong></td>
+                    <td>Solo PDF, JPG, PNG, DOCX permitidos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-009</td>
+                    <td><strong>Validación tamaño máximo</strong></td>
+                    <td>Archivo no puede superar tamaño máximo configurado</td>
+                    <td><span class="badge base">BASE</span> <span class="badge pending">DECISIÓN PENDIENTE: ¿10MB? ¿20MB?</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-010</td>
+                    <td><strong>Checklist documentación obligatoria</strong></td>
+                    <td>Estado: Completo, Incompleto, Rechazado según documentos legales requeridos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-011</td>
+                    <td><strong>Alerta documentación incompleta</strong></td>
+                    <td>Badge/indicador en listado de empleados si falta documentación</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">DOC-012</td>
+                    <td><strong>Marca completado en onboarding</strong></td>
+                    <td>Si documento obligatorio subido, marca tarea como completada en checklist</td>
+                    <td><span class="badge flag">FLAG: onboarding</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.6 Pestaña: PERMISOS <span class="badge base">BASE</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">PER-001</td>
+                    <td><strong>Visualización permisos asignados</strong></td>
+                    <td>Mostrar rol y todos los permisos heredados organizados por módulo</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-002</td>
+                    <td><strong>Vista en árbol de permisos</strong></td>
+                    <td>Estructura jerárquica expandible de 71 permisos en 6 módulos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-003</td>
+                    <td><strong>Búsqueda/filtro de permisos</strong></td>
+                    <td>Campo de búsqueda para localizar permisos específicos</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-004</td>
+                    <td><strong>Indicador nivel requerido (N1-N4)</strong></td>
+                    <td>Badge visual indicando nivel jerárquico de cada permiso</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-005</td>
+                    <td><strong>Cambio de rol del empleado</strong></td>
+                    <td>Modal para seleccionar nuevo rol de lista predefinida</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-006</td>
+                    <td><strong>Comparativa de permisos al cambiar rol</strong></td>
+                    <td>Mostrar qué permisos se añadirán (verde), quitarán (rojo), mantendrán (gris)</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-007</td>
+                    <td><strong>Notificar cambio de permisos a empleado</strong></td>
+                    <td>Sistema envía notificación al trabajador informando del cambio</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PER-008</td>
+                    <td><strong>Registrar cambio en historial</strong></td>
+                    <td>Cambios de rol/permisos quedan registrados en auditoría</td>
+                    <td><span class="badge flag">FLAG: audit</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.7 Pestaña: PUESTO <span class="badge flag">FLAG: jobdescription</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">PUESTO-001</td>
+                    <td><strong>Descripción del puesto de trabajo</strong></td>
+                    <td>Definir: nombre puesto, departamento, reporta a, supervisa a, misión, funciones, competencias, formación, experiencia</td>
+                    <td><span class="badge flag">FLAG: jobdescription</span></td>
+                    <td>Gerente (editar), Trabajador (ver)</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PUESTO-002</td>
+                    <td><strong>Editar descripción puesto</strong></td>
+                    <td>Modal para modificar todos los campos de descripción</td>
+                    <td><span class="badge flag">FLAG: jobdescription</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">PUESTO-003</td>
+                    <td><strong>Objetivos del puesto</strong></td>
+                    <td>Definir objetivos específicos asociados al puesto</td>
+                    <td><span class="badge flag">FLAG: jobdescription</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>1.2.8 Pestaña: HISTORIAL <span class="badge flag">FLAG: audit</span></h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">HIST-001</td>
+                    <td><strong>Registro de cambios del empleado</strong></td>
+                    <td>Listado cronológico de todos los cambios: datos personales/laborales/administrativos, rol, permisos, fichajes, vacaciones, documentos, horarios</td>
+                    <td><span class="badge flag">FLAG: audit</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HIST-002</td>
+                    <td><strong>Información por registro</strong></td>
+                    <td>Fecha/hora, usuario que hizo cambio, qué cambió, valor anterior/nuevo</td>
+                    <td><span class="badge flag">FLAG: audit</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HIST-003</td>
+                    <td><strong>Filtros de historial</strong></td>
+                    <td>Filtrar por: tipo de cambio, rango de fechas, usuario que hizo el cambio</td>
+                    <td><span class="badge flag">FLAG: audit</span></td>
+                    <td>Gerente, RRHH</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- PESTAÑA 2: HORARIOS -->
+        <div class="tab-header">2️⃣ PESTAÑA: HORARIOS <span class="badge flag">FLAG: schedules</span></div>
+        
+        <h2>2.1 Vista General de Planificación Horaria</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">HORGEN-001</td>
+                    <td><strong>Calendario mensual de horarios</strong></td>
+                    <td>Vista calendario mostrando horarios de todos los empleados del mes</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-002</td>
+                    <td><strong>Vista por semanas</strong></td>
+                    <td>Alternar entre vista mensual y semanal</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-003</td>
+                    <td><strong>Filtro por centro de trabajo</strong></td>
+                    <td>Si multicenter activo, filtrar horarios por centro</td>
+                    <td><span class="badge flag">FLAG: schedules + multicenter</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-004</td>
+                    <td><strong>Gestión de turnos</strong></td>
+                    <td>CRUD de turnos: nombre, hora inicio/fin, descanso, color, centro</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-005</td>
+                    <td><strong>Plantillas de horario semanal</strong></td>
+                    <td>Crear y guardar plantillas reutilizables de horarios semanales</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-006</td>
+                    <td><strong>Asignación masiva de horarios</strong></td>
+                    <td>Asignar mismo horario/turno a múltiples empleados simultáneamente</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">HORGEN-007</td>
+                    <td><strong>Alertas de planificación</strong></td>
+                    <td>Sistema genera alertas: falta personal, solapamiento, exceso horas, sin horario, conflicto vacaciones, descansos insuficientes</td>
+                    <td><span class="badge flag">FLAG: schedules</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- PESTAÑA 3: FICHAJES -->
+        <div class="tab-header">3️⃣ PESTAÑA: FICHAJES <span class="badge base">BASE</span></div>
+        
+        <h2>3.1 Vista General de Fichajes</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">FICGEN-001</td>
+                    <td><strong>KPIs de fichajes</strong></td>
+                    <td>Tarjetas resumen: Fichados hoy (nº y %), Puntualidad (%), Incidencias, Horas trabajadas hoy, Empleados activos ahora</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICGEN-002</td>
+                    <td><strong>Tarjetas desplegables de resumen</strong></td>
+                    <td>3 tarjetas clickeables: Fichajes de Hoy, Puntualidad, Incidencias</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICGEN-003</td>
+                    <td><strong>Ranking de puntualidad</strong></td>
+                    <td>Listado ordenado de empleados por % puntualidad con medallas top 3</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICGEN-004</td>
+                    <td><strong>Configuración de geolocalización</strong></td>
+                    <td>Activar/desactivar geolocalización, radio permitido, centros autorizados</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICGEN-005</td>
+                    <td><strong>Configuración dispositivos permitidos</strong></td>
+                    <td>Seleccionar: móvil, tablet, web, autenticación biométrica</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICGEN-006</td>
+                    <td><strong>Configuración horarios de fichaje</strong></td>
+                    <td>Definir: anticipación máxima, retraso máximo, ventana de salida</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>3.2 Fichaje desde Aplicación Móvil (Trabajador)</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">FICMOV-001</td>
+                    <td><strong>Fichar entrada</strong></td>
+                    <td>Botón en app móvil para registrar hora de entrada + geolocalización</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICMOV-002</td>
+                    <td><strong>Fichar salida</strong></td>
+                    <td>Botón para registrar hora de salida + geolocalización</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICMOV-003</td>
+                    <td><strong>Olvidé fichar</strong></td>
+                    <td>Opción para reportar olvido de fichaje y solicitar ajuste</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICMOV-004</td>
+                    <td><strong>Validación geolocalización</strong></td>
+                    <td>Sistema valida que trabajador esté en ubicación autorizada</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">FICMOV-005</td>
+                    <td><strong>Validación ventana horaria</strong></td>
+                    <td>Sistema valida fichaje dentro de ventana permitida</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- PESTAÑA 4: VACACIONES -->
+        <div class="tab-header">4️⃣ PESTAÑA: VACACIONES <span class="badge flag">FLAG: vacations</span></div>
+        
+        <h2>4.1 Vista General de Vacaciones</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">VACGEN-001</td>
+                    <td><strong>Vista por centros de trabajo</strong></td>
+                    <td>Si multicenter, filtrar vista de vacaciones por centro</td>
+                    <td><span class="badge flag">FLAG: vacations + multicenter</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACGEN-002</td>
+                    <td><strong>Tarjetas de resumen</strong></td>
+                    <td>3 tarjetas: Total días mes, Solicitudes pendientes, Total año</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACGEN-003</td>
+                    <td><strong>Calendario mensual general vacaciones</strong></td>
+                    <td>Vista calendario mostrando vacaciones de todos los empleados</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACGEN-004</td>
+                    <td><strong>Botón: Proponer Vacaciones</strong></td>
+                    <td>Acceso rápido a modal para proponer fechas a empleado</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACGEN-005</td>
+                    <td><strong>Botón: Asignar Vacaciones</strong></td>
+                    <td>Acceso rápido a modal para asignar directamente</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACGEN-006</td>
+                    <td><strong>Modal solicitudes pendientes</strong></td>
+                    <td>Lista completa de solicitudes pendientes con opción aprobar/rechazar</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>4.2 Configuración de Vacaciones</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">VACCONF-001</td>
+                    <td><strong>Configurar días por año</strong></td>
+                    <td>Definir días de vacaciones según convenio y país</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACCONF-002</td>
+                    <td><strong>Configurar períodos bloqueados</strong></td>
+                    <td>Definir fechas en que no se pueden solicitar vacaciones</td>
+                    <td><span class="badge flag">FLAG: vacations</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">VACCONF-003</td>
+                    <td><strong>Configurar anticipación mínima</strong></td>
+                    <td>Días mínimos de anticipación requeridos para solicitar</td>
+                    <td><span class="badge flag">FLAG: vacations</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- PESTAÑA 5: CONSUMOS -->
+        <div class="tab-header">5️⃣ PESTAÑA: CONSUMOS <span class="badge flag">FLAG: consumptions</span></div>
+        
+        <h2>5.1 Vista General y Gestión de Consumos</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">CONS-001</td>
+                    <td><strong>Tarjetas de resumen consumos</strong></td>
+                    <td>3 tarjetas: Total este mes, Aprobaciones pendientes, Límites excedidos</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-002</td>
+                    <td><strong>Listado de consumos del equipo</strong></td>
+                    <td>Tabla con todos los consumos: empleado, fecha, categoría, importe, estado</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-003</td>
+                    <td><strong>Registrar consumo (Trabajador)</strong></td>
+                    <td>Modal para empleado: categoría, cantidad, descripción</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-004</td>
+                    <td><strong>Aprobar consumos</strong></td>
+                    <td>Gerente aprueba consumos pendientes</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-005</td>
+                    <td><strong>Rechazar consumos</strong></td>
+                    <td>Gerente rechaza consumo añadiendo motivo</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-006</td>
+                    <td><strong>Configurar límites por empleado</strong></td>
+                    <td>Definir límite mensual de consumo por trabajador</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-007</td>
+                    <td><strong>Gestionar categorías de consumos</strong></td>
+                    <td>CRUD categorías: Comida, Bebidas, Snacks, Material, Otros</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">CONS-008</td>
+                    <td><strong>Alerta límite excedido</strong></td>
+                    <td>Notificación si empleado supera límite mensual</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- PESTAÑA 6: GASTOS -->
+        <div class="tab-header">6️⃣ PESTAÑA: GASTOS <span class="badge flag">FLAG: expenses</span></div>
+        
+        <h2>6.1 Vista General y Gestión de Gastos</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">GAST-001</td>
+                    <td><strong>Tarjetas de resumen gastos</strong></td>
+                    <td>3 tarjetas: Total gastos, Aprobaciones pendientes, Límites excedidos</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-002</td>
+                    <td><strong>Listado de gastos del equipo</strong></td>
+                    <td>Tabla: empleado, fecha, concepto, categoría, importe, justificante, estado</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-003</td>
+                    <td><strong>Modal detalle de gasto</strong></td>
+                    <td>Click en gasto abre modal con información completa + factura/ticket</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-004</td>
+                    <td><strong>Subir gasto (Trabajador)</strong></td>
+                    <td>Modal: categoría, importe, concepto, justificación, subir factura/ticket</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-005</td>
+                    <td><strong>Aprobar gastos</strong></td>
+                    <td>Gerente aprueba gastos pendientes</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-006</td>
+                    <td><strong>Rechazar gastos</strong></td>
+                    <td>Gerente rechaza gasto añadiendo motivo obligatorio</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-007</td>
+                    <td><strong>Solicitar más información</strong></td>
+                    <td>Gerente puede pedir aclaraciones antes de aprobar/rechazar</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-008</td>
+                    <td><strong>Configurar límites de gastos</strong></td>
+                    <td>Definir límite mensual por empleado o por categoría</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-009</td>
+                    <td><strong>Gestionar categorías de gastos</strong></td>
+                    <td>CRUD categorías: Transporte, Alojamiento, Manutención, Material, Otros</td>
+                    <td><span class="badge flag">FLAG: expenses</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-010</td>
+                    <td><strong>Validación justificante obligatorio</strong></td>
+                    <td>Sistema requiere factura/ticket antes de aprobar</td>
+                    <td><span class="badge flag">FLAG: expenses</span> <span class="badge pending">DECISIÓN PENDIENTE: ¿Obligatorio u opcional?</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GAST-011</td>
+                    <td><strong>Integración con nóminas</strong></td>
+                    <td>Gastos aprobados se integran automáticamente en nómina para reembolso</td>
+                    <td><span class="badge flag">FLAG: expenses</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- FUNCIONALIDADES ADICIONALES -->
+        <div class="tab-header">7️⃣ FUNCIONALIDADES ADICIONALES Y TRANSVERSALES</div>
+        
+        <h2>7.1 Sistema de Onboarding <span class="badge flag">FLAG: onboarding</span></h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">ONB-001</td>
+                    <td><strong>Invitar empleado</strong></td>
+                    <td>Enviar email con enlace de invitación para acceder al sistema</td>
+                    <td><span class="badge flag">FLAG: onboarding</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">ONB-002</td>
+                    <td><strong>Checklist de onboarding</strong></td>
+                    <td>12 tareas: Datos completos, Documentos, Permisos, Horario, Acceso app, etc.</td>
+                    <td><span class="badge flag">FLAG: onboarding</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">ONB-003</td>
+                    <td><strong>Estados de onboarding</strong></td>
+                    <td>Invitado, Pendiente datos, Pendiente gestoría, Activo, Inactivo</td>
+                    <td><span class="badge flag">FLAG: onboarding</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">ONB-004</td>
+                    <td><strong>Portal trabajador onboarding</strong></td>
+                    <td>Interfaz específica para que empleado complete su onboarding</td>
+                    <td><span class="badge flag">FLAG: onboarding</span></td>
+                    <td>Trabajador</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>7.2 Integración con Gestoría <span class="badge flag">FLAG: gestoria</span></h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">GEST-001</td>
+                    <td><strong>Notificaciones automáticas a gestoría</strong></td>
+                    <td>Eventos: Alta/Baja, Cambios administrativos, Cambios contractuales, IT</td>
+                    <td><span class="badge flag">FLAG: gestoria</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GEST-002</td>
+                    <td><strong>Exportación para gestoría</strong></td>
+                    <td>Datos: Empleados activos, Horas, Horas extra, Gastos, Ausencias, Cambios</td>
+                    <td><span class="badge flag">FLAG: gestoria</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">GEST-003</td>
+                    <td><strong>API directa con software gestoría</strong></td>
+                    <td>Integración bidireccional con software gestoría partner</td>
+                    <td><span class="badge flag">FLAG: gestoria</span> <span class="badge pending">DECISIÓN PENDIENTE</span></td>
+                    <td>Sistema</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>7.3 Multicentro <span class="badge flag">FLAG: multicenter</span></h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">MULTI-001</td>
+                    <td><strong>Gestión de centros de trabajo</strong></td>
+                    <td>CRUD centros: Nombre, Dirección, Coordenadas, Color, Icono, Empleados, Estado</td>
+                    <td><span class="badge flag">FLAG: multicenter</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">MULTI-002</td>
+                    <td><strong>Filtros por centro en todos los módulos</strong></td>
+                    <td>Dropdown filtro centro en: equipo, horarios, fichajes, vacaciones, consumos, gastos</td>
+                    <td><span class="badge flag">FLAG: multicenter</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">MULTI-003</td>
+                    <td><strong>Asignar empleado a centro</strong></td>
+                    <td>Campo centro de trabajo en datos laborales de empleado</td>
+                    <td><span class="badge flag">FLAG: multicenter</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>7.4 Comunicaciones</h2>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">COM-001</td>
+                    <td><strong>Chat con empleado</strong></td>
+                    <td>Mensajería directa 1 a 1 entre gerente y trabajador</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente, Trabajador</td>
+                </tr>
+                <tr>
+                    <td class="func-id">COM-002</td>
+                    <td><strong>Notificaciones Push</strong></td>
+                    <td>Notificaciones en app móvil para eventos importantes</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">COM-003</td>
+                    <td><strong>Notificaciones Email</strong></td>
+                    <td>Emails para eventos críticos: invitaciones, aprobaciones, cambios</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">COM-004</td>
+                    <td><strong>Badge notificaciones en app</strong></td>
+                    <td>Contador visual de notificaciones no leídas</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Sistema</td>
+                </tr>
+                <tr>
+                    <td class="func-id">COM-005</td>
+                    <td><strong>Panel de notificaciones</strong></td>
+                    <td>Historial completo de notificaciones recibidas</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Todos</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- MÓDULO DE INFORMES -->
+        <div class="tab-header">8️⃣ MÓDULO DE INFORMES - EQUIPO</div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 5%;">ID</th>
+                    <th style="width: 30%;">Funcionalidad</th>
+                    <th style="width: 40%;">Descripción</th>
+                    <th style="width: 15%;">Clasificación</th>
+                    <th style="width: 10%;">Rol</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="func-id">INF-001</td>
+                    <td><strong>Informe: Fichajes</strong></td>
+                    <td>KPIs, Evolución gráfica, Detalle por empleado, Alertas, Insights (NORMAL/PRO)</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INF-002</td>
+                    <td><strong>Informe: Horas Trabajadas</strong></td>
+                    <td>Horas totales, por empleado, comparativa vs esperadas, horas extra</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INF-003</td>
+                    <td><strong>Informe: Asistencia y Absentismo</strong></td>
+                    <td>% Asistencia, Ausencias, Tipos de ausencia, Tendencias</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INF-004</td>
+                    <td><strong>Informe: Consumos Internos</strong></td>
+                    <td>Total consumos, por categoría, por empleado, evolución</td>
+                    <td><span class="badge flag">FLAG: consumptions</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INF-005</td>
+                    <td><strong>Exportación de informes</strong></td>
+                    <td>Descargar informes en PDF, Excel, CSV</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+                <tr>
+                    <td class="func-id">INF-006</td>
+                    <td><strong>Filtros de informes</strong></td>
+                    <td>Rango fechas, centro trabajo, empleado específico, departamento</td>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>Gerente</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- RESUMEN FINAL -->
+        <hr style="margin: 50px 0;">
+        
+        <div class="warning-box">
+            <h2>⚠ DECISIONES PENDIENTES CRÍTICAS (Resumen)</h2>
+            <ol>
+                <li><strong>Onboarding:</strong> ¿Automático al crear empleado? ¿Obligatorio?</li>
+                <li><strong>Fichajes:</strong> Límite días atrás ajustes, Notificar ajuste manual, Bloquear sin documentación</li>
+                <li><strong>Horarios:</strong> Permitir/bloquear exceso horas, Cambio centro mueve horarios</li>
+                <li><strong>Vacaciones:</strong> Bloqueos capacidad, Forzar sin días, Anticipación mínima, Cancelar al inactivar</li>
+                <li><strong>Consumos/Gastos:</strong> Justificante obligatorio, Tamaño máximo archivo, Permitir aprobar sin justificante, Integración nóminas</li>
+                <li><strong>Documentación:</strong> Tamaño máximo archivo (¿10MB? ¿20MB?), Bloquear fichaje sin documentación</li>
+                <li><strong>Permisos:</strong> Autorización adicional roles críticos</li>
+                <li><strong>Gestoría:</strong> API directa, Formato A3 nóminas</li>
+                <li><strong>Gamificación:</strong> Mostrar ranking a trabajadores, Premios automáticos</li>
+            </ol>
+        </div>
+
+        <div class="summary-box" style="margin-top: 40px;">
+            <h2>📊 RESUMEN FINAL POR CLASIFICACIÓN</h2>
+            <table>
+                <tr>
+                    <th>Clasificación</th>
+                    <th>Cantidad aproximada</th>
+                    <th>Descripción</th>
+                </tr>
+                <tr>
+                    <td><span class="badge base">BASE</span></td>
+                    <td>~85 funcionalidades</td>
+                    <td>Funcionalidades incluidas en plan base, siempre visibles y operativas</td>
+                </tr>
+                <tr>
+                    <td><span class="badge flag">FLAG</span></td>
+                    <td>~65 funcionalidades</td>
+                    <td>Funcionalidades condicionadas a flags activos (schedules, vacations, consumptions, expenses, onboarding, gestoria, multicenter, jobdescription, audit)</td>
+                </tr>
+                <tr>
+                    <td><span class="badge pending">PENDIENTE</span></td>
+                    <td>~12 decisiones</td>
+                    <td>Funcionalidades con decisiones de negocio pendientes sobre comportamiento o implementación</td>
+                </tr>
+            </table>
+        </div>
+
+        <p style="text-align: center; color: #7f8c8d; margin-top: 60px; padding: 20px; border-top: 2px solid #ecf0f1;">
+            <strong>LISTADO COMPLETO DE FUNCIONALIDADES - MÓDULO EQUIPO Y RRHH</strong><br>
+            UDAR EDGE | Versión 1.0 | Febrero 2026<br>
+            <em>Documento para clasificación BASE/FLAG y planificación de desarrollo backend</em>
+        </p>
+    </div>
+
+    <button class="print-btn" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+</body>
+</html>
