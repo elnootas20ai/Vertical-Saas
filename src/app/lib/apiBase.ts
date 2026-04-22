@@ -5,7 +5,7 @@ function trimTrailingSlash(url: string): string {
 }
 
 export function getApiBase(): string {
-  const base = env.VITE_API_URL || 'https://api.udaredge.com';
-  return trimTrailingSlash(base);
+  // Runtime safety: force canonical API host in production frontend.
+  return 'https://api.udaredge.com';
 }
 

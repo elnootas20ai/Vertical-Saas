@@ -152,15 +152,35 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 // SEC-03: CORS restrictivo con whitelist de dominios configurada via ALLOWED_ORIGINS.
-// En producción define: ALLOWED_ORIGINS=https://tudominio.com,https://app.tudominio.com
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
+// Se incluyen también orígenes canónicos de Udar Edge para evitar caídas por .env incompleto.
+const CORE_ALLOWED_ORIGINS = [
+  'https://udaredge.com',
+  'https://www.udaredge.com',
+  'https://api.udaredge.com',
+];
+const ALLOWED_ORIGINS = Array.from(
+  new Set([
+    ...CORE_ALLOWED_ORIGINS,
+    ...(process.env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
+  ]),
+);
+
+function isTrustedUdarOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    return u.protocol === 'https:' && (u.hostname === 'udaredge.com' || u.hostname.endsWith('.udaredge.com'));
+  } catch {
+    return false;
+  }
+}
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || isTrustedUdarOrigin(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   } else if (ALLOWED_ORIGINS.length === 0) {
