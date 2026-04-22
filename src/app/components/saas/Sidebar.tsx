@@ -556,11 +556,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   }, [loadSalesPoints]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
-    home: true,
-    'worker-main': true,
-    'salesPoints': true,
-    ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, true])),
-    ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, true])),
+    home: false,
+    'worker-main': false,
+    salesPoints: false,
+    ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
+    ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
   }));
 
   const toggleWorkerMode = () => {
@@ -706,6 +706,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     `${location.pathname}${location.search}` === item.path ||
     location.pathname === item.path ||
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
+    (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
     (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
@@ -1109,41 +1110,52 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         })()}
 
         {!workerMode && bottomVisibleItems.length > 0 && (
-          <NavSectionShell narrow={narrow}>
-            <div className={`py-0.5 transition-opacity duration-200 ${
+          <div
+            className={`space-y-2 transition-opacity duration-200 ${
               searchNorm && !bottomVisibleItems.some(itemMatchesSearch) ? 'opacity-30' : ''
-            }`}>
-              {bottomVisibleItems.map((item) => {
-                const isActive = isItemActive(item);
-                const itemDimmed = searchNorm && !itemMatchesSearch(item);
-                return (
+            }`}
+          >
+            {bottomVisibleItems.map((item) => {
+              const isActive = isItemActive(item);
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900 ${
+                    narrow ? 'mx-0.5' : 'mx-2'
+                  }`}
+                >
                   <button
-                    key={item.id}
                     type="button"
                     onClick={() => handleMenuItemClick(item)}
-                    className={`relative w-full flex items-center gap-3 py-2.5 transition-all first:rounded-t-xl last:rounded-b-xl ${
-                      !isMobile && collapsed ? 'justify-center px-0' : 'px-4'
+                    className={`relative flex w-full items-center gap-2 rounded-xl px-4 py-2.5 text-left transition-colors ${
+                      narrow ? 'justify-center px-0' : ''
                     } ${
                       isActive
-                        ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600'
-                        : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40'
-                    } ${item.disabled ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''} ${
-                      itemDimmed ? 'opacity-30' : ''
-                    }`}
+                        ? 'border-l-[3px] border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-200'
+                        : 'text-slate-600 hover:bg-slate-50 dark:text-gray-400 dark:hover:bg-gray-800/90'
+                    } ${item.disabled ? 'cursor-not-allowed opacity-60 hover:bg-transparent dark:hover:bg-transparent' : ''}`}
                     disabled={item.disabled}
-                    title={!isMobile && collapsed ? item.label : undefined}
+                    title={narrow ? item.label : undefined}
                   >
-                    <span className={isActive ? 'text-amber-600' : 'text-gray-500 dark:text-gray-400'}>
+                    <span
+                      className={`shrink-0 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-gray-400'}`}
+                    >
                       {item.icon}
                     </span>
                     {(isMobile || !collapsed) && (
-                      <span className="font-medium flex-1 text-left">{item.label}</span>
+                      <span
+                        className={`min-w-0 flex-1 text-xs font-semibold uppercase tracking-wide leading-snug ${
+                          isActive ? 'text-amber-900 dark:text-amber-200' : 'text-slate-600 dark:text-gray-400'
+                        }`}
+                      >
+                        {item.label}
+                      </span>
                     )}
                   </button>
-                );
-              })}
-            </div>
-          </NavSectionShell>
+                </div>
+              );
+            })}
+          </div>
         )}
       </nav>
 

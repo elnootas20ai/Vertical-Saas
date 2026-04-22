@@ -6,7 +6,6 @@ const SKIP_PATH_PREFIXES = [
   '/health',
   '/metrics',
   '/api/plugin/',
-  '/api/cursor/',
   '/api/sse',
   '/api/stats',
 ];

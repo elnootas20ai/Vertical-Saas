@@ -1,4 +1,5 @@
 import { authFetch } from './authApi';
+import { getApiBase } from './apiBase';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,7 +107,8 @@ export interface AffiliateSummary {
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 
-const BASE = '/api/affiliate';
+const API_BASE = getApiBase();
+const BASE = `${API_BASE}/api/affiliate`;
 
 async function apiRequest<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await authFetch(url, {
@@ -268,6 +270,12 @@ export async function validateReferralCode(code: string): Promise<{ valid: boole
   const data = await res.json();
   if (!data.ok) return { valid: false };
   return { valid: data.valid, affiliateName: data.affiliateName, affiliateCompany: data.affiliateCompany };
+}
+
+export async function listAffiliateVerticals(): Promise<string[]> {
+  const res = await fetch(`${BASE}/verticals`);
+  const data = await res.json().catch(() => ({ ok: false }));
+  return data.ok && Array.isArray(data.verticals) ? data.verticals : [];
 }
 
 // ── Aggregated stats ──────────────────────────────────────────────────────────

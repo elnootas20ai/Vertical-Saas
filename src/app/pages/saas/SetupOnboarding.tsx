@@ -26,9 +26,9 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
-  base: 'Configuraci\u00f3n base',
+  base: 'Configuración base',
   crm: 'CRM y clientes',
-  stock: 'Stock y cat\u00e1logo',
+  stock: 'Stock y catálogo',
   tpv: 'Punto de venta',
   workshop: 'Taller',
 };
@@ -119,7 +119,7 @@ export function SetupOnboarding() {
 
   if (loading || verifying) {
     return (
-      <Layout title="Configuraci\u00f3n inicial" subtitle="Preparando tu espacio...">
+      <Layout title="Configuración inicial" subtitle="Preparando tu espacio...">
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
         </div>
@@ -129,7 +129,7 @@ export function SetupOnboarding() {
 
   if (!progress || !definitions || !status) {
     return (
-      <Layout title="Configuraci\u00f3n inicial">
+      <Layout title="Configuración inicial">
         <div className="text-center py-20 text-gray-500 dark:text-gray-400">No se pudo cargar el progreso.</div>
       </Layout>
     );
@@ -137,13 +137,13 @@ export function SetupOnboarding() {
 
   if (status.overallCompleted && !status.skippedAt) {
     return (
-      <Layout title="Configuraci\u00f3n inicial">
+      <Layout title="Configuración inicial">
         <div className="max-w-2xl mx-auto text-center py-16">
           <div className="w-20 h-20 mx-auto mb-6 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center">
             <Trophy className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">Tu negocio est\u00e1 listo</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-8">Has completado la configuraci\u00f3n inicial.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">Tu negocio está listo</h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-8">Has completado la configuración inicial.</p>
           <button onClick={() => navigate('/saas/dashboard')} className="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-semibold hover:bg-black dark:hover:bg-gray-100 transition-colors">
             Ir al Dashboard <ArrowRight className="w-4 h-4" />
           </button>
@@ -165,13 +165,13 @@ export function SetupOnboarding() {
   const companyName = user?.companyName || '';
 
   return (
-    <Layout title="Configuraci\u00f3n inicial" subtitle="Prepara tu negocio paso a paso">
+    <Layout title="Configuración inicial" subtitle="Prepara tu negocio paso a paso">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-6">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                {userName ? `\u00a1Hola, ${userName}!` : '\u00a1Bienvenido!'}{' '}
+                {userName ? `¡Hola, ${userName}!` : '¡Bienvenido!'}{' '}
                 {companyName ? `Vamos a preparar ${companyName}` : 'Vamos a preparar tu negocio'}
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400">Completa estos pasos para dejar el sistema listo y empezar a operar.</p>
@@ -179,7 +179,7 @@ export function SetupOnboarding() {
             {status.trialDaysRemaining > 0 && (
               <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-700 rounded-lg">
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{status.trialDaysRemaining} d\u00edas de prueba</span>
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{status.trialDaysRemaining} días de prueba</span>
               </div>
             )}
           </div>

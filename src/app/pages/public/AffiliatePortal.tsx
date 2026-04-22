@@ -7,7 +7,14 @@ import {
   Handshake, BadgeDollarSign, ExternalLink, MessageSquare, Tag,
   CreditCard, MailOpen, UserPlus, CircleDollarSign, QrCode, Share2, UserCheck,
 } from 'lucide-react';
-import { portalDashboard, portalLogin, portalRegisterClient, portalReferredAccounts, type ReferredAccount } from '../../lib/affiliatesApi';
+import {
+  listAffiliateVerticals,
+  portalDashboard,
+  portalLogin,
+  portalRegisterClient,
+  portalReferredAccounts,
+  type ReferredAccount,
+} from '../../lib/affiliatesApi';
 
 type Tab = 'clients' | 'commissions' | 'referred';
 
@@ -267,9 +274,8 @@ export function AffiliatePortal() {
   const [showQr, setShowQr] = useState(false);
 
   useEffect(() => {
-    fetch('/api/affiliate/verticals')
-      .then((r) => r.json())
-      .then((data) => { if (data.ok) setVerticalOptions(data.verticals); })
+    listAffiliateVerticals()
+      .then((verticals) => setVerticalOptions(verticals))
       .catch(() => {});
   }, []);
 

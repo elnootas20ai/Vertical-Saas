@@ -3315,64 +3315,94 @@ export function Settings() {
 
   return (
     <Layout title={t('settings.title')} subtitle={t('settings.subtitle')}>
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <div className="flex overflow-x-auto [&::-webkit-scrollbar]:hidden gap-1 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-1.5" style={{ scrollbarWidth: 'none' }}>
-            {SECTIONS.map((section) => {
-              const isActive = TAB_TO_SECTION[activeTab] === section.id;
-              const SectionIcon = section.icon;
-              return (
-                <button
-                  key={section.id}
-                  onClick={() => navigate(`/saas/settings/${TAB_TO_SLUG[section.tabs[0]]}`)}
-                  className={`flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                    isActive ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <SectionIcon className="w-4 h-4" />
-                  {section.label}
-                </button>
-              );
-            })}
-          </div>
-          {(() => {
-            const currentSection = SECTIONS.find((s) => s.id === TAB_TO_SECTION[activeTab]);
-            if (!currentSection || currentSection.tabs.length <= 1) return null;
-            return (
-              <div className="flex overflow-x-auto [&::-webkit-scrollbar]:hidden gap-1 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700/50 p-1" style={{ scrollbarWidth: 'none' }}>
-                {currentSection.tabs.map((tabId) => {
-                  const tab = TAB_KEYS.find((tk) => tk.id === tabId);
-                  if (!tab) return null;
+      <div className="mx-auto max-w-6xl space-y-6">
+        <section className="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-gradient-to-br from-white via-slate-50/80 to-amber-50/30 p-5 shadow-sm dark:border-gray-700 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 sm:p-6">
+          <div className="pointer-events-none absolute -left-12 top-0 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl dark:bg-amber-500/10" />
+          <div className="relative space-y-4">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700/90 dark:text-amber-400/90">
+              Elige un área y luego la pestaña concreta
+            </p>
+
+            <div className="space-y-3">
+              <div
+                className="flex gap-0.5 overflow-x-auto rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55 [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {SECTIONS.map((section) => {
+                  const isActive = TAB_TO_SECTION[activeTab] === section.id;
+                  const SectionIcon = section.icon;
                   return (
                     <button
-                      key={tab.id}
-                      onClick={() => navigate(`/saas/settings/${tab.slug}`)}
-                      className={`flex-shrink-0 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                        activeTab === tab.id
-                          ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 hover:bg-white/60 dark:hover:bg-gray-700/40'
+                      key={section.id}
+                      type="button"
+                      onClick={() => navigate(`/saas/settings/${TAB_TO_SLUG[section.tabs[0]]}`)}
+                      className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                        isActive
+                          ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 shadow-sm dark:bg-amber-900/25 dark:text-amber-300'
+                          : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
                       }`}
                     >
-                      {tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id)}
+                      <SectionIcon
+                        className={`h-4 w-4 shrink-0 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}
+                      />
+                      {section.label}
                     </button>
                   );
                 })}
               </div>
-            );
-          })()}
-        </div>
+
+              {(() => {
+                const currentSection = SECTIONS.find((s) => s.id === TAB_TO_SECTION[activeTab]);
+                if (!currentSection || currentSection.tabs.length <= 1) return null;
+                return (
+                  <div
+                    className="flex gap-0.5 overflow-x-auto rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55 [&::-webkit-scrollbar]:hidden"
+                    style={{ scrollbarWidth: 'none' }}
+                  >
+                    {currentSection.tabs.map((tabId) => {
+                      const tab = TAB_KEYS.find((tk) => tk.id === tabId);
+                      if (!tab) return null;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => navigate(`/saas/settings/${tab.slug}`)}
+                          className={`flex-shrink-0 rounded-lg px-3.5 py-2 text-xs font-medium transition-all ${
+                            activeTab === tab.id
+                              ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-300'
+                              : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
+                          }`}
+                        >
+                          {tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </section>
+
         {user?.role === 'Admin' && (
-          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-1.5">
+          <div className="rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55">
             <button
+              type="button"
               onClick={() => navigate('/saas/admin')}
-              className={`w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex w-full items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
                 location.pathname.startsWith('/saas/admin')
-                  ? 'bg-gray-900 text-white shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800'
+                  ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-300'
+                  : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
               }`}
             >
-              <Shield className="w-4 h-4" />
-              <span>Panel admin</span>
+              <Shield
+                className={`h-4 w-4 shrink-0 ${
+                  location.pathname.startsWith('/saas/admin')
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}
+              />
+              <span>Panel de administración</span>
             </button>
           </div>
         )}
@@ -3441,7 +3471,7 @@ export function Settings() {
                 </div>
 
                 <div className="mt-6 flex items-center justify-between gap-3">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">{profileMessage || 'Los cambios se guardan en CouchDB dentro de `accounts`.'}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400">{profileMessage || 'Los cambios se guardan en tu cuenta de usuario.'}</div>
                   <button type="submit" className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors">
                     <Save className="w-4 h-4" />
                     Guardar perfil
@@ -3452,7 +3482,7 @@ export function Settings() {
               <form onSubmit={handlePasswordSubmit} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
                 <div className="mb-6">
                   <h3 className="font-bold text-gray-900 dark:text-gray-100">Cambiar contraseña</h3>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">La nueva contraseña será válida en `/auth/login`.</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">La nueva contraseña será la que uses al iniciar sesión en la aplicación.</p>
                 </div>
 
                 <div className="space-y-4">
@@ -3488,8 +3518,8 @@ export function Settings() {
                   </div>
                 </div>
 
-                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-2xl text-sm text-blue-800">
-                  Tras guardar, el login validará la contraseña nueva contra la cuenta real en CouchDB.
+                <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                  Tras guardar, el inicio de sesión usará exclusivamente la nueva contraseña.
                 </div>
 
                 <div className="mt-6 flex items-center justify-between gap-3">

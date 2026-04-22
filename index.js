@@ -67,7 +67,6 @@ import { salaRouter } from './routers/salaRouter.js';
 import { cleaningClientsRouter } from './routers/cleaningClientsRouter.js';
 import { pluginRouter } from './src/plugin/server/router.js';
 import { ocrApiRouter } from './routers/ocrRouter.js';
-import { cursorRouter } from './routers/cursorRouter.js';
 import aiParserRouter from './routers/aiParserRouter.js';
 import { affiliateRouter } from './routers/affiliateRouter.js';
 import { quoteRouter } from './routers/quoteRouter.js';
@@ -107,7 +106,6 @@ import { startDeliveryAlertEngine } from './services/deliveryAlertEngine.js';
 import { startCleaningAlertEngine } from './services/cleaningAlertEngine.js';
 import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler.js';
 import { runAutoOrdersForAllUsers } from './services/autoOrderService.js';
-import { startCursorSync } from './services/cursorSync.js';
 import { startSubscriptionLifecycle } from './services/subscriptionLifecycle.js';
 import { createVerticalRouter } from './services/verticalCrudFactory.js';
 import { allVerticalConfigs } from './verticalConfigs/all.js';
@@ -988,9 +986,6 @@ app.use('/api/ocr', requireAuth, ocrApiRouter);
 
 // AI Parser — procesamiento de texto libre con IA para módulos SaaS
 app.use('/api/ai', requireAuth, aiParserRouter);
-
-// Cursor IDE sync — conversaciones, agentes y terminales en CouchDB
-app.use('/api/cursor', cursorRouter);
 
 // RT-01: SSE — sin requireAuth middleware (usa JWT por query param)
 app.use('/api/sse', sseRouter);
@@ -2803,9 +2798,6 @@ setInterval(() => runAutoOrdersForAllUsers().catch(() => null), 2 * 3600000);
 
 // I-05: Backup automático de CouchDB con gzip + rotación
 startBackupScheduler();
-
-// Cursor sync — sincroniza conversaciones y terminales cada 60s
-startCursorSync(60_000);
 
 // S-06: Subscription lifecycle — trial expiry, grace period, suspension + emails
 startSubscriptionLifecycle();

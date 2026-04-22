@@ -1205,8 +1205,8 @@ const es = {
     },
     // ── Configuración ─────────────────────────────────────────────────────────
     settings: {
-      title: 'Configuración',
-      subtitle: 'Ajustes del sistema y suscripción',
+      title: 'Ajustes',
+      subtitle: 'Gestiona tu cuenta, empresa, facturación y preferencias del sistema.',
       myUser: 'Mi usuario',
       myUserDesc: 'Cambia nombre, avatar y datos básicos del acceso.',
       avatarHint: 'Puedes usar una URL de imagen para el avatar.',

@@ -6,6 +6,8 @@ import {
   CheckCircle, AlertCircle, Loader2, Star, Zap, BarChart3, DollarSign,
   Gift, Rocket, HeadphonesIcon, Copy, BadgePercent,
 } from 'lucide-react';
+import { getApiBase } from '../../lib/apiBase';
+import { listAffiliateVerticals } from '../../lib/affiliatesApi';
 
 const STEPS = [
   { icon: Rocket, title: 'Solicita tu acceso', desc: 'Rellena el formulario con tus datos. En menos de 48h tendrás tu código de afiliado.' },
@@ -36,6 +38,8 @@ const FAQ = [
   { q: '¿Puedo ser afiliado desde cualquier país?', a: 'Sí, el programa está abierto a nivel internacional. Solo necesitas poder facturar legalmente.' },
   { q: '¿Cómo funciona el código de afiliado?', a: 'Al ser aceptado recibes un código único (ej: AFF-A7K2). Con él accedes a tu panel, registras clientes y haces seguimiento de todo.' },
 ];
+
+const API_BASE = getApiBase();
 
 type FormState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -72,9 +76,8 @@ export function AffiliatePage() {
   });
 
   useEffect(() => {
-    fetch('/api/affiliate/verticals')
-      .then((r) => r.json())
-      .then((data) => { if (data.ok) setVerticalOptions(data.verticals); })
+    listAffiliateVerticals()
+      .then((verticals) => setVerticalOptions(verticals))
       .catch(() => {});
   }, []);
 
@@ -104,7 +107,7 @@ export function AffiliatePage() {
     setErrorMsg('');
     try {
       const payload = { ...form, whatsapp: sameAsPhone ? form.phone : form.whatsapp };
-      const res = await fetch('/api/affiliate/request', {
+      const res = await fetch(`${API_BASE}/api/affiliate/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

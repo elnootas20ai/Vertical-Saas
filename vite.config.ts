@@ -17,7 +17,8 @@ export default defineConfig({
     allowedHosts: [
       'localhost',
       '51.158.120.151',
-      'urdu.com',
+      'udaredge.com',
+      'www.udaredge.com',
     ],
     proxy: {
       '/api': {

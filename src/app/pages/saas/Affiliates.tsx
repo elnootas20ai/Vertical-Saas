@@ -10,6 +10,7 @@ import {
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
+  listAffiliateVerticals,
   buildAffiliateSummaries,
   createAffiliate,
   createAffiliateCommission,
@@ -675,9 +676,8 @@ export function Affiliates() {
   useModalClose(showCommissionModal, () => setShowCommissionModal(false));
 
   useEffect(() => {
-    fetch('/api/affiliate/verticals')
-      .then((r) => r.json())
-      .then((data) => { if (data.ok) setVerticalOptions(data.verticals); })
+    listAffiliateVerticals()
+      .then((verticals) => setVerticalOptions(verticals))
       .catch(() => {});
   }, []);
 

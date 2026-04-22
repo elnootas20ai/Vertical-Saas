@@ -58,7 +58,7 @@ import { toast } from 'sonner';
 // ─── Module definitions ────────────────────────────────────────────────────────
 
 const MODULE_DEFS = [
-  { id: 'dashboard',     label: 'Dashboard',              icon: BarChart3,    category: 'core' },
+  { id: 'dashboard',     label: 'Panel principal',       icon: BarChart3,    category: 'core' },
   { id: 'crm',           label: 'CRM / Clientes',         icon: Users,        category: 'core' },
   { id: 'catalog',       label: 'Catálogo',               icon: LayoutGrid,   category: 'core' },
   { id: 'stock',         label: 'Compras y Stock',        icon: Truck,        category: 'operations' },
@@ -259,7 +259,7 @@ const ALERT_STYLES: Record<SystemAlert['type'], { bg: string; icon: string; bord
 // ─── Connection panel definitions ──────────────────────────────────────────────
 
 const CONNECTIONS = [
-  { id: 'dashboard',        label: 'Dashboard',              icon: BarChart3,    path: '/saas/dashboard' },
+  { id: 'dashboard',        label: 'Panel principal',       icon: BarChart3,    path: '/saas/dashboard' },
   { id: 'crm',              label: 'CRM / Clientes',         icon: Users,        path: '/saas/clients' },
   { id: 'team',             label: 'Equipo',                 icon: UserCheck,    path: '/saas/team' },
   { id: 'clockins',         label: 'Fichajes',               icon: Clock,        path: '/saas/clockins' },
@@ -272,7 +272,7 @@ const CONNECTIONS = [
   { id: 'documents',        label: 'Documentación',          icon: FolderOpen,   path: '/saas/documents' },
   { id: 'ocr',              label: 'OCR',                    icon: ScanLine,     path: '/saas/documents' },
   { id: 'tpv',              label: 'TPV',                    icon: Monitor,      path: '/saas/tpv' },
-  { id: 'onboarding',       label: 'Onboarding',             icon: Zap,          path: '/saas/configuracion' },
+  { id: 'onboarding',       label: 'Incorporación inicial', icon: Zap,          path: '/saas/configuracion' },
 ] as const;
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -328,9 +328,9 @@ export function ConfiguracionGeneral() {
     try {
       await saveModulesConfig(bizId, next);
       setModulesData((prev) => prev ? { ...prev, activeModules: next } : prev);
-      toast.success(next.includes(moduleId) ? 'Modulo activado' : 'Modulo desactivado');
+      toast.success(next.includes(moduleId) ? 'Módulo activado' : 'Módulo desactivado');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al actualizar modulos');
+      toast.error(err instanceof Error ? err.message : 'Error al actualizar módulos');
     } finally {
       setTogglingModule(null);
     }
@@ -351,7 +351,7 @@ export function ConfiguracionGeneral() {
       const next = !invoiceEmailData.enabled;
       await saveInvoiceEmailConfig(bizId, { enabled: next });
       setInvoiceEmailData((prev) => prev ? { ...prev, enabled: next } : prev);
-      toast.success(next ? 'Recepcion de facturas activada' : 'Recepcion de facturas desactivada');
+      toast.success(next ? 'Recepción de facturas activada' : 'Recepción de facturas desactivada');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al actualizar');
     }
@@ -440,7 +440,7 @@ export function ConfiguracionGeneral() {
       id: 'correo-facturas',
       icon: Mail,
       title: 'Correo recepción facturas',
-      description: invoiceEmailData?.email || 'Configura tu email de recepcion',
+      description: invoiceEmailData?.email || 'Configura tu correo de recepción',
       status: (invoiceEmailData?.enabled ? 'complete' : 'empty') as BlockStatus,
       route: '#correo-facturas',
       stats: invoiceEmailData?.enabled ? 'Activo' : 'Pendiente',
@@ -475,20 +475,25 @@ export function ConfiguracionGeneral() {
 
   return (
     <Layout>
-      <div className="max-w-6xl mx-auto space-y-8">
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-black text-gray-900 dark:text-gray-100 tracking-tight">
-              Configuración General
+      <div className="max-w-6xl mx-auto space-y-8 pb-10">
+        {/* ── Cabecera ───────────────────────────────────────────────────── */}
+        <section className="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-gradient-to-br from-white via-amber-50/40 to-slate-50 p-6 shadow-sm dark:border-gray-700/90 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 sm:p-8">
+          <div className="pointer-events-none absolute -right-16 -top-24 h-48 w-48 rounded-full bg-amber-400/15 blur-3xl dark:bg-amber-500/10" />
+          <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700/90 dark:text-amber-400/90">
+              Centro de configuración
+            </p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-50 sm:text-3xl">
+              Configuración general
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Gestiona los parámetros globales y prepara tu cuenta para trabajar
+            <p className="max-w-xl text-sm leading-relaxed text-slate-600 dark:text-gray-400">
+              Revisa el estado de empresa, equipo y módulos antes de usar el día a día. Todo queda agrupado aquí para que configures con claridad.
             </p>
           </div>
 
-          {/* Progress ring */}
-          <div className="flex items-center gap-4">
+          {/* Progreso */}
+          <div className="flex shrink-0 items-center gap-4 rounded-2xl border border-white/70 bg-white/70 px-4 py-3 shadow-inner dark:border-gray-700/80 dark:bg-gray-800/60">
             <div className="relative w-16 h-16">
               <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64">
                 <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" strokeWidth="4"
@@ -503,11 +508,12 @@ export function ConfiguracionGeneral() {
               </span>
             </div>
             <div>
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{completedCount}/{totalCount} bloques</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">configuración completada</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{completedCount}/{totalCount} apartados</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">completados</p>
             </div>
           </div>
-        </div>
+          </div>
+        </section>
 
         {/* ── System alerts ──────────────────────────────────────────────── */}
         {alerts.length > 0 && (
@@ -535,7 +541,7 @@ export function ConfiguracionGeneral() {
         )}
 
         {/* ── Config blocks grid ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {visibleBlocks.map((block) => {
             const badge = statusBadge(block.status);
             const Icon = block.icon;
@@ -549,7 +555,7 @@ export function ConfiguracionGeneral() {
                   }
                   navigate(block.route);
                 }}
-                className="group relative text-left bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 transition-all hover:shadow-lg hover:border-gray-300 dark:hover:border-gray-600 hover:-translate-y-0.5"
+                className="group relative text-left rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-amber-200/80 hover:shadow-md dark:border-gray-700 dark:bg-gray-800 dark:hover:border-amber-900/50"
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
@@ -592,7 +598,7 @@ export function ConfiguracionGeneral() {
         </div>
 
         {/* ── Módulos activos (inline panel) ─────────────────────────────── */}
-        <section id="modulos" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <section id="modulos" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
               <LayoutGrid className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -615,7 +621,7 @@ export function ConfiguracionGeneral() {
                 <div key={mod.id}
                   className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
                     isActive
-                      ? 'border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20'
+                      ? 'border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/20'
                       : isContracted
                         ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
                         : 'border-gray-100 dark:border-gray-700/50 bg-gray-50 dark:bg-gray-800/50 opacity-60'
@@ -623,13 +629,13 @@ export function ConfiguracionGeneral() {
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                     isActive
-                      ? 'bg-blue-100 dark:bg-blue-900/40'
+                      ? 'bg-amber-100 dark:bg-amber-900/40'
                       : 'bg-gray-100 dark:bg-gray-700'
                   }`}>
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold ${isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
+                    <p className={`text-sm font-semibold ${isActive ? 'text-amber-900 dark:text-amber-100' : 'text-gray-500 dark:text-gray-400'}`}>
                       {mod.label}
                     </p>
                     {!isContracted && (
@@ -641,7 +647,7 @@ export function ConfiguracionGeneral() {
                     onClick={() => isContracted && handleToggleModule(mod.id)}
                     disabled={!isContracted || isToggling}
                     className={`w-9 h-5 rounded-full flex items-center transition-colors ${
-                      isActive ? 'bg-blue-500 justify-end' : 'bg-gray-300 dark:bg-gray-600 justify-start'
+                      isActive ? 'bg-amber-500 justify-end dark:bg-amber-600' : 'bg-gray-300 dark:bg-gray-600 justify-start'
                     } ${!isContracted ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} ${isToggling ? 'animate-pulse' : ''}`}
                   >
                     <span className="w-4 h-4 bg-white rounded-full shadow-sm mx-0.5" />
@@ -653,7 +659,7 @@ export function ConfiguracionGeneral() {
         </section>
 
         {/* ── Correo recepción facturas ───────────────────────────────────── */}
-        <section id="correo-facturas" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <section id="correo-facturas" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center">
               <Mail className="w-5 h-5 text-violet-600 dark:text-violet-400" />
@@ -668,7 +674,7 @@ export function ConfiguracionGeneral() {
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Tu email de recepcion</p>
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Tu correo de recepción</p>
               <p className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100 truncate">
                 {invoiceEmailData?.email || `facturas-${bizId || 'xxx'}@udaredge.com`}
               </p>
@@ -689,7 +695,7 @@ export function ConfiguracionGeneral() {
                 onClick={handleCopyEmail}
                 className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold hover:bg-gray-700 dark:hover:bg-gray-300 transition-colors"
               >
-                {copied ? 'Copiado!' : 'Copiar email'}
+                {copied ? '¡Copiado!' : 'Copiar correo'}
               </button>
             </div>
           </div>
@@ -697,13 +703,13 @@ export function ConfiguracionGeneral() {
           <div className="flex items-center gap-3 mt-4">
             <Info className="w-4 h-4 text-gray-400 shrink-0" />
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Las facturas recibidas se procesaran automaticamente con OCR y apareceran en tu bandeja de facturas de proveedor.
+              Las facturas recibidas se procesarán automáticamente con OCR y aparecerán en tu bandeja de facturas de proveedor.
             </p>
           </div>
         </section>
 
         {/* ── Importación inicial ─────────────────────────────────────────── */}
-        <section id="importacion" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <section id="importacion" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
               <Upload className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -720,7 +726,7 @@ export function ConfiguracionGeneral() {
             {([
               { key: 'stock' as const, label: 'Stock', desc: 'Archivo de existencias iniciales', icon: Truck, route: '/saas/catalog' },
               { key: 'clients' as const, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users, route: '/saas/clients' },
-              { key: 'catalog' as const, label: 'Catalogo', desc: 'Productos o servicios', icon: LayoutGrid, route: '/saas/catalog' },
+              { key: 'catalog' as const, label: 'Catálogo', desc: 'Productos o servicios', icon: LayoutGrid, route: '/saas/catalog' },
             ]).map((item) => {
               const importStatus = importData?.[item.key] ?? biz?.initialImportStatus?.[item.key] ?? 'pending';
               const Icon = item.icon;
@@ -761,15 +767,15 @@ export function ConfiguracionGeneral() {
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}
         {activeModulesSet.has('tpv') && (
-          <section id="tpv-config" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+          <section id="tpv-config" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center">
                 <Monitor className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div className="flex-1">
-                <h2 className="font-bold text-gray-900 dark:text-gray-100">Configuracion TPV</h2>
+                <h2 className="font-bold text-gray-900 dark:text-gray-100">Configuración TPV</h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Terminal punto de venta — configura metodos de pago, impuestos y tickets
+                  Terminal punto de venta: métodos de pago, impuestos y tickets
                 </p>
               </div>
               <button
@@ -784,9 +790,9 @@ export function ConfiguracionGeneral() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {[
                 { label: 'Punto de venta', desc: 'Selecciona tu PDV por defecto', icon: Store },
-                { label: 'Metodos de pago', desc: 'Efectivo, tarjeta, Bizum, transferencia', icon: CreditCard },
+                { label: 'Métodos de pago', desc: 'Efectivo, tarjeta, Bizum, transferencia', icon: CreditCard },
                 { label: 'Impuestos (IVA)', desc: 'Tipo de IVA por defecto', icon: Receipt },
-                { label: 'Numeracion tickets', desc: 'Formato y serie de tickets', icon: FileText },
+                { label: 'Numeración de tickets', desc: 'Formato y serie de tickets', icon: FileText },
                 { label: 'Impresora', desc: 'Impresora de tickets conectada', icon: Settings },
               ].map((item) => {
                 const Icon = item.icon;
@@ -808,15 +814,15 @@ export function ConfiguracionGeneral() {
         )}
 
         {/* ── Config de importacion ───────────────────────────────────────── */}
-        <section id="import-config" className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <section id="import-config" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center">
               <Settings className="w-5 h-5 text-amber-600 dark:text-amber-400" />
             </div>
             <div>
-              <h2 className="font-bold text-gray-900 dark:text-gray-100">Reglas de importacion</h2>
+              <h2 className="font-bold text-gray-900 dark:text-gray-100">Reglas de importación</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Define como se procesan los archivos de importacion
+                Define cómo se procesan los archivos de importación
               </p>
             </div>
           </div>
@@ -854,7 +860,7 @@ export function ConfiguracionGeneral() {
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-                Codificacion
+                Codificación
               </label>
               <select className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none">
                 <option value="UTF-8">UTF-8</option>
@@ -865,7 +871,7 @@ export function ConfiguracionGeneral() {
         </section>
 
         {/* ── Conexiones rápidas ──────────────────────────────────────────── */}
-        <section className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <section className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
               <ExternalLink className="w-5 h-5 text-gray-600 dark:text-gray-300" />
@@ -878,7 +884,8 @@ export function ConfiguracionGeneral() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-0.5">
             {CONNECTIONS.map((conn) => {
               const Icon = conn.icon;
               const isActive = activeModulesSet.has(conn.id) || conn.id === 'dashboard' || conn.id === 'onboarding';
@@ -886,14 +893,14 @@ export function ConfiguracionGeneral() {
                 <button
                   key={conn.id}
                   onClick={() => navigate(conn.path)}
-                  className={`flex items-center gap-2.5 p-3 rounded-xl border text-left transition-all hover:shadow-sm ${
+                  className={`flex items-center gap-2.5 rounded-lg border border-transparent p-3 text-left transition-all ${
                     isActive
-                      ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-blue-300 dark:hover:border-blue-700'
-                      : 'border-gray-100 dark:border-gray-700/50 bg-gray-50 dark:bg-gray-800/50 opacity-50'
+                      ? 'border-l-2 border-l-amber-600 bg-amber-50 text-amber-900 hover:bg-amber-50/90 dark:bg-amber-900/25 dark:text-amber-300 dark:hover:bg-amber-900/35'
+                      : 'text-gray-500 opacity-60 hover:bg-white/60 hover:opacity-90 dark:text-gray-400 dark:hover:bg-gray-700/40'
                   }`}
                 >
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}`} />
-                  <span className={`text-xs font-semibold truncate ${isActive ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <span className={`text-xs font-medium truncate ${isActive ? 'text-amber-900 dark:text-amber-200' : ''}`}>
                     {conn.label}
                   </span>
                   {!isActive && (
@@ -902,6 +909,7 @@ export function ConfiguracionGeneral() {
                 </button>
               );
             })}
+            </div>
           </div>
         </section>
       </div>
