@@ -1,5 +1,3 @@
-import { getApiBase } from './apiBase';
-
 // S-07: Sesión activa (dispositivo)
 export interface ActiveSession {
   sessionId: string;
@@ -276,7 +274,7 @@ interface ApiEnvelope<T> {
 
 // ── Configuración base de la API ──────────────────────────────────────────────
 
-const API_BASE = getApiBase();
+const API_BASE = 'https://api.udaredge.com';
 
 // ── Gestión de tokens ─────────────────────────────────────────────────────────
 // S-01: Los tokens JWT se almacenan en cookies httpOnly gestionadas por el backend.
