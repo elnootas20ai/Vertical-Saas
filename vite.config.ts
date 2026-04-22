@@ -27,22 +27,24 @@ export default defineConfig({
       },
     },
   },
+
   plugins: [
-    // The React and Tailwind plugins are both required for Make, even if
-    // Tailwind is not being actively used – do not remove them
     react(),
     tailwindcss(),
+
     VitePWA({
       registerType: 'autoUpdate',
-      // RT-02: injectManifest permite usar un SW personalizado con push handler
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
+
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
       },
+
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+
       manifest: {
         name: 'Udar — Gestión de Concesionarios',
         short_name: 'Udar',
@@ -53,6 +55,7 @@ export default defineConfig({
         orientation: 'portrait-primary',
         start_url: '/saas/dashboard',
         scope: '/',
+
         icons: [
           {
             src: '/pwa-192x192.png',
@@ -72,15 +75,18 @@ export default defineConfig({
           },
         ],
       },
+
       devOptions: {
         enabled: false,
       },
     }),
   ],
+
   build: {
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
   },
+
   resolve: {
     alias: {
       '@': new URL('./src', import.meta.url).pathname,
