@@ -133,6 +133,9 @@ export function Login() {
             <p className="text-gray-600 dark:text-gray-400">
               {t('auth.loginSubtitle')}
             </p>
+            <p className="mt-2 text-xs font-medium text-blue-600">
+              PROD-SYNC-MARKER-2026-04-22
+            </p>
           </div>
 
           {/* S-03: Banner de cuenta bloqueada */}
