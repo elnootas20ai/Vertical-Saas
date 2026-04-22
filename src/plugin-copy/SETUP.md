@@ -37,7 +37,7 @@ A floating button will appear. Click to open the agent panel.
 ```ts
 server: {
   proxy: {
-    '/api': { target: 'http://localhost:3001', changeOrigin: true },
+    '/api': { target: 'https://api.udaredge.com', changeOrigin: true },
   },
 },
 ```

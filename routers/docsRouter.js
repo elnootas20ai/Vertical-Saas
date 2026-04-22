@@ -45,7 +45,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
       description: 'Producción',
     },
     {
-      url: 'http://localhost:3001',
+      url: 'https://api.udaredge.com',
       description: 'Desarrollo local',
     },
   ],

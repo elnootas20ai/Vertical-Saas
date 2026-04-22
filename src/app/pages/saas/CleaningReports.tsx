@@ -37,6 +37,7 @@ import {
   Briefcase, CalendarDays, Package, FileText, Zap, Star, ExternalLink,
 } from 'lucide-react';
 import { format, subMonths, subDays, subWeeks } from 'date-fns';
+import { getApiBase } from '../../lib/apiBase';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -286,7 +287,7 @@ export function CleaningReports() {
   // SSE real-time refresh
   useEffect(() => {
     if (!userId) return;
-    const base = (import.meta as any).env?.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
+    const base = getApiBase();
     const es = new EventSource(`${base}/api/events?userId=${encodeURIComponent(userId)}`);
     let debounceTimer: ReturnType<typeof setTimeout>;
     es.onmessage = (ev) => {

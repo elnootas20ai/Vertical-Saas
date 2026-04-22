@@ -2,7 +2,7 @@
 
 Base de prueba actual del backend:
 
-- `http://51.158.120.151:3001/health`
+- `https://api.udaredge.com/health`
 
 ## 1) Requisitos
 
@@ -51,7 +51,7 @@ Chequeo rapido del servicio.
 Ejemplo:
 
 ```bash
-curl -s http://51.158.120.151:3001/health
+curl -s https://api.udaredge.com/health
 ```
 
 Respuesta esperada:
@@ -76,7 +76,7 @@ Metricas completas de salud del proceso:
 Ejemplo:
 
 ```bash
-curl -s http://51.158.120.151:3001/metrics
+curl -s https://api.udaredge.com/metrics
 ```
 
 ### `GET /api/stats`
@@ -90,7 +90,7 @@ Resumen ligero para monitorizacion rapida:
 Ejemplo:
 
 ```bash
-curl -s http://51.158.120.151:3001/api/stats
+curl -s https://api.udaredge.com/api/stats
 ```
 
 ## 5) Como validar que las metricas "van bien"
@@ -106,7 +106,7 @@ Referencia operativa (orientativa):
 Comprobacion simple cada 10s:
 
 ```bash
-watch -n 10 'curl -s http://51.158.120.151:3001/metrics'
+watch -n 10 'curl -s https://api.udaredge.com/metrics'
 ```
 
 ## 6) PM2 en puertos con nombres `frontend` y `backend` (4014 MB)
@@ -144,9 +144,9 @@ pm2 startup
 
 ## 8) Verificacion final
 
-- Backend OK: `curl -s http://51.158.120.151:3001/health`
-- Metricas OK: `curl -s http://51.158.120.151:3001/metrics`
-- Frontend OK: abrir `http://51.158.120.151:3005`
+- Backend OK: `curl -s https://api.udaredge.com/health`
+- Metricas OK: `curl -s https://api.udaredge.com/metrics`
+- Frontend OK: abrir `https://www.udaredge.com`
 
 ## 9) Nota importante de seguridad
 

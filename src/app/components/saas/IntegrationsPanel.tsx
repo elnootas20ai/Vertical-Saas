@@ -29,6 +29,7 @@ import {
   revokeApiToken,
   type ApiToken,
 } from '../../lib/apiTokensApi';
+import { getApiBase } from '../../lib/apiBase';
 
 type PanelSection = 'tokens' | 'reference' | 'playground' | 'embed';
 
@@ -542,7 +543,7 @@ function ReferenceSection() {
   const [expanded, setExpanded] = useState<string[]>([String(API_MODULES[0].id)]);
   const toggle = (id: string) =>
     setExpanded((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  const baseUrl = `${window.location.protocol}//${window.location.hostname}:3001/api/v1`;
+  const baseUrl = `${getApiBase()}/api/v1`;
 
   return (
     <div className="space-y-5">
@@ -590,7 +591,7 @@ function ReferenceSection() {
               {isOpen && (
                 <div className="border-t border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
                   {module.endpoints.map((ep, idx) => {
-                    const curlCmd = `curl -X ${ep.method} "${window.location.protocol}//${window.location.hostname}:3001${ep.path}" \\\n  -H "Authorization: Bearer TU_TOKEN" \\\n  -H "Content-Type: application/json"${ep.bodyExample ? ` \\\n  -d '${JSON.stringify(ep.bodyExample)}'` : ''}`;
+                    const curlCmd = `curl -X ${ep.method} "${getApiBase()}${ep.path}" \\\n  -H "Authorization: Bearer TU_TOKEN" \\\n  -H "Content-Type: application/json"${ep.bodyExample ? ` \\\n  -d '${JSON.stringify(ep.bodyExample)}'` : ''}`;
                     return (
                       <div key={idx} className="p-4 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -687,7 +688,7 @@ function PlaygroundSection({ userId }: { userId: string }) {
     });
     const qp = Object.entries(queryValues).filter(([, v]) => v.trim());
     if (qp.length > 0) path += '?' + qp.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-    return `${window.location.protocol}//${window.location.hostname}:3001${path}`;
+    return `${getApiBase()}${path}`;
   };
 
   const handleRun = async () => {

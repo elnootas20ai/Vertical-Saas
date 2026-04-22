@@ -16,13 +16,13 @@ export default defineConfig({
     },
     allowedHosts: [
       'localhost',
-      '51.158.120.151',
+      'api.udaredge.com',
       'udaredge.com',
       'www.udaredge.com',
     ],
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'https://api.udaredge.com',
         changeOrigin: true,
       },
     },
