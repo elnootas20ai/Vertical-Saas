@@ -37,6 +37,7 @@ export function Login() {
   const [lockInfo, setLockInfo] = useState<{ lockUntil?: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [peekPassword, setPeekPassword] = useState(false);
+  const [googleTimedOut, setGoogleTimedOut] = useState(false);
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -117,6 +118,17 @@ export function Login() {
       renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', text: 'signin_with' });
     }
   }, [googleReady, renderButton]);
+
+  useEffect(() => {
+    if (googleReady) {
+      setGoogleTimedOut(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setGoogleTimedOut(true);
+    }, 8000);
+    return () => window.clearTimeout(timeout);
+  }, [googleReady]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
@@ -226,7 +238,7 @@ export function Login() {
             <div className="flex justify-center">
               <div ref={googleBtnRef} className="min-h-[44px]" />
             </div>
-            {!googleReady && (
+            {!googleReady && !googleTimedOut && (
               <button
                 type="button"
                 disabled
@@ -238,6 +250,11 @@ export function Login() {
                 </svg>
                 {t('auth.googleLogin')}
               </button>
+            )}
+            {!googleReady && googleTimedOut && (
+              <div className="w-full py-3 px-4 border-2 border-amber-200 bg-amber-50 rounded-lg text-sm text-amber-700 text-center">
+                Google no disponible temporalmente. Puedes iniciar sesión con email y contraseña.
+              </div>
             )}
           </form>
 
