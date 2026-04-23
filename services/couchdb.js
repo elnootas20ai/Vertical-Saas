@@ -57,14 +57,10 @@ function addDays(date, amount) {
 }
 
 export function getCouchConfig(req) {
-  const headerUrl = req?.headers?.['x-couch-url'];
-  const headerUser = req?.headers?.['x-couch-user'];
-  const headerPassword = req?.headers?.['x-couch-password'];
-
   return {
-    baseUrl: normalizeBaseUrl(headerUrl || process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || ''),
-    username: String(headerUser || process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || ''),
-    password: String(headerPassword || process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || ''),
+    baseUrl: normalizeBaseUrl(process.env.COUCHDB_URL || ''),
+    username: String(process.env.COUCHDB_USER || ''),
+    password: String(process.env.COUCHDB_PASSWORD || ''),
   };
 }
 
@@ -79,7 +75,7 @@ export function buildCouchAuthHeader(req) {
 export async function couchRequest(req, pathname, init = {}) {
   const cfg = getCouchConfig(req);
   if (!cfg.baseUrl) {
-    throw new Error('COUCHDB_URL o VITE_COUCHDB_URL no configurado en backend');
+    throw new Error('COUCHDB_URL no configurado en backend');
   }
 
   const auth = buildCouchAuthHeader(req);
@@ -1942,7 +1938,7 @@ function normalizeDbName(value) {
 }
 
 function getDbPrefix() {
-  return normalizeDbName(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'udar');
+  return normalizeDbName(process.env.COUCHDB_DB || 'udar');
 }
 
 export function getSalesDbName() {
@@ -4172,12 +4168,12 @@ export async function listLocationsByUser(req, userId) {
 // ─── GDPR / RGPD ─────────────────────────────────────────────────────────────
 
 export function getGdprConsentsDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.COUCHDB_DB || 'udar';
   return `${prefix}-gdpr-consents`;
 }
 
 export function getGdprRequestsDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.COUCHDB_DB || 'udar';
   return `${prefix}-gdpr-requests`;
 }
 

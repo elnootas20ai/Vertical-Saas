@@ -829,14 +829,16 @@ function FacturacionTab({ invoices }: { invoices: PurchaseInvoice[] }) {
         isOpen={showAIModal}
         onClose={() => setShowAIModal(false)}
         module="purchases_stock"
-        moduleLabel="Compras/Stock"
+        moduleLabel="Stock"
         fields={MODULE_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
       />
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        moduleLabel="Compras/Stock"
+        moduleLabel="Stock"
+        importLabel="Stock"
+        templateFileName="plantilla_stock.csv"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />

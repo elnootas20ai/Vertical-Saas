@@ -2,11 +2,11 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 
-const COUCH_URL = process.env.VITE_COUCHDB_URL || 'http://localhost:5984';
-const COUCH_USER = process.env.VITE_COUCHDB_USER;
-const COUCH_PASS = process.env.VITE_COUCHDB_PASSWORD;
+const COUCH_URL = process.env.COUCHDB_URL || 'http://localhost:5984';
+const COUCH_USER = process.env.COUCHDB_USER;
+const COUCH_PASS = process.env.COUCHDB_PASSWORD;
 if (!COUCH_USER || !COUCH_PASS) {
-  console.error('❌ Falta VITE_COUCHDB_USER o VITE_COUCHDB_PASSWORD en .env');
+  console.error('❌ Falta COUCHDB_USER o COUCHDB_PASSWORD en .env');
   process.exit(1);
 }
 const ACCOUNTS_DB = 'accounts';

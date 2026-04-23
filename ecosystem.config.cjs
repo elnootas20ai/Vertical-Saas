@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "udaredge-frontend",
+      name: "udar-frontend",
       script: "npx",
       args: "vite",
       node_args: "--max-old-space-size=4192",
@@ -9,7 +9,7 @@ module.exports = {
       watch: false,
     },
     {
-      name: "udaredge-backend",
+      name: "udar-backend",
       script: "index.js",
       cwd: "./",
       watch: false,

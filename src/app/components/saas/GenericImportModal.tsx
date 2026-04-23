@@ -16,6 +16,8 @@ interface GenericImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   moduleLabel: string;
+  importLabel?: string;
+  templateFileName?: string;
   fields: ImportFieldDef[];
   onImport: (entries: Record<string, string>[]) => Promise<number | void> | number | void;
 }
@@ -26,6 +28,8 @@ export function GenericImportModal({
   isOpen,
   onClose,
   moduleLabel,
+  importLabel,
+  templateFileName,
   fields,
   onImport,
 }: GenericImportModalProps) {
@@ -35,6 +39,8 @@ export function GenericImportModal({
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const normalizedImportLabel = (importLabel || moduleLabel).trim();
 
   const handleClose = () => {
     setStep('upload');
@@ -53,7 +59,8 @@ export function GenericImportModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `plantilla_${moduleLabel.toLowerCase().replace(/\s+/g, '_')}.csv`;
+    const fallbackName = `plantilla_${normalizedImportLabel.toLowerCase().replace(/\s+/g, '_')}.csv`;
+    a.download = templateFileName || fallbackName;
     a.click();
     URL.revokeObjectURL(url);
     toast.success('Plantilla descargada');
@@ -166,7 +173,7 @@ export function GenericImportModal({
             </div>
             <div>
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                Importar {moduleLabel}
+                Importar {normalizedImportLabel}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {step === 'upload' && 'Sube un archivo CSV o Excel'}
@@ -196,7 +203,7 @@ export function GenericImportModal({
                 <div>
                   <p className="font-semibold text-blue-900 dark:text-blue-200">Descargar plantilla</p>
                   <p className="text-sm text-blue-600 dark:text-blue-400 mt-0.5">
-                    Descarga la plantilla CSV con los campos de {moduleLabel}
+                    Descarga la plantilla CSV con los campos de {normalizedImportLabel}
                   </p>
                 </div>
               </button>

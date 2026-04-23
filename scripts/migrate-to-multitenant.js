@@ -24,9 +24,9 @@
  *   --business-id=XXX  → migra sólo una empresa (útil para pruebas graduales)
  *
  *   Variables de entorno requeridas (o en .env):
- *     COUCHDB_URL / VITE_COUCHDB_URL
- *     COUCHDB_USER / VITE_COUCHDB_USER
- *     COUCHDB_PASSWORD / VITE_COUCHDB_PASSWORD
+ *     COUCHDB_URL
+ *     COUCHDB_USER
+ *     COUCHDB_PASSWORD
  *     VITE_COUCHDB_DB  (prefijo legado, p.ej. "udar")
  *
  * ══════════════════════════════════════════════════════════════════════════════
@@ -53,7 +53,7 @@ import {
 const __filename  = fileURLToPath(import.meta.url);
 const __dirname   = path.dirname(__filename);
 const LOG_FILE    = path.resolve(__dirname, '../migration-log.json');
-const LEGACY_PREFIX = (process.env.VITE_COUCHDB_DB || 'udar').replace(/\/+$/, '');
+const LEGACY_PREFIX = (process.env.COUCHDB_DB || 'udar').replace(/\/+$/, '');
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 const args     = process.argv.slice(2);
@@ -62,9 +62,9 @@ const BIZ_ARG  = args.find((a) => a.startsWith('--business-id='));
 const ONLY_BIZ = BIZ_ARG ? BIZ_ARG.split('=')[1] : null;
 
 // ── CouchDB config ────────────────────────────────────────────────────────────
-const COUCH_BASE = (process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || '').replace(/\/+$/, '');
-const COUCH_USER = process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || '';
-const COUCH_PASS = process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || '';
+const COUCH_BASE = (process.env.COUCHDB_URL || '').replace(/\/+$/, '');
+const COUCH_USER = process.env.COUCHDB_USER || '';
+const COUCH_PASS = process.env.COUCHDB_PASSWORD || '';
 const AUTH_HEADER = COUCH_USER
   ? `Basic ${Buffer.from(`${COUCH_USER}:${COUCH_PASS}`).toString('base64')}`
   : '';

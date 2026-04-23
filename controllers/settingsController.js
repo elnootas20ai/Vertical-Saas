@@ -54,6 +54,21 @@ async function saveSettingsDoc(req, type, id, data) {
   return res.json();
 }
 
+function getBillingEmailDomain() {
+  const fromEmail =
+    process.env.BILLING_EMAIL_DOMAIN ||
+    process.env.DEFAULT_CONTACT_EMAIL ||
+    process.env.EMAIL_FROM ||
+    process.env.SMTP_USER ||
+    '';
+  const match = String(fromEmail).match(/@([^>\s]+)/);
+  return (match?.[1] || 'udar.app').toLowerCase();
+}
+
+function buildDefaultInvoiceEmail(businessId) {
+  return `facturas-${businessId}@${getBillingEmailDomain()}`;
+}
+
 // ─── ADM-02: Branding ─────────────────────────────────────────────────────────
 
 export async function getBranding(req, res) {
@@ -907,7 +922,7 @@ export async function getInvoiceEmail(req, res) {
     return res.json({
       ok: true,
       invoiceEmail: doc || {
-        email: `facturas-${businessId}@udaredge.com`,
+        email: buildDefaultInvoiceEmail(businessId),
         enabled: false,
         customEmail: '',
       },
@@ -922,7 +937,7 @@ export async function saveInvoiceEmail(req, res) {
     const { businessId } = req.params;
     const { email, enabled, customEmail } = req.body;
     await saveSettingsDoc(req, 'invoice_email', businessId, {
-      email: email || `facturas-${businessId}@udaredge.com`,
+      email: email || buildDefaultInvoiceEmail(businessId),
       enabled: Boolean(enabled),
       customEmail: customEmail || '',
     });

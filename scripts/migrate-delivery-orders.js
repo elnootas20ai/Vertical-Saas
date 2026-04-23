@@ -14,6 +14,8 @@
 import 'dotenv/config';
 
 const COUCHDB_URL = process.env.COUCHDB_URL || 'http://localhost:5984';
+const COUCHDB_USER = process.env.COUCHDB_USER || '';
+const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || '';
 const DB_PREFIX = process.env.DB_PREFIX || 'udar';
 const DB_NAME = `${DB_PREFIX}-delivery`;
 const DRY_RUN = !process.argv.includes('--apply');
@@ -31,9 +33,13 @@ const VALID_STATUSES = ['nuevo', 'cocina', 'listo', 'entregado', 'cancelled', 'i
 
 async function couchFetch(path, options = {}) {
   const url = `${COUCHDB_URL}${path}`;
+  const authHeader =
+    COUCHDB_USER && COUCHDB_PASSWORD
+      ? { Authorization: `Basic ${Buffer.from(`${COUCHDB_USER}:${COUCHDB_PASSWORD}`).toString('base64')}` }
+      : {};
   const res = await fetch(url, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeader, ...options.headers },
   });
   if (!res.ok && res.status !== 404) {
     const body = await res.text();

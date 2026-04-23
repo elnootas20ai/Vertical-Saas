@@ -1,13 +1,18 @@
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Clock, Rocket } from 'lucide-react';
 import { useSetupProgress } from '../../context/SetupProgressContext';
+import { useBusiness } from '../../context/BusinessContext';
 
 export function SetupProgressWidget() {
   const navigate = useNavigate();
   const { status, definitions, progress, loading } = useSetupProgress();
+  const { currentBusiness } = useBusiness();
 
   if (loading || !status || !progress || !definitions) return null;
   if (status.overallCompleted) return null;
+  if (currentBusiness?.business_id && progress.business_id && currentBusiness.business_id !== progress.business_id) {
+    return null;
+  }
 
   const pendingDefs = definitions
     .filter((d) => {

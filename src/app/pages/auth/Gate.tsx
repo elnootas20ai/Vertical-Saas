@@ -572,6 +572,13 @@ export function Gate() {
 
           {createBusinessStep === 1 && (
             <>
+              <ACCESO__Input
+                label="Nombre comercial"
+                placeholder="Mi empresa S.L."
+                value={createBusinessData.name}
+                onChange={(e) => setCreateBusinessData({ ...createBusinessData, name: e.target.value })}
+                required
+              />
               <div className="space-y-3">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Tipo de negocio (vertical)
@@ -606,13 +613,6 @@ export function Gate() {
                   })}
                 </div>
               </div>
-              <ACCESO__Input
-                label="Nombre comercial"
-                placeholder="Mi empresa S.L."
-                value={createBusinessData.name}
-                onChange={(e) => setCreateBusinessData({ ...createBusinessData, name: e.target.value })}
-                required
-              />
             </>
           )}
 

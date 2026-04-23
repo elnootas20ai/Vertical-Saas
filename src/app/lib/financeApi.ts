@@ -31,6 +31,11 @@ function getApiBase() {
 
 const API_BASE = getApiBase();
 
+function normalizeUserId(userId: string): string {
+  const value = String(userId || '').trim();
+  return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
@@ -62,8 +67,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function listFinanceMovements(userId: string): Promise<FinanceMovementRecord[]> {
+  const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; movements: unknown[] }>(
-    `/api/finance/${encodeURIComponent(userId)}`,
+    `/api/finance/${encodeURIComponent(id)}`,
   );
 
   return (payload.movements || [])
@@ -79,11 +85,12 @@ export async function createFinanceMovementInCouch(
   userId: string,
   payload: CreateFinanceMovementPayload,
 ): Promise<FinanceMovementRecord> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; movement: unknown }>(
-    `/api/finance/${encodeURIComponent(userId)}`,
+    `/api/finance/${encodeURIComponent(id)}`,
     {
       method: 'POST',
-      body: JSON.stringify({ movement: { ...payload, user_id: userId } }),
+      body: JSON.stringify({ movement: { ...payload, user_id: id } }),
     },
   );
 
@@ -96,8 +103,9 @@ export async function updateFinanceMovementInCouch(
   userId: string,
   document: FinanceMovementRecord,
 ): Promise<FinanceMovementRecord> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; movement: unknown }>(
-    `/api/finance/${encodeURIComponent(userId)}/${encodeURIComponent(document._id)}`,
+    `/api/finance/${encodeURIComponent(id)}/${encodeURIComponent(document._id)}`,
     {
       method: 'PUT',
       body: JSON.stringify({ movement: document }),
@@ -113,8 +121,9 @@ export async function deleteFinanceMovementFromCouch(
   userId: string,
   movementId: string,
 ): Promise<void> {
+  const id = normalizeUserId(userId);
   await request(
-    `/api/finance/${encodeURIComponent(userId)}/${encodeURIComponent(movementId)}`,
+    `/api/finance/${encodeURIComponent(id)}/${encodeURIComponent(movementId)}`,
     { method: 'DELETE' },
   );
 }
@@ -123,8 +132,9 @@ export async function markMovementPaid(
   userId: string,
   movementId: string,
 ): Promise<FinanceMovementRecord> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; movement: unknown }>(
-    `/api/finance/${encodeURIComponent(userId)}/${encodeURIComponent(movementId)}/mark-paid`,
+    `/api/finance/${encodeURIComponent(id)}/${encodeURIComponent(movementId)}/mark-paid`,
     { method: 'PUT' },
   );
   const normalized = normalizeFinanceMovementRecord(result.movement);
@@ -137,8 +147,9 @@ export async function createMovementFromInvoice(
   invoiceId: string,
   invoiceType: 'client_invoice' | 'purchase_invoice',
 ): Promise<FinanceMovementRecord> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; movement: unknown }>(
-    `/api/finance/${encodeURIComponent(userId)}/from-invoice`,
+    `/api/finance/${encodeURIComponent(id)}/from-invoice`,
     {
       method: 'POST',
       body: JSON.stringify({ invoiceId, invoiceType }),
@@ -153,8 +164,9 @@ export async function createMovementFromSale(
   userId: string,
   saleId: string,
 ): Promise<FinanceMovementRecord> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; movement: unknown }>(
-    `/api/finance/${encodeURIComponent(userId)}/from-sale`,
+    `/api/finance/${encodeURIComponent(id)}/from-sale`,
     {
       method: 'POST',
       body: JSON.stringify({ saleId }),
@@ -169,12 +181,13 @@ export async function fetchCategorySuggestion(
   userId: string,
   params: { concept?: string; companyName?: string; type?: string },
 ): Promise<string | null> {
+  const id = normalizeUserId(userId);
   const qs = new URLSearchParams();
   if (params.concept) qs.set('concept', params.concept);
   if (params.companyName) qs.set('companyName', params.companyName);
   if (params.type) qs.set('type', params.type);
   const result = await request<{ ok: boolean; category: string | null }>(
-    `/api/finance/${encodeURIComponent(userId)}/suggest-category?${qs}`,
+    `/api/finance/${encodeURIComponent(id)}/suggest-category?${qs}`,
   );
   return result.category;
 }
@@ -192,8 +205,9 @@ export interface ReconciliationSuggestion {
 export async function fetchReconciliationSuggestions(
   userId: string,
 ): Promise<ReconciliationSuggestion[]> {
+  const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; suggestions: ReconciliationSuggestion[] }>(
-    `/api/finance/${encodeURIComponent(userId)}/reconciliation-suggestions`,
+    `/api/finance/${encodeURIComponent(id)}/reconciliation-suggestions`,
   );
   return result.suggestions || [];
 }

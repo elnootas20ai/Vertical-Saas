@@ -51,12 +51,12 @@ export function getBackupState() {
 
 // ── CouchDB helpers ───────────────────────────────────────────────────────────
 function getCouchBase() {
-  return (process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || '').replace(/\/+$/, '');
+  return (process.env.COUCHDB_URL || '').replace(/\/+$/, '');
 }
 
 function getCouchAuthHeader() {
-  const user = process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || '';
-  const pass = process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || '';
+  const user = process.env.COUCHDB_USER || '';
+  const pass = process.env.COUCHDB_PASSWORD || '';
   return user ? `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}` : '';
 }
 

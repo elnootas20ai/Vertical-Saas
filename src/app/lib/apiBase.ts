@@ -5,7 +5,16 @@ function trimTrailingSlash(url: string): string {
 }
 
 export function getApiBase(): string {
-  // Runtime safety: force canonical API host in production frontend.
-  return 'https://api.udaredge.com';
+  if (env.VITE_API_URL) return trimTrailingSlash(env.VITE_API_URL);
+
+  const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const protocol =
+    env.VITE_API_PROTOCOL ||
+    (typeof window !== 'undefined' && window.location.protocol
+      ? window.location.protocol.replace(':', '')
+      : 'http');
+  const host = env.VITE_API_HOST || browserHost;
+  const port = env.VITE_API_PORT || '3001';
+  return trimTrailingSlash(`${protocol}://${host}:${port}`);
 }
 

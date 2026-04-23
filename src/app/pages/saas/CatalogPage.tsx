@@ -58,6 +58,9 @@ const DEFAULT_SALES_CHANNELS = [
   { id: 'deliveroo', name: 'Deliveroo' },
 ];
 
+const normalizeDuplicateValue = (value?: string | null): string =>
+  String(value || '').trim().toLowerCase();
+
 function getStepsForType(itemType: CatalogItemType): string[] {
   switch (itemType) {
     case 'product':
@@ -859,21 +862,61 @@ export function CatalogPage() {
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
     if (!user?.id) return;
-    const items = entries.map(entry => ({
-      name: entry.name || '', description: entry.description || '',
-      category: entry.category || '', unit: entry.unit || vc.units[0]?.value || 'ud',
-      vertical: businessType,
-      module: 'catalog' as const,
-      unitPrice: Number(entry.unitPrice) || 0, costPrice: Number(entry.costPrice) || 0,
-      stockQuantity: Number(entry.stockQuantity) || 0, minStock: Number(entry.minStock) || 0,
-      active: true, webVisible: true, available: true, notes: entry.notes || '', customFields: {},
-    }));
+    const existingNameKeys = new Set(catalogItems.map(item => normalizeDuplicateValue(item.name)).filter(Boolean));
+    const existingSkuKeys = new Set(catalogItems.map(item => normalizeDuplicateValue(item.sku)).filter(Boolean));
+    const importNameKeys = new Set<string>();
+    const importSkuKeys = new Set<string>();
+    let skippedDuplicates = 0;
+
+    const items = entries.reduce<Record<string, unknown>[]>((acc, entry) => {
+      const nameKey = normalizeDuplicateValue(entry.name);
+      const skuKey = normalizeDuplicateValue(entry.sku);
+      const hasDuplicateName = !!nameKey && (existingNameKeys.has(nameKey) || importNameKeys.has(nameKey));
+      const hasDuplicateSku = !!skuKey && (existingSkuKeys.has(skuKey) || importSkuKeys.has(skuKey));
+
+      if (hasDuplicateName || hasDuplicateSku) {
+        skippedDuplicates += 1;
+        return acc;
+      }
+
+      if (nameKey) importNameKeys.add(nameKey);
+      if (skuKey) importSkuKeys.add(skuKey);
+
+      acc.push({
+        name: entry.name || '',
+        description: entry.description || '',
+        category: entry.category || '',
+        unit: entry.unit || vc.units[0]?.value || 'ud',
+        vertical: businessType,
+        module: 'catalog' as const,
+        unitPrice: Number(entry.unitPrice) || 0,
+        costPrice: Number(entry.costPrice) || 0,
+        stockQuantity: Number(entry.stockQuantity) || 0,
+        minStock: Number(entry.minStock) || 0,
+        active: true,
+        webVisible: true,
+        available: true,
+        notes: entry.notes || '',
+        sku: entry.sku || undefined,
+        customFields: {},
+      });
+      return acc;
+    }, []);
+
+    if (items.length === 0) {
+      toast.error('No se importaron elementos: todos estaban repetidos por nombre o SKU.');
+      return 0;
+    }
+
     const result = await bulkCreateCatalogItemsRequest(user.id, items as any);
     if (result.created > 0) {
       loadData();
     }
     if (result.errors > 0) {
       toast.error(`${result.errors} elemento(s) no se pudieron importar`);
+    }
+    if (skippedDuplicates > 0) {
+      toast.warning(`${skippedDuplicates} elemento(s) omitido(s) por duplicado (nombre/SKU)`);
     }
     return result.created;
   };
@@ -913,6 +956,23 @@ export function CatalogPage() {
       return;
     }
     try {
+      const incomingNameKey = normalizeDuplicateValue(data.name);
+      const incomingSkuKey = normalizeDuplicateValue(data.sku);
+      const duplicatedItem = catalogItems.find(item => {
+        if (editingItem && item._id === editingItem._id) return false;
+        const sameName = !!incomingNameKey && normalizeDuplicateValue(item.name) === incomingNameKey;
+        const sameSku = !!incomingSkuKey && normalizeDuplicateValue(item.sku) === incomingSkuKey;
+        return sameName || sameSku;
+      });
+      if (duplicatedItem) {
+        const duplicatedField =
+          incomingSkuKey && normalizeDuplicateValue(duplicatedItem.sku) === incomingSkuKey
+            ? 'SKU'
+            : 'nombre';
+        toast.error(`Ya existe un artículo con ese ${duplicatedField}.`);
+        return;
+      }
+
       if (editingItem) {
         const updated = await updateCatalogItemRequest(user.id, { ...editingItem, ...data } as CatalogItem);
         setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
@@ -959,7 +1019,28 @@ export function CatalogPage() {
   };
 
   const categories = useMemo(() => [...new Set(catalogItems.map(i => i.category).filter(Boolean))].sort(), [catalogItems]);
+  const duplicateMetaById = useMemo(() => {
+    const repeatedNameIds = new Set<string>();
+    const repeatedSkuIds = new Set<string>();
+    const names = new Map<string, string[]>();
+    const skus = new Map<string, string[]>();
 
+    for (const item of catalogItems) {
+      const nameKey = normalizeDuplicateValue(item.name);
+      if (nameKey) names.set(nameKey, [...(names.get(nameKey) || []), item._id]);
+      const skuKey = normalizeDuplicateValue(item.sku);
+      if (skuKey) skus.set(skuKey, [...(skus.get(skuKey) || []), item._id]);
+    }
+
+    names.forEach(ids => { if (ids.length > 1) ids.forEach(id => repeatedNameIds.add(id)); });
+    skus.forEach(ids => { if (ids.length > 1) ids.forEach(id => repeatedSkuIds.add(id)); });
+
+    const meta: Record<string, { name: boolean; sku: boolean }> = {};
+    for (const item of catalogItems) {
+      meta[item._id] = { name: repeatedNameIds.has(item._id), sku: repeatedSkuIds.has(item._id) };
+    }
+    return meta;
+  }, [catalogItems]);
   const filteredCatalog = useMemo(() => {
     return catalogItems.filter(item => {
       if (filterCategory !== 'all' && item.category !== filterCategory) return false;
@@ -992,7 +1073,7 @@ export function CatalogPage() {
   };
 
   return (
-    <Layout title="Catálogo" subtitle={`Gestión de ${vc.itemLabelPlural.toLowerCase()}`}>
+    <Layout title="Catálogo" subtitle="Gestión de catálogo">
       <div className="space-y-6">
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/saas/articles')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
@@ -1010,8 +1091,8 @@ export function CatalogPage() {
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="flex gap-2 flex-wrap">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-              <input className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-56" placeholder="Buscar producto, SKU..." value={searchCatalog} onChange={e => setSearchCatalog(e.target.value)} />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+              <input className="pl-8 pr-3 py-1.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-xs focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-44" placeholder="Buscar artículo..." value={searchCatalog} onChange={e => setSearchCatalog(e.target.value)} />
             </div>
             <select className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none" value={filterType} onChange={e => setFilterType(e.target.value as any)}>
               <option value="all">Todos los tipos</option>
@@ -1057,7 +1138,6 @@ export function CatalogPage() {
             <div className="text-xs text-green-700 dark:text-green-400 mt-0.5">Categorías</div>
           </div>
         </div>
-
         {/* Table */}
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
@@ -1100,7 +1180,14 @@ export function CatalogPage() {
                             </div>
                           )}
                           <div>
-                            <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{item.name}</div>
+                            <div className="flex items-center gap-2">
+                              <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{item.name}</div>
+                              {(duplicateMetaById[item._id]?.name || duplicateMetaById[item._id]?.sku) && (
+                                <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                  Duplicado
+                                </span>
+                              )}
+                            </div>
                             {item.description && <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{item.description}</div>}
                           </div>
                         </div>
@@ -1164,7 +1251,7 @@ export function CatalogPage() {
         isOpen={showAIModal}
         onClose={() => setShowAIModal(false)}
         module="catalog"
-        moduleLabel={vc.itemLabelPlural}
+        moduleLabel="Catálogo"
         fields={CATALOG_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
       />
@@ -1172,7 +1259,9 @@ export function CatalogPage() {
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        moduleLabel={vc.itemLabelPlural}
+        moduleLabel="Catálogo"
+        importLabel="Catálogo"
+        templateFileName="plantilla_catalogo.csv"
         fields={CATALOG_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />

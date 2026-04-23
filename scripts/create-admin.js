@@ -2,12 +2,12 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 
-const COUCH_URL = process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || 'http://localhost:5984';
-const COUCH_USER = process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER;
-const COUCH_PASS = process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD;
+const COUCH_URL = process.env.COUCHDB_URL || 'http://localhost:5984';
+const COUCH_USER = process.env.COUCHDB_USER;
+const COUCH_PASS = process.env.COUCHDB_PASSWORD;
 
 if (!COUCH_USER || !COUCH_PASS) {
-  console.error('Missing COUCHDB_USER/COUCHDB_PASSWORD (or VITE_COUCHDB_USER/VITE_COUCHDB_PASSWORD)');
+  console.error('Missing COUCHDB_USER/COUCHDB_PASSWORD');
   process.exit(1);
 }
 

@@ -68,6 +68,20 @@ async function findAffiliateByCode(req, code) {
   return all.find((d) => d.type === 'affiliate' && d.affiliateCode === code && !d.deletedAt) || null;
 }
 
+function getAffiliateContactEmail() {
+  return (
+    process.env.AFFILIATE_EMAIL ||
+    process.env.DEFAULT_CONTACT_EMAIL ||
+    process.env.EMAIL_FROM ||
+    process.env.SMTP_USER ||
+    'hola@udar.app'
+  );
+}
+
+function getPublicSiteUrl() {
+  return process.env.APP_URL || 'https://udar.app';
+}
+
 export async function findAffiliateByReferralCode(req, code) {
   await ensureAffiliatesDb(req);
   const all = await getAllDocuments(req, AFFILIATES_DB);
@@ -139,7 +153,7 @@ export async function submitAffiliateRequest(req, res) {
     logger.info({ tag: 'AFFILIATE', email, verticals, affiliateCode }, 'Solicitud de afiliado recibida');
 
     try {
-      const affiliateEmail = process.env.AFFILIATE_EMAIL || process.env.SMTP_USER || 'hola@udaredge.com';
+      const affiliateEmail = getAffiliateContactEmail();
       const html = buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, website, verticals, message });
       await sendEmail({
         to: affiliateEmail,
@@ -912,7 +926,7 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
             : ''
         }
         <tr><td style="padding:32px;">
-          <p style="color:#9ca3af;font-size:12px;margin:0;">Este correo fue generado automáticamente desde el formulario de afiliados de <a href="https://udaredge.com" style="color:#2563eb;">udaredge.com</a></p>
+          <p style="color:#9ca3af;font-size:12px;margin:0;">Este correo fue generado automáticamente desde el formulario de afiliados de <a href="${getPublicSiteUrl()}" style="color:#2563eb;">${getPublicSiteUrl().replace(/^https?:\/\//, '')}</a></p>
         </td></tr>
       </table>
     </td></tr>

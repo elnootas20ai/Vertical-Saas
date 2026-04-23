@@ -53,13 +53,13 @@ const RESOURCE_LABELS = {
 };
 
 function getCouchBaseUrl() {
-  const url = process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || 'http://localhost:5984';
+  const url = process.env.COUCHDB_URL || 'http://localhost:5984';
   return url.replace(/\/+$/, '');
 }
 
 function getCouchAuth() {
-  const user = process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || '';
-  const pass = process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || '';
+  const user = process.env.COUCHDB_USER || '';
+  const pass = process.env.COUCHDB_PASSWORD || '';
   if (!user || !pass) return '';
   return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
 }

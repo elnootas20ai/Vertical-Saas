@@ -10,8 +10,10 @@ import {
   buildSetupProgressDocument,
   ensureDatabase,
   findAccountByUserId,
+  findBusinessById,
   findSetupProgressByUserId,
   getAllDocuments,
+  listBusinessesByUser,
   sanitizeSetupProgress,
   saveSetupProgress,
   getCatalogDbName,
@@ -32,7 +34,51 @@ function recalcOverall(doc) {
 
 async function getOrCreateProgress(req, userId) {
   let doc = await findSetupProgressByUserId(req, userId);
-  if (doc && doc.type === 'setup_progress') return doc;
+  if (doc && doc.type === 'setup_progress') {
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return doc;
+
+    let targetBusinessId = String(doc.business_id || account.linkedBusinessId || '').trim();
+    if (!targetBusinessId) {
+      const businesses = await listBusinessesByUser(req, userId);
+      targetBusinessId = String(businesses[0]?.business_id || '').trim();
+    }
+
+    let changed = false;
+    if (targetBusinessId && doc.business_id !== targetBusinessId) {
+      doc.business_id = targetBusinessId;
+      changed = true;
+    }
+
+    const businessScopedStepKeys = [
+      'initial_team',
+      'locations',
+      'initial_clients',
+      'catalog_setup',
+      'stock_initial',
+      'first_operation',
+    ];
+
+    for (const stepKey of businessScopedStepKeys) {
+      const step = doc.steps.find((s) => s.key === stepKey);
+      if (!step) continue;
+
+      const shouldBeCompleted = await verifyStep(req, userId, stepKey, account, targetBusinessId);
+      if (step.completed !== shouldBeCompleted) {
+        step.completed = shouldBeCompleted;
+        step.completedAt = shouldBeCompleted ? step.completedAt || new Date().toISOString() : null;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      recalcOverall(doc);
+      doc.updatedAt = new Date().toISOString();
+      doc = await saveSetupProgress(req, doc);
+    }
+
+    return doc;
+  }
 
   const account = await findAccountByUserId(req, userId);
   if (!account) return null;
@@ -234,7 +280,7 @@ export async function verifyAll(req, res) {
     for (const step of doc.steps) {
       if (step.completed || step.skipped) continue;
 
-      const wasCompleted = await verifyStep(req, userId, step.key, account);
+      const wasCompleted = await verifyStep(req, userId, step.key, account, doc.business_id);
       if (wasCompleted) {
         step.completed = true;
         step.completedAt = new Date().toISOString();
@@ -261,8 +307,10 @@ export async function verifyAll(req, res) {
 
 // ─── Verificación individual de cada paso ────────────────────────────────────
 
-async function verifyStep(req, userId, stepKey, account) {
+async function verifyStep(req, userId, stepKey, account, businessId) {
   try {
+    const targetBusinessId = String(businessId || account?.linkedBusinessId || '').trim();
+
     switch (stepKey) {
       case 'company_profile': {
         const onb = account.onboardingData || {};
@@ -270,53 +318,72 @@ async function verifyStep(req, userId, stepKey, account) {
         return Boolean(profile.tradeName && profile.legalName && profile.taxId && profile.address);
       }
       case 'initial_team': {
-        await ensureDatabase(req, ACCOUNTS_DB);
-        const allAccounts = await getAllDocuments(req, ACCOUNTS_DB);
-        const teamMembers = allAccounts.filter(
-          (a) => a?.type === 'account' && a.linkedBusinessId === account.linkedBusinessId && a.user_id !== userId && !a.deletedAt,
-        );
-        return teamMembers.length >= 1;
+        if (!targetBusinessId) return false;
+        const business = await findBusinessById(req, targetBusinessId);
+        if (!business || business?.deletedAt) return false;
+        const members = Array.isArray(business.members) ? business.members : [];
+        const activeMembers = members.filter((m) => m && m.user_id && !m.deletedAt);
+        return activeMembers.length >= 2;
       }
       case 'locations': {
-        const locDb = `${process.env.VITE_COUCHDB_DB || 'udar'}-locations`;
+        if (!targetBusinessId) return false;
+        const locDb = `${process.env.COUCHDB_DB || 'udar'}-locations`;
         try {
           await ensureDatabase(req, locDb);
           const locs = await getAllDocuments(req, locDb);
-          const userLocs = locs.filter((d) => d?.user_id === userId && d?.type === 'location' && !d.deletedAt);
-          return userLocs.length >= 1;
+          const businessLocs = locs.filter(
+            (d) =>
+              d?.type === 'location' &&
+              !d?.deletedAt &&
+              d?.business_id === targetBusinessId,
+          );
+          return businessLocs.length >= 1;
         } catch {
           return false;
         }
       }
       case 'initial_clients': {
-        const clientDb = `${process.env.VITE_COUCHDB_DB || 'udar'}-clients`;
+        if (!targetBusinessId) return false;
+        const clientDb = `${process.env.COUCHDB_DB || 'udar'}-clients`;
         try {
           await ensureDatabase(req, clientDb);
           const clients = await getAllDocuments(req, clientDb);
-          const userClients = clients.filter((d) => d?.user_id === userId && !d.deletedAt);
-          return userClients.length >= 1;
+          const businessClients = clients.filter(
+            (d) => !d?.deletedAt && d?.business_id === targetBusinessId,
+          );
+          return businessClients.length >= 1;
         } catch {
           return false;
         }
       }
       case 'catalog_setup': {
+        if (!targetBusinessId) return false;
         const catDb = getCatalogDbName();
         try {
           await ensureDatabase(req, catDb);
           const items = await getAllDocuments(req, catDb);
-          const userItems = items.filter((d) => d?.user_id === userId && d?.type === 'catalog_item' && !d.deletedAt);
-          return userItems.length >= 1;
+          const businessItems = items.filter(
+            (d) =>
+              d?.type === 'catalog_item' &&
+              !d?.deletedAt &&
+              d?.business_id === targetBusinessId,
+          );
+          return businessItems.length >= 1;
         } catch {
           return false;
         }
       }
       case 'stock_initial': {
+        if (!targetBusinessId) return false;
         const catDb2 = getCatalogDbName();
         try {
           await ensureDatabase(req, catDb2);
           const items = await getAllDocuments(req, catDb2);
-          const withStock = items.filter(
-            (d) => d?.user_id === userId && d?.type === 'catalog_item' && !d.deletedAt && (d.stockQuantity || 0) > 0,
+          const withStock = items.filter((d) =>
+            d?.type === 'catalog_item' &&
+            !d?.deletedAt &&
+            d?.business_id === targetBusinessId &&
+            (d.stockQuantity || 0) > 0,
           );
           return withStock.length >= 1;
         } catch {
@@ -324,12 +391,13 @@ async function verifyStep(req, userId, stepKey, account) {
         }
       }
       case 'first_operation': {
-        const salesDb = `${process.env.VITE_COUCHDB_DB || 'udar'}-sales`;
+        if (!targetBusinessId) return false;
+        const salesDb = `${process.env.COUCHDB_DB || 'udar'}-sales`;
         try {
           await ensureDatabase(req, salesDb);
           const sales = await getAllDocuments(req, salesDb);
-          const userSales = sales.filter((d) => d?.user_id === userId && !d.deletedAt);
-          return userSales.length >= 1;
+          const businessSales = sales.filter((d) => !d?.deletedAt && d?.business_id === targetBusinessId);
+          return businessSales.length >= 1;
         } catch {
           return false;
         }

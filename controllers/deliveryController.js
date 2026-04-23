@@ -56,6 +56,39 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function normalizeDuplicateValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isSameCatalogScope(base, candidate) {
+  if ((base.module || 'catalog') !== (candidate.module || 'catalog')) return false;
+  const baseBusinessId = String(base.business_id || '').trim();
+  const candidateBusinessId = String(candidate.business_id || '').trim();
+  if (baseBusinessId && candidateBusinessId) return baseBusinessId === candidateBusinessId;
+  return true;
+}
+
+async function findCatalogDuplicate(req, userId, itemCandidate, excludeId = '') {
+  const items = await listCatalogItemsByUser(req, userId, { module: itemCandidate.module || 'catalog' });
+  const candidateName = normalizeDuplicateValue(itemCandidate.name);
+  const candidateSku = normalizeDuplicateValue(itemCandidate.sku);
+  const excluded = String(excludeId || '').trim();
+
+  if (!candidateName && !candidateSku) return null;
+
+  for (const item of items) {
+    if (!item || String(item._id || '') === excluded) continue;
+    if (!isSameCatalogScope(itemCandidate, item)) continue;
+    const sameName = !!candidateName && normalizeDuplicateValue(item.name) === candidateName;
+    const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
+    if (sameName || sameSku) {
+      return { item, duplicatedField: sameSku ? 'sku' : 'name' };
+    }
+  }
+
+  return null;
+}
+
 async function ensureDeliveryOrderOwner(req, userId, orderId) {
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
@@ -472,6 +505,13 @@ export async function createCatalogItem(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
     const doc = buildCatalogItemDocument(userId, item);
+    const duplicate = await findCatalogDuplicate(req, userId, doc);
+    if (duplicate) {
+      return res.status(409).json({
+        ok: false,
+        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'SKU' : 'nombre'}`,
+      });
+    }
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId,
@@ -506,17 +546,71 @@ export async function bulkCreateCatalogItems(req, res) {
 
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
-    const results = await bulkPutDocuments(req, db, docs);
+    const existingItems = await listCatalogItemsByUser(req, userId);
+    const existingNameKeys = new Set();
+    const existingSkuKeys = new Set();
+    existingItems.forEach(existing => {
+      if (!existing) return;
+      const moduleKey = String(existing.module || 'catalog');
+      const businessKey = String(existing.business_id || '');
+      const nameKey = normalizeDuplicateValue(existing.name);
+      const skuKey = normalizeDuplicateValue(existing.sku);
+      if (nameKey) existingNameKeys.add(`${moduleKey}|${businessKey}|name|${nameKey}`);
+      if (skuKey) existingSkuKeys.add(`${moduleKey}|${businessKey}|sku|${skuKey}`);
+    });
+
+    const batchNameKeys = new Set();
+    const batchSkuKeys = new Set();
+    const dedupedDocs = [];
+    const duplicateErrors = [];
+
+    docs.forEach((doc, idx) => {
+      const moduleKey = String(doc.module || 'catalog');
+      const businessKey = String(doc.business_id || '');
+      const nameKey = normalizeDuplicateValue(doc.name);
+      const skuKey = normalizeDuplicateValue(doc.sku);
+      const nameComposite = nameKey ? `${moduleKey}|${businessKey}|name|${nameKey}` : '';
+      const skuComposite = skuKey ? `${moduleKey}|${businessKey}|sku|${skuKey}` : '';
+      const repeatedName = !!nameComposite && (existingNameKeys.has(nameComposite) || batchNameKeys.has(nameComposite));
+      const repeatedSku = !!skuComposite && (existingSkuKeys.has(skuComposite) || batchSkuKeys.has(skuComposite));
+
+      if (repeatedName || repeatedSku) {
+        duplicateErrors.push({
+          index: idx,
+          name: doc?.name,
+          error: repeatedSku ? 'SKU duplicado' : 'Nombre duplicado',
+        });
+        return;
+      }
+
+      if (nameComposite) batchNameKeys.add(nameComposite);
+      if (skuComposite) batchSkuKeys.add(skuComposite);
+      dedupedDocs.push(doc);
+    });
+
+    if (dedupedDocs.length === 0) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se pudo importar: todos los artículos están duplicados por nombre o SKU',
+        created: 0,
+        errors: duplicateErrors.length,
+        items: [],
+        errorDetails: duplicateErrors,
+      });
+    }
+
+    const results = await bulkPutDocuments(req, db, dedupedDocs);
 
     const created = [];
     const errors = [];
     results.forEach((result, idx) => {
       if (result.ok) {
-        created.push(sanitizeCatalogItem({ ...docs[idx], _rev: result.rev }));
+        created.push(sanitizeCatalogItem({ ...dedupedDocs[idx], _rev: result.rev }));
       } else {
-        errors.push({ index: idx, name: docs[idx]?.name, error: result.error || result.reason });
+        errors.push({ index: idx, name: dedupedDocs[idx]?.name, error: result.error || result.reason });
       }
     });
+    if (duplicateErrors.length > 0) errors.push(...duplicateErrors);
 
     if (created.length > 0) {
       await logAccountActivity(req, {
@@ -527,7 +621,7 @@ export async function bulkCreateCatalogItems(req, res) {
         action: `Importación masiva: ${created.length} artículo(s) creado(s)`,
         entityId: created[0]._id,
         entityLabel: `Importación de ${created.length} artículos`,
-        metadata: { count: created.length, module: docs[0]?.module },
+        metadata: { count: created.length, module: dedupedDocs[0]?.module },
       });
     }
 
@@ -554,6 +648,13 @@ export async function updateCatalogItem(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getCatalogDbName();
     const doc = buildCatalogItemDocument(userId, { ...existing, ...item }, existing);
+    const duplicate = await findCatalogDuplicate(req, userId, doc, existing._id);
+    if (duplicate) {
+      return res.status(409).json({
+        ok: false,
+        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'SKU' : 'nombre'}`,
+      });
+    }
     const saved = await putDocument(req, db, doc._id, doc);
     const stockChanged = Number(existing.stockQuantity || 0) !== Number(doc.stockQuantity || 0);
     if (stockChanged) triggerReactiveAlert(userId, 'stock_updated', { itemId: doc._id }).catch(() => null);

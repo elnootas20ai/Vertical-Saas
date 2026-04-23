@@ -1,36 +1,42 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
-  server: {
-    hmr: true,
-    host: '0.0.0.0',
-    port: 3015,
-    watch: {
-      ignored: [
-        '**/.plugin-data/**',
-        '**/src/app/components/saved/**',
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const apiTarget =
+    env.VITE_API_URL ||
+    `${env.VITE_API_PROTOCOL || 'http'}://${env.VITE_API_HOST || 'localhost'}:${env.VITE_API_PORT || '3001'}`;
+
+  return {
+    server: {
+      hmr: true,
+      host: '0.0.0.0',
+      port: 3015,
+      watch: {
+        ignored: [
+          '**/.plugin-data/**',
+          '**/src/app/components/saved/**',
+        ],
+      },
+      allowedHosts: [
+        'localhost',
+        'api.udaredge.com',
+        'udaredge.com',
+        'www.udaredge.com',
       ],
-    },
-    allowedHosts: [
-      'localhost',
-      'api.udaredge.com',
-      'udaredge.com',
-      'www.udaredge.com',
-    ],
-    proxy: {
-      '/api': {
-        target: 'https://api.udaredge.com',
-        changeOrigin: true,
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
-  },
 
-  plugins: [
-    react(),
-    tailwindcss(),
+    plugins: [
+      react(),
+      tailwindcss(),
 
     VitePWA({
       registerType: 'autoUpdate',
@@ -80,16 +86,17 @@ export default defineConfig({
         enabled: false,
       },
     }),
-  ],
+    ],
 
-  build: {
-    sourcemap: false,
-    chunkSizeWarningLimit: 1500,
-  },
-
-  resolve: {
-    alias: {
-      '@': new URL('./src', import.meta.url).pathname,
+    build: {
+      sourcemap: false,
+      chunkSizeWarningLimit: 1500,
     },
-  },
+
+    resolve: {
+      alias: {
+        '@': new URL('./src', import.meta.url).pathname,
+      },
+    },
+  };
 })

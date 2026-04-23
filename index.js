@@ -152,12 +152,11 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 // SEC-03: CORS restrictivo con whitelist de dominios configurada via ALLOWED_ORIGINS.
-// Se incluyen también orígenes canónicos de Udar Edge para evitar caídas por .env incompleto.
+// Los orígenes base se infieren del entorno para evitar acoplar el código a un dominio fijo.
 const CORE_ALLOWED_ORIGINS = [
-  'https://udaredge.com',
-  'https://www.udaredge.com',
-  'https://api.udaredge.com',
-];
+  process.env.APP_URL,
+  process.env.VITE_API_URL,
+].filter(Boolean);
 const ALLOWED_ORIGINS = Array.from(
   new Set([
     ...CORE_ALLOWED_ORIGINS,
@@ -168,11 +167,18 @@ const ALLOWED_ORIGINS = Array.from(
   ]),
 );
 
-function isTrustedUdarOrigin(origin) {
+const TRUSTED_ORIGIN_SUFFIXES = (process.env.ALLOWED_ORIGIN_SUFFIXES || '')
+  .split(',')
+  .map((v) => v.trim().toLowerCase())
+  .filter(Boolean);
+
+function isTrustedConfiguredOrigin(origin) {
   if (!origin) return false;
   try {
     const u = new URL(origin);
-    return u.protocol === 'https:' && (u.hostname === 'udaredge.com' || u.hostname.endsWith('.udaredge.com'));
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    return TRUSTED_ORIGIN_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
   } catch {
     return false;
   }
@@ -180,7 +186,7 @@ function isTrustedUdarOrigin(origin) {
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && (ALLOWED_ORIGINS.includes(origin) || isTrustedUdarOrigin(origin))) {
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || isTrustedConfiguredOrigin(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   } else if (ALLOWED_ORIGINS.length === 0) {
@@ -237,21 +243,13 @@ function getClientIp(req) {
 }
 
 function getCouchConfig(req) {
-  const headerUrl = req?.headers?.['x-couch-url'];
-  const headerUser = req?.headers?.['x-couch-user'];
-  const headerPassword = req?.headers?.['x-couch-password'];
-
-  const baseUrlFromHeader = typeof headerUrl === 'string' ? headerUrl : '';
-  const userFromHeader = typeof headerUser === 'string' ? headerUser : '';
-  const passFromHeader = typeof headerPassword === 'string' ? headerPassword : '';
-
   return {
-    baseUrl: (baseUrlFromHeader || process.env.COUCHDB_URL || process.env.VITE_COUCHDB_URL || '').replace(
+    baseUrl: (process.env.COUCHDB_URL || '').replace(
       /\/+$/,
       '',
     ),
-    username: userFromHeader || process.env.COUCHDB_USER || process.env.VITE_COUCHDB_USER || '',
-    password: passFromHeader || process.env.COUCHDB_PASSWORD || process.env.VITE_COUCHDB_PASSWORD || '',
+    username: process.env.COUCHDB_USER || '',
+    password: process.env.COUCHDB_PASSWORD || '',
   };
 }
 
@@ -266,7 +264,7 @@ function buildCouchAuthHeader(req) {
 async function couchRequest(req, pathname, init = {}) {
   const cfg = getCouchConfig(req);
   if (!cfg.baseUrl) {
-    throw new Error('COUCHDB_URL o VITE_COUCHDB_URL no configurado en backend');
+    throw new Error('COUCHDB_URL no configurado en backend');
   }
   const auth = buildCouchAuthHeader(req);
   const response = await fetch(`${cfg.baseUrl}${pathname}`, {
