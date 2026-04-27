@@ -547,19 +547,15 @@ export async function bulkCreateCatalogItems(req, res) {
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
     const existingItems = await listCatalogItemsByUser(req, userId);
-    const existingNameKeys = new Set();
     const existingSkuKeys = new Set();
     existingItems.forEach(existing => {
       if (!existing) return;
       const moduleKey = String(existing.module || 'catalog');
       const businessKey = String(existing.business_id || '');
-      const nameKey = normalizeDuplicateValue(existing.name);
       const skuKey = normalizeDuplicateValue(existing.sku);
-      if (nameKey) existingNameKeys.add(`${moduleKey}|${businessKey}|name|${nameKey}`);
       if (skuKey) existingSkuKeys.add(`${moduleKey}|${businessKey}|sku|${skuKey}`);
     });
 
-    const batchNameKeys = new Set();
     const batchSkuKeys = new Set();
     const dedupedDocs = [];
     const duplicateErrors = [];
@@ -567,23 +563,19 @@ export async function bulkCreateCatalogItems(req, res) {
     docs.forEach((doc, idx) => {
       const moduleKey = String(doc.module || 'catalog');
       const businessKey = String(doc.business_id || '');
-      const nameKey = normalizeDuplicateValue(doc.name);
       const skuKey = normalizeDuplicateValue(doc.sku);
-      const nameComposite = nameKey ? `${moduleKey}|${businessKey}|name|${nameKey}` : '';
       const skuComposite = skuKey ? `${moduleKey}|${businessKey}|sku|${skuKey}` : '';
-      const repeatedName = !!nameComposite && (existingNameKeys.has(nameComposite) || batchNameKeys.has(nameComposite));
       const repeatedSku = !!skuComposite && (existingSkuKeys.has(skuComposite) || batchSkuKeys.has(skuComposite));
 
-      if (repeatedName || repeatedSku) {
+      if (repeatedSku) {
         duplicateErrors.push({
           index: idx,
           name: doc?.name,
-          error: repeatedSku ? 'SKU duplicado' : 'Nombre duplicado',
+          error: 'SKU duplicado',
         });
         return;
       }
 
-      if (nameComposite) batchNameKeys.add(nameComposite);
       if (skuComposite) batchSkuKeys.add(skuComposite);
       dedupedDocs.push(doc);
     });
@@ -591,7 +583,7 @@ export async function bulkCreateCatalogItems(req, res) {
     if (dedupedDocs.length === 0) {
       return res.status(409).json({
         ok: false,
-        error: 'No se pudo importar: todos los artículos están duplicados por nombre o SKU',
+        error: 'No se pudo importar: todos los artículos están duplicados por SKU',
         created: 0,
         errors: duplicateErrors.length,
         items: [],

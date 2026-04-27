@@ -170,7 +170,7 @@ const HOME_GROUP: SidebarGroup = {
   id: 'home',
   label: 'Home',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['dashboard', 'calendar', 'chat', 'calls', 'business-mode', 'tpv-mode'],
+  itemIds: ['dashboard', 'calendar', 'chat', 'calls'],
 };
 
 const menuItemDefs = [
@@ -180,14 +180,10 @@ const menuItemDefs = [
   { id: 'chat',      navKey: 'chat',      icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/chat' },
   { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
   { id: 'business-mode', navKey: 'businessMode', icon: <ArrowLeftRight className="w-5 h-5" />, path: '#' },
-  { id: 'tpv-mode',      navKey: 'tpvMode',      icon: <Monitor className="w-5 h-5" />,       path: '/saas/tpv-mode' },
 
   // ── Clientes / CRM ──────────────────────────────────────────────────────────
   { id: 'quotes',     navKey: 'quotes',     icon: <ClipboardList className="w-5 h-5" />, path: '/saas/quotes' },
-  { id: 'clients',    navKey: 'clients',    icon: <Users className="w-5 h-5" />,          path: '/saas/crm/clientes?tab=clients' },
-  { id: 'leads',      navKey: 'leads',      icon: <UserPlus className="w-5 h-5" />,       path: '/saas/crm/clientes?tab=leads' },
   { id: 'promotions', navKey: 'promotions', icon: <Megaphone className="w-5 h-5" />,      path: '/saas/promotions', isNew: true },
-  { id: 'billing',    navKey: 'billing',    icon: <Receipt className="w-5 h-5" />,        path: '/saas/crm/clientes?tab=billing' },
 
   // ── Equipo ───────────────────────────────────────────────────────────────────
   { id: 'team',            navKey: 'team',           icon: <UsersRound className="w-5 h-5" />,    path: '/saas/team' },
@@ -249,6 +245,7 @@ const menuItemDefs = [
   { id: 'delivery-montaje', navKey: 'deliveryMontaje', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/delivery-montaje' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
+  { id: 'delivery-crm',     navKey: 'clients',         icon: <Users className="w-5 h-5" />,     path: '/saas/delivery-crm' },
   { id: 'delivery-catalog', navKey: 'deliveryCatalog', icon: <BookOpen className="w-5 h-5" />, path: '/saas/delivery-catalog' },
   { id: 'delivery-reparto', navKey: 'deliveryReparto', icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery-reparto' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
@@ -401,7 +398,7 @@ const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
   label: 'Principal',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['worker-home', 'worker-tpv', 'worker-tasks', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding', 'business-mode'],
+  itemIds: ['worker-home', 'worker-tpv', 'worker-tasks', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
 };
 
 const workerSidebarGroupDefs = [
@@ -409,14 +406,14 @@ const workerSidebarGroupDefs = [
 ] as const;
 
 const sidebarGroupDefs = [
-  { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'clients', 'leads', 'promotions', 'billing'] },
+  { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'promotions'] },
   { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'] },
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'articles', 'suppliers', 'orders', 'purchase-orders', 'supplier-billing', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['delivery-ops', 'tpv', 'sala', 'tpv-locales', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'tpv-rapido', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['delivery-ops', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'tpv-rapido', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -441,7 +438,7 @@ const sidebarGroupDefs = [
 const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   carDealership: new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'commercial']),
   workshop:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'workshop']),
-  delivery:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
+  delivery:      new Set(['equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
   cleaning:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'cleaning']),
   gym:           new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'gym']),
   clinic:        new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'clinic']),
@@ -624,6 +621,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     ...WORKER_HOME_GROUP,
     label: t('sidebar.groups.workerMain'),
   };
+  const currentProfileLabel = workerMode ? 'Trabajador' : 'Gerente';
 
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || 'UU';
 
@@ -687,7 +685,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     if (!user) {
       return true;
     }
-    if (['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'business-mode', 'tpv-mode'].includes(item.id)) {
+    if (['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'business-mode'].includes(item.id)) {
       return true;
     }
     const permission = permissionMap[item.id]
@@ -766,10 +764,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
   const COMMON_SIDEBAR_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
   const allowedGroupsList = sidebarGroups.filter((g) => allowedGroups.has(g.id));
+  const shouldHideCrmGroup = vertical === 'delivery';
   const filteredGroups: SidebarGroup[] = [
     HOME_GROUP,
-    ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id)),
-    ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id)),
+    ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
+    ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
   ];
   const salesPointItems: SidebarItem[] = salesPoints.map((sp) => ({
     id: `sp-${sp._id}`,
@@ -868,38 +867,56 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
         {/* Company selector dropdown */}
         <div ref={companySelectorRef} className={`relative ${narrow ? 'px-1 pb-1' : 'px-3 pb-1'}`}>
-          <button
-            type="button"
-            onClick={() => setShowCompanyDropdown((prev) => !prev)}
-            className={`w-full flex items-center gap-2 rounded-lg transition-all text-sm ${
-              narrow ? 'justify-center p-2' : 'px-3 py-2'
-            } hover:bg-gray-100 dark:hover:bg-gray-800`}
-            title={narrow ? (currentBusiness?.name || t('topbar.myCompany')) : undefined}
-          >
-            <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {currentBusiness?.logo ? (
-                <img
-                  src={currentBusiness.logo}
-                  alt={currentBusiness.name}
-                  className="w-7 h-7 rounded-lg object-cover"
-                />
-              ) : (
-                <span className="text-xs font-bold text-blue-700 dark:text-blue-300">
-                  {currentBusiness
-                    ? currentBusiness.name.slice(0, 2).toUpperCase()
-                    : (user?.firstName?.[0] || 'U').toUpperCase()}
-                </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setShowCompanyDropdown((prev) => !prev)}
+              className={`flex items-center gap-2 rounded-lg transition-all text-sm ${
+                narrow ? 'justify-center p-2 flex-1 min-w-0' : 'px-3 py-2 flex-1 min-w-0'
+              } hover:bg-gray-100 dark:hover:bg-gray-800`}
+              title={narrow ? (currentBusiness?.name || t('topbar.myCompany')) : undefined}
+            >
+              <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {currentBusiness?.logo ? (
+                  <img
+                    src={currentBusiness.logo}
+                    alt={currentBusiness.name}
+                    className="w-7 h-7 rounded-lg object-cover"
+                  />
+                ) : (
+                  <span className="text-xs font-bold text-blue-700 dark:text-blue-300">
+                    {currentBusiness
+                      ? currentBusiness.name.slice(0, 2).toUpperCase()
+                      : (user?.firstName?.[0] || 'U').toUpperCase()}
+                  </span>
+                )}
+              </div>
+              {(isMobile || !collapsed) && (
+                <>
+                  <span className="font-medium text-gray-900 dark:text-gray-100 flex-1 text-left truncate">
+                    {currentBusiness?.name || user?.companyName || user?.firstName || t('topbar.myCompany')}
+                  </span>
+                  <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
+                </>
               )}
-            </div>
-            {(isMobile || !collapsed) && (
-              <>
-                <span className="font-medium text-gray-900 dark:text-gray-100 flex-1 text-left truncate">
-                  {currentBusiness?.name || user?.companyName || user?.firstName || t('topbar.myCompany')}
-                </span>
-                <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
-              </>
-            )}
-          </button>
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleWorkerMode}
+              className={`rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+                narrow ? 'p-2 flex-shrink-0' : 'px-2 py-2 flex-shrink-0 max-w-[96px]'
+              }`}
+              title={currentProfileLabel}
+            >
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300 min-w-0">
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                {(isMobile || !collapsed) && (
+                  <span className="truncate">{currentProfileLabel}</span>
+                )}
+              </span>
+            </button>
+          </div>
 
           {showCompanyDropdown && (
             <div className={`absolute z-50 mt-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl overflow-hidden ${

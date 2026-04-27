@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Layout } from '../../components/saas/Layout';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   listCatalogItemsRequest,
+  listDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   type CatalogItem,
   type DeliveryOrder,
@@ -14,10 +16,11 @@ import {
   type DeliveryOrderStatus,
   type DeliveryType,
 } from '../../lib/deliveryApi';
-import { createClientRequest, updateClientRequest } from '../../lib/crmApi';
+import { updateClientRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  ArrowLeft,
   Phone,
   Search,
   ShoppingBag,
@@ -70,8 +73,11 @@ function formatPrice(n: number): string {
 
 export function TpvRapidoPage() {
   const { user } = useAuth();
+  const { addClient } = useApp();
+  const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
-  const userId = user?.id || '';
+  const userId = user?.user_id || user?.id || '';
+  const [selectedCashierId, setSelectedCashierId] = useState<string>('');
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
@@ -112,6 +118,7 @@ export function TpvRapidoPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
+  const [clientProductScores, setClientProductScores] = useState<Record<string, number>>({});
 
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
@@ -122,6 +129,35 @@ export function TpvRapidoPage() {
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const cashierOptions = useMemo(() => {
+    const members = currentBusiness?.members || [];
+    const merged = new Map<string, { id: string; name: string; role: string }>();
+    members.forEach((m) => {
+      const id = String(m.user_id || '');
+      if (!id) return;
+      merged.set(id, {
+        id,
+        name: m.fullName?.trim() || m.email || 'Trabajador',
+        role: m.role || 'worker',
+      });
+    });
+    if (user?.id) {
+      merged.set(user.id, {
+        id: user.id,
+        name: user.fullName?.trim() || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Gerente',
+        role: String((user as Record<string, unknown>).role || 'admin'),
+      });
+    }
+    return Array.from(merged.values());
+  }, [currentBusiness?.members, user]);
+
+  useEffect(() => {
+    if (!selectedCashierId && cashierOptions.length > 0) {
+      const manager = cashierOptions.find((c) => ['admin', 'owner', 'manager', 'gerente'].includes(c.role.toLowerCase()));
+      setSelectedCashierId(manager?.id || cashierOptions[0].id);
+    }
+  }, [cashierOptions, selectedCashierId]);
 
   // ─── Load catalog ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -148,6 +184,35 @@ export function TpvRapidoPage() {
     }
   }, [currentStep, selectedClient, createdOrder]);
 
+  // ─── Frequent products by selected client ───────────────────────────────────
+  useEffect(() => {
+    if (!userId || !selectedClient?.id) {
+      setClientProductScores({});
+      return;
+    }
+    let cancelled = false;
+    listDeliveryOrdersRequest(userId)
+      .then((orders) => {
+        if (cancelled) return;
+        const scores: Record<string, number> = {};
+        const clientOrders = orders.filter((o) => o.clientId === selectedClient.id).slice(0, 40);
+        clientOrders.forEach((order) => {
+          order.items.forEach((item) => {
+            const key = String(item.catalogItemId || '').trim();
+            if (!key) return;
+            scores[key] = (scores[key] || 0) + Number(item.quantity || 1);
+          });
+        });
+        setClientProductScores(scores);
+      })
+      .catch(() => {
+        if (!cancelled) setClientProductScores({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, selectedClient?.id]);
+
   // ─── Derived ───────────────────────────────────────────────────────────────
   const categories = useMemo(() => {
     const cats = new Set<string>();
@@ -164,8 +229,26 @@ export function TpvRapidoPage() {
         (i) => i.name.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q),
       );
     }
-    return items;
-  }, [catalog, selectedCategory, productSearch]);
+    return items.sort((a, b) => {
+      const pricedA = Number(a.unitPrice || 0) > 0 ? 1 : 0;
+      const pricedB = Number(b.unitPrice || 0) > 0 ? 1 : 0;
+      if (pricedA !== pricedB) return pricedB - pricedA;
+      return (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0);
+    });
+  }, [catalog, selectedCategory, productSearch, clientProductScores]);
+
+  const hasPricedProducts = useMemo(
+    () => catalog.some((item) => Number(item.unitPrice || 0) > 0),
+    [catalog],
+  );
+
+  const habitualProducts = useMemo(
+    () =>
+      filteredProducts
+        .filter((p) => (clientProductScores[p._id] || 0) > 0)
+        .slice(0, 6),
+    [filteredProducts, clientProductScores],
+  );
 
   const cartTotal = useMemo(
     () => cart.reduce((sum, ci) => sum + ci.catalogItem.unitPrice * ci.quantity, 0),
@@ -195,11 +278,13 @@ export function TpvRapidoPage() {
   );
 
   const canSubmit =
+    !!selectedCashierId &&
     !!selectedClient &&
     !!deliveryType &&
     cart.length > 0 &&
     !!paymentMethod &&
     (deliveryType !== 'domicilio' || !!selectedAddressId);
+  const isProductsFocus = currentStep === 'products' && isStepReachable('products');
 
   // ─── Cart helpers ──────────────────────────────────────────────────────────
   const addToCart = useCallback((item: CatalogItem) => {
@@ -245,6 +330,31 @@ export function TpvRapidoPage() {
     });
   }, []);
 
+  const resetFlowFromClientStep = useCallback(() => {
+    clearSelection();
+    setCompletedSteps(new Set());
+    setCurrentStep('client');
+    setDeliveryType(null);
+    setSelectedAddressId(null);
+    setShowNewAddress(false);
+    setAddressWarning(false);
+    setCart([]);
+    setProductSearch('');
+    setSelectedCategory(null);
+    setPaymentMethod(null);
+    setCashGiven('');
+    setOrderNotes('');
+    setInitialStatus('nuevo');
+  }, [clearSelection]);
+
+  const goToPreviousStep = useCallback(() => {
+    const order: Step[] = ['client', 'delivery', 'products', 'payment'];
+    const idx = order.indexOf(currentStep);
+    if (idx > 0) {
+      setCurrentStep(order[idx - 1]);
+    }
+  }, [currentStep]);
+
   // ─── Client selection ─────────────────────────────────────────────────────
   const handleSelectClient = useCallback(
     (client: Client) => {
@@ -269,17 +379,23 @@ export function TpvRapidoPage() {
     setCreatingClient(true);
     try {
       const addressId = uuidv4();
-      const clientData = {
-        id: `client-${uuidv4()}`,
-        type: 'client' as const,
+      const selectedCashier = cashierOptions.find((c) => c.id === selectedCashierId);
+      const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
+      const clientData: Omit<Client, 'id' | 'createdAt'> = {
+        type: 'client',
         user_id: userId,
+        clientType: 'particular',
         name: newClientName.trim(),
         phone: phoneInput.trim(),
         phonePrefix,
         email: '',
         status: 'active' as const,
+        responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
+        branch_id: primaryBranchId,
+        tags: ['tpv'],
         address: newClientStreet.trim(),
         notes: newClientNotes.trim(),
+        consents: { dataProcessing: false, commercial: false, thirdParty: false },
         defaultPaymentMethod: (newClientPayment || '') as Client['defaultPaymentMethod'],
         addresses: [
           {
@@ -291,7 +407,6 @@ export function TpvRapidoPage() {
             lastUsedAt: null,
           },
         ],
-        createdAt: new Date(),
         stats: {
           totalOrders: 0,
           lastOrderDate: null,
@@ -300,11 +415,8 @@ export function TpvRapidoPage() {
           totalSpent: 0,
           createdFrom: 'tpv' as const,
         },
-      } as Client;
-      const { client: created, duplicates } = await createClientRequest(userId, clientData);
-      if (duplicates && duplicates.length > 0) {
-        setDuplicateWarning(true);
-      }
+      };
+      const created = await addClient(clientData);
       if (created) {
         toast.success('Cliente creado');
         handleSelectClient(created);
@@ -314,7 +426,22 @@ export function TpvRapidoPage() {
     } finally {
       setCreatingClient(false);
     }
-  }, [userId, phonePrefix, phoneInput, newClientName, newClientStreet, newClientNotes, newClientPayment, handleSelectClient]);
+  }, [
+    userId,
+    phonePrefix,
+    phoneInput,
+    newClientName,
+    newClientStreet,
+    newClientNotes,
+    newClientPayment,
+    handleSelectClient,
+    addClient,
+    cashierOptions,
+    selectedCashierId,
+    currentBusiness?.branches,
+    user?.fullName,
+    user?.firstName,
+  ]);
 
   // ─── Address creation ─────────────────────────────────────────────────────
   const handleSaveNewAddress = useCallback(async () => {
@@ -394,7 +521,9 @@ export function TpvRapidoPage() {
           items,
           totalAmount: cartTotal,
           notes: orderNotes.trim(),
-          observations: '',
+          observations: selectedCashierId
+            ? `Caja atendida por: ${cashierOptions.find((c) => c.id === selectedCashierId)?.name || selectedCashierId}`
+            : '',
           paymentMethod,
           paymentStatus: paymentMethod === 'efectivo' ? 'paid' : 'pending',
           paidAmount: paymentMethod === 'efectivo' ? cartTotal : 0,
@@ -411,7 +540,7 @@ export function TpvRapidoPage() {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, cartTotal, orderNotes, userId, phonePrefix],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, cartTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -439,14 +568,15 @@ export function TpvRapidoPage() {
     setOrderNotes('');
     setInitialStatus('nuevo');
     setCreatedOrder(null);
+    setSelectedCashierId((prev) => prev || cashierOptions[0]?.id || '');
     setTimeout(() => phoneRef.current?.focus(), 150);
-  }, [clearSelection, clearResults]);
+  }, [clearSelection, clearResults, cashierOptions]);
 
   // ─── Success screen ───────────────────────────────────────────────────────
   if (createdOrder) {
     return (
-      <Layout title="TPV Rápido" subtitle="Pedido creado">
-        <div className="max-w-[720px] mx-auto py-12">
+      <TpvFullscreenShell onBack={() => navigate('/saas/delivery-ops')}>
+        <div className="max-w-[820px] mx-auto py-10">
           <div className="flex flex-col items-center text-center gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
               <CheckCircle2 className="w-10 h-10 text-green-600 dark:text-green-400" />
@@ -479,7 +609,7 @@ export function TpvRapidoPage() {
             </div>
           </div>
         </div>
-      </Layout>
+      </TpvFullscreenShell>
     );
   }
 
@@ -487,18 +617,11 @@ export function TpvRapidoPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <Layout title="TPV Rápido" subtitle="Nuevo pedido">
-      <div className="max-w-[720px] mx-auto pb-32">
+    <TpvFullscreenShell onBack={() => navigate('/saas/delivery-ops')}>
+      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-28 px-2 md:px-4`}>
 
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
-        {completedSteps.has('client') && currentStep !== 'client' ? (
-          <CollapsedStep
-            icon={<User className="w-4 h-4" />}
-            label={selectedClient?.name || ''}
-            detail={`${selectedClient?.phonePrefix || phonePrefix} ${selectedClient?.phone}`}
-            onEdit={() => editStep('client')}
-          />
-        ) : currentStep === 'client' ? (
+        {currentStep === 'client' ? (
           <StepContainer step={1} title="Cliente" visible>
             <div className="flex gap-2">
               <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
@@ -510,6 +633,7 @@ export function TpvRapidoPage() {
                   value={phoneInput}
                   onChange={(e) => {
                     setPhoneInput(e.target.value);
+                    resetFlowFromClientStep();
                     setShowCreateForm(false);
                     setDuplicateWarning(false);
                     setPhoneShake(false);
@@ -539,17 +663,19 @@ export function TpvRapidoPage() {
               </div>
             )}
 
-            {!isSearching && results.length === 0 && digits.length >= 6 && !selectedClient && !showCreateForm && (
-              <div className="mt-4 text-center">
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  No se encontró ningún cliente
+            {!showCreateForm && (
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {(!isSearching && results.length === 0 && digits.length >= 6)
+                    ? 'No se encontró ningún cliente'
+                    : 'Si no aparece, puedes crear cliente manualmente'}
                 </p>
                 <button
                   onClick={() => setShowCreateForm(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-medium text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                  Crear cliente nuevo con este teléfono
+                  <Plus className="w-3.5 h-3.5" />
+                  Crear cliente nuevo
                 </button>
               </div>
             )}
@@ -603,18 +729,7 @@ export function TpvRapidoPage() {
         ) : null}
 
         {/* ═══════════════ STEP 2: DELIVERY TYPE ═══════════════ */}
-        {completedSteps.has('delivery') && currentStep !== 'delivery' ? (
-          <CollapsedStep
-            icon={deliveryType === 'domicilio' ? <Truck className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
-            label={deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}
-            detail={
-              deliveryType === 'domicilio'
-                ? selectedClient?.addresses?.find((a) => a.id === selectedAddressId)?.street || ''
-                : ''
-            }
-            onEdit={() => editStep('delivery')}
-          />
-        ) : currentStep === 'delivery' && isStepReachable('delivery') ? (
+        {currentStep === 'delivery' && isStepReachable('delivery') ? (
           <StepContainer step={2} title="Tipo de entrega" visible>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -770,15 +885,8 @@ export function TpvRapidoPage() {
         ) : null}
 
         {/* ═══════════════ STEP 3: PRODUCTS ═══════════════ */}
-        {completedSteps.has('products') && currentStep !== 'products' ? (
-          <CollapsedStep
-            icon={<ShoppingCart className="w-4 h-4" />}
-            label={`${cartCount} producto${cartCount !== 1 ? 's' : ''}`}
-            detail={formatPrice(cartTotal)}
-            onEdit={() => editStep('products')}
-          />
-        ) : currentStep === 'products' && isStepReachable('products') ? (
-          <StepContainer step={3} title="Productos" visible>
+        {currentStep === 'products' && isStepReachable('products') ? (
+          <StepContainer step={3} title="Productos" visible wide>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -788,6 +896,20 @@ export function TpvRapidoPage() {
                 className={`${INPUT_CLASS} pl-10`}
               />
             </div>
+
+            {!hasPricedProducts && (
+              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+                <p className="text-xs text-amber-800 dark:text-amber-300">
+                  No hay precios cargados en catálogo. Importa Excel para operar rápido.
+                </p>
+                <button
+                  onClick={() => navigate('/saas/catalog')}
+                  className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+                >
+                  Importar Excel
+                </button>
+              </div>
+            )}
 
             {categories.length > 0 && (
               <div className="flex gap-2 overflow-x-auto pb-1 mt-3 scrollbar-hide">
@@ -817,112 +939,139 @@ export function TpvRapidoPage() {
               </div>
             )}
 
-            {loadingCatalog ? (
-              <div className="flex items-center justify-center py-12 text-gray-400">
-                <Loader2 className="w-6 h-6 animate-spin" />
-              </div>
-            ) : filteredProducts.length === 0 ? (
-              <p className="text-center text-sm text-gray-400 py-8">No hay productos</p>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-                {filteredProducts.map((item) => {
-                  const qty = getCartQty(item._id);
-                  const disabled = !item.active;
-                  return (
-                    <div
-                      key={item._id}
-                      className={`relative rounded-2xl border-2 overflow-hidden transition-all ${
-                        qty > 0
-                          ? 'border-gray-900 dark:border-gray-300'
-                          : 'border-gray-200 dark:border-gray-700'
-                      } ${disabled ? 'opacity-60' : ''}`}
+            {selectedClient && habitualProducts.length > 0 && (
+              <div className="mt-3 mb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                  Pedido habitual
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {habitualProducts.map((item) => (
+                    <button
+                      key={`habitual-${item._id}`}
+                      onClick={() => addToCart(item)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
                     >
-                      {disabled && (
-                        <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 text-[10px] font-bold uppercase">
-                          Agotado
-                        </div>
-                      )}
-                      <div className="aspect-square bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                        {item.image ? (
-                          <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <Package className="w-8 h-8 text-gray-300 dark:text-gray-500" />
-                        )}
-                      </div>
-                      <div className="p-2.5">
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
-                        <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mt-0.5">{formatPrice(item.unitPrice)}</p>
-                        <div className="flex items-center justify-between mt-2">
-                          {qty > 0 ? (
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => removeFromCart(item._id)}
-                                className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                              >
-                                <Minus className="w-3.5 h-3.5" />
-                              </button>
-                              <span className="text-sm font-bold text-gray-900 dark:text-gray-100 w-6 text-center tabular-nums">{qty}</span>
-                              <button
-                                onClick={() => addToCart(item)}
-                                disabled={disabled}
-                                className="w-7 h-7 rounded-lg bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => addToCart(item)}
-                              disabled={disabled}
-                              className="w-full py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
-                            >
-                              Añadir
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      <Plus className="w-3 h-3" />
+                      <span className="truncate max-w-[180px]">{item.name}</span>
+                      <span className="text-[11px] opacity-80">x{clientProductScores[item._id] || 0}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
-            {cart.length > 0 && (
-              <div className={`mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 ${cartShake ? 'animate-shake' : ''}`}>
-                <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">Resumen</h4>
-                <div className="space-y-2">
-                  {cart.map((ci) => (
-                    <div key={ci.catalogItem._id} className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-gray-500 dark:text-gray-400 tabular-nums">{ci.quantity}x</span>
-                        <span className="text-gray-900 dark:text-gray-100 truncate">{ci.catalogItem.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{formatPrice(ci.catalogItem.unitPrice * ci.quantity)}</span>
-                        <button onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors">
-                          <Minus className="w-3.5 h-3.5" />
-                        </button>
-                        <button onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                  <span className="font-bold text-gray-900 dark:text-gray-100">Total</span>
-                  <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
-                </div>
-                <div className="flex justify-end mt-3">
-                  <button
-                    onClick={() => completeStep('products')}
-                    className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-                  >
-                    Continuar
-                  </button>
-                </div>
+            <div className="mt-3 lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-4">
+              <div>
+                {loadingCatalog ? (
+                  <div className="flex items-center justify-center py-12 text-gray-400">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  </div>
+                ) : filteredProducts.length === 0 ? (
+                  <p className="text-center text-sm text-gray-400 py-8">No hay productos</p>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {filteredProducts.map((item) => {
+                      const qty = getCartQty(item._id);
+                      const disabled = !item.active || Number(item.unitPrice || 0) <= 0;
+                      return (
+                        <div
+                          key={item._id}
+                          className={`relative rounded-2xl border-2 overflow-hidden transition-all ${
+                            qty > 0
+                              ? 'border-gray-900 dark:border-gray-300'
+                              : 'border-gray-200 dark:border-gray-700'
+                          } ${disabled ? 'opacity-60' : ''}`}
+                        >
+                          {disabled && (
+                            <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 text-[10px] font-bold uppercase">
+                              {Number(item.unitPrice || 0) <= 0 ? 'Sin precio' : 'Agotado'}
+                            </div>
+                          )}
+                          <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                            {item.image ? (
+                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Package className="w-8 h-8 text-gray-300 dark:text-gray-500" />
+                            )}
+                          </div>
+                          <div className="p-2.5">
+                            <p className="text-[13px] font-semibold text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
+                            <p className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-0.5">
+                              {Number(item.unitPrice || 0) > 0 ? formatPrice(item.unitPrice) : 'Sin precio'}
+                            </p>
+                            <div className="flex items-center justify-between mt-1.5">
+                              {qty > 0 ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => removeFromCart(item._id)}
+                                    className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                  >
+                                    <Minus className="w-3.5 h-3.5" />
+                                  </button>
+                                  <span className="text-sm font-bold text-gray-900 dark:text-gray-100 w-5 text-center tabular-nums">{qty}</span>
+                                  <button
+                                    onClick={() => addToCart(item)}
+                                    disabled={disabled}
+                                    className="w-7 h-7 rounded-lg bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => addToCart(item)}
+                                  disabled={disabled}
+                                  className="w-full py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
+                                >
+                                  Añadir
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
+
+              {cart.length > 0 && (
+                <div className={`mt-4 lg:mt-0 lg:sticky lg:top-20 h-fit p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 ${cartShake ? 'animate-shake' : ''}`}>
+                  <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">Resumen</h4>
+                  <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                    {cart.map((ci) => (
+                      <div key={ci.catalogItem._id} className="flex items-center justify-between text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-gray-500 dark:text-gray-400 tabular-nums">{ci.quantity}x</span>
+                          <span className="text-gray-900 dark:text-gray-100 truncate">{ci.catalogItem.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{formatPrice(ci.catalogItem.unitPrice * ci.quantity)}</span>
+                          <button onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <span className="font-bold text-gray-900 dark:text-gray-100">Total</span>
+                    <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
+                  </div>
+                  <div className="flex justify-end mt-3">
+                    <button
+                      onClick={() => completeStep('products')}
+                      className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                    >
+                      Continuar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </StepContainer>
         ) : null}
 
@@ -1021,28 +1170,14 @@ export function TpvRapidoPage() {
 
       {/* ═══════════════ STICKY FOOTER ═══════════════ */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg">
-        <div className="max-w-[720px] mx-auto px-4 py-3">
-          <div className="flex items-center justify-between gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
-            <div className="flex items-center gap-3 min-w-0 truncate">
-              {selectedClient && (
-                <span className="flex items-center gap-1">
-                  <User className="w-3 h-3" />
-                  {selectedClient.name}
-                </span>
-              )}
-              {cartCount > 0 && (
-                <span className="flex items-center gap-1">
-                  <ShoppingCart className="w-3 h-3" />
-                  {cartCount}
-                </span>
-              )}
-              {deliveryType && (
-                <span className="flex items-center gap-1">
-                  {deliveryType === 'domicilio' ? <Truck className="w-3 h-3" /> : <ShoppingBag className="w-3 h-3" />}
-                  {deliveryType === 'domicilio' ? 'Domicilio' : 'Recogida'}
-                </span>
-              )}
-            </div>
+        <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-4 py-3`}>
+          <div className="flex items-center justify-end gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
+            {cartCount > 0 && (
+              <span className="flex items-center gap-1">
+                <ShoppingCart className="w-3 h-3" />
+                {cartCount}
+              </span>
+            )}
             {cartTotal > 0 && (
               <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
                 {formatPrice(cartTotal)}
@@ -1057,11 +1192,11 @@ export function TpvRapidoPage() {
               Cancelar
             </button>
             <button
-              onClick={() => handleSubmitOrder('nuevo')}
-              disabled={!canSubmit || submitting}
-              className="flex-1 px-4 py-2.5 rounded-xl bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={goToPreviousStep}
+              disabled={currentStep === 'client'}
+              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {submitting ? 'Guardando...' : 'Guardar (Nuevo)'}
+              Atrás
             </button>
             <button
               onClick={() => handleSubmitOrder('cocina')}
@@ -1073,26 +1208,39 @@ export function TpvRapidoPage() {
           </div>
         </div>
       </div>
-    </Layout>
+    </TpvFullscreenShell>
   );
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function StepContainer({ step, title, visible, children }: { step: number; title: string; visible: boolean; children: ReactNode }) {
+function StepContainer({ step, title, visible, children, wide = false }: { step: number; title: string; visible: boolean; children: ReactNode; wide?: boolean }) {
   return (
     <div
       className={`mb-4 transition-all duration-500 ${
         visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 pointer-events-none'
       }`}
     >
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-7 h-7 rounded-full bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 text-xs font-bold">
-          {step}
+      <div className={`${wide ? 'pl-0' : 'pl-0'} space-y-0`}>{children}</div>
+    </div>
+  );
+}
+
+function TpvFullscreenShell({ children, onBack }: { children: ReactNode; onBack: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
+      <div className="sticky top-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+        <div className="max-w-[1320px] mx-auto px-3 py-2.5">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Volver
+          </button>
         </div>
-        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{title}</h2>
       </div>
-      <div className="pl-10 space-y-0">{children}</div>
+      <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
     </div>
   );
 }

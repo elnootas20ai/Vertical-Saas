@@ -34,7 +34,19 @@ import {
   deleteClientInvoiceRequest,
 } from '../../lib/clientInvoicesApi';
 import { generateInvoicePdf } from '../../lib/invoicePdfGenerator';
-import { checkLeadDuplicatesRequest, mergeLeadRequest, mergeClientRequest } from '../../lib/crmApi';
+import {
+  checkLeadDuplicatesRequest,
+  mergeLeadRequest,
+  mergeClientRequest,
+  listAssignmentRulesRequest,
+  createAssignmentRuleRequest,
+  updateAssignmentRuleRequest,
+  deleteAssignmentRuleRequest,
+  getSlaConfigRequest,
+  saveSlaConfigRequest,
+  type AssignmentRule,
+  type SlaConfig,
+} from '../../lib/crmApi';
 import { InvoiceCreationModal, type InvoiceTypeSelection } from '../../components/saas/InvoiceCreationModal';
 import {
   Users, Plus, Eye, Phone, Mail, UserPlus, Search, MapPin,
@@ -42,6 +54,7 @@ import {
   Receipt, Download, Calendar, X, ArrowUp, ArrowDown, Check, ChevronDown,
   User, Trash2, Package, BadgePercent, Upload, Tag, Kanban, AlertTriangle, Store,
   RotateCcw, ClipboardList, Zap, ReceiptText, Droplets,
+  Settings2, Timer, Workflow, Save,
 } from 'lucide-react';
 
 // ─── Column definitions ───────────────────────────────────────────────────────
@@ -1493,6 +1506,21 @@ export function ClientsPage() {
   const [cFilterCity,   setCFilterCity]   = useState<string[]>([]);
   const [cSort,         setCSort]         = useState<SortState>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [assignmentRules, setAssignmentRules] = useState<AssignmentRule[]>([]);
+  const [loadingAutomation, setLoadingAutomation] = useState(false);
+  const [savingAutomation, setSavingAutomation] = useState(false);
+  const [newRuleName, setNewRuleName] = useState('');
+  const [newRuleHours, setNewRuleHours] = useState('24');
+  const [newRuleFromUser, setNewRuleFromUser] = useState('');
+  const [newRuleToUser, setNewRuleToUser] = useState('');
+  const [newRuleStrategy, setNewRuleStrategy] = useState<'specific' | 'roundrobin' | 'leastload'>('specific');
+  const [slaConfig, setSlaConfig] = useState<SlaConfig>({
+    enabled: false,
+    maxResponseHours: 4,
+    alertAfterHours: 2,
+    applyToStatuses: ['new'],
+    escalationUser: '',
+  });
 
   const CLIENT_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre completo' },
@@ -1955,6 +1983,95 @@ export function ClientsPage() {
     setActivePill('all');
     updateTabQueryParam(tab);
   }, [updateTabQueryParam]);
+
+  const loadAutomationSettings = useCallback(async () => {
+    if (!authUser?.user_id) return;
+    setLoadingAutomation(true);
+    try {
+      const [rules, sla] = await Promise.all([
+        listAssignmentRulesRequest(authUser.user_id),
+        getSlaConfigRequest(authUser.user_id),
+      ]);
+      setAssignmentRules(rules);
+      if (sla) setSlaConfig(sla);
+    } catch {
+      toast.error('No se pudo cargar configuración de asignación/SLA');
+    } finally {
+      setLoadingAutomation(false);
+    }
+  }, [authUser?.user_id]);
+
+  useEffect(() => {
+    if (activeTab === 'alerts' && authUser?.user_id) {
+      void loadAutomationSettings();
+    }
+  }, [activeTab, authUser?.user_id, loadAutomationSettings]);
+
+  const handleCreateRule = async () => {
+    if (!authUser?.user_id || !newRuleName.trim()) {
+      toast.error('Pon un nombre para la regla');
+      return;
+    }
+    setSavingAutomation(true);
+    try {
+      const created = await createAssignmentRuleRequest(authUser.user_id, {
+        name: newRuleName.trim(),
+        inactiveHours: Math.max(1, Number(newRuleHours || 1)),
+        fromUser: newRuleFromUser.trim(),
+        toUser: newRuleToUser.trim(),
+        toStrategy: newRuleStrategy,
+        enabled: true,
+      });
+      if (created) {
+        setAssignmentRules((prev) => [created, ...prev]);
+        setNewRuleName('');
+        setNewRuleHours('24');
+        setNewRuleFromUser('');
+        setNewRuleToUser('');
+        setNewRuleStrategy('specific');
+        toast.success('Regla creada');
+      }
+    } catch {
+      toast.error('No se pudo crear la regla');
+    } finally {
+      setSavingAutomation(false);
+    }
+  };
+
+  const toggleRule = async (rule: AssignmentRule) => {
+    if (!authUser?.user_id) return;
+    const updated = await updateAssignmentRuleRequest(authUser.user_id, rule.id, { enabled: !rule.enabled });
+    if (updated) {
+      setAssignmentRules((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    }
+  };
+
+  const removeRule = async (ruleId: string) => {
+    if (!authUser?.user_id) return;
+    await deleteAssignmentRuleRequest(authUser.user_id, ruleId);
+    setAssignmentRules((prev) => prev.filter((r) => r.id !== ruleId));
+    toast.success('Regla eliminada');
+  };
+
+  const handleSaveSla = async () => {
+    if (!authUser?.user_id) return;
+    setSavingAutomation(true);
+    try {
+      const saved = await saveSlaConfigRequest(authUser.user_id, {
+        ...slaConfig,
+        maxResponseHours: Math.max(1, Number(slaConfig.maxResponseHours || 1)),
+        alertAfterHours: Math.max(1, Number(slaConfig.alertAfterHours || 1)),
+      });
+      if (saved) {
+        setSlaConfig(saved);
+        toast.success('SLA guardado');
+      }
+    } catch {
+      toast.error('No se pudo guardar el SLA');
+    } finally {
+      setSavingAutomation(false);
+    }
+  };
 
   const handleLeadClick      = (lead: Lead)     => { navigate(`/saas/crm/clientes/${lead.id}`); };
   const handleConvertLead    = (lead: Lead)      => { setLeadToConvert(lead); setShowConvertModal(true); setShowLeadDrawer(false); };
@@ -3342,7 +3459,104 @@ export function ClientsPage() {
         {activeTab === 'leads'   && renderLeadsTab()}
         {activeTab === 'clients' && renderClientsTab()}
         {activeTab === 'billing' && renderBillingTab()}
-        {activeTab === 'alerts'  && <CrmAlertsPanel userId={authUser?.user_id || ''} />}
+        {activeTab === 'alerts'  && (
+          <div className="space-y-4">
+            <CrmAlertsPanel userId={authUser?.user_id || ''} />
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 md:p-5 space-y-5">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-indigo-500" />
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Automatización CRM (reasignación y SLA)</h3>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-3 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <Workflow className="w-4 h-4 text-blue-500" />
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Reglas de reasignación</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input value={newRuleName} onChange={(e) => setNewRuleName(e.target.value)} placeholder="Nombre de regla"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                    <input type="number" min={1} value={newRuleHours} onChange={(e) => setNewRuleHours(e.target.value)} placeholder="Horas inactivo"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                    <input value={newRuleFromUser} onChange={(e) => setNewRuleFromUser(e.target.value)} placeholder="Desde usuario (opcional)"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                    <input value={newRuleToUser} onChange={(e) => setNewRuleToUser(e.target.value)} placeholder="Hacia usuario (opcional)"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                  </div>
+                  <select value={newRuleStrategy} onChange={(e) => setNewRuleStrategy(e.target.value as 'specific' | 'roundrobin' | 'leastload')}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+                    <option value="specific">Específico</option>
+                    <option value="roundrobin">Round-robin</option>
+                    <option value="leastload">Menor carga</option>
+                  </select>
+                  <button onClick={handleCreateRule} disabled={savingAutomation}
+                    className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                    Crear regla
+                  </button>
+
+                  <div className="space-y-2 max-h-52 overflow-y-auto">
+                    {loadingAutomation ? (
+                      <p className="text-xs text-gray-400">Cargando reglas...</p>
+                    ) : assignmentRules.length === 0 ? (
+                      <p className="text-xs text-gray-400">Sin reglas configuradas</p>
+                    ) : assignmentRules.map((rule) => (
+                      <div key={rule.id} className="flex items-center justify-between gap-2 text-xs rounded-lg border border-gray-100 dark:border-gray-700 p-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-700 dark:text-gray-300 truncate">{rule.name}</p>
+                          <p className="text-gray-500">{rule.inactiveHours}h · {rule.toStrategy}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => toggleRule(rule)} className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-700">
+                            {rule.enabled ? 'Activa' : 'Pausada'}
+                          </button>
+                          <button onClick={() => removeRule(rule.id)} className="p-1.5 rounded hover:bg-red-50 text-red-500">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <Timer className="w-4 h-4 text-amber-500" />
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">SLA de contacto de leads</p>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={slaConfig.enabled}
+                      onChange={(e) => setSlaConfig((prev) => ({ ...prev, enabled: e.target.checked }))}
+                    />
+                    Activar SLA
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="number" min={1} value={slaConfig.maxResponseHours}
+                      onChange={(e) => setSlaConfig((prev) => ({ ...prev, maxResponseHours: Number(e.target.value || 1) }))}
+                      placeholder="Máx. horas respuesta"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                    <input type="number" min={1} value={slaConfig.alertAfterHours}
+                      onChange={(e) => setSlaConfig((prev) => ({ ...prev, alertAfterHours: Number(e.target.value || 1) }))}
+                      placeholder="Alerta tras horas"
+                      className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" />
+                  </div>
+                  <input
+                    value={slaConfig.escalationUser}
+                    onChange={(e) => setSlaConfig((prev) => ({ ...prev, escalationUser: e.target.value }))}
+                    placeholder="Usuario de escalado (opcional)"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+                  />
+                  <button onClick={handleSaveSla} disabled={savingAutomation}
+                    className="inline-flex items-center gap-1 px-3 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                    <Save className="w-3.5 h-3.5" /> Guardar SLA
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modals */}

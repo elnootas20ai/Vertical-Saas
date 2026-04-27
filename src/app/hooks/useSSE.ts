@@ -94,6 +94,14 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
     }
 
     es.onerror = () => {
+      const disconnectedHandler = handlersRef.current.disconnected;
+      if (typeof disconnectedHandler === 'function') {
+        disconnectedHandler({ reason: 'error' });
+      }
+      const reconnectingHandler = handlersRef.current.reconnecting;
+      if (typeof reconnectingHandler === 'function') {
+        reconnectingHandler({ retryInMs: reconnectDelay.current });
+      }
       es.close();
       esRef.current = null;
 

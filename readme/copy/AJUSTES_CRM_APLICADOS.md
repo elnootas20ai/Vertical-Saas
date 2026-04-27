@@ -1,5 +1,8 @@
 # ✅ AJUSTES ARQUITECTÓNICOS CRM APLICADOS
 
+> **Nota de vigencia (abril 2026):** este documento referencia archivos que no existen actualmente (por ejemplo `src/app/utils/crmRules.ts` y `src/app/types/crm.ts`).  
+> Debe tomarse como histórico; para el estado real usar `ClientsPage`, `CompraventaCrm`, `DeliveryCrm` y `src/app/lib/crmApi.ts`.
+
 ## Fecha: 16 Enero 2026
 **Estado:** Completados todos los ajustes mínimos requeridos
 

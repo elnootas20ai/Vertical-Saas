@@ -7739,7 +7739,8 @@ export async function listBrandsByBusiness(req, businessId) {
 export function buildCatalogItemDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `catitem-${uuidv4()}`;
-  const sku = data.sku || existing?.sku || `ART-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const fallbackSku = `ART-${uuidv4().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+  const sku = data.sku || existing?.sku || fallbackSku;
   const validItemTypes = ['product', 'service', 'combo'];
   const itemType = validItemTypes.includes(data.itemType) ? data.itemType : (existing?.itemType || 'product');
   const validModules = ['stock', 'catalog'];

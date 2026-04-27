@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
 import {
   getDashboardRequest,
   listCrmClientsRequest,
@@ -127,6 +128,7 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'amber' }: {
 
 export function DeliveryCrm() {
   const { userId } = useAuth();
+  const { addClient } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [loading, setLoading] = useState(true);
 
@@ -174,15 +176,6 @@ export function DeliveryCrm() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} cliente(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} cliente(s) importado(s)`);
-  };
-
-
   const loadAll = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
@@ -205,6 +198,52 @@ export function DeliveryCrm() {
   }, [userId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const createClientsFromEntries = useCallback(
+    async (entries: Array<Record<string, unknown>>) => {
+      let created = 0;
+      for (const entry of entries) {
+        const name = String(entry.name || '').trim();
+        if (!name) continue;
+        try {
+          await addClient({
+            name,
+            phone: String(entry.phone || ''),
+            email: String(entry.email || ''),
+            dni: '',
+            address: String(entry.address || ''),
+            city: '',
+            postalCode: '',
+            status: 'active',
+            responsible: '',
+            notes: String(entry.notes || ''),
+            tags: [],
+            consents: { dataProcessing: false, commercial: false, thirdParty: false },
+            interactions: [],
+            documentsList: [],
+          });
+          created += 1;
+        } catch {
+          // Continue with remaining rows; individual failures should not stop import batch.
+        }
+      }
+      if (created > 0) await loadAll();
+      return created;
+    },
+    [addClient, loadAll],
+  );
+
+  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
+    const created = await createClientsFromEntries(entries);
+    if (created > 0) toast.success(`${created} cliente(s) creado(s) con IA`);
+    else toast.error('No se pudo crear ningún cliente');
+  };
+
+  const handleImportEntries = async (entries: Record<string, string>[]) => {
+    const created = await createClientsFromEntries(entries);
+    if (created > 0) toast.success(`${created} cliente(s) importado(s)`);
+    else toast.error('No se pudo importar ningún cliente');
+  };
 
   const openClientDetail = async (client: DeliveryCrmClient) => {
     setSelectedClient(client);

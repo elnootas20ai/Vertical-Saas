@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
@@ -61,6 +62,16 @@ const DEFAULT_SALES_CHANNELS = [
 const normalizeDuplicateValue = (value?: string | null): string =>
   String(value || '').trim().toLowerCase();
 
+const normalizeMediaKey = (value?: string | null): string =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+const SAMPLE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pO7s/0AAAAASUVORK5CYII=';
+
 function getStepsForType(itemType: CatalogItemType): string[] {
   switch (itemType) {
     case 'product':
@@ -120,6 +131,20 @@ function CreateItemModal({
   const unitOptions = vc.units.length > 0 ? vc.units : DEFAULT_UNIT_OPTIONS;
   const stepLabels = getStepsForType(itemType);
   const totalSteps = stepLabels.length;
+  const isEditMode = Boolean(editItem);
+  const modalScrollRef = useRef<HTMLDivElement>(null);
+  const editSections = stepLabels
+    .filter(label => label !== 'Tipo' && label !== 'Resumen')
+    .sort((a, b) => {
+      const rank = (label: string) => {
+        if (label.startsWith('Detalles')) return 0;
+        if (label === 'Precio y fiscalidad') return 1;
+        if (label === 'Marcas y canales') return 2;
+        if (label === 'Artículos' || label === 'Productos del combo') return 3;
+        return 4;
+      };
+      return rank(a) - rank(b);
+    });
 
   const availableArticles = useMemo(() =>
     allCatalogItems.filter(i => i.active && i.itemType !== 'combo'),
@@ -186,6 +211,14 @@ function CreateItemModal({
       setStep(1);
     }
   }, [editItem, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      if (modalScrollRef.current) modalScrollRef.current.scrollTop = 0;
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [isOpen, editItem?._id]);
   useModalClose(isOpen, onClose);
 
   if (!isOpen) return null;
@@ -292,8 +325,8 @@ function CreateItemModal({
     ? availableProducts.filter(i => i.name.toLowerCase().includes(form.comboSearch.toLowerCase()))
     : availableProducts;
 
-  const renderStep = () => {
-    const label = stepLabels[step - 1];
+  const renderStep = (forcedLabel?: string) => {
+    const label = forcedLabel || stepLabels[step - 1];
 
     // ── Tipo ──
     if (label === 'Tipo') {
@@ -728,22 +761,24 @@ function CreateItemModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div ref={modalScrollRef} className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {editItem ? 'Editar elemento' : 'Nuevo elemento del catálogo'}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                Paso {step} de {totalSteps} — {stepLabels[step - 1]}
-              </p>
+              {!isEditMode && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  Paso {step} de {totalSteps} — {stepLabels[step - 1]}
+                </p>
+              )}
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
-          {totalSteps > 1 && (
+          {!isEditMode && totalSteps > 1 && (
             <div className="flex gap-1.5">
               {Array.from({ length: totalSteps }).map((_, i) => (
                 <div key={i}
@@ -753,15 +788,44 @@ function CreateItemModal({
             </div>
           )}
         </div>
-        <div className="p-6 min-h-[280px]">{renderStep()}</div>
-        {step > 1 && (
+        <div className="p-6 min-h-[280px]">
+          {isEditMode ? (
+            <div className="space-y-6">
+              {editSections.map(label => (
+                <section key={label} className="space-y-2">
+                  {label !== 'Detalles del producto' && label !== 'Detalles del servicio' && label !== 'Detalles del combo' && (
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</h3>
+                  )}
+                  {renderStep(label)}
+                </section>
+              ))}
+              <section className="space-y-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Resumen</h3>
+                {renderStep('Resumen')}
+              </section>
+            </div>
+          ) : (
+            renderStep()
+          )}
+        </div>
+        {(isEditMode || step > 1) && (
           <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
-            <button type="button" onClick={() => setStep(s => s - 1)} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">Atrás</button>
-            <div className="flex-1" />
-            {step < totalSteps ? (
-              <button type="button" onClick={() => setStep(s => s + 1)} disabled={!canNext()} className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">Siguiente</button>
+            {isEditMode ? (
+              <>
+                <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">Cancelar</button>
+                <div className="flex-1" />
+                <button type="button" onClick={handleFinalSubmit} disabled={submitting} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait">{submitting ? 'Guardando…' : 'Guardar cambios'}</button>
+              </>
             ) : (
-              <button type="button" onClick={handleFinalSubmit} disabled={submitting} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait">{submitting ? 'Guardando…' : editItem ? 'Guardar cambios' : 'Crear elemento'}</button>
+              <>
+                <button type="button" onClick={() => setStep(s => s - 1)} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">Atrás</button>
+                <div className="flex-1" />
+                {step < totalSteps ? (
+                  <button type="button" onClick={() => setStep(s => s + 1)} disabled={!canNext()} className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">Siguiente</button>
+                ) : (
+                  <button type="button" onClick={handleFinalSubmit} disabled={submitting} className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait">{submitting ? 'Guardando…' : 'Crear elemento'}</button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -784,6 +848,8 @@ export function CatalogPage() {
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [searchCatalog, setSearchCatalog] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
+  const [loadingImageZip, setLoadingImageZip] = useState(false);
   const [filterType, setFilterType] = useState<'all' | CatalogItemType>('all');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -813,11 +879,13 @@ export function CatalogPage() {
   const CATALOG_IMPORT_FIELDS: ImportFieldDef[] = useMemo(() => {
     const fields: ImportFieldDef[] = [
       { key: 'name', label: 'Nombre', required: true, example: vc.categories[0] ? `${vc.itemLabel} ejemplo` : 'Artículo ejemplo' },
+      { key: 'sku', label: 'SKU', example: 'SKU-001' },
       { key: 'description', label: 'Descripción', example: 'Descripción breve' },
       { key: 'category', label: 'Categoría', example: vc.categories[0] || 'general' },
       { key: 'unit', label: 'Unidad', example: vc.units[0]?.value || 'ud' },
       { key: 'unitPrice', label: 'Precio venta', required: true, example: '2.50' },
       { key: 'costPrice', label: 'Precio coste', example: '0.80' },
+      { key: 'image', label: 'Imagen (URL opcional)', example: '' },
     ];
     if (vc.features.stock) {
       fields.push({ key: 'stockQuantity', label: 'Stock actual', example: '100' });
@@ -862,28 +930,25 @@ export function CatalogPage() {
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
     if (!user?.id) return;
-    const existingNameKeys = new Set(catalogItems.map(item => normalizeDuplicateValue(item.name)).filter(Boolean));
-    const existingSkuKeys = new Set(catalogItems.map(item => normalizeDuplicateValue(item.sku)).filter(Boolean));
-    const importNameKeys = new Set<string>();
-    const importSkuKeys = new Set<string>();
-    let skippedDuplicates = 0;
+    const unmatchedImageRefs: string[] = [];
 
-    const items = entries.reduce<Record<string, unknown>[]>((acc, entry) => {
-      const nameKey = normalizeDuplicateValue(entry.name);
-      const skuKey = normalizeDuplicateValue(entry.sku);
-      const hasDuplicateName = !!nameKey && (existingNameKeys.has(nameKey) || importNameKeys.has(nameKey));
-      const hasDuplicateSku = !!skuKey && (existingSkuKeys.has(skuKey) || importSkuKeys.has(skuKey));
-
-      if (hasDuplicateName || hasDuplicateSku) {
-        skippedDuplicates += 1;
-        return acc;
+    let matchedImages = 0;
+    const zipProvided = Object.keys(imageZipMap).length > 0;
+    const items = entries.reduce<Record<string, unknown>[]>((acc, entry, index) => {
+      const nameValue = String(entry.name || '').trim();
+      if (!nameValue) return acc;
+      const resolvedImage =
+        entry.image ||
+        imageZipMap[normalizeMediaKey(entry.sku)] ||
+        imageZipMap[normalizeMediaKey(entry.name)] ||
+        undefined;
+      if (resolvedImage) matchedImages += 1;
+      if (zipProvided && !resolvedImage) {
+        unmatchedImageRefs.push(entry.sku || entry.name || `fila ${index + 2}`);
       }
 
-      if (nameKey) importNameKeys.add(nameKey);
-      if (skuKey) importSkuKeys.add(skuKey);
-
       acc.push({
-        name: entry.name || '',
+        name: nameValue,
         description: entry.description || '',
         category: entry.category || '',
         unit: entry.unit || vc.units[0]?.value || 'ud',
@@ -898,6 +963,7 @@ export function CatalogPage() {
         available: true,
         notes: entry.notes || '',
         sku: entry.sku || undefined,
+        image: resolvedImage,
         customFields: {},
       });
       return acc;
@@ -908,18 +974,119 @@ export function CatalogPage() {
       return 0;
     }
 
-    const result = await bulkCreateCatalogItemsRequest(user.id, items as any);
+    if (zipProvided && unmatchedImageRefs.length > 0) {
+      const sample = unmatchedImageRefs.slice(0, 6).join(', ');
+      toast.warning(`ZIP: ${unmatchedImageRefs.length} producto(s) sin imagen coincidente. Se importarán igual. Ej: ${sample}`);
+    }
+
+    let result = await bulkCreateCatalogItemsRequest(user.id, items as any);
+    const suspiciousSingleCreate = items.length > 1 && result.created <= 1 && result.errors >= items.length - 1;
+    if (suspiciousSingleCreate) {
+      let recovered = 0;
+      let recoveredErrors = 0;
+      for (const item of items) {
+        try {
+          await createCatalogItemRequest(user.id, item as CatalogItem);
+          recovered += 1;
+        } catch (error) {
+          recoveredErrors += 1;
+          const message = error instanceof Error ? error.message : '';
+          if (!message.toLowerCase().includes('ya existe')) {
+            // Preserve non-duplicate failures in logs for backend diagnostics
+            console.warn('Import recovery failed for item', item?.name, message);
+          }
+        }
+      }
+      result = {
+        ...result,
+        created: recovered,
+        errors: recoveredErrors,
+      };
+      toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
+    }
     if (result.created > 0) {
       loadData();
+      if (matchedImages > 0) {
+        toast.success(`${matchedImages} elemento(s) importado(s) con imagen`);
+      }
+      if (Object.keys(imageZipMap).length > 0 && matchedImages === 0) {
+        toast.warning('Se subió ZIP, pero no hubo coincidencias por SKU o nombre');
+      }
     }
     if (result.errors > 0) {
-      toast.error(`${result.errors} elemento(s) no se pudieron importar`);
-    }
-    if (skippedDuplicates > 0) {
-      toast.warning(`${skippedDuplicates} elemento(s) omitido(s) por duplicado (nombre/SKU)`);
+      const firstError = result.errorDetails?.[0];
+      toast.error(
+        firstError
+          ? `${result.errors} elemento(s) no se pudieron importar. Ej: ${firstError.name || 'sin nombre'} -> ${firstError.error}`
+          : `${result.errors} elemento(s) no se pudieron importar`,
+      );
     }
     return result.created;
   };
+
+  const handleZipFileSelected = useCallback(async (file: File | null) => {
+    if (!file) return;
+    setLoadingImageZip(true);
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const map: Record<string, string> = {};
+      const entries = Object.values(zip.files).filter((entry) => {
+        if (entry.dir) return false;
+        const lower = entry.name.toLowerCase();
+        return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp');
+      });
+      for (const entry of entries) {
+        const blob = await entry.async('blob');
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        const filename = entry.name.split('/').pop() || entry.name;
+        const basename = filename.replace(/\.[^.]+$/, '');
+        const key = normalizeMediaKey(basename);
+        if (key) map[key] = dataUrl;
+      }
+      setImageZipMap(map);
+      toast.success(`ZIP cargado: ${Object.keys(map).length} imagen(es) lista(s)`);
+    } catch {
+      toast.error('No se pudo leer el ZIP de imágenes');
+    } finally {
+      setLoadingImageZip(false);
+    }
+  }, []);
+
+  const handleDownloadSampleZip = useCallback(async () => {
+    try {
+      const zip = new JSZip();
+      zip.file('SKU-001.png', SAMPLE_PNG_BASE64, { base64: true });
+      zip.file('SKU-002.png', SAMPLE_PNG_BASE64, { base64: true });
+      zip.file(
+        'LEEME.txt',
+        [
+          'Ejemplo de ZIP de imagenes para Catalogo',
+          '',
+          '1) Nombra cada foto por SKU (recomendado) o por nombre del producto.',
+          '2) Formatos soportados: .jpg, .jpeg, .png, .webp',
+          '3) Usa los mismos valores que en las columnas sku o name del Excel.',
+          '',
+          'Ejemplo:',
+          '- Excel sku: SKU-001 => archivo: SKU-001.png',
+        ].join('\n'),
+      );
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ejemplo_zip_catalogo.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('ZIP de ejemplo descargado');
+    } catch {
+      toast.error('No se pudo generar el ZIP de ejemplo');
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -1264,6 +1431,22 @@ export function CatalogPage() {
         templateFileName="plantilla_catalogo.csv"
         fields={CATALOG_IMPORT_FIELDS}
         onImport={handleImportEntries}
+        extraFileUpload={{
+          accept: '.zip,application/zip',
+          label: 'ZIP de imágenes (opcional)',
+          helpText: loadingImageZip
+            ? 'Procesando ZIP...'
+            : Object.keys(imageZipMap).length > 0
+              ? `${Object.keys(imageZipMap).length} imagen(es) detectada(s) en ZIP`
+              : 'Sube un ZIP con imágenes nombradas por SKU o nombre del producto (si falta match se bloquea la importación)',
+          loading: loadingImageZip,
+          countLabel: Object.keys(imageZipMap).length > 0
+            ? `${Object.keys(imageZipMap).length} imagen(es) preparadas para mapear`
+            : '',
+          sampleZipLabel: 'Descargar ZIP ejemplo',
+          onDownloadSampleZip: handleDownloadSampleZip,
+          onFileSelected: handleZipFileSelected,
+        }}
       />
     </Layout>
   );

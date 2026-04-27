@@ -118,6 +118,10 @@ deliveryRouter.put('/drivers/:userId/:driverId', updateDriver);
 deliveryRouter.delete('/drivers/:userId/:driverId', removeDriver);
 deliveryRouter.post('/drivers/:userId/auto-assign/:orderId', autoAssignDriver);
 
+deliveryRouter.get('/config/:userId', getDeliveryConfig);
+deliveryRouter.put('/config/:userId', updateDeliveryConfig);
+deliveryRouter.get('/ops-center/:userId', getOpsCenter);
+
 deliveryRouter.get('/reparto-config/:userId', getRepartoConfig);
 deliveryRouter.put('/reparto-config/:userId', saveRepartoConfig);
 

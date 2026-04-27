@@ -46,8 +46,6 @@ import {
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
 } from 'lucide-react';
-import { QuickStartGuide } from '../../components/saas/QuickStartGuide';
-import { SetupProgressWidget } from '../../components/saas/SetupProgressWidget';
 import { DocumentAlertsWidget } from '../../components/saas/DocumentAlertsWidget';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 
@@ -75,6 +73,8 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
 ];
 
 const DASH_CONFIG_KEY = 'udar_dashboard_config_v2';
+const DASH_RUNTIME_CACHE_KEY = 'udar_dashboard_runtime_v1';
+const DASH_RUNTIME_TTL_MS = 90_000;
 
 function getDashboardConfigStorageKey(scopeId?: string): string {
   return `${DASH_CONFIG_KEY}:${scopeId || 'global'}`;
@@ -94,6 +94,10 @@ function loadWidgetConfig(scopeId?: string): WidgetConfig[] {
 
 function saveWidgetConfig(config: WidgetConfig[], scopeId?: string) {
   try { localStorage.setItem(getDashboardConfigStorageKey(scopeId), JSON.stringify(config)); } catch { /* noop */ }
+}
+
+function getDashboardRuntimeCacheKey(scopeId?: string): string {
+  return `${DASH_RUNTIME_CACHE_KEY}:${scopeId || 'global'}`;
 }
 
 // ─── Draggable widget wrapper ─────────────────────────────────────────────────
@@ -539,6 +543,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
 
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
   const dashboardConfigScope = `${authUser?.user_id || 'anon'}:${currentBusiness?.business_id || 'default'}`;
+  const runtimeCacheScope = dashboardConfigScope;
 
   // ── Personalización ──
   const [widgetConfig, setWidgetConfig] = useState<WidgetConfig[]>(() => loadWidgetConfig(dashboardConfigScope));
@@ -596,6 +601,33 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   const [serverData, setServerData] = useState<DashboardServerData | null>(null);
   const [serverLoading, setServerLoading] = useState(false);
   const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(null);
+  const [clockinsActive, setClockinsActive] = useState<ActiveMember[]>([]);
+  const [clockinsStatsSummary, setClockinsStatsSummary] = useState<ClockinStatsSummary | null>(null);
+  const [clockinsAlertsSummary, setClockinsAlertsSummary] = useState<AlertsSummary | null>(null);
+  const [clockinsLoading, setClockinsLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(getDashboardRuntimeCacheKey(runtimeCacheScope));
+      if (!raw) return;
+      const cached = JSON.parse(raw) as {
+        at: number;
+        serverData: DashboardServerData | null;
+        serverUpdatedAt: string | null;
+        clockinsActive: ActiveMember[];
+        clockinsStatsSummary: ClockinStatsSummary | null;
+        clockinsAlertsSummary: AlertsSummary | null;
+      };
+      if (!cached?.at || Date.now() - cached.at > DASH_RUNTIME_TTL_MS) return;
+      setServerData(cached.serverData || null);
+      setServerUpdatedAt(cached.serverUpdatedAt || null);
+      setClockinsActive(Array.isArray(cached.clockinsActive) ? cached.clockinsActive : []);
+      setClockinsStatsSummary(cached.clockinsStatsSummary || null);
+      setClockinsAlertsSummary(cached.clockinsAlertsSummary || null);
+    } catch {
+      // noop
+    }
+  }, [runtimeCacheScope]);
 
   useEffect(() => {
     if (!authUser?.user_id) return;
@@ -613,13 +645,101 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
     return () => { cancelled = true; };
   }, [authUser?.user_id]);
 
+  // Refresh silencioso en segundo plano para mantener el dashboard "vivo"
+  useEffect(() => {
+    if (!authUser?.user_id) return;
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      fetchDashboardData(authUser.user_id)
+        .then((data) => {
+          setServerData(data);
+          setServerUpdatedAt(data.updatedAt);
+        })
+        .catch(() => { /* noop */ });
+      Promise.all([
+        fetchActiveNow(authUser.user_id),
+        fetchClockinStats(authUser.user_id),
+        fetchAlertsSummary(authUser.user_id),
+      ])
+        .then(([active, stats, alertsSummary]) => {
+          setClockinsActive(Array.isArray(active) ? active : []);
+          setClockinsStatsSummary(stats || null);
+          setClockinsAlertsSummary(alertsSummary || null);
+        })
+        .catch(() => { /* noop */ });
+    }, 45000);
+    return () => window.clearInterval(intervalId);
+  }, [authUser?.user_id]);
+
+  useEffect(() => {
+    if (!authUser?.user_id) return;
+    let cancelled = false;
+    setClockinsLoading(true);
+    Promise.all([
+      fetchActiveNow(authUser.user_id),
+      fetchClockinStats(authUser.user_id),
+      fetchAlertsSummary(authUser.user_id),
+    ])
+      .then(([active, stats, alertsSummary]) => {
+        if (cancelled) return;
+        setClockinsActive(Array.isArray(active) ? active : []);
+        setClockinsStatsSummary(stats || null);
+        setClockinsAlertsSummary(alertsSummary || null);
+        setClockinsLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClockinsActive([]);
+        setClockinsStatsSummary(null);
+        setClockinsAlertsSummary(null);
+        setClockinsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [authUser?.user_id]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        getDashboardRuntimeCacheKey(runtimeCacheScope),
+        JSON.stringify({
+          at: Date.now(),
+          serverData,
+          serverUpdatedAt,
+          clockinsActive,
+          clockinsStatsSummary,
+          clockinsAlertsSummary,
+        }),
+      );
+    } catch {
+      // noop
+    }
+  }, [runtimeCacheScope, serverData, serverUpdatedAt, clockinsActive, clockinsStatsSummary, clockinsAlertsSummary]);
+
   // ── Refresh handler ──
   const handleRefresh = useCallback(() => {
     if (!authUser?.user_id || serverLoading) return;
     setServerLoading(true);
+    setClockinsLoading(true);
     fetchDashboardData(authUser.user_id)
       .then((data) => { setServerData(data); setServerUpdatedAt(data.updatedAt); setServerLoading(false); })
       .catch(() => setServerLoading(false));
+    Promise.all([
+      fetchActiveNow(authUser.user_id),
+      fetchClockinStats(authUser.user_id),
+      fetchAlertsSummary(authUser.user_id),
+    ])
+      .then(([active, stats, alertsSummary]) => {
+        setClockinsActive(Array.isArray(active) ? active : []);
+        setClockinsStatsSummary(stats || null);
+        setClockinsAlertsSummary(alertsSummary || null);
+        setClockinsLoading(false);
+      })
+      .catch(() => {
+        setClockinsActive([]);
+        setClockinsStatsSummary(null);
+        setClockinsAlertsSummary(null);
+        setClockinsLoading(false);
+      });
   }, [authUser?.user_id, serverLoading]);
 
   // ── KPI values (server → local fallback) ──
@@ -713,89 +833,11 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   // ── Quick access items ──
   const quickAccessItems = useMemo(() => getQuickAccessItems(vertical), [vertical]);
 
-  // ── Loading / Empty state ──
-  if (isLoadingVehicles || isLoadingClients) {
-    return (
-      <Layout title="Dashboard">
-        <div className="space-y-5 animate-pulse">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="bg-white dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl p-5">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="h-3 w-20 bg-gray-100 dark:bg-gray-700 rounded" />
-                  <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-xl" />
-                </div>
-                <div className="h-8 w-20 bg-gray-100 dark:bg-gray-700 rounded-lg mb-2" />
-                <div className="h-3 w-28 bg-gray-100 dark:bg-gray-700 rounded" />
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {[...Array(2)].map((_, i) => (
-              <div key={i} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-800 rounded-2xl p-5">
-                <div className="h-4 w-32 bg-gray-100 dark:bg-gray-700 rounded mb-4" />
-                <div className="h-40 bg-gray-100 dark:bg-gray-700 rounded-xl" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </Layout>
-    );
-  }
-
-  const hasNoData = vehicles.length === 0 && sales.length === 0 && !serverData;
-  if (hasNoData) {
-    const startRoutes: Record<string, string> = {
-      carDealership: '/saas/vehicles',
-      workshop: '/saas/workshop',
-      delivery: '/saas/delivery',
-      cleaning: '/saas/cleaning-hub',
-      gym: '/saas/gym-members',
-      clinic: '/saas/clinic-patients',
-      hotel: '/saas/hotel-reservations',
-      construction: '/saas/construction-projects',
-      academy: '/saas/academy-students',
-      realEstate: '/saas/realestate-properties',
-      lawyer: '/saas/lawyer-cases',
-      nightclub: '/saas/nightclub-events',
-      events: '/saas/events-management',
-      hairSalon: '/saas/salon-appointments',
-      scrapyard: '/saas/scrapyard-hub',
-      spareParts: '/saas/spareparts-catalog',
-      taxi: '/saas/taxi-fleet',
-      pharmacy: '/saas/pharmacy-inventory',
-      carWash: '/saas/carwash-services',
-      vet: '/saas/vet-patients',
-      tobaccoShop: '/saas/tobacco-sales',
-      butcherShop: '/saas/butcher-hub',
-    };
-    const startRoute = startRoutes[vertical] || '/saas/clients';
-    return (
-      <Layout title="Dashboard" subtitle="Panel de control de tu negocio">
-        <div className="flex flex-col gap-5">
-          <SetupProgressWidget />
-          <QuickStartGuide />
-          <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-12 text-center">
-            <div className="max-w-md mx-auto">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-2xl flex items-center justify-center mx-auto mb-5">
-                <BarChart3 className="w-8 h-8 text-gray-400 dark:text-gray-500" />
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">Empieza a gestionar tu negocio</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 leading-relaxed">
-                Tu dashboard se llenará de datos en tiempo real conforme uses la plataforma.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <button onClick={() => navigate(startRoute)}
-                  className="px-6 py-3 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-colors">
-                  <Plus className="w-4 h-4" /> Empezar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
+  // ── Loading state progresivo ──
+  const baseDataLoading = isLoadingVehicles || isLoadingClients;
+  const alertsLoading = serverLoading && !serverData;
+  const chartsLoading = baseDataLoading;
+  const activityLoading = baseDataLoading;
 
   // ── Funnel totals ──
   const funnelTotal = funnelCounts['new'] || 0;
@@ -810,10 +852,6 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
       )}
 
       <div className="flex flex-col gap-5">
-
-        <SetupProgressWidget />
-        <QuickStartGuide />
-
         {/* ── Status bar ── */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
@@ -828,6 +866,11 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   Tiempo real · {new Date(serverUpdatedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               ) : null
+            )}
+            {baseDataLoading && (
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                Cargando modulos...
+              </span>
             )}
             <button onClick={handleRefresh} disabled={serverLoading}
               className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40">
@@ -985,7 +1028,13 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   )}
                 </div>
                 <div className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {alerts.length === 0 ? (
+                  {alertsLoading ? (
+                    <div className="p-4 space-y-2.5 animate-pulse">
+                      {[...Array(3)].map((_, i) => (
+                        <div key={i} className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
+                      ))}
+                    </div>
+                  ) : alerts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 px-5">
                       <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mb-3">
                         <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
@@ -1023,6 +1072,20 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
         {isVisible('charts') && (
           <div style={{ order: getWidgetOrder('charts') }}>
             <DraggableWidget id="charts" {...dragProps}>
+              {chartsLoading ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-pulse">
+                  {[...Array(2)].map((_, i) => (
+                    <div key={i} className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
+                      <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                        <div className="h-4 w-40 bg-gray-100 dark:bg-gray-700 rounded" />
+                      </div>
+                      <div className="p-4 h-48">
+                        <div className="w-full h-full rounded-xl bg-gray-100 dark:bg-gray-700" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Ventas 14 días */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1102,6 +1165,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   </div>
                 </div>
               </div>
+              )}
             </DraggableWidget>
           </div>
         )}
@@ -1196,7 +1260,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                       {overallConversion}% conversión
                     </span>
                   </div>
-                  <button onClick={() => navigate('/saas/crm/clientes')}
+                  <button onClick={() => navigate('/saas/delivery-crm')}
                     className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
                     Ver CRM <ArrowRight className="w-3.5 h-3.5" />
                   </button>
@@ -1209,7 +1273,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                     </div>
                     <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin leads aún</p>
                     <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los leads aparecerán aquí</p>
-                    <button onClick={() => navigate('/saas/crm/clientes')}
+                    <button onClick={() => navigate('/saas/delivery-crm')}
                       className="mt-4 px-4 py-2 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold transition-colors">
                       Ir al CRM
                     </button>
@@ -1277,6 +1341,15 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   </button>
                 </div>
                 <div className="p-5 space-y-4">
+                  {clockinsLoading ? (
+                    <div className="space-y-3 animate-pulse">
+                      <div className="grid grid-cols-3 gap-3">
+                        {[...Array(3)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-gray-100 dark:bg-gray-700" />)}
+                      </div>
+                      <div className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
+                    </div>
+                  ) : (
+                    <>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="text-center p-3 rounded-xl bg-green-50 dark:bg-green-900/20">
                       <p className="text-2xl font-bold text-green-700 dark:text-green-400">{clockinsActive.filter(a => a.status === 'active').length}</p>
@@ -1316,6 +1389,8 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                       </div>
                       <ArrowRight className="w-3.5 h-3.5 text-red-400" />
                     </button>
+                  )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1374,7 +1449,13 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   </div>
                 </div>
                 <div className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {recentActivity.length === 0 ? (
+                  {activityLoading ? (
+                    <div className="p-4 space-y-2 animate-pulse">
+                      {[...Array(4)].map((_, i) => (
+                        <div key={i} className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
+                      ))}
+                    </div>
+                  ) : recentActivity.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-10 px-5">
                       <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin actividad reciente</p>
                       <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los cambios aparecerán aquí</p>

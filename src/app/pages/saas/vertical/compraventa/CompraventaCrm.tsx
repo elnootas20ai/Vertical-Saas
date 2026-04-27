@@ -89,6 +89,7 @@ export function CompraventaCrm() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [scopeAll, setScopeAll] = useState(isManager);
+  const [dragOverStage, setDragOverStage] = useState<OpportunityStatus | null>(null);
   const draggingId = useRef<string | null>(null);
 
   const scope = scopeAll ? 'all' : 'mine';
@@ -470,15 +471,15 @@ export function CompraventaCrm() {
           {activeStages.map((stage) => {
             const stageOpps = filteredOpps.filter((o) => o.commercialStatus === stage.id);
             const totalBudget = stageOpps.reduce((s, o) => s + o.budget, 0);
-            const [isDragOver, setIsDragOver] = useState(false);
+            const isDragOver = dragOverStage === stage.id;
 
             return (
               <div
                 key={stage.id}
                 className={`flex-shrink-0 w-72 flex flex-col rounded-xl border transition-all ${stage.bg} ${isDragOver ? 'ring-2 ring-blue-400' : ''}`}
-                onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={(e) => { setIsDragOver(false); handleDrop(e, stage.id); }}
+                onDragOver={(e) => { e.preventDefault(); setDragOverStage(stage.id); }}
+                onDragLeave={() => setDragOverStage((prev) => (prev === stage.id ? null : prev))}
+                onDrop={(e) => { setDragOverStage(null); handleDrop(e, stage.id); }}
               >
                 <div className={`px-3 py-2.5 border-b ${stage.bg}`}>
                   <div className="flex items-center justify-between">

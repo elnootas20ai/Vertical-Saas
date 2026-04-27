@@ -56,7 +56,7 @@ function SaasContent() {
   useEffect(() => {
     if (
       isInitializing || !isAuthenticated || setupLoading || setupRedirectDone.current ||
-      !setupStatus || setupStatus.overallCompleted
+      !setupStatus || setupStatus.overallCompleted || Boolean(setupStatus.skippedAt)
     ) return;
     if (location.pathname === '/saas/dashboard' || location.pathname === '/saas' || location.pathname === '/saas/') {
       setupRedirectDone.current = true;

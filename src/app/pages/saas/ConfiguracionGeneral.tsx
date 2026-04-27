@@ -271,7 +271,7 @@ const CONNECTIONS = [
   { id: 'finance',          label: 'Finanzas',               icon: Wallet,       path: '/saas/finance' },
   { id: 'documents',        label: 'Documentación',          icon: FolderOpen,   path: '/saas/documents' },
   { id: 'ocr',              label: 'OCR',                    icon: ScanLine,     path: '/saas/documents' },
-  { id: 'tpv',              label: 'TPV',                    icon: Monitor,      path: '/saas/tpv' },
+  { id: 'tpv',              label: 'TPV',                    icon: Monitor,      path: '/saas/vertical/delivery/tpv' },
   { id: 'onboarding',       label: 'Incorporación inicial', icon: Zap,          path: '/saas/configuracion' },
 ] as const;
 
@@ -779,7 +779,7 @@ export function ConfiguracionGeneral() {
                 </p>
               </div>
               <button
-                onClick={() => navigate('/saas/tpv')}
+                onClick={() => navigate('/saas/vertical/delivery/tpv')}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
               >
                 Ir al TPV

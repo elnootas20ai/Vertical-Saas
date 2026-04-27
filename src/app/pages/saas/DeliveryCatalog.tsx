@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
+import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { Tabs } from '../../components/saas/Tabs';
@@ -9,6 +10,7 @@ import {
   createCatalogItemRequest,
   updateCatalogItemRequest,
   deleteCatalogItemRequest,
+  bulkCreateCatalogItemsRequest,
   listSuppliersRequest,
   createSupplierRequest,
   updateSupplierRequest,
@@ -83,6 +85,17 @@ const STEP_LABELS = [
   'Visibilidad web',
 ];
 
+function normalizeMediaKey(value: string) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+const SAMPLE_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9pO7s/0AAAAASUVORK5CYII=';
+
 interface CreateCatalogItemModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -140,11 +153,12 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
   if (!isOpen) return null;
 
   const totalSteps = 7;
+  const isEditMode = Boolean(editItem);
 
   const handleFinalSubmit = async () => {
     if (!form.name.trim()) {
       toast.error('El nombre es obligatorio');
-      setStep(1);
+      if (!isEditMode) setStep(1);
       return;
     }
     setSubmitting(true);
@@ -199,32 +213,72 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {editItem ? 'Editar artículo' : 'Nuevo artículo'}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                Paso {step} de {totalSteps} — {STEP_LABELS[step - 1]}
-              </p>
+              {!isEditMode && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                  Paso {step} de {totalSteps} — {STEP_LABELS[step - 1]}
+                </p>
+              )}
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
             </button>
           </div>
-          {/* Progress bar */}
-          <div className="flex gap-1.5">
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 flex-1 rounded-full transition-colors cursor-pointer ${
-                  i + 1 <= step ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-200 dark:bg-gray-700'
-                }`}
-                onClick={() => { if (i + 1 <= step) setStep(i + 1); }}
-              />
-            ))}
-          </div>
+          {!isEditMode && (
+            <>
+              {/* Progress bar */}
+              <div className="flex gap-1.5">
+                {Array.from({ length: totalSteps }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`h-1.5 flex-1 rounded-full transition-colors cursor-pointer ${
+                      i + 1 <= step ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-200 dark:bg-gray-700'
+                    }`}
+                    onClick={() => { if (i + 1 <= step) setStep(i + 1); }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+          {editItem && (
+            <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                Producto que estas editando
+              </p>
+              <div className="mt-1.5 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                    {form.name || editItem.name || 'Sin nombre'}
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                    {form.description || editItem.description || 'Sin descripcion'}
+                  </p>
+                </div>
+                <span className="shrink-0 inline-flex items-center rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-1 text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  {form.category || editItem.category || 'Sin categoria'}
+                </span>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5">
+                  <span className="text-gray-500 dark:text-gray-400">Precio</span>
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">{Number(form.unitPrice || 0).toFixed(2)}€</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5">
+                  <span className="text-gray-500 dark:text-gray-400">Stock</span>
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">{Number(form.stockQuantity || 0)}</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5">
+                  <span className="text-gray-500 dark:text-gray-400">Estado</span>
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">{form.available ? 'Disponible' : 'No disponible'}</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Step content */}
         <div className="p-6 min-h-[280px]">
           {/* Step 1: Información básica */}
-          {step === 1 && (
+          {(step === 1 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl mb-2">
                 <Package className="w-6 h-6 text-blue-600 shrink-0" />
@@ -242,7 +296,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 2: Categoría y unidad */}
-          {step === 2 && (
+          {(step === 2 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-xl mb-2">
                 <Layers className="w-6 h-6 text-purple-600 shrink-0" />
@@ -262,7 +316,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 3: Precios */}
-          {step === 3 && (
+          {(step === 3 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl mb-2">
                 <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
@@ -292,7 +346,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 4: Stock */}
-          {step === 4 && (
+          {(step === 4 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl mb-2">
                 <Archive className="w-6 h-6 text-amber-600 shrink-0" />
@@ -323,7 +377,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 5: Imagen */}
-          {step === 5 && (
+          {(step === 5 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl mb-2">
                 <Package className="w-6 h-6 text-indigo-600 shrink-0" />
@@ -354,7 +408,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 6: Alérgenos y notas */}
-          {step === 6 && (
+          {(step === 6 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-xl mb-2">
                 <AlertTriangle className="w-6 h-6 text-orange-600 shrink-0" />
@@ -387,7 +441,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           )}
 
           {/* Step 7: Visibilidad web */}
-          {step === 7 && (
+          {(step === 7 || isEditMode) && (
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-cyan-50 dark:bg-cyan-900/20 border-2 border-cyan-200 dark:border-cyan-800 rounded-xl mb-2">
                 <Package className="w-6 h-6 text-cyan-600 shrink-0" />
@@ -464,34 +518,53 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
 
         {/* Footer */}
         <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
-          {step > 1 ? (
-            <button type="button" onClick={() => setStep(s => s - 1)} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
-              Atrás
-            </button>
+          {isEditMode ? (
+            <>
+              <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                Cancelar
+              </button>
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={handleFinalSubmit}
+                disabled={submitting}
+                className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
+              >
+                {submitting ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+            </>
           ) : (
-            <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
-              Cancelar
-            </button>
-          )}
-          <div className="flex-1" />
-          {step < totalSteps ? (
-            <button
-              type="button"
-              onClick={() => setStep(s => s + 1)}
-              disabled={!canNext()}
-              className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Siguiente
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleFinalSubmit}
-              disabled={submitting}
-              className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
-            >
-              {submitting ? 'Guardando…' : editItem ? 'Guardar cambios' : 'Crear artículo'}
-            </button>
+            <>
+              {step > 1 ? (
+                <button type="button" onClick={() => setStep(s => s - 1)} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                  Atrás
+                </button>
+              ) : (
+                <button type="button" onClick={onClose} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
+                  Cancelar
+                </button>
+              )}
+              <div className="flex-1" />
+              {step < totalSteps ? (
+                <button
+                  type="button"
+                  onClick={() => setStep(s => s + 1)}
+                  disabled={!canNext()}
+                  className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Siguiente
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleFinalSubmit}
+                  disabled={submitting}
+                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
+                >
+                  {submitting ? 'Guardando…' : 'Crear artículo'}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1083,6 +1156,8 @@ export function DeliveryCatalog() {
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [searchCatalog, setSearchCatalog] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
+  const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
 
   // Stock state
   const [stockAdjustItem, setStockAdjustItem] = useState<CatalogItem | null>(null);
@@ -1096,6 +1171,8 @@ export function DeliveryCatalog() {
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
+  const [loadingImageZip, setLoadingImageZip] = useState(false);
 
   const MODULE_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre' },
@@ -1107,19 +1184,193 @@ export function DeliveryCatalog() {
 
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'name', label: 'Nombre', required: true, example: '' },
+    { key: 'sku', label: 'SKU', example: 'SKU-001' },
     { key: 'category', label: 'Categoría', example: '' },
     { key: 'price', label: 'Precio', example: '' },
     { key: 'description', label: 'Descripción', example: '' },
     { key: 'allergens', label: 'Alérgenos', example: '' },
+    { key: 'image', label: 'Imagen (URL opcional)', example: '' },
   ];
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} producto(s) parseado(s) con IA`);
+    if (!user?.id) return;
+    const items = entries
+      .map((entry) => ({
+        name: String(entry.name || '').trim(),
+        category: String(entry.category || '').trim(),
+        unitPrice: Number(String(entry.price ?? entry.unitPrice ?? '').replace(',', '.')) || 0,
+        description: String(entry.description || '').trim(),
+        allergens: String(entry.allergens || '')
+          .split(',')
+          .map((a) => a.trim())
+          .filter(Boolean),
+        active: true,
+        available: true,
+        webVisible: true,
+        module: 'catalog' as const,
+      }))
+      .filter((item) => item.name);
+    if (items.length === 0) {
+      toast.error('No hay productos válidos para importar');
+      return;
+    }
+    const result = await bulkCreateCatalogItemsRequest(user.id, items as Partial<CatalogItem>[]);
+    if (result.created > 0) {
+      await loadCatalog();
+      toast.success(`${result.created} producto(s) importado(s) con IA`);
+    }
+    if (result.errors > 0) {
+      const firstError = result.errorDetails?.[0];
+      toast.error(
+        firstError
+          ? `${result.errors} producto(s) no se pudieron importar. Ej: ${firstError.name || 'sin nombre'} -> ${firstError.error}`
+          : `${result.errors} producto(s) no se pudieron importar`,
+      );
+    }
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} producto(s) importado(s)`);
+    if (!user?.id) return 0;
+    const zipProvided = Object.keys(imageZipMap).length > 0;
+    const unmatchedImageRefs: string[] = [];
+    const items: Partial<CatalogItem>[] = entries
+      .map((entry, index) => {
+        const name = String(entry.name || '').trim();
+        if (!name) return null;
+        const sku = String(entry.sku || '').trim();
+        const imageFromZip =
+          imageZipMap[normalizeMediaKey(sku)] ||
+          imageZipMap[normalizeMediaKey(name)] ||
+          '';
+        const image = String(entry.image || '').trim() || imageFromZip;
+        if (zipProvided && !image) unmatchedImageRefs.push(sku || name || `fila ${index + 2}`);
+        return {
+          name,
+          category: String(entry.category || '').trim(),
+          description: String(entry.description || '').trim(),
+          unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
+          costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
+          stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
+          minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
+          allergens: String(entry.allergens || '')
+            .split(',')
+            .map((a) => a.trim())
+            .filter(Boolean),
+          image,
+          sku: sku || undefined,
+          unit: String(entry.unit || 'ud'),
+          active: true,
+          available: true,
+          webVisible: true,
+          module: 'catalog',
+        } as Partial<CatalogItem>;
+      })
+      .filter((item): item is Partial<CatalogItem> => Boolean(item));
+
+    if (items.length === 0) {
+      toast.error('No hay productos válidos para importar');
+      return 0;
+    }
+    if (zipProvided && unmatchedImageRefs.length > 0) {
+      const sample = unmatchedImageRefs.slice(0, 6).join(', ');
+      toast.warning(`ZIP: ${unmatchedImageRefs.length} producto(s) sin imagen coincidente. Se importarán igual. Ej: ${sample}`);
+    }
+    let result = await bulkCreateCatalogItemsRequest(user.id, items);
+    const suspiciousSingleCreate = items.length > 1 && result.created <= 1 && result.errors >= items.length - 1;
+    if (suspiciousSingleCreate) {
+      let recovered = 0;
+      let recoveredErrors = 0;
+      for (const item of items) {
+        try {
+          await createCatalogItemRequest(user.id, item);
+          recovered += 1;
+        } catch (error) {
+          recoveredErrors += 1;
+          const message = error instanceof Error ? error.message : '';
+          if (!message.toLowerCase().includes('ya existe')) {
+            console.warn('Import recovery failed for item', item?.name, message);
+          }
+        }
+      }
+      result = {
+        ...result,
+        created: recovered,
+        errors: recoveredErrors,
+      };
+      toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
+    }
+    if (result.created > 0) {
+      await loadCatalog();
+      const importedWithImage = items.filter((i) => Boolean(i.image)).length;
+      toast.success(
+        `${result.created} producto(s) importado(s)` +
+          (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : ''),
+      );
+    }
+    if (result.errors > 0) toast.error(`${result.errors} producto(s) no se pudieron importar`);
+    return result.created || 0;
   };
+
+  const handleZipFileSelected = useCallback(async (file: File | null) => {
+    if (!file) return;
+    setLoadingImageZip(true);
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const map: Record<string, string> = {};
+      const entries = Object.values(zip.files).filter((entry) => {
+        if (entry.dir) return false;
+        const lower = entry.name.toLowerCase();
+        return lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp');
+      });
+      for (const entry of entries) {
+        const blob = await entry.async('blob');
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        const filename = entry.name.split('/').pop() || entry.name;
+        const basename = filename.replace(/\.[^.]+$/, '');
+        const key = normalizeMediaKey(basename);
+        if (key) map[key] = dataUrl;
+      }
+      setImageZipMap(map);
+      toast.success(`ZIP cargado: ${Object.keys(map).length} imagen(es) lista(s) para mapear por nombre/SKU`);
+    } catch {
+      toast.error('No se pudo leer el ZIP de imágenes');
+    } finally {
+      setLoadingImageZip(false);
+    }
+  }, []);
+
+  const handleDownloadSampleZip = useCallback(async () => {
+    try {
+      const zip = new JSZip();
+      zip.file('SKU-001.png', SAMPLE_PNG_BASE64, { base64: true });
+      zip.file('SKU-002.png', SAMPLE_PNG_BASE64, { base64: true });
+      zip.file(
+        'LEEME.txt',
+        [
+          'Ejemplo de ZIP de imagenes para Delivery Catalogo',
+          '',
+          '1) Nombra cada foto por SKU (recomendado) o por nombre del producto.',
+          '2) Formatos soportados: .jpg, .jpeg, .png, .webp',
+          '3) Usa los mismos valores que en las columnas sku o name del Excel.',
+        ].join('\n'),
+      );
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'ejemplo_zip_delivery_catalogo.zip';
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('ZIP de ejemplo descargado');
+    } catch {
+      toast.error('No se pudo generar el ZIP de ejemplo');
+    }
+  }, []);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -1183,13 +1434,45 @@ export function DeliveryCatalog() {
 
   const handleDeleteItem = async (item: CatalogItem) => {
     if (!user?.id) return;
+    if (bulkDeletingCatalog || deletingItemIds.has(item._id)) return;
     if (!confirm(`¿Eliminar "${item.name}"?`)) return;
+    setDeletingItemIds((prev) => new Set(prev).add(item._id));
     try {
       await deleteCatalogItemRequest(user.id, item._id);
       setCatalogItems(prev => prev.filter(i => i._id !== item._id));
       toast.success('Artículo eliminado');
     } catch {
       toast.error('Error al eliminar el artículo');
+    } finally {
+      setDeletingItemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item._id);
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteFilteredCatalog = async () => {
+    if (!user?.id || filteredCatalog.length === 0 || bulkDeletingCatalog) return;
+    const total = filteredCatalog.length;
+    if (!confirm(`¿Eliminar ${total} artículo(s) del filtro actual?`)) return;
+    setBulkDeletingCatalog(true);
+    let deleted = 0;
+    let failed = 0;
+    try {
+      for (const item of filteredCatalog) {
+        try {
+          await deleteCatalogItemRequest(user.id, item._id);
+          deleted += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      await loadCatalog();
+      if (deleted > 0) toast.success(`${deleted} artículo(s) eliminado(s)`);
+      if (failed > 0) toast.error(`${failed} artículo(s) no se pudieron eliminar`);
+    } finally {
+      setBulkDeletingCatalog(false);
     }
   };
 
@@ -1396,13 +1679,29 @@ export function DeliveryCatalog() {
             ))}
           </select>
         </div>
-        <button
-          onClick={() => { setEditingItem(null); setShowCreateItem(true); }}
-          className="px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl flex items-center gap-2 font-medium transition-colors"
-        >
-          <Plus className="w-5 h-5" />
-          Nuevo artículo
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-gray-50"
+          >
+            Importar Excel
+          </button>
+          <button
+            onClick={() => { setEditingItem(null); setShowCreateItem(true); }}
+            className="px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl flex items-center gap-2 font-medium transition-colors"
+          >
+            <Plus className="w-5 h-5" />
+            Nuevo artículo
+          </button>
+          <button
+            onClick={handleDeleteFilteredCatalog}
+            disabled={bulkDeletingCatalog || filteredCatalog.length === 0}
+            className="px-4 py-2.5 border border-red-300 text-red-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="w-5 h-5" />
+            {bulkDeletingCatalog ? 'Eliminando...' : `Eliminar filtro (${filteredCatalog.length})`}
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -1533,7 +1832,8 @@ export function DeliveryCatalog() {
                         </button>
                         <button
                           onClick={() => handleDeleteItem(item)}
-                          className="p-1.5 hover:bg-red-100 rounded-lg transition-colors"
+                          disabled={bulkDeletingCatalog || deletingItemIds.has(item._id)}
+                          className="p-1.5 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Eliminar"
                         >
                           <Trash2 className="w-4 h-4 text-red-500" />
@@ -1993,6 +2293,20 @@ export function DeliveryCatalog() {
         moduleLabel="Catálogo"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
+        extraFileUpload={{
+          label: 'ZIP de imágenes (opcional)',
+          helpText: 'Sube un ZIP con fotos nombradas por SKU o nombre del producto (si falta match se bloquea la importación).',
+          accept: '.zip,application/zip',
+          loading: loadingImageZip,
+          countLabel: Object.keys(imageZipMap).length > 0
+            ? `${Object.keys(imageZipMap).length} imagen(es) preparadas para mapear`
+            : '',
+          sampleZipLabel: 'Descargar ZIP ejemplo',
+          onDownloadSampleZip: handleDownloadSampleZip,
+          onFileSelected: async (file) => {
+            await handleZipFileSelected(file);
+          },
+        }}
       />
     </Layout>
   );

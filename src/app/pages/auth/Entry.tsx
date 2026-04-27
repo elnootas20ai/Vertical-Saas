@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { LogIn, Building2, User, ArrowRight, Users } from 'lucide-react';
+import { Building2, User, ArrowRight, Users, BriefcaseBusiness, ClipboardList, UserCheck } from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { UdarLogo } from '../../components/UdarLogo';
 
@@ -10,6 +10,11 @@ export function Entry() {
   const navigate = useNavigate();
   const [view, setView] = useState<'main' | 'register'>('main');
   const [selectedType, setSelectedType] = useState<AccountType | null>(null);
+
+  const roleHighlights = {
+    manager: ['Configura negocio y sedes', 'Gestiona equipo y permisos', 'Controla ventas, CRM y facturas'],
+    employee: ['Registra tareas y fichajes', 'Opera módulos asignados y TPV', 'Reporta actividad diaria'],
+  };
 
   if (view === 'register') {
     return (
@@ -23,7 +28,7 @@ export function Entry() {
               ¿Cómo quieres usar Udar Edge?
             </h1>
             <p className="text-lg text-gray-600 dark:text-gray-400">
-              Elige tu tipo de cuenta para personalizar tu experiencia
+              Elige el tipo de acceso según tus funciones
             </p>
           </div>
 
@@ -49,23 +54,36 @@ export function Entry() {
                 <User className={`w-7 h-7 transition-colors ${selectedType === 'user' ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
               </div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                Usuario
+                Usuario / Empleado
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Registro rápido y sin fricción. Ideal si vas a trabajar para una empresa existente.
+                Acceso personal para formar parte de una empresa existente.
               </p>
+              <div className="rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 p-3 mb-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2">
+                  Funciones principales
+                </p>
+                <ul className="space-y-1.5 text-sm text-blue-700 dark:text-blue-300">
+                  {roleHighlights.employee.map((item) => (
+                    <li key={item} className="flex items-center gap-2">
+                      <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
-                  Solo datos personales
+                  Alta rápida con datos personales
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
-                  Únete a empresas por invitación
+                  Te unes por invitación o código de empresa
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
-                  Sin datos fiscales ni de negocio
+                  No requiere datos fiscales
                 </li>
               </ul>
             </button>
@@ -94,12 +112,25 @@ export function Entry() {
                 Empresa
               </h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Acceso completo a todas las funcionalidades. 14 días gratis.
+                Perfil de gestión con control completo del negocio.
               </p>
+              <div className="rounded-xl bg-gray-100 dark:bg-gray-700/60 border border-gray-200 dark:border-gray-600 p-3 mb-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-700 dark:text-gray-200 mb-2">
+                  Funciones principales
+                </p>
+                <ul className="space-y-1.5 text-sm text-gray-700 dark:text-gray-200">
+                  {roleHighlights.manager.map((item) => (
+                    <li key={item} className="flex items-center gap-2">
+                      <BriefcaseBusiness className="w-3.5 h-3.5 shrink-0" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full shrink-0" />
-                  Dashboard completo y CRM
+                  Dashboard ejecutivo, CRM y reportes
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full shrink-0" />
@@ -107,7 +138,7 @@ export function Entry() {
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="w-1.5 h-1.5 bg-gray-400 rounded-full shrink-0" />
-                  Invita y gestiona tu equipo
+                  Gestión de equipo y permisos
                 </li>
               </ul>
             </button>
@@ -153,6 +184,10 @@ export function Entry() {
           <p className="text-xl text-gray-600 dark:text-gray-400">
             14 días gratis. Sin tarjeta. Sin permanencia.
           </p>
+          <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+            <span className="px-2.5 py-1 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600">Empresa/Gerente = gestión completa</span>
+            <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40 text-blue-700 dark:text-blue-300">Empleado = operación diaria</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -166,9 +201,19 @@ export function Entry() {
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Empresa / Gerente
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Accede con tu email y contraseña como propietario o administrador
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Para propietarios y responsables de gestión.
             </p>
+            <ul className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Configuración, ventas y seguimiento global
+              </li>
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Gestión de personal y permisos
+              </li>
+            </ul>
           </button>
 
           <button
@@ -181,9 +226,23 @@ export function Entry() {
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Equipo / Empleado
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Entra con el código de tu empresa, tu usuario y contraseña
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Para personal operativo del día a día.
             </p>
+            <ul className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Acceso por código de empresa + usuario
+              </li>
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Tareas y módulos según permisos asignados
+              </li>
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Acceso a TPV
+              </li>
+            </ul>
           </button>
 
           <button
@@ -196,9 +255,19 @@ export function Entry() {
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Crear cuenta
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Regístrate como usuario o empresa. 14 días gratis.
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Si aun no tienes acceso, crea tu cuenta en 1 minuto.
             </p>
+            <ul className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Elige entre cuenta Empresa o Empleado
+              </li>
+              <li className="flex items-center gap-2">
+                <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+                Onboarding guiado tras el registro
+              </li>
+            </ul>
           </button>
         </div>
 

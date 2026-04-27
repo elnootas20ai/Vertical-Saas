@@ -20,6 +20,16 @@ interface GenericImportModalProps {
   templateFileName?: string;
   fields: ImportFieldDef[];
   onImport: (entries: Record<string, string>[]) => Promise<number | void> | number | void;
+  extraFileUpload?: {
+    label: string;
+    helpText?: string;
+    accept?: string;
+    loading?: boolean;
+    countLabel?: string;
+    sampleZipLabel?: string;
+    onDownloadSampleZip?: () => void | Promise<void>;
+    onFileSelected: (file: File | null) => void | Promise<void>;
+  };
 }
 
 type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing';
@@ -32,6 +42,7 @@ export function GenericImportModal({
   templateFileName,
   fields,
   onImport,
+  extraFileUpload,
 }: GenericImportModalProps) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
@@ -39,6 +50,7 @@ export function GenericImportModal({
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const extraFileRef = useRef<HTMLInputElement>(null);
 
   const normalizedImportLabel = (importLabel || moduleLabel).trim();
 
@@ -54,20 +66,27 @@ export function GenericImportModal({
   const downloadTemplate = () => {
     const headers = fields.map(f => f.label + (f.required ? ' *' : ''));
     const example = fields.map(f => f.example || '');
-    const csv = [headers.join(';'), example.join(';')].join('\n');
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const fallbackName = `plantilla_${normalizedImportLabel.toLowerCase().replace(/\s+/g, '_')}.csv`;
-    a.download = templateFileName || fallbackName;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success('Plantilla descargada');
+    if (example.every((value) => !String(value || '').trim()) && example.length > 0) {
+      example[0] = 'ejemplo';
+    }
+    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
+
+    const fallbackName = `plantilla_${normalizedImportLabel.toLowerCase().replace(/\s+/g, '_')}.xlsx`;
+    const requestedName = templateFileName || fallbackName;
+    const downloadName = requestedName.replace(/\.(csv|tsv|txt)$/i, '.xlsx');
+    XLSX.writeFile(wb, downloadName);
+    toast.success('Plantilla Excel descargada');
   };
 
   const processFile = (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'zip' && extraFileUpload) {
+      void extraFileUpload.onFileSelected(file);
+      toast.success('ZIP de imágenes cargado');
+      return;
+    }
     if (ext === 'csv' || ext === 'tsv' || ext === 'txt') {
       Papa.parse(file, {
         skipEmptyLines: true,
@@ -104,7 +123,23 @@ export function GenericImportModal({
       };
       reader.readAsArrayBuffer(file);
     } else {
-      toast.error('Formato no soportado. Usa CSV o Excel (.xlsx/.xls)');
+      toast.error('Formato no soportado. Usa Excel (.xlsx/.xls) o CSV');
+    }
+  };
+
+  const processFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    // If user drops/selects multiple files, process ZIP first (optional) and then data file.
+    const zipFile = list.find((f) => f.name.toLowerCase().endsWith('.zip'));
+    const dataFile = list.find((f) => /\.(xlsx|xls|csv|tsv|txt)$/i.test(f.name));
+
+    if (zipFile) processFile(zipFile);
+    if (dataFile) processFile(dataFile);
+
+    if (!zipFile && !dataFile) {
+      processFile(list[0]);
     }
   };
 
@@ -149,6 +184,11 @@ export function GenericImportModal({
     try {
       const result = await onImport(mappedEntries);
       const count = typeof result === 'number' ? result : mappedEntries.length;
+      if (count <= 0) {
+        setStep('preview');
+        setImporting(false);
+        return;
+      }
       toast.success(`${count} entrada(s) importadas correctamente`);
       handleClose();
     } catch {
@@ -176,7 +216,7 @@ export function GenericImportModal({
                 Importar {normalizedImportLabel}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {step === 'upload' && 'Sube un archivo CSV o Excel'}
+                {step === 'upload' && (extraFileUpload ? 'Sube un archivo Excel (recomendado) o CSV y, opcionalmente, un ZIP de imágenes' : 'Sube un archivo Excel (recomendado) o CSV')}
                 {step === 'mapping' && 'Mapea las columnas del archivo'}
                 {step === 'preview' && `${mappedEntries.length} entradas listas para importar`}
                 {step === 'importing' && 'Importando datos...'}
@@ -203,7 +243,7 @@ export function GenericImportModal({
                 <div>
                   <p className="font-semibold text-blue-900 dark:text-blue-200">Descargar plantilla</p>
                   <p className="text-sm text-blue-600 dark:text-blue-400 mt-0.5">
-                    Descarga la plantilla CSV con los campos de {normalizedImportLabel}
+                    Descarga la plantilla Excel con los campos de {normalizedImportLabel}
                   </p>
                 </div>
               </button>
@@ -212,7 +252,7 @@ export function GenericImportModal({
               <div
                 onClick={() => fileRef.current?.click()}
                 onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
-                onDrop={e => { e.preventDefault(); e.stopPropagation(); const f = e.dataTransfer.files[0]; if (f) processFile(f); }}
+                onDrop={e => { e.preventDefault(); e.stopPropagation(); processFiles(e.dataTransfer.files); }}
                 className="w-full flex flex-col items-center gap-3 p-10 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-2xl hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-all cursor-pointer"
               >
                 <FileText className="w-10 h-10 text-gray-400 dark:text-gray-500" />
@@ -221,17 +261,69 @@ export function GenericImportModal({
                     Arrastra tu archivo aquí o haz clic para seleccionar
                   </p>
                   <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                    Formatos: CSV, Excel (.xlsx, .xls)
+                    {extraFileUpload
+                      ? 'Formatos: Excel (.xlsx, .xls), CSV y ZIP de imágenes (.zip)'
+                      : 'Formatos: Excel (.xlsx, .xls) y CSV'}
                   </p>
                 </div>
+                {extraFileUpload && (
+                  <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 text-center">
+                    También puedes arrastrar aquí el ZIP de imágenes
+                  </p>
+                )}
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".csv,.tsv,.txt,.xlsx,.xls"
+                  multiple
+                  accept={extraFileUpload ? '.csv,.tsv,.txt,.xlsx,.xls,.zip,application/zip' : '.csv,.tsv,.txt,.xlsx,.xls'}
                   className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+                  onChange={e => { if (e.target.files?.length) processFiles(e.target.files); }}
                 />
               </div>
+
+              {extraFileUpload && (
+                <div className="rounded-2xl border border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/40">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-800 dark:text-gray-200">{extraFileUpload.label}</p>
+                      {extraFileUpload.helpText && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{extraFileUpload.helpText}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => extraFileRef.current?.click()}
+                      disabled={Boolean(extraFileUpload.loading)}
+                      className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50"
+                    >
+                      {extraFileUpload.loading ? 'Procesando...' : 'Seleccionar ZIP'}
+                    </button>
+                    {extraFileUpload.onDownloadSampleZip && (
+                      <button
+                        type="button"
+                        onClick={() => void extraFileUpload.onDownloadSampleZip?.()}
+                        className="px-3 py-2 rounded-lg border border-indigo-300 dark:border-indigo-700 text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
+                      >
+                        {extraFileUpload.sampleZipLabel || 'Descargar ZIP de ejemplo'}
+                      </button>
+                    )}
+                    <input
+                      ref={extraFileRef}
+                      type="file"
+                      accept={extraFileUpload.accept || '.zip,application/zip'}
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        void extraFileUpload.onFileSelected(f);
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </div>
+                  {extraFileUpload.countLabel && (
+                    <p className="text-xs text-indigo-600 dark:text-indigo-300 mt-2">{extraFileUpload.countLabel}</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

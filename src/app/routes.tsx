@@ -101,7 +101,6 @@ import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { DeliveryCatalog } from './pages/saas/DeliveryCatalog';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
-import { TpvPage } from './pages/saas/TpvPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { ChangelogPage } from './pages/saas/ChangelogPage';
 import { WorkOrderStatus } from './pages/public/WorkOrderStatus';
@@ -270,8 +269,6 @@ import { CompraventaCrm } from './pages/saas/vertical/compraventa/CompraventaCrm
 import { PreparationExpenses } from './pages/saas/PreparationExpenses';
 import { ButcherWorkerOrders } from './pages/saas/ButcherWorkerOrders';
 
-import { TpvModePage } from './pages/saas/TpvModePage';
-import { TpvProvider } from './context/TpvContext';
 import { SalesPointTpvPage } from './pages/saas/SalesPointTpvPage';
 import { ClockKiosk } from './pages/saas/ClockKiosk';
 
@@ -293,14 +290,6 @@ import {
 } from './pages/saas/worker';
 import { UserDashboard } from './pages/saas/UserDashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
-
-function TpvModeWithProvider() {
-  return (
-    <TpvProvider>
-      <TpvModePage />
-    </TpvProvider>
-  );
-}
 
 function MechanicStandalone() {
   return (
@@ -475,9 +464,9 @@ export const router = createBrowserRouter([
           { path: 'commissions', Component: Commissions },
           { path: 'payroll', Component: PayrollPage },
           { path: 'sala', Component: SalaPage },
-          { path: 'tpv/locales', Component: TpvPage },
-          { path: 'tpv', Component: TpvPage },
-          { path: 'tpv-mode', Component: TpvModeWithProvider },
+          { path: 'tpv/locales', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
+          { path: 'tpv', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
+          { path: 'tpv-mode', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
           { path: 'tpv/punto/:salesPointId', Component: SalesPointTpvPage },
           { path: 'clock-kiosk', Component: ClockKiosk },
           { path: 'income-expenses', Component: IncomeExpensesPage },
@@ -563,6 +552,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/construccion/obras', Component: ConstructionProjects },
           { path: 'construction-budgets', Component: ConstructionBudgets },
           { path: 'construction-clients', element: <Navigate to="/saas/clients" replace /> },
+          { path: 'vertical/construccion/clientes', element: <Navigate to="/saas/crm/clientes" replace /> },
           { path: 'construction-workers', element: <Navigate to="/saas/team" replace /> },
           { path: 'construction-tasks', Component: ConstructionTasks },
           { path: 'construction-execution', Component: ConstructionExecution },

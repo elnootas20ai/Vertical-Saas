@@ -5,6 +5,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
+import { getAuthHeaders } from '../../lib/authApi';
 import {
   getOpsCenterRequest,
   updateDeliveryOrderRequest,
@@ -174,7 +175,7 @@ function QuickAccess({ cfg, kpis, cashPend, incidents }: {
   const nav = useNavigate();
   type QItem = { l: string; i: typeof Monitor; r: string; b: number | null; bc?: string; v: boolean };
   const items: QItem[] = [
-    { l: 'TPV', i: Monitor, r: '/saas/tpv', b: null, v: true },
+    { l: 'TPV', i: Monitor, r: '/saas/vertical/delivery/tpv', b: null, v: true },
     { l: 'Pedidos', i: ShoppingBag, r: '/saas/delivery', b: kpis ? kpis.byStatus.nuevo + kpis.byStatus.cocina + kpis.byStatus.listo : null, v: true },
     { l: 'Cocina', i: ChefHat, r: '/saas/delivery', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
     { l: 'Montaje', i: Package, r: '/saas/delivery', b: null, v: cfg?.hasAssemblyStation !== false },
@@ -184,7 +185,7 @@ function QuickAccess({ cfg, kpis, cashPend, incidents }: {
     { l: 'Incidencias', i: AlertTriangle, r: '/saas/delivery', b: incidents > 0 ? incidents : null, bc: 'bg-red-500', v: true },
     { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Stock', i: Boxes, r: '/saas/articles', b: null, v: true },
-    { l: 'Clientes', i: Users, r: '/saas/crm/clientes', b: null, v: true },
+    { l: 'Clientes', i: Users, r: '/saas/delivery-crm', b: null, v: true },
     { l: 'Finanzas', i: Euro, r: '/saas/finance', b: null, v: true },
   ];
   return (
@@ -452,8 +453,25 @@ function ChannelsW({ data }: { data: Record<string, number> }) {
 /* ═══ MAIN PAGE ══════════════════════════════════════════════════════════════ */
 
 export function DeliveryOpsCenter() {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const sessionUserId = useMemo(() => {
+    try {
+      const raw = localStorage.getItem('udar_session_user');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { user_id?: string; id?: string; userId?: string; _id?: string };
+      return parsed.user_id || parsed.id || parsed.userId || parsed._id || null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const authUserId = user?.user_id || user?.id || user?.userId || user?._id || sessionUserId || null;
+  const sseToken = useMemo(() => {
+    const headers = getAuthHeaders();
+    const authHeader = headers.Authorization || headers.authorization;
+    if (!authHeader) return null;
+    return authHeader.replace(/^Bearer\s+/i, '').trim() || null;
+  }, [user?.user_id]);
   const [data, setData] = useState<OpsCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<OpsCenterFilters>({});
@@ -463,12 +481,12 @@ export function DeliveryOpsCenter() {
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
-    if (!user?.id) return;
+    if (!authUserId) return;
     try {
-      const r = await getOpsCenterRequest(user.id, filters);
+      const r = await getOpsCenterRequest(authUserId, filters);
       setData(r); setLastUp(new Date());
     } catch (e) { console.error('ops-center error', e); } finally { setLoading(false); }
-  }, [user?.id, filters]);
+  }, [authUserId, filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -483,21 +501,29 @@ export function DeliveryOpsCenter() {
     'delivery:incident_reported': () => load(),
     'delivery:incident_resolved': () => load(),
     connected: () => setSseOk(true),
+    disconnected: () => setSseOk(false),
+    reconnecting: () => setSseOk(false),
   }), [load]);
 
-  useSSE({ userId: user?.id || null, token: token || null, businessId: currentBusiness?.id || null, handlers, enabled: !!user?.id });
+  useSSE({
+    userId: authUserId,
+    token: sseToken,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    handlers,
+    enabled: !!authUserId && !!sseToken,
+  });
 
   const advance = useCallback(async (order: DeliveryOrder, s: DeliveryOrderStatus) => {
-    if (!user?.id) return;
+    if (!authUserId) return;
     try {
-      await updateDeliveryOrderRequest(user.id, {
+      await updateDeliveryOrderRequest(authUserId, {
         ...order, status: s,
         stageHistory: [...(order.stageHistory || []), { status: s, date: new Date().toISOString(), user: user.fullName || 'Sistema' }],
       });
       toast.success(`${order.orderNumber} → ${STATUS_CFG[s]?.label || s}`);
       load();
     } catch { toast.error('Error al actualizar'); }
-  }, [user, load]);
+  }, [authUserId, user, load]);
 
   const cfg = data?.config || null;
 
@@ -509,6 +535,18 @@ export function DeliveryOpsCenter() {
   const subtitle = data?.date
     ? `Operativa del ${new Date(data.date + 'T00:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}`
     : 'Cargando...';
+  const dataAgeMs = lastUp ? Date.now() - lastUp.getTime() : Number.POSITIVE_INFINITY;
+  const isPollingFresh = dataAgeMs < 45_000;
+  const connectionText = sseOk
+    ? 'En vivo'
+    : isPollingFresh
+      ? 'Conexion inestable (actualizando cada 30s)'
+      : 'Sin conexion (reintentando)';
+  const connectionDotClass = sseOk
+    ? 'bg-green-500'
+    : isPollingFresh
+      ? 'bg-amber-500 animate-pulse'
+      : 'bg-red-500 animate-pulse';
 
   return (
     <Layout title="Centro Operativo" subtitle={subtitle}>
@@ -516,9 +554,9 @@ export function DeliveryOpsCenter() {
         {/* Connection indicator */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${sseOk ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
+            <div className={`w-2 h-2 rounded-full ${connectionDotClass}`} />
             <span className="text-xs text-gray-500 dark:text-gray-400">
-              {sseOk ? 'En vivo' : 'Reconectando…'}
+              {connectionText}
               {lastUp && ` · ${lastUp.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`}
             </span>
           </div>

@@ -190,6 +190,20 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
 export function useActivationChecklist() {
   const ctx = useContext(ActivationChecklistContext);
-  if (!ctx) throw new Error('useActivationChecklist must be used within ActivationChecklistProvider');
+  if (!ctx) {
+    return {
+      steps: [],
+      completionPct: 0,
+      completedSteps: 0,
+      totalSteps: 0,
+      isVisible: false,
+      isDismissed: true,
+      currentStepIndex: 0,
+      dismiss: () => {},
+      restore: () => {},
+      loadSampleData: () => {},
+      isLoadingSample: false,
+    };
+  }
   return ctx;
 }

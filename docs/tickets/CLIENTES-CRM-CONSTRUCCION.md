@@ -1,7 +1,7 @@
 # CLIENTES Y CRM CONSTRUCCIÓN — Tickets
 
 **Página:** `/saas/vertical/construccion/clientes`  
-**Ruta real (routes.tsx):** `/saas/construction-clients`  
+**Ruta real (routes.tsx):** `/saas/vertical/construccion/clientes` (alias de `/saas/construction-clients`)  
 **Objetivo:** Centralizar clientes, inmuebles y relación comercial dentro de la vertical de construcción. Convertir la ficha básica actual en un CRM completo especializado para constructoras con obras vinculadas, presupuestos, datos fiscales, histórico, documentación y estado comercial.  
 **Perfiles:** Gerente (ve todos los clientes, estado comercial y relación económica) · Trabajador (solo datos operativos de clientes asignados si se autoriza)  
 **Fecha:** 14 abril 2026

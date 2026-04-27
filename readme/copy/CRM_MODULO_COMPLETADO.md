@@ -1,5 +1,8 @@
 # 🎯 MÓDULO CRM - IMPLEMENTACIÓN COMPLETADA
 
+> **Nota de vigencia (abril 2026):** esta documentación describe una arquitectura anterior basada en `/src/app/components/crm/*` que ya no coincide con la implementación actual.  
+> Estado real actual: CRM operativo en `ClientsPage`, `CompraventaCrm` y `DeliveryCrm`, con APIs en `controllers/*crm*` y `src/app/lib/*crm*Api.ts`.
+
 ## ✅ RESUMEN EJECUTIVO
 
 El módulo CRM ha sido implementado exitosamente dentro del módulo **Clientes** siguiendo todas las reglas arquitectónicas del sistema UDAR EDGE.

@@ -46,7 +46,7 @@ const TOUR_STEPS: TourStep[] = [
     title: 'Sube tus clientes',
     description: 'Importa tu base de clientes desde Excel o créalos manualmente. Con el CRM integrado podrás gestionar clientes y leads desde un mismo sitio.',
     hint: 'Puedes importar clientes en bloque desde un fichero CSV o Excel.',
-    route: '/saas/crm/clientes?tab=clients',
+    route: '/saas/delivery-crm',
   },
   {
     id: 'catalog',
