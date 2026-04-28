@@ -61,6 +61,7 @@ export interface WorkCenter {
   squareMeters?: number;
   notes?: string;
   active: boolean;
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -109,6 +110,7 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
   if (!value || typeof value !== 'object') return null;
   const doc = value as Partial<WorkCenter> & { _id?: string; id?: string; type?: string };
   if (doc.type !== 'sales_point') return null;
+  if ((doc as { deletedAt?: string | null }).deletedAt) return null;
   const id = String(doc.id || doc._id || '');
   if (!id) return null;
 
@@ -149,6 +151,7 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     squareMeters: doc.squareMeters != null ? Number(doc.squareMeters) : undefined,
     notes: doc.notes ? String(doc.notes) : undefined,
     active: doc.active !== false,
+    deletedAt: (doc as { deletedAt?: string | null }).deletedAt || null,
     createdAt: String(doc.createdAt || new Date().toISOString()),
     updatedAt: String(doc.updatedAt || doc.createdAt || new Date().toISOString()),
   };

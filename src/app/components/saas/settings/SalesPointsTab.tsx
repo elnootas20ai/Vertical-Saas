@@ -454,7 +454,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
           <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm">
             Cancelar
           </button>
-          <button type="button" onClick={handleSubmit} disabled={saving || !form.name.trim()} className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+          <button type="button" onClick={handleSubmit} disabled={saving} className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm">
             {saving ? 'Guardando...' : editItem ? 'Guardar cambios' : 'Crear centro de trabajo'}
           </button>
         </div>
@@ -489,6 +489,7 @@ const WC_IMPORT_FIELDS: ImportFieldDef[] = [
 
 export function SalesPointsTab() {
   const { user } = useAuth();
+  const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -500,30 +501,33 @@ export function SalesPointsTab() {
   const [showImportModal, setShowImportModal] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!resolvedUserId) return;
     try {
-      const wcs = await listWorkCenters(user.id);
+      const wcs = await listWorkCenters(resolvedUserId);
       setWorkCenters(wcs);
     } catch {
       toast.error('Error al cargar los centros de trabajo');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [resolvedUserId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   const handleSave = async (data: Partial<WorkCenter>) => {
-    if (!user?.id) return;
+    if (!resolvedUserId) {
+      toast.error('No hay usuario autenticado para guardar este centro.');
+      return;
+    }
     try {
       if (editingItem) {
         const updated = await updateWorkCenter({ ...editingItem, ...data } as WorkCenter);
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         toast.success(`"${updated.name}" actualizado`);
       } else {
-        const created = await createWorkCenter(user.id, {
+        const created = await createWorkCenter(resolvedUserId, {
           name: data.name!,
           centerType: data.centerType || 'punto_de_venta',
           customTypeName: data.customTypeName,
@@ -554,13 +558,13 @@ export function SalesPointsTab() {
   };
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!user?.id) return;
+    if (!resolvedUserId) return;
     let created = 0;
     for (const entry of entries) {
       try {
         const ct = String(entry.centerType || 'punto_de_venta');
         const ow = String(entry.ownership || 'propiedad');
-        const wc = await createWorkCenter(user.id, {
+        const wc = await createWorkCenter(resolvedUserId, {
           name: String(entry.name || ''),
           centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
           ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
@@ -578,13 +582,13 @@ export function SalesPointsTab() {
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    if (!user?.id) return;
+    if (!resolvedUserId) return;
     let created = 0;
     for (const entry of entries) {
       try {
         const ct = entry.centerType || 'punto_de_venta';
         const ow = entry.ownership || 'propiedad';
-        const wc = await createWorkCenter(user.id, {
+        const wc = await createWorkCenter(resolvedUserId, {
           name: entry.name || '',
           centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
           ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
