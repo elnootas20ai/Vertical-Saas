@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -35,6 +36,9 @@ import {
   Tag,
   FileText,
   Euro,
+  Users,
+  ArrowRight,
+  AlertTriangle,
 } from 'lucide-react';
 
 const CENTER_TYPE_ICONS: Record<WorkCenterType, React.ReactNode> = {
@@ -61,6 +65,7 @@ interface WorkCenterModalProps {
 }
 
 function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalProps) {
+  const navigate = useNavigate();
   useModalClose(isOpen, onClose);
   const [form, setForm] = useState({
     name: '',
@@ -73,6 +78,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
     province: '',
     phone: '',
     email: '',
+    expectedStaffCount: '3',
     squareMeters: '',
     notes: '',
     active: true,
@@ -104,6 +110,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
         province: editItem.province || '',
         phone: editItem.phone || '',
         email: editItem.email || '',
+        expectedStaffCount: String(editItem.expectedStaffCount ?? 3),
         squareMeters: editItem.squareMeters ? String(editItem.squareMeters) : '',
         notes: editItem.notes || '',
         active: editItem.active,
@@ -122,7 +129,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
     } else {
       setForm({
         name: '', centerType: 'punto_de_venta', customTypeName: '', ownership: 'propiedad',
-        address: '', city: '', postalCode: '', province: '', phone: '', email: '', squareMeters: '',
+        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '3', squareMeters: '',
         notes: '', active: true, purchasePrice: '', purchaseDate: '', cadastralReference: '',
         contractStartDate: '', contractEndDate: '', monthlyPrice: '', deposit: '',
         landlord: '', landlordPhone: '', landlordEmail: '', contractNotes: '',
@@ -140,6 +147,11 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
     }
     if (form.centerType === 'custom' && !form.customTypeName.trim()) {
       toast.error('Especifica el tipo personalizado');
+      return;
+    }
+    const staffCount = Number(form.expectedStaffCount || 0);
+    if (!Number.isFinite(staffCount) || staffCount < 1 || staffCount > 999) {
+      toast.error('Indica cuántos trabajadores tiene este centro (1-999)');
       return;
     }
     setSaving(true);
@@ -171,6 +183,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
         province: form.province.trim() || undefined,
         phone: form.phone.trim() || undefined,
         email: form.email.trim() || undefined,
+        expectedStaffCount: Math.max(1, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: form.notes.trim() || undefined,
         active: form.active,
@@ -277,6 +290,18 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
                   autoFocus
                 />
               </div>
+              <div>
+                <label className={labelClass}>Trabajadores previstos *</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  className={inputClass}
+                  placeholder="Ej: 8"
+                  value={form.expectedStaffCount}
+                  onChange={(e) => setForm(f => ({ ...f, expectedStaffCount: e.target.value }))}
+                />
+              </div>
 
               <div>
                 <label className={labelClass}>Régimen</label>
@@ -333,6 +358,23 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
                   {form.active ? <ToggleRight className="w-7 h-7 text-green-600" /> : <ToggleLeft className="w-7 h-7 text-gray-400" />}
                 </div>
               </button>
+              <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
+                  <Users className="w-6 h-6 text-gray-700 dark:text-gray-200" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Invitar equipo del centro</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Configura usuarios desde Equipo para que el centro opere correctamente.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/team')}
+                  className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                >
+                  Ir a Equipo
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
             </>
           )}
 
@@ -499,6 +541,9 @@ export function SalesPointsTab() {
   const [filterType, setFilterType] = useState<WorkCenterType | 'all'>('all');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<WorkCenter | null>(null);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!resolvedUserId) return;
@@ -543,6 +588,7 @@ export function SalesPointsTab() {
           province: data.province,
           phone: data.phone,
           email: data.email,
+          expectedStaffCount: data.expectedStaffCount ?? 3,
           squareMeters: data.squareMeters,
           notes: data.notes,
         });
@@ -606,7 +652,7 @@ export function SalesPointsTab() {
   };
 
   const handleToggleActive = async (wc: WorkCenter) => {
-    if (!user?.id) return;
+    if (!resolvedUserId) return;
     try {
       const updated = await updateWorkCenter({ ...wc, active: !wc.active });
       setWorkCenters(prev => prev.map(s => s._id === updated._id ? updated : s));
@@ -616,12 +662,27 @@ export function SalesPointsTab() {
     }
   };
 
-  const handleDelete = async (wc: WorkCenter) => {
-    if (!confirm(`¿Eliminar "${wc.name}"? Esta acción no se puede deshacer.`)) return;
+  const openDeleteDialog = (wc: WorkCenter) => {
+    setDeleteTarget(wc);
+    setDeleteConfirmName('');
+    setDeleteAcknowledge(false);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    if (deleteConfirmName.trim().toLowerCase() !== deleteTarget.name.trim().toLowerCase()) {
+      toast.error(`Escribe el nombre exacto (${deleteTarget.name}) para continuar.`);
+      return;
+    }
+    if (!deleteAcknowledge) {
+      toast.error('Debes confirmar el borrado definitivo.');
+      return;
+    }
     try {
-      await deleteWorkCenter(wc._id);
-      setWorkCenters(prev => prev.filter(s => s._id !== wc._id));
-      toast.success(`"${wc.name}" eliminado`);
+      await deleteWorkCenter(deleteTarget._id);
+      setWorkCenters(prev => prev.filter(s => s._id !== deleteTarget._id));
+      toast.success(`"${deleteTarget.name}" eliminado`);
+      setDeleteTarget(null);
     } catch {
       toast.error('Error al eliminar');
     }
@@ -828,6 +889,10 @@ export function SalesPointsTab() {
                     <span className="truncate">{wc.email}</span>
                   </div>
                 )}
+                <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                  <Users className="w-3.5 h-3.5 shrink-0" />
+                  <span>{wc.expectedStaffCount ?? 3} trabajador{(wc.expectedStaffCount ?? 3) !== 1 ? 'es' : ''}</span>
+                </div>
                 {wc.ownership === 'alquiler' && wc.contract?.monthlyPrice && (
                   <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400">
                     <Euro className="w-3.5 h-3.5 shrink-0" />
@@ -867,7 +932,7 @@ export function SalesPointsTab() {
                   Editar
                 </button>
                 <button
-                  onClick={() => handleDelete(wc)}
+                  onClick={() => openDeleteDialog(wc)}
                   className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                   title="Eliminar"
                 >
@@ -892,6 +957,61 @@ export function SalesPointsTab() {
         onSave={handleSave}
         editItem={editingItem}
       />
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>
+          <div className="w-full max-w-lg rounded-2xl border-2 border-red-200 bg-white p-5 shadow-2xl dark:border-red-900 dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-red-100 p-2 text-red-600 dark:bg-red-900/40 dark:text-red-300">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-gray-900 dark:text-gray-100">Eliminar establecimiento</h4>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Acción irreversible. Se ocultará para toda la operativa.</p>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                Nombre: <span className="font-semibold">{deleteTarget.name}</span>
+              </div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Escribe el nombre exacto para confirmar
+              </label>
+              <input
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                className="w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm font-semibold outline-none focus:border-red-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                placeholder={deleteTarget.name}
+              />
+              <label className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50/60 px-3 py-2.5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">
+                <input type="checkbox" className="mt-0.5 h-4 w-4" checked={deleteAcknowledge} onChange={(e) => setDeleteAcknowledge(e.target.checked)} />
+                Confirmo que quiero eliminar este establecimiento y entiendo que la acción no se puede deshacer.
+              </label>
+            </div>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleteConfirmName.trim().toLowerCase() !== deleteTarget.name.trim().toLowerCase() || !deleteAcknowledge}
+                className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold text-white ${
+                  deleteConfirmName.trim().toLowerCase() === deleteTarget.name.trim().toLowerCase() && deleteAcknowledge
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-red-300 cursor-not-allowed'
+                }`}
+              >
+                Eliminar definitivamente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AIAddModal
         isOpen={showAIModal}

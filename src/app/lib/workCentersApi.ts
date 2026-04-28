@@ -58,6 +58,7 @@ export interface WorkCenter {
   province?: string;
   phone?: string;
   email?: string;
+  expectedStaffCount?: number;
   squareMeters?: number;
   notes?: string;
   active: boolean;
@@ -148,6 +149,7 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     province: doc.province ? String(doc.province) : undefined,
     phone: doc.phone ? String(doc.phone) : undefined,
     email: doc.email ? String(doc.email) : undefined,
+    expectedStaffCount: doc.expectedStaffCount != null ? Math.max(1, Math.floor(Number(doc.expectedStaffCount))) : 3,
     squareMeters: doc.squareMeters != null ? Number(doc.squareMeters) : undefined,
     notes: doc.notes ? String(doc.notes) : undefined,
     active: doc.active !== false,
@@ -206,11 +208,30 @@ export async function updateWorkCenter(wc: WorkCenter): Promise<WorkCenter> {
 export async function deleteWorkCenter(wcId: string): Promise<void> {
   await ensureDb();
   const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
-  const doc = (payload.docs as WorkCenter[]).find((d) => d._id === wcId);
+  const doc = (payload.docs as Array<WorkCenter & { _id?: string; _rev?: string; deletedAt?: string | null }>).find((d) => d._id === wcId);
   if (!doc) return;
+  if (doc._rev) {
+    try {
+      await req(
+        `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wcId)}?rev=${doc._rev}`,
+        { method: 'DELETE' },
+      );
+      return;
+    } catch {
+      // fallback to soft-delete when rev mismatches
+    }
+  }
   await req(
-    `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wcId)}?rev=${doc._rev}`,
-    { method: 'DELETE' },
+    `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wcId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...doc,
+        deletedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        active: false,
+      }),
+    },
   );
 }
 
