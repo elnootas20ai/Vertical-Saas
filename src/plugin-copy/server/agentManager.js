@@ -236,7 +236,8 @@ function findCursorCli() {
     if (existsSync(p)) { cursorCliPath = p; return p; }
   }
   try {
-    const found = execSync('which agent 2>/dev/null', { encoding: 'utf-8' }).trim();
+    const cmd = process.platform === 'win32' ? 'where agent' : 'which agent';
+    const found = execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     if (found) { cursorCliPath = found; return found; }
   } catch { /* not found */ }
   return null;
