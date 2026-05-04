@@ -167,7 +167,7 @@ export function Footer() {
           {/* Bottom bar */}
           <div className="pt-8 border-t border-blue-900 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-sm text-blue-400">
-              © 2026 Udar Edge. Todos los derechos reservados.
+              © 2026 Vertial. Todos los derechos reservados.
             </div>
             <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
               <button

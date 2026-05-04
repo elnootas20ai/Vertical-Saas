@@ -106,7 +106,7 @@ const supportCards: SupportCard[] = [
   {
     id: 'faq',
     title: 'Centro de ayuda y FAQ',
-    description: 'Resuelve dudas frecuentes sobre el uso de UDAR Edge, los flujos operativos y la configuracion del entorno.',
+    description: 'Resuelve dudas frecuentes sobre el uso de Vertial, los flujos operativos y la configuracion del entorno.',
     actionLabel: 'Ir a preguntas frecuentes',
     href: '/saas/help#faq',
     icon: CircleHelp,
@@ -226,7 +226,7 @@ const guides: Guide[] = [
   {
     id: 'documentos',
     title: 'Documentos y plantillas',
-    description: 'UDAR Edge centraliza la generacion, envio y seguimiento de documentos para reducir trabajo manual y mejorar la consistencia.',
+    description: 'Vertial centraliza la generacion, envio y seguimiento de documentos para reducir trabajo manual y mejorar la consistencia.',
     route: '/saas/documents',
     routeLabel: 'Ir a documentos',
     icon: FileText,
@@ -301,7 +301,7 @@ const faqs = [
       'Sirven para estandarizar contratos, reservas, facturas y otros documentos frecuentes. Reducen trabajo manual, aceleran la emision y protegen la consistencia documental de la empresa.',
   },
   {
-    question: '¿Que utilidad tiene el modulo ANCOVE dentro de UDAR Edge?',
+    question: '¿Que utilidad tiene el modulo ANCOVE dentro de Vertial?',
     answer:
       'Aporta contexto sectorial, comunicados y recursos de apoyo que ayudan a tomar mejores decisiones comerciales y operativas dentro del negocio de vehiculo de ocasion.',
   },
@@ -349,7 +349,7 @@ export function HelpCenter() {
   return (
     <Layout
       title="Centro de ayuda"
-      subtitle="Guias operativas, preguntas frecuentes y soporte para sacar el maximo partido a UDAR Edge"
+      subtitle="Guias operativas, preguntas frecuentes y soporte para sacar el maximo partido a Vertial"
     >
       <div className="space-y-8">
         <section className="rounded-[28px] border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8 text-white shadow-sm">
@@ -359,7 +359,7 @@ export function HelpCenter() {
               Soporte y conocimiento
             </div>
             <h2 className="mt-4 text-3xl font-bold tracking-tight md:text-4xl">
-              La ayuda de UDAR Edge pensada para una operativa profesional.
+              La ayuda de Vertial pensada para una operativa profesional.
             </h2>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-200 md:text-base">
               Este centro de ayuda centraliza la explicacion de la plataforma, guias practicas por modulo y
@@ -447,7 +447,7 @@ export function HelpCenter() {
         <section className="space-y-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-gray-500">Como funciona la plataforma</p>
-            <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Una vision clara del flujo de trabajo en UDAR Edge</h3>
+            <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Una vision clara del flujo de trabajo en Vertial</h3>
           </div>
           <div className="grid gap-4 xl:grid-cols-4">
             {platformFlow.map((item) => {
@@ -560,13 +560,13 @@ export function HelpCenter() {
             <h3 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">Cuando necesites ayuda directa, este es el canal recomendado</h3>
             <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-400">
               Para dudas funcionales, incidencias o necesidades de acompanamiento, escribe a{" "}
-              <a className="font-semibold text-gray-900 dark:text-gray-100 underline decoration-gray-300 underline-offset-4" href="mailto:soporte@udaredge.com">
-                soporte@udaredge.com
+              <a className="font-semibold text-gray-900 dark:text-gray-100 underline decoration-gray-300 underline-offset-4" href="mailto:soporte@vertial.com">
+                soporte@vertial.com
               </a>
               . Cuanto mejor expliques el contexto, mas facil sera orientar la respuesta y priorizar correctamente.
             </p>
             <a
-              href="mailto:soporte@udaredge.com"
+              href="mailto:soporte@vertial.com"
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-black"
             >
               Escribir a soporte

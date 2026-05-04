@@ -20,11 +20,11 @@ export function UdarLogo({ size = 'md', className = '', showText = false }: Udar
     <div className={`flex items-center gap-2 ${className}`}>
       <img
         src={logoSrc}
-        alt="UDAR EDGE"
+        alt="Vertial"
         className={`${sizeMap[size]} w-auto object-contain`}
       />
       {showText && (
-        <span className="text-xl font-semibold">Udar Edge</span>
+        <span className="text-xl font-semibold">Vertial</span>
       )}
     </div>
   );

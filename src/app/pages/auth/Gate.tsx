@@ -257,7 +257,7 @@ export function Gate() {
                 <span className="text-white font-bold text-xl">U</span>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">UDAR EDGE</h1>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Vertial</h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Plataforma SaaS multi-vertical</p>
               </div>
             </div>
@@ -279,7 +279,7 @@ export function Gate() {
         {/* Welcome section */}
         <div className="mb-8">
           <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-            Bienvenido a UDAR EDGE{user?.firstName ? `, ${user.firstName}` : ''}
+            Bienvenido a Vertial{user?.firstName ? `, ${user.firstName}` : ''}
           </h2>
           <p className="text-lg text-gray-600 dark:text-gray-400 mb-4">
             Plataforma SaaS multi-vertical para digitalizar negocios. Tu acceso actual es <strong>{user?.role || 'Admin'}</strong>.

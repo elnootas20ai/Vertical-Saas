@@ -230,8 +230,15 @@ export async function runHealthCheck({ baseUrl, authHeader, activeSockets = 0 })
   // ── Memoria ───────────────────────────────────────────────────────────────
   const mem = checkMemory();
   checks.memory = mem;
-  if (!mem.ok) criticalFail = true;
-  else if (mem.state === 'warn') hasWarnings = true;
+  // En desarrollo Node suele acercar heapUsed al heapTotal asignado sin que eso
+  // implique caída real del servicio; marcamos warn/degraded pero no 503.
+  if (process.env.NODE_ENV === 'development' && mem.state === 'critical') {
+    hasWarnings = true;
+  } else if (!mem.ok) {
+    criticalFail = true;
+  } else if (mem.state === 'warn') {
+    hasWarnings = true;
+  }
 
   // ── Disco ─────────────────────────────────────────────────────────────────
   const disk = checkDisk(path.resolve(__dirname, '..'));
