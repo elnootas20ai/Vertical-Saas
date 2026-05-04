@@ -1,8 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 
 const COUCH_URL = process.env.VITE_COUCHDB_URL || 'http://localhost:5984';
-const COUCH_USER = process.env.VITE_COUCHDB_USER || 'admin';
-const COUCH_PASS = process.env.VITE_COUCHDB_PASSWORD || '1234';
+const COUCH_USER = process.env.VITE_COUCHDB_USER || '';
+const COUCH_PASS = process.env.VITE_COUCHDB_PASSWORD || '';
 const DB_NAME = 'plugin_kanban';
 
 const authHeader = 'Basic ' + Buffer.from(`${COUCH_USER}:${COUCH_PASS}`).toString('base64');
