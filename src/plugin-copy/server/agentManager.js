@@ -983,7 +983,7 @@ export function reorderQueue(agentId, itemId, direction) {
 
 // ── Chat / Conversation ──
 
-const SYSTEM_PROMPT = `Eres un asistente de IA integrado en la plataforma UDAR EDGE. Ayudas a los usuarios con gestión de vehículos, clientes, leads, facturación y operaciones del negocio. Responde de forma concisa y útil en español.`;
+const SYSTEM_PROMPT = `Eres un asistente de IA integrado en la plataforma Vertial. Ayudas a los usuarios con gestión de vehículos, clientes, leads, facturación y operaciones del negocio. Responde de forma concisa y útil en español.`;
 
 export function getChatMessages(agentId) {
   return chatMessages.get(agentId) || [];

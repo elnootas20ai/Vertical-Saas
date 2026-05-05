@@ -734,8 +734,8 @@ pluginRouter.post('/actions/restart-backend', (_req, res) => {
 
 pluginRouter.post('/actions/pm2-start', (_req, res) => {
   const cmd = process.platform === 'win32'
-    ? 'pm2 delete udaredge; pm2 start index.js --name "udaredge" --env production -i max'
-    : 'pm2 delete udaredge 2>/dev/null; pm2 start index.js --name "udaredge" --env production -i max';
+    ? 'pm2 delete vertial; pm2 start index.js --name "vertial" --env production -i max'
+    : 'pm2 delete vertial 2>/dev/null; pm2 start index.js --name "vertial" --env production -i max';
   exec(cmd, { cwd: process.cwd() }, (err, stdout, stderr) => {
     if (err) return res.status(500).json({ ok: false, error: stderr || err.message });
     res.json({ ok: true, output: stdout.trim() });

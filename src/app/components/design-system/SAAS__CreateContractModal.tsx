@@ -125,7 +125,7 @@ export function SAAS__CreateContractModal({
   vehicles,
   userId,
   responsibleName = 'Sin asignar',
-  companyName = 'Udar Automoción',
+  companyName = 'Ejemplo Automoción',
   companyCif = '',
   companyAddress = '',
   onSubmit,

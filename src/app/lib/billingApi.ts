@@ -236,12 +236,12 @@ export function downloadInvoicePdf(invoice: BillingInvoice, companyName?: string
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
-  doc.text('UDAR', margin, 18);
+  doc.text('Vertial', margin, 18);
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Sistema de gestión de concesionario', margin, 26);
-  doc.text('noreply@udar.app', margin, 33);
+  doc.text('Plataforma de gestión empresarial', margin, 26);
+  doc.text('noreply@vertialapp.com', margin, 33);
 
   // Número de factura (derecha)
   doc.setFontSize(10);
@@ -298,7 +298,7 @@ export function downloadInvoicePdf(invoice: BillingInvoice, companyName?: string
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 20, 20);
-  doc.text(companyName || 'UDAR', margin, y);
+  doc.text(companyName || 'Vertial', margin, y);
   doc.setFont('helvetica', 'normal');
 
   // ─── Tabla de conceptos ──────────────────────────────────────────
@@ -362,7 +362,7 @@ export function downloadInvoicePdf(invoice: BillingInvoice, companyName?: string
   doc.line(margin, footerY - 4, pageW - margin, footerY - 4);
   doc.setFontSize(7);
   doc.setTextColor(160, 160, 160);
-  doc.text('UDAR · Sistema de gestión de concesionario · noreply@udar.app', margin, footerY);
+  doc.text('Vertial · Plataforma de gestión · noreply@vertialapp.com', margin, footerY);
   doc.text(`Generado el ${new Date().toLocaleDateString('es-ES')}`, pageW - margin, footerY, { align: 'right' });
 
   doc.save(`${invoice.number}.pdf`);

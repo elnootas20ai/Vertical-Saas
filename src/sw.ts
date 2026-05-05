@@ -57,10 +57,10 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: 'Udar', body: event.data.text() };
+    payload = { title: 'Vertial', body: event.data.text() };
   }
 
-  const title = payload.title || 'Udar';
+  const title = payload.title || 'Vertial';
   const options: NotificationOptions = {
     body: payload.body || '',
     icon: payload.icon || '/pwa-192x192.png',

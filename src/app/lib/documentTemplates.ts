@@ -34,7 +34,7 @@ export const DOCUMENT_TEMPLATE_VARIABLES: DocumentTemplateVariable[] = [
     key: '{{empresa.nombre}}',
     label: 'Nombre de la empresa',
     category: 'Empresa',
-    example: 'Udar Automoción',
+    example: 'Ejemplo Automoción',
     description: 'Nombre comercial del concesionario o empresa.',
   },
   {

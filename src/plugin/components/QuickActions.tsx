@@ -284,7 +284,7 @@ export function QuickActions() {
             <StatusIcon status={pm2StartStatus} />
           </button>
 
-          {/* udaredge status badge */}
+          {/* backend status badge */}
           {backendAlive !== null && (
             <div
               className={cn(
@@ -299,7 +299,7 @@ export function QuickActions() {
                 )}
               />
               <span className={isDark ? 'text-zinc-400' : 'text-gray-500'}>
-                udaredge — {backendAlive ? t('backendRunning') : t('backendStopped')}
+                vertial — {backendAlive ? t('backendRunning') : t('backendStopped')}
               </span>
             </div>
           )}

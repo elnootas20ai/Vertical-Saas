@@ -184,7 +184,7 @@ export async function importTenantData(
 ): Promise<{ ok: boolean; totalImported: number; results: Record<string, { imported: number; total: number; error?: string }> }> {
   const text = await file.text();
   const parsed = JSON.parse(text) as { collections?: unknown };
-  if (!parsed.collections) throw new Error('Formato de archivo inválido. Se espera un archivo exportado por UDAR.');
+  if (!parsed.collections) throw new Error('Formato de archivo inválido. Se espera un archivo exportado por Vertial.');
   return apiRequest(`/api/settings/import/${encodeURIComponent(userId)}`, {
     method: 'POST',
     body: JSON.stringify({ collections: parsed.collections }),
