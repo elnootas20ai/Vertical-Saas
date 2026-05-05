@@ -1,4 +1,4 @@
-# 📋 AUDITORÍA COMPLETA — MÓDULO CATÁLOGO (UDAR EDGE)
+﻿# 📋 AUDITORÍA COMPLETA — MÓDULO CATÁLOGO (Vertial)
 
 **Fecha de auditoría**: 27 de enero de 2026  
 **Versión del sistema**: Figma CORE (pre-backend)  
@@ -1091,3 +1091,4 @@ interface Escandallo {
 **Conclusión**: El módulo Catálogo tiene una UX sólida y bien diseñada, pero requiere implementación completa de backend, segregación multiempresa, y refactorización de modelos de datos antes de ser funcional en producción.
 
 **Próximo paso sugerido**: Decisión BASE/FLAG por funcionalidad + diseño de esquema de base de datos.
+

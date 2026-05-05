@@ -1,5 +1,5 @@
-# 🔒 ARQUITECTURA CERRADA - MÓDULO RRHH
-**Sistema:** UDAR EDGE  
+﻿# 🔒 ARQUITECTURA CERRADA - MÓDULO RRHH
+**Sistema:** Vertial  
 **Fecha de cierre:** 17 Enero 2026  
 **Versión:** 1.0.0  
 **Estado:** ARQUITECTURA FINALIZADA ✅
@@ -8,7 +8,7 @@
 
 ## 📋 DECLARACIÓN OFICIAL
 
-Este documento certifica que el módulo RRHH de UDAR EDGE ha completado su fase de arquitectura y diseño funcional. A partir de esta fecha:
+Este documento certifica que el módulo RRHH de Vertial ha completado su fase de arquitectura y diseño funcional. A partir de esta fecha:
 
 ✅ **Los flujos están CERRADOS y VALIDADOS**  
 ✅ **No se admiten nuevas pantallas sin revisión de arquitectura**  
@@ -431,10 +431,10 @@ CREATE TABLE horarios (
 
 | Fecha | Versión | Cambio | Autor |
 |-------|---------|--------|-------|
-| 17/01/2026 | 1.0.0 | Cierre inicial de arquitectura RRHH | Sistema UDAR EDGE |
-| 17/01/2026 | 1.0.0 | Eliminación flujo "Gerente propone" en vacaciones | Sistema UDAR EDGE |
-| 17/01/2026 | 1.0.0 | Implementación reglas negocio en rrhhRules.ts | Sistema UDAR EDGE |
-| 17/01/2026 | 1.0.0 | Conexión Calendario Trabajador con incidencias | Sistema UDAR EDGE |
+| 17/01/2026 | 1.0.0 | Cierre inicial de arquitectura RRHH | Sistema Vertial |
+| 17/01/2026 | 1.0.0 | Eliminación flujo "Gerente propone" en vacaciones | Sistema Vertial |
+| 17/01/2026 | 1.0.0 | Implementación reglas negocio en rrhhRules.ts | Sistema Vertial |
+| 17/01/2026 | 1.0.0 | Conexión Calendario Trabajador con incidencias | Sistema Vertial |
 
 ---
 
@@ -451,3 +451,4 @@ Para consultas sobre la arquitectura cerrada del módulo RRHH:
 
 *Arquitectura cerrada y validada para producción.*  
 *Última actualización: 17 de Enero de 2026*
+

@@ -386,7 +386,7 @@ export function AffiliatePortal() {
               </div>
               <div>
                 <p className="font-bold text-sm leading-tight">Panel de Afiliado</p>
-                <p className="text-xs text-blue-300/60">UDAR EDGE</p>
+                <p className="text-xs text-blue-300/60">Vertial</p>
               </div>
             </div>
             <div className="flex items-center gap-3">

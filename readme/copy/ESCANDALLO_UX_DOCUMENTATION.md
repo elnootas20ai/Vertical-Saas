@@ -1,4 +1,4 @@
-# 🧮 SISTEMA DE ESCANDALLOS - DOCUMENTACIÓN UX
+﻿# 🧮 SISTEMA DE ESCANDALLOS - DOCUMENTACIÓN UX
 
 ## 📋 ÍNDICE
 
@@ -631,6 +631,7 @@ Para dudas sobre implementación, consultar:
 
 **Versión**: 1.0  
 **Fecha**: Enero 2025  
-**Proyecto**: UDAR EDGE - Core ERP  
+**Proyecto**: Vertial - Core ERP  
 **Módulo**: Catálogo - Escandallos
+
 

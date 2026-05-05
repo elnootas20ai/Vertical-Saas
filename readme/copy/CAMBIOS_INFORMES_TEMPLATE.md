@@ -1,8 +1,8 @@
-# ✅ PLANTILLA REUTILIZABLE DE INFORMES - IMPLEMENTACIÓN COMPLETA
+﻿# ✅ PLANTILLA REUTILIZABLE DE INFORMES - IMPLEMENTACIÓN COMPLETA
 
 ## 🎯 RESUMEN IMPLEMENTACIÓN
 
-Ya está completa la **plantilla reutilizable con selector de niveles** para el sistema de informes de UDAR EDGE.
+Ya está completa la **plantilla reutilizable con selector de niveles** para el sistema de informes de Vertial.
 
 ### ✨ CARACTERÍSTICAS IMPLEMENTADAS
 
@@ -197,3 +197,4 @@ Para replicar esta plantilla a Gastos, Margen, Stock, Incidencias:
 4. Añadir insight "60% proviene de X" en PRO
 5. Añadir sección "Incidencias Económicas" en PRO
 6. Replicar plantilla a otros 4 informes
+

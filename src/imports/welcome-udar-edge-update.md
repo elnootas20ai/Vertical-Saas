@@ -1,13 +1,13 @@
-Actúa como UX/UI senior. IMPORTANTE: NO crees una página nueva desde cero. Modifica la página existente “Bienvenido a tu espacio” (la que ahora está enfocada a ANCOVE) para que sea de UDAR EDGE multi-vertical. Mantén el estilo y estructura general, pero moderniza el look y el contenido. Objetivo: que parezca un SaaS premium y que convierta.
+﻿Actúa como UX/UI senior. IMPORTANTE: NO crees una página nueva desde cero. Modifica la página existente “Bienvenido a tu espacio” (la que ahora está enfocada a ANCOVE) para que sea de Vertial multi-vertical. Mantén el estilo y estructura general, pero moderniza el look y el contenido. Objetivo: que parezca un SaaS premium y que convierta.
 
 NUEVO ENFOQUE
-- Marca principal: UDAR EDGE (no ANCOVE como eje).
-- UDAR EDGE es multi-vertical, pero SOLO “Compraventa de coches” está disponible ahora.
+- Marca principal: Vertial (no ANCOVE como eje).
+- Vertial es multi-vertical, pero SOLO “Compraventa de coches” está disponible ahora.
 - ANCOVE pasa a ser una integración/opción dentro de la vertical Compraventa, no el centro de la página.
 
 CAMBIOS OBLIGATORIOS (reemplazar textos y bloques)
 1) Título y subtítulo
-- Título: “Bienvenido a UDAR EDGE”
+- Título: “Bienvenido a Vertial”
 - Subtítulo: “Plataforma SaaS multi-vertical para digitalizar negocios. Vertical disponible: Compraventa de coches.”
 - Badge visible junto al título: “Compraventa (Disponible)”
 - Añade badges secundarios deshabilitados: “Taller (Próximamente)”, “Retail (Próximamente)”, “Delivery (Próximamente)” (no clicables o abren modal “Próximamente”).

@@ -1,6 +1,6 @@
-# 📋 AUDITORÍA DE ARQUITECTURA UX & LÓGICA – RRHH AVANZADO
+﻿# 📋 AUDITORÍA DE ARQUITECTURA UX & LÓGICA – RRHH AVANZADO
 
-**Sistema:** UDAR EDGE  
+**Sistema:** Vertial  
 **Módulo:** RRHH Avanzado (Multipaís)  
 **Fecha:** 13 de Enero de 2026  
 **Alcance:** Empleados, Horarios, Turnos, Fichajes, Coste, Relación Gerente↔Trabajador
@@ -611,7 +611,7 @@ interface Employee {
 ## 📌 RESUMEN EJECUTIVO
 
 ### **Estado Actual:**
-El módulo RRHH de UDAR EDGE está **diseñado y optimizado para España** con reglas laborales, fiscales y administrativas específicas del mercado español. La arquitectura funciona correctamente dentro de este contexto.
+El módulo RRHH de Vertial está **diseñado y optimizado para España** con reglas laborales, fiscales y administrativas específicas del mercado español. La arquitectura funciona correctamente dentro de este contexto.
 
 ### **Capacidad Multipaís:**
 **Baja.** Requeriría refactorización significativa en:
@@ -635,7 +635,7 @@ El módulo RRHH de UDAR EDGE está **diseñado y optimizado para España** con r
 ---
 
 **Fecha de auditoría:** 13 de Enero de 2026  
-**Versión del sistema:** UDAR EDGE (SVA 3 - RRHH Avanzado)  
+**Versión del sistema:** Vertial (SVA 3 - RRHH Avanzado)  
 **Auditor:** Sistema de Análisis de Arquitectura  
 **Alcance cumplido:** ✅ 100%
 
@@ -698,3 +698,4 @@ interface Employee {
 ---
 
 **FIN DEL DOCUMENTO**
+

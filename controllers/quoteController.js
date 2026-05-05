@@ -331,7 +331,7 @@ function buildQuoteEmailHtml({ quote, acceptUrl, rejectUrl, companyName }) {
     )
     .join('');
 
-  const senderName = companyName || 'UDAR';
+  const senderName = companyName || 'Vertial';
 
   return {
     subject: `Presupuesto ${quote.number} · ${senderName}`,

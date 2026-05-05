@@ -1,11 +1,11 @@
-# 📋 ARQUITECTURA UX: CATÁLOGO COMPLETO
+﻿# 📋 ARQUITECTURA UX: CATÁLOGO COMPLETO
 ## Módulo: Catálogo + Pedidos + Facturas + Productos y Servicios
 
 ---
 
 ## 🎯 OBJETIVO COMPLETADO
 
-Se ha diseñado e implementado la arquitectura UX completa del módulo Catálogo de UDAR EDGE, alineando:
+Se ha diseñado e implementado la arquitectura UX completa del módulo Catálogo de Vertial, alineando:
 - ✅ Facturas de proveedor (nueva funcionalidad completa)
 - ✅ Pedidos a proveedor (ajustes UX realizados)
 - ✅ Catálogo de artículos (unificado y coherente)
@@ -426,3 +426,4 @@ Todos los componentes visuales, flujos y mensajes están implementados y listos 
 4. Extender en fases F2/F3 sin romper lo existente
 
 **Estado:** ✅ **ARQUITECTURA UX COMPLETA Y COHERENTE**
+

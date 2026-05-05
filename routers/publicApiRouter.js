@@ -61,7 +61,7 @@ publicApiRouter.use(validateApiToken);
 publicApiRouter.get('/', (req, res) => {
   res.json({
     ok: true,
-    name: 'Udar Edge API',
+    name: 'Vertial API',
     version: '1',
     userId: req.apiUserId,
     permissions: req.apiPermissions,

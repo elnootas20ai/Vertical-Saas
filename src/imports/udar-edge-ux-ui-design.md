@@ -1,4 +1,4 @@
-Actúa como diseñador/a UX/UI senior para un SaaS B2B. Quiero diseñar el SaaS “UDAR EDGE” orientado a COMPRAVENTAS de coches en España, con integración y enfoque para ANCOVE (asociación).
+﻿Actúa como diseñador/a UX/UI senior para un SaaS B2B. Quiero diseñar el SaaS “Vertial” orientado a COMPRAVENTAS de coches en España, con integración y enfoque para ANCOVE (asociación).
 
 REFERENCIA VISUAL
 - Copia el estilo del pantallazo que te he pasado: sidebar izquierda con iconos, topbar superior, cards limpias con bordes suaves, tipografía clara, tabs/píldoras, y dashboard con KPIs + gráficas.

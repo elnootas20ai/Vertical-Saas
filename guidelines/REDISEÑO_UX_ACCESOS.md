@@ -1,7 +1,7 @@
-# ✅ REDISEÑO UX - ACCESOS AL SISTEMA | UDAR EDGE
+﻿# ✅ REDISEÑO UX - ACCESOS AL SISTEMA | Vertial
 
 **Fecha:** 26 de enero de 2026  
-**Proyecto:** UDAR EDGE - Sistema de Accesos Refactorizado  
+**Proyecto:** Vertial - Sistema de Accesos Refactorizado  
 **Estado:** ✅ Implementado
 
 ---
@@ -412,3 +412,4 @@ El rediseño UX de **Configuración → Accesos al Sistema** cumple con todos lo
 **Documento generado:** 26/01/2026  
 **Versión:** 1.0  
 **Estado:** ✅ Implementado (solo UX, sin backend)
+

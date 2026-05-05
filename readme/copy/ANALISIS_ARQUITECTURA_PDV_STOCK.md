@@ -1,6 +1,6 @@
-# 📊 ANÁLISIS TÉCNICO: ARQUITECTURA PDV, STOCK Y CATÁLOGO
+﻿# 📊 ANÁLISIS TÉCNICO: ARQUITECTURA PDV, STOCK Y CATÁLOGO
 
-**Sistema:** UDAR EDGE - SaaS B2B Multiempresa y Multivertical  
+**Sistema:** Vertial - SaaS B2B Multiempresa y Multivertical  
 **Fecha:** 17 de enero de 2025  
 **Alcance:** Análisis de arquitectura actual sin modificación de código  
 **Objetivo:** Evaluar soporte multi-PDV y detectar riesgos críticos
@@ -703,3 +703,4 @@ interface DescuentoStock {
 ---
 
 **FIN DEL INFORME**
+

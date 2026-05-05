@@ -1,4 +1,4 @@
-# TOUR DE BIENVENIDA / ONBOARDING — Diseño de Tickets
+﻿# TOUR DE BIENVENIDA / ONBOARDING — Diseño de Tickets
 
 **Página:** `/saas/onboarding`  
 **Objetivo:** Guiar el alta inicial del negocio según la vertical y módulos contratados, dejando el sistema listo para operar.  
@@ -878,7 +878,7 @@ Al completar el wizard de auth y activar el trial, el usuario debe recibir un em
 **1. Plantilla de email en `services/emailTemplates.js` (o similar)**
 
 Contenido del email:
-- Asunto: "¡Bienvenido a UDAR EDGE! Tu prueba gratuita de 14 días ha comenzado"
+- Asunto: "¡Bienvenido a Vertial! Tu prueba gratuita de 14 días ha comenzado"
 - Cuerpo:
   - Nombre del usuario y empresa
   - Plan contratado (nombre + precio estimado)
@@ -1164,3 +1164,4 @@ OB-03 (Contexto React)
 | **Verticales** (`verticalCatalog.js`) | OB-02 lee features y campos por vertical para determinar pasos y formularios |
 | **Dashboard** (`/saas/dashboard`) | OB-15 muestra widget de progreso |
 | **Motor de alertas** (`alertEngine.js`) | OB-14 añade 3 reglas nuevas al ciclo horario |
+

@@ -1,4 +1,4 @@
-Quiero que diseñes la pestaña “Vehículos” del SaaS para concesionarios dentro de Udar Edge / ANCOVE.
+﻿Quiero que diseñes la pestaña “Vehículos” del SaaS para concesionarios dentro de Vertial / ANCOVE.
 
 IMPORTANTE
 - Diseña esta pantalla pensando en un sistema único, conectado y sin duplicidades.

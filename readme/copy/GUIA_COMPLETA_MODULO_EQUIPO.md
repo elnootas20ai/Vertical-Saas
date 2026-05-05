@@ -1,4 +1,4 @@
-# 📚 DOCUMENTACIÓN COMPLETA MÓDULO EQUIPO - UDAR EDGE
+﻿# 📚 DOCUMENTACIÓN COMPLETA MÓDULO EQUIPO - Vertial
 
 **Versión:** 1.0  
 **Fecha:** 4 Febrero 2026  
@@ -8,7 +8,7 @@
 
 ## 🎯 PROPÓSITO DE ESTA DOCUMENTACIÓN
 
-Este paquete contiene **TODA LA INFORMACIÓN** necesaria para desarrollar el módulo Equipo y RRHH de UDAR EDGE:
+Este paquete contiene **TODA LA INFORMACIÓN** necesaria para desarrollar el módulo Equipo y RRHH de Vertial:
 
 1. ✅ **162 funcionalidades** documentadas con IDs únicos
 2. ✅ **Clasificación BASE/FLAG** completa
@@ -410,7 +410,7 @@ Antes de comenzar el desarrollo, es necesario definir:
 
 **Base URL:**
 ```
-https://api.udaredge.com/v1
+https://api.vertialapp.com/v1
 ```
 
 **Headers requeridos:**
@@ -500,5 +500,5 @@ Ejemplo: 1500.50
 
 **Versión del documento:** 1.0  
 **Última actualización:** 4 Febrero 2026  
-**Autor:** Equipo UDAR EDGE  
+**Autor:** Equipo Vertial  
 **Estado:** ✅ COMPLETO Y APROBADO PARA DESARROLLO

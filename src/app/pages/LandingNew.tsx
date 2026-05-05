@@ -198,7 +198,7 @@ export function LandingNew() {
                   ))}
                 </div>
                 <div className="text-blue-200 text-sm">
-                  <span className="text-white font-semibold">+500 empresas</span> ya confían en UDAR EDGE
+                  <span className="text-white font-semibold">+500 empresas</span> ya confían en Vertial
                 </div>
               </div>
             </div>
@@ -393,7 +393,7 @@ export function LandingNew() {
               Elige tu vertical
             </h2>
             <p className="text-lg text-slate-500 max-w-2xl mx-auto">
-              UDAR EDGE está diseñado para múltiples sectores. Compraventa, Taller y Delivery ya están disponibles.
+              Vertial está diseñado para múltiples sectores. Compraventa, Taller y Delivery ya están disponibles.
             </p>
           </div>
 
@@ -843,7 +843,7 @@ export function LandingNew() {
               Lo que dicen nuestros clientes
             </h2>
             <p className="text-lg text-slate-500">
-              Empresas que ya gestionan su negocio con UDAR EDGE
+              Empresas que ya gestionan su negocio con Vertial
             </p>
           </div>
 
@@ -919,7 +919,7 @@ export function LandingNew() {
             <span className="bg-gradient-to-r from-blue-300 to-sky-300 bg-clip-text text-transparent">Sin riesgos.</span>
           </h2>
           <p className="text-xl text-blue-200 mb-10 max-w-2xl mx-auto">
-            Prueba UDAR EDGE gratis durante 30 días. Sin tarjeta, sin permanencia, con soporte en español.
+            Prueba Vertial gratis durante 30 días. Sin tarjeta, sin permanencia, con soporte en español.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button
@@ -936,7 +936,7 @@ export function LandingNew() {
             </button>
           </div>
           <p className="mt-6 text-blue-300 text-sm">
-            ¿Quieres recomendar UDAR y ganar comisiones?{' '}
+            ¿Quieres recomendar Vertial y ganar comisiones?{' '}
             <button
               onClick={() => navigate('/affiliados')}
               className="text-white font-semibold underline underline-offset-2 hover:text-blue-200 transition-colors inline-flex items-center gap-1"
@@ -962,7 +962,7 @@ export function LandingNew() {
             {[
               {
                 q: '¿Necesito tarjeta de crédito para la prueba gratuita?',
-                a: 'No. Puedes empezar a usar UDAR EDGE sin introducir ninguna tarjeta. Solo email y contraseña.',
+                a: 'No. Puedes empezar a usar Vertial sin introducir ninguna tarjeta. Solo email y contraseña.',
               },
               {
                 q: '¿Qué pasa después de los 30 días de prueba?',
@@ -1030,8 +1030,8 @@ export function LandingNew() {
               </div>
               <h3 className="font-bold text-slate-900 mb-2 text-lg">Escríbenos</h3>
               <p className="text-slate-500 text-sm mb-4">Respondemos en menos de 24h</p>
-              <a href="mailto:hola@udaredge.com" className="text-blue-600 hover:text-blue-700 font-bold text-lg transition-colors">
-                hola@udaredge.com
+              <a href="mailto:hola@vertialapp.com" className="text-blue-600 hover:text-blue-700 font-bold text-lg transition-colors">
+                hola@vertialapp.com
               </a>
             </div>
           </div>
@@ -1055,7 +1055,7 @@ export function LandingNew() {
               </div>
               <h2 className="text-3xl lg:text-4xl font-extrabold text-white mb-4 leading-tight">
                 ¿Conoces negocios que<br />
-                <span className="bg-gradient-to-r from-blue-400 to-sky-300 bg-clip-text text-transparent">podrían beneficiarse de UDAR?</span>
+                <span className="bg-gradient-to-r from-blue-400 to-sky-300 bg-clip-text text-transparent">podrían beneficiarse de Vertial?</span>
               </h2>
               <p className="text-lg text-slate-300 mb-8 max-w-xl">
                 Únete a nuestro programa de afiliados y gana comisiones recurrentes por cada cliente que traigas. Sin límite de ingresos, con soporte dedicado.

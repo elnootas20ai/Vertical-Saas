@@ -1,8 +1,8 @@
-# Recepción de Material - Documentación UX/UI
+﻿# Recepción de Material - Documentación UX/UI
 
 ## 📋 Resumen
 
-Sistema de recepción de material diseñado para UDAR EDGE que permite registrar entradas de stock mediante dos flujos principales:
+Sistema de recepción de material diseñado para Vertial que permite registrar entradas de stock mediante dos flujos principales:
 1. **Recepción desde pedido existente** - Material esperado de un pedido a proveedor
 2. **Compra directa** - Material adquirido sin pedido previo
 
@@ -298,6 +298,7 @@ El sistema registra en consola:
 
 ---
 
-**Documento creado para UDAR EDGE**
+**Documento creado para Vertial**
 *Diseño UX/UI - Recepción de Material*
 *Versión 1.0 - Enero 2025*
+

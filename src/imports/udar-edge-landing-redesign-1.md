@@ -1,6 +1,6 @@
-IMPORTANTE: SOLO modificar la WEB/LANDING (marketing). PROHIBIDO tocar el SaaS interno (rutas /saas/*), ni componentes del panel, ni estilos compartidos del SaaS. Trabaja únicamente en los componentes/páginas de marketing (landing/pricing/faq/footer).
+﻿IMPORTANTE: SOLO modificar la WEB/LANDING (marketing). PROHIBIDO tocar el SaaS interno (rutas /saas/*), ni componentes del panel, ni estilos compartidos del SaaS. Trabaja únicamente en los componentes/páginas de marketing (landing/pricing/faq/footer).
 
-Rediseña la LANDING actual de UDAR EDGE con cambios VISIBLES de UI (no solo textos). Mantén la identidad (colores y tipografía base), pero cambia layout, jerarquía y componentes para que se vea premium. UDAR EDGE es multi-vertical, pero SOLO “Compraventa de coches” está DISPONIBLE. El resto debe aparecer “Próximamente”. Planes: BÁSICO / NORMAL / PRO (unificar en toda la web).
+Rediseña la LANDING actual de Vertial con cambios VISIBLES de UI (no solo textos). Mantén la identidad (colores y tipografía base), pero cambia layout, jerarquía y componentes para que se vea premium. Vertial es multi-vertical, pero SOLO “Compraventa de coches” está DISPONIBLE. El resto debe aparecer “Próximamente”. Planes: BÁSICO / NORMAL / PRO (unificar en toda la web).
 
 OBJETIVO
 - Que el rediseño se note a simple vista.

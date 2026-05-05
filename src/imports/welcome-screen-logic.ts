@@ -1,4 +1,4 @@
-Actúa como lead developer + product engineer. Quiero que “todo coja vida” en UDAR EDGE (compraventa) y que el producto funcione end-to-end con datos reales (NO mock, NO JSON hardcodeado, NO arrays en el front). Mantén el diseño/UX actual tal cual (no rediseñar), pero implementa lógica, backend, base de datos, autenticación, permisos, y flujos completos.
+Actúa como lead developer + product engineer. Quiero que “todo coja vida” en Vertial (compraventa) y que el producto funcione end-to-end con datos reales (NO mock, NO JSON hardcodeado, NO arrays en el front). Mantén el diseño/UX actual tal cual (no rediseñar), pero implementa lógica, backend, base de datos, autenticación, permisos, y flujos completos.
 
 REGLA #1 (OBLIGATORIA)
 - Prohibido usar datos mock. Todo lo que se ve en pantalla debe venir de la base de datos y/o servicios reales.

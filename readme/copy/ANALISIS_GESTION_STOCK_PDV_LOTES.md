@@ -1,6 +1,6 @@
-# 📦 ANÁLISIS TÉCNICO: GESTIÓN ACTUAL DE STOCK, PDV, LOTES Y RECEPCIONES
+﻿# 📦 ANÁLISIS TÉCNICO: GESTIÓN ACTUAL DE STOCK, PDV, LOTES Y RECEPCIONES
 
-**Sistema:** UDAR EDGE - Frontend Core  
+**Sistema:** Vertial - Frontend Core  
 **Fecha:** 17 de enero de 2025  
 **Tipo:** Análisis de estado actual  
 **Alcance:** Documentación técnica sin propuestas de solución
@@ -1423,3 +1423,4 @@ stockActual: 45.5  ← ❌ No se actualiza
 ---
 
 **FIN DEL DOCUMENTO**
+

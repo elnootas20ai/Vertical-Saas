@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Udar Edge Widget — Demo</title>
+  <title>Vertial Widget — Demo</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; color: #0f172a; }
@@ -74,7 +74,7 @@
 <body>
 
 <header>
-  <h1>🚗 Udar Edge Widget</h1>
+  <h1>🚗 Vertial Widget</h1>
   <p>Widget embebible para mostrar el catálogo de vehículos de tu concesionario en cualquier web, en tiempo real.</p>
   <div>
     <span class="badge">📦 Vanilla JS</span>
@@ -91,9 +91,9 @@
   <div class="section">
     <h2>Demo interactiva</h2>
     <div class="controls">
-      <button onclick="UdarWidget.setTheme('light'); document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active')); this.classList.add('active')" class="active">☀️ Tema claro</button>
-      <button onclick="UdarWidget.setTheme('dark'); document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active')); this.classList.add('active')">🌙 Tema oscuro</button>
-      <button onclick="UdarWidget.refresh()">🔄 Recargar stock</button>
+      <button onclick="VertialWidget.setTheme('light'); document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active')); this.classList.add('active')" class="active">☀️ Tema claro</button>
+      <button onclick="VertialWidget.setTheme('dark'); document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active')); this.classList.add('active')">🌙 Tema oscuro</button>
+      <button onclick="VertialWidget.refresh()">🔄 Recargar stock</button>
     </div>
     <div id="udar-stock"></div>
     <div id="vehicle-detail">
@@ -110,7 +110,7 @@
 
     <h3>2. Carga el widget con tu API key:</h3>
     <pre><code><span class="highlight">&lt;script</span>
-  <span class="highlight-green">src</span>=<span class="highlight-yellow">"https://tu-dominio.udar.app/sdk/udar-widget.js"</span>
+  <span class="highlight-green">src</span>=<span class="highlight-yellow">"https://vertialapp.com/sdk/udar-widget.js"</span>
   <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"udar_sk_xxxxxxxxxxxxxxxx"</span>
   <span class="highlight-green">data-container</span>=<span class="highlight-yellow">"#mi-catalogo"</span>
   <span class="highlight-green">data-theme</span>=<span class="highlight-yellow">"light"</span>
@@ -118,7 +118,7 @@
 <span class="highlight">&gt;&lt;/script&gt;</span></code></pre>
 
     <div class="note">
-      💡 <strong>Genera tu API key</strong> en Udar Edge → Ajustes → API Tokens. Solo necesitas el permiso <code>vehicles:read</code>.
+      💡 <strong>Genera tu API key</strong> en Vertial → Ajustes → API Tokens. Solo necesitas el permiso <code>vehicles:read</code>.
     </div>
   </div>
 
@@ -126,7 +126,7 @@
   <div class="section">
     <h2>Todas las opciones</h2>
     <pre><code><span class="highlight">&lt;script</span>
-  src="https://tu-dominio.udar.app/sdk/udar-widget.js"
+  src="https://vertialapp.com/sdk/udar-widget.js"
 
   <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"udar_sk_..."</span>         <span style="color:#64748b"><!-- (requerido) Tu API key --></span>
   <span class="highlight-green">data-container</span>=<span class="highlight-yellow">"#mi-catalogo"</span>  <span style="color:#64748b"><!-- Selector CSS del contenedor --></span>
@@ -161,12 +161,12 @@ document.getElementById('mi-catalogo').addEventListener(
 );
 
 <span class="highlight-green">// API pública del widget</span>
-UdarWidget.refresh();          <span style="color:#64748b">// Recargar stock desde la API</span>
-UdarWidget.setTheme('dark');   <span style="color:#64748b">// Cambiar tema</span>
-UdarWidget.getVehicles();      <span style="color:#64748b">// Obtener array de vehículos</span></code></pre>
+VertialWidget.refresh();          <span style="color:#64748b">// Recargar stock desde la API</span>
+VertialWidget.setTheme('dark');   <span style="color:#64748b">// Cambiar tema</span>
+VertialWidget.getVehicles();      <span style="color:#64748b">// Obtener array de vehículos</span></code></pre>
 
     <h3>Verificar firma HMAC de webhooks (Node.js):</h3>
-    <pre><code><span class="highlight-green">// Verificar que el webhook viene de Udar Edge</span>
+    <pre><code><span class="highlight-green">// Verificar que el webhook viene de Vertial</span>
 import crypto from 'crypto';
 
 function verificarFirma(secret, body, signatureHeader) {
@@ -195,7 +195,7 @@ app.post('/webhook/udar', (req, res) => {
 </main>
 
 <footer>
-  <p>Udar Edge Widget &mdash; <a href="/api/docs">Documentación API</a> &mdash; <a href="https://udar.app">udar.app</a></p>
+  <p>Vertial Widget &mdash; <a href="/api/docs">Documentación API</a> &mdash; <a href="https://vertialapp.com">vertialapp.com</a></p>
 </footer>
 
 <!-- Widget con demo (usa datos reales si tienes API key) -->

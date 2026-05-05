@@ -1,7 +1,7 @@
-# ✅ CORRECCIÓN ESTRUCTURAL – MÓDULO CLIENTES (UDAR EDGE)
+﻿# ✅ CORRECCIÓN ESTRUCTURAL – MÓDULO CLIENTES (Vertial)
 
 **Fecha:** 27 de Enero de 2026  
-**Proyecto:** UDAR EDGE - SaaS B2B multiempresa y multivertical  
+**Proyecto:** Vertial - SaaS B2B multiempresa y multivertical  
 **Objetivo:** Preparar módulo CLIENTES para backend real con arquitectura BASE/FLAG y multiempresa correcta
 
 ---
@@ -478,3 +478,4 @@ El módulo CLIENTES ha sido **completamente refactorizado** siguiendo estrictame
 **Estado:** ✅ **LISTO PARA BACKEND REAL**
 
 El frontend está completamente preparado para conectarse al backend sin retrabajo.
+

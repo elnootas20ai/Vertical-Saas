@@ -1,7 +1,7 @@
-# PAGOS A GREMIOS Y SUBCONTRATAS — Plan de Tickets
+﻿# PAGOS A GREMIOS Y SUBCONTRATAS — Plan de Tickets
 
 **Página:** `/saas/vertical/construccion/pagos`
-**URL pública:** `https://udaredge.com/saas/vertical/construccion/pagos`
+**URL pública:** `https://vertialapp.com/saas/vertical/construccion/pagos`
 **Objetivo:** Controlar pagos internos de la obra y reparto económico por gremio o proveedor. Saber en todo momento cuánto se ha pagado, cuánto queda pendiente, si hay justificantes y si el margen real de cada obra sigue siendo rentable.
 **Tipo:** Módulo dentro de la vertical Construcción.
 **Fecha:** 2026-04-14
@@ -1451,3 +1451,4 @@ Todos los documentos `construction_payment` se almacenan en la DB de construcci�
 
 ### Precisión numérica
 Todos los cálculos financieros usan `Number((valor).toFixed(2))` o `Math.round(valor * 100) / 100` para evitar errores de punto flotante.
+

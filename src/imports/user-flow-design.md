@@ -1,4 +1,4 @@
-Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para UDAR EDGE (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
+﻿Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para Vertial (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
 
 OBJETIVO
 Construir: Login, Registro, Recuperar contraseña, Onboarding (wizard) y Recomendación de plan.
@@ -46,7 +46,7 @@ PANTALLAS A CREAR (NOMBRADAS Y ORDENADAS)
   1) “Compraventa de coches” (seleccionada)
   2) “Taller (próximamente)” (deshabilitada)
   3) “Otro (próximamente)” (deshabilitada)
-- Texto: “UDAR EDGE está optimizado para compraventas.”
+- Texto: “Vertial está optimizado para compraventas.”
 - Botón: “Continuar”
 
 05 Onboarding - Paso 2: Empresa

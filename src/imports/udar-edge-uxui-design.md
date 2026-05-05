@@ -1,4 +1,4 @@
-Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para UDAR EDGE (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
+﻿Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para Vertial (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
 
 OBJETIVO
 Construir: Login, Registro, Recuperar contraseña, Onboarding (wizard) y Recomendación de plan.
@@ -49,7 +49,7 @@ PANTALLAS A CREAR (NOMBRADAS Y ORDENADAS)
   1) “Compraventa de coches” (seleccionada)
   2) “Taller (próximamente)” (deshabilitada)
   3) “Otro (próximamente)” (deshabilitada)
-- Texto: “UDAR EDGE está optimizado para compraventas.”
+- Texto: “Vertial está optimizado para compraventas.”
 - Botón: “Continuar”
 
 05 Onboarding - Paso 2: Empresa
@@ -156,7 +156,7 @@ En la pantalla “Plan recomendado”, destaca automáticamente el plan resultan
 Si quieres, te digo dónde pegarlo: dentro de tu prompt, justo debajo de “08 Recomendación de plan (personalizada)”.
 
 pon eso en el prompt, ponlo todo , no voy a enviarle 2 mensajes
-Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para UDAR EDGE (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
+Actúa como diseñador/a UX/UI senior. Necesito diseñar el CAMINO DE ACCESO completo para Vertial (compraventa de coches en España), manteniendo el mismo estilo visual de mi web y del SaaS (minimalista premium, cards con borde suave, botones principales oscuros/azules, mucho aire, tipografía grande). Crea pantallas desktop + mobile y prototipo navegable.
 
 OBJETIVO
 Construir: Login, Registro, Recuperar contraseña, Onboarding (wizard) y Recomendación de plan.
@@ -204,7 +204,7 @@ PANTALLAS A CREAR (NOMBRADAS Y ORDENADAS)
   1) “Compraventa de coches” (seleccionada)
   2) “Taller (próximamente)” (deshabilitada)
   3) “Otro (próximamente)” (deshabilitada)
-- Texto: “UDAR EDGE está optimizado para compraventas.”
+- Texto: “Vertial está optimizado para compraventas.”
 - Botón: “Continuar”
 
 05 Onboarding - Paso 2: Empresa
@@ -314,7 +314,7 @@ Aquí lo tienes todo junto (copia/pega tal cual en Figma Make):
 
 Actúa como diseñador/a UX
 te hablo de esto , quiero esto , en 1 prompt, el promt y lo que me has dicho debajo del prompt , ahora si?
-Actúa como diseñador/a UX/UI senior. Necesito diseñar en Figma (con prototipo navegable) TODO el flujo completo de UDAR EDGE para “Compraventa de coches en España” (con ANCOVE), manteniendo el estilo visual de mis capturas (web minimalista premium + SaaS con sidebar/topbar, cards limpias, tabs tipo píldora, tabla/tarjetas, badges).
+Actúa como diseñador/a UX/UI senior. Necesito diseñar en Figma (con prototipo navegable) TODO el flujo completo de Vertial para “Compraventa de coches en España” (con ANCOVE), manteniendo el estilo visual de mis capturas (web minimalista premium + SaaS con sidebar/topbar, cards limpias, tabs tipo píldora, tabla/tarjetas, badges).
 
 OBJETIVO (MVP vendible rápido, backend simple)
 Crear 3 bloques:
@@ -334,7 +334,7 @@ REGLAS DE DISEÑO (COPIAR ESTILO)
 A) WEB — LANDING (SCROLL) + PRICING (MISMA PÁGINA O SECCIÓN)
 ========================================================
 HEADER fijo:
-Logo “Udar Edge”
+Logo “Vertial”
 Menú: Módulos | Planes | SVAs | Cómo funciona | FAQ | Contacto
 Derecha: “Iniciar sesión” + botón “Ver planes” + botón primario “Empezar gratis”
 

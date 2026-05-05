@@ -1,4 +1,4 @@
-Actúa como diseñador/a UX/UI senior. Quiero que generes una WEB de marketing completa (responsive desktop + mobile) para el SaaS “Udar Edge”, enfocada a COMPRAVENTAS de coches en España, con enfoque/alianza ANCOVE.
+﻿Actúa como diseñador/a UX/UI senior. Quiero que generes una WEB de marketing completa (responsive desktop + mobile) para el SaaS “Vertial”, enfocada a COMPRAVENTAS de coches en España, con enfoque/alianza ANCOVE.
 
 ESTILO VISUAL (COPIAR EL LOOK DE MIS CAPTURAS)
 - Minimalista, premium, corporativo
@@ -11,7 +11,7 @@ ESTILO VISUAL (COPIAR EL LOOK DE MIS CAPTURAS)
 - Secciones con títulos grandes, subtítulos cortos, sin decoración excesiva
 
 INFORMACIÓN DE CABECERA (HEADER)
-- Logo: “Udar Edge”
+- Logo: “Vertial”
 - Menú: Módulos | Planes | SVAs | Cómo funciona | FAQ | Contacto
 - A la derecha: “Iniciar sesión” + botón secundario “Ver planes” + botón primario “Empezar gratis”
 (Header fijo)
@@ -84,11 +84,11 @@ Sub: “14 días de prueba gratis. Sin tarjeta. Sin permanencia.”
 Botones: “Empezar gratis” (oscuro) y “Ver demo” (blanco)
 
 8) FOOTER (4 columnas como mis capturas)
-- Udar Edge + frase: “Tu sistema operativo para compraventas”
+- Vertial + frase: “Tu sistema operativo para compraventas”
 - Producto: Módulos, Planes, Integraciones
 - Recursos: Documentación, Centro de ayuda, API
 - Empresa: Sobre nosotros, Contacto, Soporte
-Abajo: “© 2026 Udar Edge. Todos los derechos reservados.”
+Abajo: “© 2026 Vertial. Todos los derechos reservados.”
 
 PROTOTIPO / NAVEGACIÓN
 - “Ver planes” hace scroll a Pricing

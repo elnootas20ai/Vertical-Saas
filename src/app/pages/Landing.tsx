@@ -358,7 +358,7 @@ export function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-              Cómo funciona Udar Edge
+              Cómo funciona Vertial
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-400">
               Desde la entrada del vehículo hasta la entrega al cliente
@@ -699,7 +699,7 @@ export function Landing() {
               Preguntas frecuentes
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-400">
-              Resolvemos las dudas más comunes sobre Udar Edge
+              Resolvemos las dudas más comunes sobre Vertial
             </p>
           </div>
 
@@ -710,12 +710,12 @@ export function Landing() {
                 onClick={() => toggleFaq(0)}
                 className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
-                <span className="font-semibold text-gray-900 dark:text-gray-100">¿Necesito conocimientos técnicos para usar Udar Edge?</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">¿Necesito conocimientos técnicos para usar Vertial?</span>
                 <ChevronDown className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${openFaq === 0 ? 'rotate-180' : ''}`} />
               </button>
               {openFaq === 0 && (
                 <div className="px-6 pb-6 text-gray-600 dark:text-gray-400">
-                  No, Udar Edge está diseñado para ser intuitivo. Si sabes usar WhatsApp o Instagram, sabes usar Udar Edge. Además, te acompañamos en el proceso de onboarding para que empieces sin problemas.
+                  No, Vertial está diseñado para ser intuitivo. Si sabes usar WhatsApp o Instagram, sabes usar Vertial. Además, te acompañamos en el proceso de onboarding para que empieces sin problemas.
                 </div>
               )}
             </div>
@@ -854,7 +854,7 @@ export function Landing() {
                 onClick={() => toggleFaq(9)}
                 className="w-full flex items-center justify-between p-6 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
-                <span className="font-semibold text-gray-900 dark:text-gray-100">¿Puedo exportar mis datos si decido dejar Udar Edge?</span>
+                <span className="font-semibold text-gray-900 dark:text-gray-100">¿Puedo exportar mis datos si decido dejar Vertial?</span>
                 <ChevronDown className={`w-5 h-5 text-gray-600 dark:text-gray-400 transition-transform ${openFaq === 9 ? 'rotate-180' : ''}`} />
               </button>
               {openFaq === 9 && (
@@ -885,7 +885,7 @@ export function Landing() {
               <h3 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-6">Envíanos un mensaje</h3>
               <form className="space-y-4" onSubmit={(e) => {
                 e.preventDefault();
-                alert('Formulario enviado:\n\nGracias por tu interés en Udar Edge. Nos pondremos en contacto contigo en menos de 24 horas laborables.\n\nEsta funcionalidad enviaría el mensaje a nuestro equipo de ventas.');
+                alert('Formulario enviado:\n\nGracias por tu interés en Vertial. Nos pondremos en contacto contigo en menos de 24 horas laborables.\n\nEsta funcionalidad enviaría el mensaje a nuestro equipo de ventas.');
               }}>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Nombre completo *</label>
@@ -964,7 +964,7 @@ export function Landing() {
                     </div>
                     <div>
                       <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Email</h4>
-                      <p className="text-gray-600 dark:text-gray-400">ventas@udaredge.com</p>
+                      <p className="text-gray-600 dark:text-gray-400">ventas@vertialapp.com</p>
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Respuesta en menos de 24h</p>
                     </div>
                   </div>
@@ -997,7 +997,7 @@ export function Landing() {
               <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-8 text-white">
                 <h3 className="text-2xl font-bold mb-3">¿Prefieres ver una demo?</h3>
                 <p className="mb-6 text-amber-50">
-                  Agenda una videollamada de 30 minutos y te mostramos Udar Edge en acción, adaptado a tu caso concreto.
+                  Agenda una videollamada de 30 minutos y te mostramos Vertial en acción, adaptado a tu caso concreto.
                 </p>
                 <button 
                   onClick={() => alert('Agendar demo:\nEsta funcionalidad abriría un calendario para elegir día y hora para una demo personalizada por videollamada')}

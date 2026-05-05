@@ -12,7 +12,7 @@ import { listAffiliateVerticals } from '../../lib/affiliatesApi';
 const STEPS = [
   { icon: Rocket, title: 'Solicita tu acceso', desc: 'Rellena el formulario con tus datos. En menos de 48h tendrás tu código de afiliado.' },
   { icon: Gift, title: 'Comparte tu código', desc: 'Recibe tu código único y compártelo con negocios de tu red de contactos.' },
-  { icon: Users, title: 'Registra clientes', desc: 'Desde tu panel de afiliado, da de alta a los clientes que refieran a UDAR EDGE.' },
+  { icon: Users, title: 'Registra clientes', desc: 'Desde tu panel de afiliado, da de alta a los clientes que refieran a Vertial.' },
   { icon: DollarSign, title: 'Cobra comisiones', desc: 'Gana comisiones recurrentes cada mes por cada cliente activo. Sin límite.' },
 ];
 
@@ -159,7 +159,7 @@ export function AffiliatePage() {
             className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium text-sm">
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
-          <span className="text-xl font-black text-slate-900 tracking-tight">UDAR</span>
+          <span className="text-xl font-black text-slate-900 tracking-tight">Vertial</span>
           <a href="#formulario"
             className="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
             Unirme ahora <ArrowRight className="w-3.5 h-3.5" />
@@ -179,7 +179,7 @@ export function AffiliatePage() {
           <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black text-white mb-6 leading-[1.1] tracking-tight">
             Gana dinero recomendando
             <span className="block bg-gradient-to-r from-blue-400 via-violet-400 to-emerald-400 bg-clip-text text-transparent">
-              UDAR EDGE
+              Vertial
             </span>
           </h1>
           <p className="text-lg sm:text-xl text-blue-200/80 max-w-2xl mx-auto mb-10 leading-relaxed">
@@ -232,7 +232,7 @@ export function AffiliatePage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
             <span className="text-violet-600 font-bold text-sm uppercase tracking-widest">Ventajas</span>
-            <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mt-3">¿Por qué ser afiliado de UDAR?</h2>
+            <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mt-3">¿Por qué ser afiliado de Vertial?</h2>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {BENEFITS.map(({ icon: Icon, title, desc }) => (
@@ -486,7 +486,7 @@ export function AffiliatePage() {
             </button>
 
             <p className="text-center text-xs text-slate-400">
-              Al enviar este formulario aceptas que UDAR procese tus datos para gestionar tu solicitud de afiliación.
+              Al enviar este formulario aceptas que Vertial procese tus datos para gestionar tu solicitud de afiliación.
             </p>
           </form>
         </div>
@@ -533,7 +533,7 @@ export function AffiliatePage() {
       {/* ── Footer mini ── */}
       <footer className="py-8 px-6 bg-slate-900 text-center">
         <p className="text-sm text-slate-500">
-          © {new Date().getFullYear()} UDAR EDGE. Programa de afiliados.
+          © {new Date().getFullYear()} Vertial. Programa de afiliados.
         </p>
       </footer>
     </div>

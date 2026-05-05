@@ -1,11 +1,11 @@
 /**
- * Udar Edge Widget v1.0
+ * Vertial Widget v1.0
  * Widget embebible para mostrar el stock de vehículos de un concesionario en tiempo real.
  *
  * USO:
  *   <div id="udar-stock"></div>
  *   <script
- *     src="https://tu-dominio.udar.app/sdk/udar-widget.js"
+ *     src="https://vertialapp.com/sdk/udar-widget.js"
  *     data-api-key="udar_sk_xxxxxxxxxxxxxxxx"
  *     data-container="#udar-stock"
  *     data-lang="es"
@@ -15,7 +15,7 @@
  *   ></script>
  *
  * OPCIONES:
- *   data-api-key      (requerido) Tu API key de Udar Edge
+ *   data-api-key      (requerido) Tu API key de Vertial
  *   data-api-url      URL base de la API (por defecto: origen del script)
  *   data-container    Selector CSS del contenedor (por defecto: #udar-stock)
  *   data-lang         Idioma: "es" | "en" (por defecto: "es")
@@ -522,7 +522,7 @@
       }
     }
 
-    html += `<div class="udar-footer">${t('poweredBy')} <a href="https://udar.app" target="_blank" rel="noopener">Udar Edge</a></div>`;
+    html += `<div class="udar-footer">${t('poweredBy')} <a href="https://vertialapp.com" target="_blank" rel="noopener">Vertial</a></div>`;
     html += `</div>`;
 
     container.innerHTML = html;
@@ -595,7 +595,7 @@
   }
 
   // ─── Public API ───────────────────────────────────────────────────────────────
-  global.UdarWidget = {
+  const vertialWidgetApi = {
     version: '1.0.0',
     config: CONFIG,
 
@@ -615,12 +615,14 @@
       return [...state.vehicles];
     },
   };
+  global.VertialWidget = vertialWidgetApi;
+  global.UdarWidget = vertialWidgetApi;
 
   // ─── Init ─────────────────────────────────────────────────────────────────────
   function init() {
     const container = document.querySelector(CONFIG.container);
     if (!container) {
-      console.warn('[UdarWidget] Contenedor no encontrado:', CONFIG.container);
+      console.warn('[VertialWidget] Contenedor no encontrado:', CONFIG.container);
       return;
     }
 

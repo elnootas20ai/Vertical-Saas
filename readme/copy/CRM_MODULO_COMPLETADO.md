@@ -1,11 +1,11 @@
-# 🎯 MÓDULO CRM - IMPLEMENTACIÓN COMPLETADA
+﻿# 🎯 MÓDULO CRM - IMPLEMENTACIÓN COMPLETADA
 
 > **Nota de vigencia (abril 2026):** esta documentación describe una arquitectura anterior basada en `/src/app/components/crm/*` que ya no coincide con la implementación actual.  
 > Estado real actual: CRM operativo en `ClientsPage`, `CompraventaCrm` y `DeliveryCrm`, con APIs en `controllers/*crm*` y `src/app/lib/*crm*Api.ts`.
 
 ## ✅ RESUMEN EJECUTIVO
 
-El módulo CRM ha sido implementado exitosamente dentro del módulo **Clientes** siguiendo todas las reglas arquitectónicas del sistema UDAR EDGE.
+El módulo CRM ha sido implementado exitosamente dentro del módulo **Clientes** siguiendo todas las reglas arquitectónicas del sistema Vertial.
 
 ---
 
@@ -419,7 +419,7 @@ El módulo CRM está **100% implementado** siguiendo la arquitectura definida:
 ✅ **Reutiliza** el modelo de Evento  
 ✅ **Diferenciado** por roles (Gerente vs Trabajador)  
 ✅ **Escalable** para conexión futura con Supabase  
-✅ **Coherente** con el sistema de diseño UDAR EDGE  
+✅ **Coherente** con el sistema de diseño Vertial  
 
 **El CRM es ahora una capa comercial operativa que funciona sobre clientes existentes, preparada para impulsar el crecimiento comercial de las empresas.**
 
@@ -428,3 +428,4 @@ El módulo CRM está **100% implementado** siguiendo la arquitectura definida:
 **Fecha de implementación:** Enero 2024  
 **Estado:** ✅ Completado  
 **Pendiente:** Backend (Supabase) + Funcionalidades avanzadas
+

@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Especificación Backend Completa | Módulo Equipo UDAR EDGE</title>
+    <title>Especificación Backend Completa | Módulo Equipo Vertial</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; line-height: 1.5; }
@@ -52,13 +52,13 @@
 <body>
     <div class="container">
         <h1>🔧 ESPECIFICACIÓN BACKEND COMPLETA</h1>
-        <p style="font-size: 1.2em; color: #6c757d; margin-bottom: 10px;"><strong>Módulo Equipo y RRHH | UDAR EDGE</strong></p>
+        <p style="font-size: 1.2em; color: #6c757d; margin-bottom: 10px;"><strong>Módulo Equipo y RRHH | Vertial</strong></p>
         <p><em>Versión 1.0 | 4 Febrero 2026 | Documento técnico para programadores backend</em></p>
         
         <div class="box intro">
             <h3>📋 Convenciones API</h3>
             <ul>
-                <li><strong>Base URL:</strong> <code>https://api.udaredge.com/v1</code></li>
+                <li><strong>Base URL:</strong> <code>https://api.vertialapp.com/v1</code></li>
                 <li><strong>Autenticación:</strong> Header <code>Authorization: Bearer {token}</code></li>
                 <li><strong>Context empresa:</strong> Header <code>X-Company-Id: {companyId}</code></li>
                 <li><strong>Fechas:</strong> ISO 8601 (YYYY-MM-DDTHH:mm:ssZ)</li>
@@ -864,7 +864,7 @@ app.get('/employees', authenticate, checkPermission('ver_equipo'), getEmployees)
 
         <p style="text-align: center; color: #7f8c8d; margin-top: 60px; padding: 20px; border-top: 2px solid #ecf0f1;">
             <strong>ESPECIFICACIÓN BACKEND COMPLETA - MÓDULO EQUIPO Y RRHH</strong><br>
-            UDAR EDGE | Versión 1.0 | Febrero 2026<br>
+            Vertial | Versión 1.0 | Febrero 2026<br>
             <em>162 funcionalidades | 71 permisos | 9 FLAGS</em>
         </p>
     </div>

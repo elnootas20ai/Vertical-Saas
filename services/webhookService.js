@@ -59,7 +59,7 @@ async function sendWebhookRequest(webhook, event, data, retries = 2) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'UdarEdge-Webhooks/1.0',
+          'User-Agent': 'Vertial-Webhooks/1.0',
           'X-Udar-Event': event,
           'X-Udar-Signature': signature,
           'X-Udar-Webhook-Id': webhook._id || '',

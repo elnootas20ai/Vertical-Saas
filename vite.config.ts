@@ -22,9 +22,9 @@ export default defineConfig(({ mode }) => {
       },
       allowedHosts: [
         'localhost',
-        'api.udaredge.com',
-        'udaredge.com',
-        'www.udaredge.com',
+        'api.vertialapp.com',
+        'vertialapp.com',
+        'www.vertialapp.com',
       ],
       proxy: {
         '/api': {

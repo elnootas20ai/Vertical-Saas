@@ -1,7 +1,7 @@
-# PARTIDAS, GREMIOS Y PRECIOS PREDEFINIDOS — Tickets
+﻿# PARTIDAS, GREMIOS Y PRECIOS PREDEFINIDOS — Tickets
 
 **Página:** `/saas/vertical/construccion/partidas-gremios`
-**URL pública:** `https://udaredge.com/saas/vertical/construccion/partidas-gremios`
+**URL pública:** `https://vertialapp.com/saas/vertical/construccion/partidas-gremios`
 **Objetivo:** Acelerar la creación de presupuestos usando un catálogo de gremios base configurables, partidas predefinidas por gremio con precios base editables, y plantillas de presupuesto reutilizables.
 **Tipo:** Módulo dentro de la vertical Construcción.
 **Fecha:** 2026-04-14
@@ -1724,3 +1724,4 @@ La página de Partidas, Gremios y Precios debe conectar con los módulos relacio
 | `h` | Hora | Mano de obra directa |
 | `pa` | Partida alzada | Trabajos sin medición precisa |
 | `global` | Global | Precio cerrado por concepto |
+

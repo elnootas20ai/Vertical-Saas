@@ -1,7 +1,7 @@
-# 🔍 AUDITORÍA UX PROFUNDA - MÓDULO EQUIPO (VISTA GERENTE)
+﻿# 🔍 AUDITORÍA UX PROFUNDA - MÓDULO EQUIPO (VISTA GERENTE)
 
 **Fecha:** 3 de febrero de 2026  
-**SaaS:** UDAR EDGE  
+**SaaS:** Vertial  
 **Módulo:** Equipo (Vista Gerente)  
 **Estado:** Pre-conexión Backend  
 **Alcance:** Auditoría completa de UX existente SIN rediseño
@@ -1834,4 +1834,5 @@ El módulo Equipo está **muy bien estructurado** y **funcionalmente completo**,
 
 *Generado el 3 de febrero de 2026*  
 *Módulo: Equipo (Vista Gerente)*  
-*SaaS: UDAR EDGE*
+*SaaS: Vertial*
+

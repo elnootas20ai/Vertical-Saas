@@ -1,5 +1,5 @@
-# INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH
-**SaaS UDAR EDGE - Vista Gerente**
+﻿# INVENTARIO COMPLETO - MÓDULO EQUIPO Y RRHH
+**SaaS Vertial - Vista Gerente**
 
 **Versión:** 1.0  
 **Fecha:** 4 Febrero 2026  
@@ -2650,3 +2650,4 @@ Este inventario refleja el estado ACTUAL del módulo Equipo tal como está imple
 4. Implementar funcionalidades marcadas como "pendientes"
 5. Realizar pruebas de flujos completos
 6. Documentar APIs para backend
+

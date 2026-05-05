@@ -1,7 +1,7 @@
-# PARTES DE TRABAJO Y EJECUCIÓN (Construcción) — Plan de Tickets
+﻿# PARTES DE TRABAJO Y EJECUCIÓN (Construcción) — Plan de Tickets
 
 **Página:** `/saas/construction-execution`
-**URL pública:** `https://udaredge.com/saas/vertical/construccion/ejecucion`
+**URL pública:** `https://vertialapp.com/saas/vertical/construccion/ejecucion`
 **Objetivo:** Registrar el trabajo diario de cada obra: quién hizo qué, cuántas horas, con qué materiales, fotos de evidencia y observaciones; validar partes como gerente.
 **Tipo:** Módulo dentro de la vertical Construcción.
 **Fecha:** 2026-04-14
@@ -1061,3 +1061,4 @@ CE-01 (Modelo parte)
 | **5. Alertas** | CE-08 | Motor de alertas de construcción |
 | **6. Perfiles** | CE-09, CE-10 | Vistas trabajador y gerente |
 | **7. Integraciones** | CE-11, CE-12, CE-14 | Histórico, fichajes y dashboard |
+

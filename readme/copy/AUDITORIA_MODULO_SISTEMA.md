@@ -1,4 +1,4 @@
-# 🔍 AUDITORÍA COMPLETA - MÓDULO SISTEMA (UDAR EDGE)
+﻿# 🔍 AUDITORÍA COMPLETA - MÓDULO SISTEMA (Vertial)
 
 **Fecha:** 27 de Enero de 2026  
 **Tipo:** Auditoría técnica-funcional  
@@ -8,7 +8,7 @@
 
 ## 📋 RESUMEN EJECUTIVO
 
-El módulo Sistema de UDAR EDGE proporciona la capa base de gestión de cuenta, empresas, centros, usuarios y configuración general. La auditoría identifica:
+El módulo Sistema de Vertial proporciona la capa base de gestión de cuenta, empresas, centros, usuarios y configuración general. La auditoría identifica:
 
 **✅ IMPLEMENTADO EN UX:**
 - Selector de empresa (single/global)
@@ -520,3 +520,4 @@ NO FUNCIONA EN:
 
 **FIN DE AUDITORÍA**  
 **Estado general:** Sistema funcional en UX, preparado para backend, con deuda técnica en seguridad, multipaís y generalización de flags.
+

@@ -1,7 +1,7 @@
-# PLANIFICACIÓN DE OBRA (Construcción) — Plan de Tickets
+﻿# PLANIFICACIÓN DE OBRA (Construcción) — Plan de Tickets
 
 **Página:** `/saas/construction-planning`
-**URL pública:** `https://udaredge.com/saas/vertical/construccion/planificacion`
+**URL pública:** `https://vertialapp.com/saas/vertical/construccion/planificacion`
 **Objetivo:** Organizar trabajadores, fechas, materiales, maquinaria y subcontratas de cada obra en una vista calendario y tabla con automatizaciones, alertas y diferenciación gerente/trabajador.
 **Tipo:** Módulo dentro de la vertical Construcción.
 **Fecha:** 2026-04-14
@@ -1901,3 +1901,4 @@ Mismo patrón que `ConstructionProjects.tsx` para KPIs y layout general. Calenda
 
 ### Librería de calendario
 No introducir dependencia externa pesada (FullCalendar, etc.). Construir calendario custom con CSS Grid siguiendo el patrón de `SchedulesVacations.tsx` que ya implementa un calendario semanal con drag. Para la vista Gantt, usar `div` + CSS con `overflow-x: auto` y escalado por botones de zoom.
+

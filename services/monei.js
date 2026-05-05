@@ -121,7 +121,7 @@ async function moneiRequest(method, path, body = null, apiKey = null) {
     headers: {
       Authorization: key,
       'Content-Type': 'application/json',
-      'User-Agent': 'UDAR-Backend/1.0',
+      'User-Agent': 'Vertial-Backend/1.0',
       ...(accountId ? { 'MONEI-Account-ID': accountId } : {}),
     },
   };

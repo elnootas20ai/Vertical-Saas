@@ -14,11 +14,11 @@ export function LegalInfoPage() {
           <section className="rounded-2xl border border-slate-200 bg-white p-6 md:p-8">
             <h1 className="text-2xl font-bold text-slate-950 md:text-3xl">Aviso legal</h1>
             <p className="mt-4 text-sm leading-relaxed text-slate-700">
-              Esta tienda online es titularidad de <strong>UDAR EDGE S.L.</strong>
+              Esta tienda online es titularidad de <strong>Vertial S.L.</strong>
             </p>
             <ul className="mt-4 space-y-2 text-sm text-slate-700">
               <li>
-                <strong>Razón social:</strong> UDAR EDGE S.L.
+                <strong>Razón social:</strong> Vertial S.L.
               </li>
               <li>
                 <strong>NIF:</strong> B22653737
@@ -27,7 +27,7 @@ export function LegalInfoPage() {
                 <strong>Dirección:</strong> Calle Coso 67-75, 3ºC, 50001, Zaragoza, España
               </li>
               <li>
-                <strong>Correo electrónico:</strong> soporte@udarapp.com
+                <strong>Correo electrónico:</strong> soporte@vertialapp.com
               </li>
               <li>
                 <strong>Teléfono de contacto:</strong> +34 647 77 98 12

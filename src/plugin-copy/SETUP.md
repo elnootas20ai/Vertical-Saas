@@ -1,4 +1,4 @@
-# Plugin — Agent Hub (Right Panel)
+﻿# Plugin — Agent Hub (Right Panel)
 
 ## Quick Setup in another project
 
@@ -37,7 +37,7 @@ A floating button will appear. Click to open the agent panel.
 ```ts
 server: {
   proxy: {
-    '/api': { target: 'https://api.udaredge.com', changeOrigin: true },
+    '/api': { target: 'https://api.vertialapp.com', changeOrigin: true },
   },
 },
 ```
@@ -49,3 +49,4 @@ server: {
 ## Agent Types
 - **Cursor Agent**: Launches the Cursor AI CLI (`agent`) in a PTY. Send instructions, the AI edits your code.
 - **Terminal**: Plain bash shell. Run any command.
+

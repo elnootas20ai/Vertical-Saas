@@ -1,4 +1,4 @@
-# Contexto de infraestructura Udar / udaredge.com
+﻿# Contexto de infraestructura Udar / vertialapp.com
 
 Este documento existe para **desarrolladores humanos** y para **agentes de IA** que trabajen en el repo: resume la fuente de verdad del dominio, del servidor y del entorno local, y lista **qué revisar antes de cambiar código** si algo podría seguir apuntando a otro sitio.
 
@@ -8,11 +8,11 @@ Este documento existe para **desarrolladores humanos** y para **agentes de IA** 
 
 | Concepto | Valor esperado |
 |----------|----------------|
-| Dominio principal | **https://udaredge.com** |
-| Variante con www | **https://www.udaredge.com** |
-| Correos de producto | `*@udaredge.com` (soporte, hola, facturas, etc. según pantalla) |
+| Dominio principal | **https://vertialapp.com** |
+| Variante con www | **https://www.vertialapp.com** |
+| Correos de producto | `*@vertialapp.com` (soporte, hola, facturas, etc. según pantalla) |
 
-Cualquier copy, enlace público o `APP_URL` de producción debe alinearse con **udaredge.com**, no con dominios antiguos del fork o de otra infraestructura.
+Cualquier copy, enlace público o `APP_URL` de producción debe alinearse con **vertialapp.com**, no con dominios antiguos del fork o de otra infraestructura.
 
 ---
 
@@ -20,8 +20,8 @@ Cualquier copy, enlace público o `APP_URL` de producción debe alinearse con **
 
 | Dato | Valor | Notas |
 |------|--------|--------|
-| API canónica | **https://api.udaredge.com** | Endpoint oficial para todas las llamadas del frontend. |
-| Uso típico | Acceso por IP para pruebas o servicios detrás del mismo nginx; el producto se presenta como **udaredge.com**. |
+| API canónica | **https://api.vertialapp.com** | Endpoint oficial para todas las llamadas del frontend. |
+| Uso típico | Acceso por IP para pruebas o servicios detrás del mismo nginx; el producto se presenta como **vertialapp.com**. |
 
 Si en configuración aparece **otra IP**, tratarla como **heredada** hasta comprobar en despliegue real (DNS, panel del proveedor, `ssh`).
 
@@ -33,7 +33,7 @@ Si en configuración aparece **otra IP**, tratarla como **heredada** hasta compr
 |----------|--------|------------------|
 | Frontend (Vite) | **3015** | `npm run dev` — fuente de verdad: `vite.config.ts` (`server.port`) |
 | Backend (Express) | **3001** | `npm run backend:dev` — `PORT` en `.env` / `.env.development` |
-| Proxy API en Vite | — | Las peticiones a `/api` deben resolver contra `https://api.udaredge.com` |
+| Proxy API en Vite | — | Las peticiones a `/api` deben resolver contra `https://api.vertialapp.com` |
 
 **CORS en desarrollo:** el backend solo acepta orígenes listados en `ALLOWED_ORIGINS`. Para probar desde la red LAN suele hacer falta incluir `http://<IP-LAN>:3015` (ej. `192.168.x.x`), además de `http://localhost:3015`.
 
@@ -45,17 +45,17 @@ Orden sugerido; no implica borrar código al azar, solo **validar** que cada var
 
 ### Variables de entorno (`.env`, `.env.development`, `.env.production`)
 
-- **`ALLOWED_ORIGINS`** — Debe incluir los orígenes desde los que se sirve el front (https://udaredge.com, https://www.udaredge.com, y en dev localhost / IP LAN si aplica). Orígenes de otro dominio u otra IP son candidatos a corrección.
-- **`APP_URL`** — URL pública del backend para enlaces en emails, facturas, etc.; en producción debe ser **https://udaredge.com** (o la URL definitiva que uséis).
+- **`ALLOWED_ORIGINS`** — Debe incluir los orígenes desde los que se sirve el front (https://vertialapp.com, https://www.vertialapp.com, y en dev localhost / IP LAN si aplica). Orígenes de otro dominio u otra IP son candidatos a corrección.
+- **`APP_URL`** — URL pública del backend para enlaces en emails, facturas, etc.; en producción debe ser **https://vertialapp.com** (o la URL definitiva que uséis).
 - **`VITE_HOST`** — Host donde se espera el front en build/deploy; debe coherencia con nginx/Capacitor, no con una máquina ajena.
 - **`COUCHDB_URL` / credenciales** — Deben ser la instancia CouchDB que usáis **ahora** (local en dev, servidor en prod). No son “dominio udaredge”, pero sí conexión crítica.
 - **Claves de terceros** (MONEI, Resend, OpenAI, Google Maps, etc.) — Deben ser las del **proyecto actual**; si el repo se copió de otro servidor, conviene rotar lo sensible.
 
 ### Código y configuración versionada
 
-- **`vite.config.ts` → `server.allowedHosts`** — Quién puede usar el header `Host` contra el dev server de Vite. En este repo están `localhost`, **`api.udaredge.com`**, **`udaredge.com`** y **`www.udaredge.com`**. Si añadís otro hostname (staging, tunnel), actualizad la lista aquí.
+- **`vite.config.ts` → `server.allowedHosts`** — Quién puede usar el header `Host` contra el dev server de Vite. En este repo están `localhost`, **`api.vertialapp.com`**, **`vertialapp.com`** y **`www.vertialapp.com`**. Si añadís otro hostname (staging, tunnel), actualizad la lista aquí.
 - **Webhooks** (Stripe/MONEI/cualquier integración) — URLs de callback configuradas en paneles externos deben apuntar a **este** backend/dominio.
-- **OAuth / redirect URIs** (Google, etc.) — En consola de Google Cloud deben coincidir con los hosts reales (udaredge.com y localhost para dev).
+- **OAuth / redirect URIs** (Google, etc.) — En consola de Google Cloud deben coincidir con los hosts reales (vertialapp.com y localhost para dev).
 - **`capacitor.config.ts`** — Si usáis app nativa, la URL del servidor debe ser la definitiva, no una IP huérfana de otro entorno.
 
 ### Servicios externos (no son “malos”; no hay que sustituirlos por udaredge)
@@ -98,4 +98,5 @@ Si algo más cambió solo en el servidor (nginx, DNS, certificados), conviene **
 
 ## Cómo usar este doc en el día a día
 
-Antes de un refactor grande o de un deploy: **abrir esta checklist**, grep de `ALLOWED_ORIGINS` / IP antigua / dominios que no sean `udaredge.com`, y solo entonces entrar en cambios de producto.
+Antes de un refactor grande o de un deploy: **abrir esta checklist**, grep de `ALLOWED_ORIGINS` / IP antigua / dominios que no sean `vertialapp.com`, y solo entonces entrar en cambios de producto.
+

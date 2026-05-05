@@ -1,4 +1,4 @@
-# Solución a Reinicios Constantes - UDAR EDGE
+﻿# Solución a Reinicios Constantes - Vertial
 
 ## 🔧 Problema Identificado
 
@@ -208,3 +208,4 @@ Para una solución aún más robusta, considera:
 
 **Fecha de implementación:** 14 de Enero, 2026  
 **Estado:** ✅ Implementado y Testeado
+

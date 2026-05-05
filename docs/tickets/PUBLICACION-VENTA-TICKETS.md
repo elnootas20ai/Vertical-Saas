@@ -1,4 +1,4 @@
-# PUBLICACIÓN Y VENTA — Plan de Tickets
+﻿# PUBLICACIÓN Y VENTA — Plan de Tickets
 
 **Página:** `/saas/vertical/compraventa/publicacion-venta`
 **Objetivo:** Preparar un vehículo para vender y controlar su salida comercial.
@@ -1139,7 +1139,7 @@ Al hacer clic en un vehículo, se abre su ficha comercial completa:
 │  │   Ajuste de mercado    │  │  │ [✓] Vehículo destacado                   ││
 │  │ 02/04 16.000€ ↓ -3.0% │  │  │ [✓] Publicado                            ││
 │  │   Tiempo en stock      │  │  │ Días en stock: 45                        ││
-│  │ 15/03 16.500€ (inicio) │  │  │ Microsite: udaredge.com/v/abc123 [Copiar]││
+│  │ 15/03 16.500€ (inicio) │  │  │ Microsite: vertialapp.com/v/abc123 [Copiar]││
 │  │                        │  │  └──────────────────────────────────────────┘│
 │  │ [Ver historial completo]│  │                                              │
 │  └────────────────────────┘  │                                              │
@@ -1628,3 +1628,4 @@ Las nuevas alertas siguen exactamente el mismo patrón del `alertEngine.js` actu
 
 ### i18n
 Los labels nuevos deben incluirse en los idiomas existentes del sistema (es, en, pt, fr) siguiendo el patrón de `i18n.ts`.
+

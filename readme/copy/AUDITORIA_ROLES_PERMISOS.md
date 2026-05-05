@@ -1,7 +1,7 @@
-# 🔍 AUDITORÍA COMPLETA - ROLES Y PERMISOS | UDAR EDGE
+﻿# 🔍 AUDITORÍA COMPLETA - ROLES Y PERMISOS | Vertial
 
 **Fecha:** 26 de enero de 2026  
-**Proyecto:** UDAR EDGE - SaaS B2B Multiempresa  
+**Proyecto:** Vertial - SaaS B2B Multiempresa  
 **Objetivo:** Verificar coherencia entre permisos asignados, UX visible y ejecución real  
 
 ---
@@ -594,4 +594,5 @@ Esta auditoría documenta:
 **Documento generado:** 26/01/2026  
 **Última actualización:** 26/01/2026  
 **Versión:** 1.0  
-**Auditor:** Sistema automatizado UDAR EDGE
+**Auditor:** Sistema automatizado Vertial
+

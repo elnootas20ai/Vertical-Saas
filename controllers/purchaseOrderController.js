@@ -844,7 +844,7 @@ function buildOrderEmailHtml(order, supplierInfo, businessName) {
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
   <tr><td style="background:#000;padding:24px 32px;">
-    <span style="color:#fff;font-size:22px;font-weight:bold;">${businessName || 'UDAR'}</span>
+    <span style="color:#fff;font-size:22px;font-weight:bold;">${businessName || 'Vertial'}</span>
     <span style="color:#999;font-size:14px;float:right;line-height:30px;">Pedido de compra</span>
   </td></tr>
   <tr><td style="padding:32px;">
@@ -873,7 +873,7 @@ function buildOrderEmailHtml(order, supplierInfo, businessName) {
     ${order.notes ? `<div style="margin-top:20px;padding:12px;background:#fef3c7;border-radius:6px;font-size:13px;color:#92400e;"><strong>Notas:</strong> ${order.notes}</div>` : ''}
   </td></tr>
   <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-    <p style="margin:0;color:#aaa;font-size:12px;">${businessName || 'UDAR'} · Pedido generado automáticamente</p>
+    <p style="margin:0;color:#aaa;font-size:12px;">${businessName || 'Vertial'} · Pedido generado automáticamente</p>
   </td></tr>
 </table>
 </td></tr></table>
@@ -904,7 +904,7 @@ export async function sendPurchaseOrder(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
 
     const account = await findAccountByUserId(req, userId);
-    const businessName = account?.businessName || account?.fullName || 'UDAR';
+    const businessName = account?.businessName || account?.fullName || 'Vertial';
 
     const db = getCatalogDbName();
     let supplierDoc = null;

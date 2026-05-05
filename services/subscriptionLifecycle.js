@@ -48,7 +48,7 @@ export async function sendWelcomeEmail(account) {
  */
 export async function sendPaymentSuccessNotification(account) {
   try {
-    const planName = account.subscription?.planName || 'UDAR';
+    const planName = account.subscription?.planName || 'Vertial';
     const billingMode = account.subscription?.billingMode || 'monthly';
     const { subject, html } = buildPaymentSuccessEmail(
       account.email,

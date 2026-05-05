@@ -1,5 +1,5 @@
-# AUDITORÍA DE FUNCIONALIDADES - MÓDULO CLIENTES
-## UDAR EDGE - SaaS B2B Multiempresa y Multivertical
+﻿# AUDITORÍA DE FUNCIONALIDADES - MÓDULO CLIENTES
+## Vertial - SaaS B2B Multiempresa y Multivertical
 
 **Fecha de auditoría:** 11 de febrero de 2026  
 **Versión del sistema:** CORE COMPLETO  
@@ -1006,7 +1006,8 @@ Este documento servirá de base para crear:
 
 **FIN DE AUDITORÍA**
 
-Documento generado para UDAR EDGE  
+Documento generado para Vertial  
 Módulo: Clientes  
 Fecha: 11 de febrero de 2026  
 Versión: 1.0
+
