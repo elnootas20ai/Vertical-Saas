@@ -551,7 +551,7 @@ export async function getDocumentHistory(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const activitiesDb = `${account.accountName || 'udar'}-activity`;
+    const activitiesDb = `${account.accountName || 'vertial'}-activity`;
     try {
       await ensureDatabase(req, activitiesDb);
       const allActivities = await getAllDocuments(req, activitiesDb);

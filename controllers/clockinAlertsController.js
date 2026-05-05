@@ -23,12 +23,12 @@ const DEFAULT_CONFIG = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getAlertsDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-clockin-alerts`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 function getSchedulesDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-schedules`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 

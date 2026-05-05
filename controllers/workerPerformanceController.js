@@ -50,7 +50,7 @@ function isCompletedSale(sale) {
 }
 
 function getCommissionsDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-commissions`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 

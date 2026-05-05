@@ -395,10 +395,10 @@ export async function getGroupKpis(req, res) {
 
     const vehiclesDb = 'vehicles';
     const salesDb = normalizeDbName(
-      process.env.VITE_SALES_DB || `${process.env.VITE_COUCHDB_DB || 'udar'}-sales`,
+      process.env.VITE_SALES_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-sales`,
     );
     const leadsDb = normalizeDbName(
-      process.env.VITE_CRM_LEADS_DB || `${process.env.VITE_COUCHDB_DB || 'udar'}-leads`,
+      process.env.VITE_CRM_LEADS_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-leads`,
     );
 
     async function fetchAllDocs(dbName) {

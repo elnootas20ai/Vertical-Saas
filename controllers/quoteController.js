@@ -18,7 +18,7 @@ import { sendEmail } from '../services/email.js';
 import logger from '../services/logger.js';
 
 function getQuotesDbName() {
-  return (process.env.VITE_COUCHDB_DB || 'udar') + '-quotes';
+  return (process.env.VITE_COUCHDB_DB || 'vertial') + '-quotes';
 }
 
 function getAppBaseUrl() {

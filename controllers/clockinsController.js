@@ -14,7 +14,7 @@ import {
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 function getSchedulesDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-schedules`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
@@ -929,7 +929,7 @@ export async function exportClockins(req, res) {
 // ─── Cross-check: fichajes vs horarios vs vacaciones ─────────────────────────
 
 function getVacationsDbName() {
-  const prefix = process.env.VITE_COUCHDB_DB || 'udar';
+  const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-vacations`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 

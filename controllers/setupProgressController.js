@@ -327,7 +327,7 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
       }
       case 'locations': {
         if (!targetBusinessId) return false;
-        const locDb = `${process.env.COUCHDB_DB || 'udar'}-locations`;
+        const locDb = `${process.env.COUCHDB_DB || 'vertial'}-locations`;
         try {
           await ensureDatabase(req, locDb);
           const locs = await getAllDocuments(req, locDb);
@@ -344,7 +344,7 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
       }
       case 'initial_clients': {
         if (!targetBusinessId) return false;
-        const clientDb = `${process.env.COUCHDB_DB || 'udar'}-clients`;
+        const clientDb = `${process.env.COUCHDB_DB || 'vertial'}-clients`;
         try {
           await ensureDatabase(req, clientDb);
           const clients = await getAllDocuments(req, clientDb);
@@ -392,7 +392,7 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
       }
       case 'first_operation': {
         if (!targetBusinessId) return false;
-        const salesDb = `${process.env.COUCHDB_DB || 'udar'}-sales`;
+        const salesDb = `${process.env.COUCHDB_DB || 'vertial'}-sales`;
         try {
           await ensureDatabase(req, salesDb);
           const sales = await getAllDocuments(req, salesDb);

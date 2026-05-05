@@ -367,7 +367,7 @@ export async function reconciliationSuggestions(req, res) {
     const unreconciled = movements.filter((m) => !m.reconciled);
     if (unreconciled.length === 0) return res.json({ ok: true, suggestions: [] });
 
-    const bankDbName = `${(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'udar')}-bank-transactions`;
+    const bankDbName = `${(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial')}-bank-transactions`;
     let bankTxs = [];
     try {
       await ensureDatabase(req, bankDbName);

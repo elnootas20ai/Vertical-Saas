@@ -351,9 +351,7 @@ export async function exportTenantData(req, res) {
     const userId = String(req.params.userId || '').trim();
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
 
-    const dbName = String(
-      process.env.VITE_COUCHDB_DB || 'udar',
-    );
+    const dbName = String(process.env.VITE_COUCHDB_DB || 'vertial');
     const userDbName = `${dbName}-${userId.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
     const collections = ['vehicles', 'clients', 'leads', 'sales', 'documents', 'finance', 'workshop'];
@@ -401,7 +399,7 @@ export async function importTenantData(req, res) {
       return res.status(400).json({ ok: false, error: 'Formato de importación inválido' });
     }
 
-    const dbName = String(process.env.VITE_COUCHDB_DB || 'udar');
+    const dbName = String(process.env.VITE_COUCHDB_DB || 'vertial');
     const userDbName = `${dbName}-${userId.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
     const results = {};

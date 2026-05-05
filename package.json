@@ -19,7 +19,8 @@
     "cap:add:android": "npx cap add android",
     "cap:add:ios": "npx cap add ios",
     "cap:update": "npx cap update",
-    "monitor": "node scripts/monitor.mjs"
+    "monitor": "node scripts/monitor.mjs",
+    "couch:check": "node scripts/verify-couch.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

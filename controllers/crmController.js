@@ -13,11 +13,11 @@ import { v4 as uuidv4 } from 'uuid';
 import logger from '../services/logger.js';
 
 function getQuotesDbName() {
-  return (process.env.VITE_COUCHDB_DB || 'udar') + '-quotes';
+  return (process.env.VITE_COUCHDB_DB || 'vertial') + '-quotes';
 }
 
 function getRemindersDbName() {
-  return (process.env.VITE_COUCHDB_DB || 'udar') + '-crm-reminders';
+  return (process.env.VITE_COUCHDB_DB || 'vertial') + '-crm-reminders';
 }
 
 function badRequest(res, error) {
