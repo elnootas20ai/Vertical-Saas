@@ -24,7 +24,9 @@ registerRoute(
     cacheName: 'google-fonts-cache',
     plugins: [
       new CacheableResponsePlugin({ statuses: [0, 200] }),
-      new ExpirationPlugin({ maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 365 }),
+      // En producción, cachear 1 año suele causar "veo lo antiguo" tras despliegues
+      // (especialmente si el navegador queda enganchado a una variante antigua).
+      new ExpirationPlugin({ maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 7 }),
     ],
   }),
 );
@@ -36,7 +38,8 @@ registerRoute(
     cacheName: 'api-cache',
     plugins: [
       new CacheableResponsePlugin({ statuses: [0, 200] }),
-      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 5 }),
+      // Mantener poco tiempo para evitar respuestas "antiguas" tras releases.
+      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 60 * 1 }),
     ],
   }),
 );

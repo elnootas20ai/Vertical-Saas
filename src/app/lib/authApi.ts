@@ -277,6 +277,7 @@ interface ApiEnvelope<T> {
 function getApiBase(): string {
   const env = import.meta.env;
   if (env.VITE_API_URL) return env.VITE_API_URL;
+  if (typeof window !== 'undefined') return '';
   const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const protocol =
     env.VITE_API_PROTOCOL ||

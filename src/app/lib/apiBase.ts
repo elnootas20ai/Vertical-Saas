@@ -7,6 +7,11 @@ function trimTrailingSlash(url: string): string {
 export function getApiBase(): string {
   if (env.VITE_API_URL) return trimTrailingSlash(env.VITE_API_URL);
 
+  // En producción, lo más robusto es usar same-origin (sin CORS) y llamar a `/api/*`.
+  // Esto evita "failed to fetch" por DNS/SSL/mixed-content cuando el frontend y backend
+  // están detrás del mismo dominio (reverse proxy).
+  if (typeof window !== 'undefined') return '';
+
   const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const protocol =
     env.VITE_API_PROTOCOL ||
