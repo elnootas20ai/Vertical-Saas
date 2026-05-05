@@ -6,7 +6,7 @@ function getAppBaseUrl() {
 }
 
 function getFromAddress() {
-  return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'noreply@udar.app';
+  return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'noreply@vertialapp.com';
 }
 
 async function sendViaResend(to, subject, html) {
@@ -76,19 +76,19 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
 
   return {
     to: null,
-    subject: '\u00a1Bienvenido a UDAR EDGE! Tu prueba gratuita ha comenzado',
+    subject: '\u00a1Bienvenido a Vertial! Tu prueba gratuita ha comenzado',
     html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
         <tr><td style="background:linear-gradient(135deg,#f59e0b,#ea580c);padding:32px;text-align:center;">
-          <h1 style="margin:0;color:#fff;font-size:24px;">\u00a1Bienvenido a UDAR EDGE!</h1>
+          <h1 style="margin:0;color:#fff;font-size:24px;">\u00a1Bienvenido a Vertial!</h1>
           <p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Tu prueba gratuita de 14 d\u00edas ha comenzado</p>
         </td></tr>
         <tr><td style="padding:32px;">
           <p style="font-size:16px;color:#111;">Hola <strong>${firstName || 'usuario'}</strong>,</p>
           <p style="font-size:14px;color:#444;line-height:1.6;">
-            Gracias por registrar <strong>${companyName || 'tu empresa'}</strong> en UDAR EDGE.
+            Gracias por registrar <strong>${companyName || 'tu empresa'}</strong> en Vertial.
             Tu prueba gratuita del plan <strong>${planName || 'Basic'}</strong> est\u00e1 activa hasta el <strong>${endDateStr}</strong>.
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:16px 0;">
@@ -111,7 +111,7 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR EDGE &middot; Plataforma de gesti\u00f3n integral</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial &middot; Plataforma de gesti\u00f3n integral</p>
         </td></tr>
       </table>
     </td></tr>
@@ -125,7 +125,7 @@ export function buildEmailVerificationEmail(email, token) {
   const verifyUrl = `${baseUrl}/auth/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
 
   return {
-    subject: 'Verifica tu email · UDAR',
+    subject: 'Verifica tu email · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -135,7 +135,7 @@ export function buildEmailVerificationEmail(email, token) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#FF5E00;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Confirma tu dirección de email</h2>
@@ -158,7 +158,7 @@ export function buildEmailVerificationEmail(email, token) {
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -174,7 +174,7 @@ export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
   const ipInfo = ipAddress && ipAddress !== 'unknown' ? `<p style="color:#555;margin:0 0 8px;line-height:1.6;">IP detectada: <strong>${ipAddress}</strong></p>` : '';
 
   return {
-    subject: '⚠️ Cuenta bloqueada temporalmente · UDAR',
+    subject: '⚠️ Cuenta bloqueada temporalmente · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -184,7 +184,7 @@ export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Alerta de Seguridad</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Alerta de Seguridad</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta ha sido bloqueada temporalmente</h2>
@@ -207,7 +207,7 @@ export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -223,7 +223,7 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
   const dayText = daysLeft === 1 ? '1 día' : `${daysLeft} días`;
 
   return {
-    subject: `⏰ Tu prueba gratuita termina en ${dayText} · UDAR`,
+    subject: `⏰ Tu prueba gratuita termina en ${dayText} · Vertial`,
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -233,7 +233,7 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
@@ -241,7 +241,7 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
           </div>
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola, ${displayName}</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Tu periodo de prueba gratuita de <strong>UDAR</strong> está a punto de finalizar.
+            Tu periodo de prueba gratuita de <strong>Vertial</strong> está a punto de finalizar.
             Para continuar usando todas las funcionalidades sin interrupciones, activa tu suscripción ahora.
           </p>
           <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:24px;">
@@ -262,7 +262,7 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -277,7 +277,7 @@ export function buildPaymentFailedEmail(email, name, billingUrl) {
   const displayName = name ? name.split(' ')[0] : 'Usuario';
 
   return {
-    subject: '❌ Error en tu pago · UDAR',
+    subject: '❌ Error en tu pago · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -287,12 +287,12 @@ export function buildPaymentFailedEmail(email, name, billingUrl) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Error de Pago</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Error de Pago</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">No hemos podido procesar tu pago</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${displayName}</strong>, hemos intentado cobrar tu suscripción de <strong>UDAR</strong>
+            Hola <strong>${displayName}</strong>, hemos intentado cobrar tu suscripción de <strong>Vertial</strong>
             pero el pago no se pudo completar.
           </p>
           <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin-bottom:24px;">
@@ -313,7 +313,7 @@ export function buildPaymentFailedEmail(email, name, billingUrl) {
           </td></tr></table>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -331,7 +331,7 @@ export function buildGracePeriodEmail(email, name, gracePeriodEndsAt, billingUrl
     : '72 horas';
 
   return {
-    subject: '⚠️ Periodo de gracia activado — actúa antes de que expire · UDAR',
+    subject: '⚠️ Periodo de gracia activado — actúa antes de que expire · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -341,13 +341,13 @@ export function buildGracePeriodEmail(email, name, gracePeriodEndsAt, billingUrl
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#ea580c;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Acción requerida</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Acción requerida</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta está en periodo de gracia</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
             Hola <strong>${displayName}</strong>, el último intento de cobro de tu suscripción de
-            <strong>UDAR</strong> falló y tu cuenta ha entrado en periodo de gracia.
+            <strong>Vertial</strong> falló y tu cuenta ha entrado en periodo de gracia.
           </p>
           <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#9a3412;font-size:14px;font-weight:600;">
@@ -366,7 +366,7 @@ export function buildGracePeriodEmail(email, name, gracePeriodEndsAt, billingUrl
           </td></tr></table>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -381,7 +381,7 @@ export function buildSuspensionEmail(email, name, billingUrl) {
   const displayName = name ? name.split(' ')[0] : 'Usuario';
 
   return {
-    subject: '🚫 Tu cuenta ha sido suspendida · UDAR',
+    subject: '🚫 Tu cuenta ha sido suspendida · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -391,13 +391,13 @@ export function buildSuspensionEmail(email, name, billingUrl) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#1e293b;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Cuenta Suspendida</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Cuenta Suspendida</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta ha sido suspendida</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
             Hola <strong>${displayName}</strong>, lamentamos informarte que tu cuenta de
-            <strong>UDAR</strong> ha sido suspendida por falta de pago.
+            <strong>Vertial</strong> ha sido suspendida por falta de pago.
           </p>
           <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#1e293b;font-size:14px;font-weight:600;">¿Qué significa esto?</p>
@@ -417,7 +417,7 @@ export function buildSuspensionEmail(email, name, billingUrl) {
           </td></tr></table>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -437,7 +437,7 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
   const subjectCompany = companyName ? ` · ${companyName}` : '';
 
   return {
-    subject: `Te han invitado a unirte a UDAR${subjectCompany}`,
+    subject: `Te han invitado a unirte a Vertial${subjectCompany}`,
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -447,12 +447,12 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola${name ? `, ${name}` : ''}!</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            ${inviterDisplay} te ha invitado a unirte al equipo${companyDisplay} en <strong>UDAR</strong>
+            ${inviterDisplay} te ha invitado a unirte al equipo${companyDisplay} en <strong>Vertial</strong>
             con el rol de <strong>${role}</strong>.
           </p>
           ${companyName ? `
@@ -495,7 +495,7 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>
@@ -511,7 +511,7 @@ export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
   const displayName = name ? name.split(' ')[0] : 'Usuario';
 
   return {
-    subject: `Bienvenido a UDAR 360 · ${trialDays} días gratis para ti`,
+    subject: `Bienvenido a Vertial · ${trialDays} días gratis para ti`,
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -521,7 +521,7 @@ export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR 360</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
@@ -529,7 +529,7 @@ export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
           </div>
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Hola, ${displayName}!</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Bienvenido a <strong>UDAR 360</strong>. Tu cuenta ya está activa y tienes <strong>${trialDays} días gratis</strong>
+            Bienvenido a <strong>Vertial</strong>. Tu cuenta ya está activa y tienes <strong>${trialDays} días gratis</strong>
             para explorar todas las funcionalidades de la plataforma.
           </p>
           <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:24px;">
@@ -550,7 +550,7 @@ export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR 360 · Plataforma de gestión empresarial</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
         </td></tr>
       </table>
     </td></tr>
@@ -567,7 +567,7 @@ export function buildPaymentSuccessEmail(email, name, planName, billingMode) {
   const modeLabel = billingMode === 'annual' ? 'anual' : 'mensual';
 
   return {
-    subject: '✅ Pago confirmado · UDAR',
+    subject: '✅ Pago confirmado · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -577,18 +577,18 @@ export function buildPaymentSuccessEmail(email, name, planName, billingMode) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#16a34a;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Pago Confirmado</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Pago Confirmado</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Gracias por tu pago, ${displayName}!</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Tu suscripción al plan <strong>${planName || 'UDAR'}</strong> (${modeLabel}) se ha activado correctamente.
+            Tu suscripción al plan <strong>${planName || 'Vertial'}</strong> (${modeLabel}) se ha activado correctamente.
             Ya tienes acceso completo a todas las funcionalidades.
           </p>
           <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#166534;font-size:14px;font-weight:600;">✅ Tu suscripción está activa</p>
             <p style="margin:0;color:#15803d;font-size:13px;">
-              Plan: ${planName || 'UDAR'} · Facturación: ${modeLabel}
+              Plan: ${planName || 'Vertial'} · Facturación: ${modeLabel}
             </p>
           </div>
           <table cellpadding="0" cellspacing="0"><tr><td>
@@ -599,7 +599,7 @@ export function buildPaymentSuccessEmail(email, name, planName, billingMode) {
           </td></tr></table>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Plataforma de gestión empresarial</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
         </td></tr>
       </table>
     </td></tr>
@@ -613,7 +613,7 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
   const displayName = name ? name.split(' ')[0] : 'Usuario';
 
   return {
-    subject: '⛔ Tu periodo de prueba ha finalizado · UDAR',
+    subject: '⛔ Tu periodo de prueba ha finalizado · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -623,13 +623,13 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR · Prueba Finalizada</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Prueba Finalizada</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu periodo de prueba ha terminado</h2>
           <p style="color:#555;margin:0 0 16px;line-height:1.6;">
             Hola <strong>${displayName}</strong>, tus <strong>14 días de prueba gratuita</strong> en
-            <strong>UDAR</strong> han finalizado.
+            <strong>Vertial</strong> han finalizado.
           </p>
           <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#b91c1c;font-size:14px;font-weight:600;">¿Qué ocurre ahora?</p>
@@ -638,7 +638,7 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
             <p style="margin:0;color:#7f1d1d;font-size:13px;">• Puedes activar tu suscripción en cualquier momento</p>
           </div>
           <p style="color:#555;margin:0 0 24px;line-height:1.6;">
-            Para seguir utilizando UDAR sin interrupciones, activa tu suscripción ahora.
+            Para seguir utilizando Vertial sin interrupciones, activa tu suscripción ahora.
           </p>
           <table cellpadding="0" cellspacing="0"><tr><td>
             <a href="${billingUrl}"
@@ -648,7 +648,7 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
           </td></tr></table>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Plataforma de gestión empresarial</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
         </td></tr>
       </table>
     </td></tr>
@@ -663,7 +663,7 @@ export function buildPasswordResetEmail(email, token) {
   const resetUrl = `${baseUrl}/auth/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
 
   return {
-    subject: 'Recuperar contraseña · UDAR',
+    subject: 'Recuperar contraseña · Vertial',
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -673,7 +673,7 @@ export function buildPasswordResetEmail(email, token) {
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Recupera tu contraseña</h2>
@@ -696,7 +696,7 @@ export function buildPasswordResetEmail(email, token) {
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">UDAR · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
         </td></tr>
       </table>
     </td></tr>

@@ -179,7 +179,7 @@ export function Entry() {
             <UdarLogo size="xl" />
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-            Bienvenido a Udar Edge
+            Bienvenido a Vertial
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400">
             14 días gratis. Sin tarjeta. Sin permanencia.

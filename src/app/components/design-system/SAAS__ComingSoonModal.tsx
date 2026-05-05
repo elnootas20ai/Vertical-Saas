@@ -40,7 +40,7 @@ export function SAAS__ComingSoonModal({ open, onClose, featureName = 'Esta funci
               {featureName} estará disponible muy pronto.
             </p>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Seguimos mejorando UDAR Edge para ti.
+              Seguimos mejorando Vertial para ti.
             </p>
           </div>
 

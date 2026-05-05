@@ -59,7 +59,7 @@ export function DataPortabilityTab({ userId }: Props) {
 
   const handleFileSelect = (file: File) => {
     if (!file.name.endsWith('.json')) {
-      setImportError('Solo se aceptan archivos .json generados por UDAR Edge.');
+      setImportError('Solo se aceptan archivos .json generados por Vertial.');
       return;
     }
     if (file.size > 100 * 1024 * 1024) {
@@ -152,7 +152,7 @@ export function DataPortabilityTab({ userId }: Props) {
           </div>
           <div>
             <h3 className="font-bold text-gray-900 dark:text-gray-100">Importar datos</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Importa un archivo JSON previamente exportado desde UDAR Edge. Los documentos existentes no se sobreescriben.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Importa un archivo JSON previamente exportado desde Vertial. Los documentos existentes no se sobreescriben.</p>
           </div>
         </div>
 

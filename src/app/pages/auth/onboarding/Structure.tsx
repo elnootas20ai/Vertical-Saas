@@ -127,7 +127,7 @@ export function Structure() {
                 <div>
                   <label className="flex items-start gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
                     <Users className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>¿Cuántos usuarios/trabajadores van a usar UDAR EDGE? *</span>
+                    <span>¿Cuántos usuarios/trabajadores van a usar Vertial? *</span>
                   </label>
                   <NumberStepper
                     min={1}

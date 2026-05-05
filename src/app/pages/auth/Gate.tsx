@@ -839,7 +839,7 @@ export function Gate() {
         description="Exporta todo tu stock de vehículos con los datos principales de cada uno."
         icon={<Car className="w-5 h-5 text-blue-600" />}
         iconBgColor="bg-blue-50 dark:bg-blue-900/30"
-        filenamePrefix="Vehiculos_UDAR"
+        filenamePrefix="Vehiculos_Vertial"
         data={vehicles as unknown as Record<string, unknown>[]}
         columns={[
           { key: 'registrationPlate', label: 'Matrícula' },
@@ -864,7 +864,7 @@ export function Gate() {
         description="Exporta la base de datos de clientes con su información de contacto."
         icon={<Users className="w-5 h-5 text-emerald-600" />}
         iconBgColor="bg-emerald-50 dark:bg-emerald-900/30"
-        filenamePrefix="Clientes_UDAR"
+        filenamePrefix="Clientes_Vertial"
         data={clients as unknown as Record<string, unknown>[]}
         columns={[
           { key: 'name', label: 'Nombre' },
@@ -886,7 +886,7 @@ export function Gate() {
         description="Exporta todos los leads del pipeline de ventas con sus datos de seguimiento."
         icon={<UserSearch className="w-5 h-5 text-violet-600" />}
         iconBgColor="bg-violet-50 dark:bg-violet-900/30"
-        filenamePrefix="Leads_UDAR"
+        filenamePrefix="Leads_Vertial"
         data={leads as unknown as Record<string, unknown>[]}
         columns={[
           { key: 'name', label: 'Nombre' },
@@ -908,7 +908,7 @@ export function Gate() {
         description="Exporta el registro de operaciones de venta con importes y estados."
         icon={<Receipt className="w-5 h-5 text-amber-600" />}
         iconBgColor="bg-amber-50 dark:bg-amber-900/30"
-        filenamePrefix="Facturas_UDAR"
+        filenamePrefix="Facturas_Vertial"
         data={sales as unknown as Record<string, unknown>[]}
         columns={[
           { key: 'id', label: 'ID' },

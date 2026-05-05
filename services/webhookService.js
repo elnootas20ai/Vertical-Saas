@@ -128,7 +128,7 @@ export async function dispatchWebhooks(req, userId, event, data) {
  */
 export async function testWebhook(webhook, userId) {
   return sendWebhookRequest(webhook, 'ping', {
-    message: 'Este es un evento de prueba desde Udar Edge',
+    message: 'Este es un evento de prueba desde Vertial',
     userId,
     sentAt: new Date().toISOString(),
   }, 0);

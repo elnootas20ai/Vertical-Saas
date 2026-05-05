@@ -609,7 +609,7 @@ const es = {
         margin: 'margen',
       },
       empty: {
-        title: 'Comienza con Udar Edge',
+        title: 'Comienza con Vertial',
         desc: 'Añade tu primer vehículo y registra tus operaciones. El dashboard mostrará métricas de negocio en tiempo real.',
         addVehicle: 'Añadir vehículo',
         registerOp: 'Registrar operación',
@@ -2436,7 +2436,7 @@ const en = {
         margin: 'margin',
       },
       empty: {
-        title: 'Get started with Udar Edge',
+        title: 'Get started with Vertial',
         desc: 'Add your first vehicle and record your operations. The dashboard will show real-time business metrics.',
         addVehicle: 'Add vehicle',
         registerOp: 'Register operation',
@@ -4229,7 +4229,7 @@ const pt = {
         margin: 'margem',
       },
       empty: {
-        title: 'Comece com o Udar Edge',
+        title: 'Comece com o Vertial',
         desc: 'Adicione o seu primeiro veículo e registe as suas operações. O dashboard mostrará métricas de negócio em tempo real.',
         addVehicle: 'Adicionar veículo',
         registerOp: 'Registar operação',
@@ -5691,7 +5691,7 @@ const fr = {
         margin: 'marge',
       },
       empty: {
-        title: 'Commencez avec Udar Edge',
+        title: 'Commencez avec Vertial',
         desc: 'Ajoutez votre premier véhicule et enregistrez vos opérations. Le tableau de bord affichera les métriques en temps réel.',
         addVehicle: 'Ajouter un véhicule',
         registerOp: 'Enregistrer une opération',
@@ -7151,7 +7151,7 @@ const it = {
         margin: 'margine',
       },
       empty: {
-        title: 'Inizia con Udar Edge',
+        title: 'Inizia con Vertial',
         desc: 'Aggiungi il tuo primo veicolo e registra le operazioni. La dashboard mostrerà le metriche in tempo reale.',
         addVehicle: 'Aggiungi veicolo',
         registerOp: 'Registra operazione',

@@ -969,7 +969,7 @@ export function IntegrationsPanel() {
     <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
       <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800">
         <h3 className="font-bold text-gray-900 dark:text-gray-100">Integraciones y API</h3>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Accede a todos tus datos de Udar Edge mediante la REST API</p>
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Accede a todos tus datos de Vertial mediante la REST API</p>
       </div>
 
       <div className="flex border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800 px-4">

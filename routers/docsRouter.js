@@ -7,9 +7,9 @@ const BASE_URL = process.env.PUBLIC_API_BASE_URL || '';
 const openApiSpec = {
   openapi: '3.0.3',
   info: {
-    title: 'Udar Edge API',
+    title: 'Vertial API',
     version: '1.0.0',
-    description: `API pública de Udar Edge para integrar datos de tu concesionario con sistemas externos (n8n, Zapier, webs corporativas, etc.).
+    description: `API pública de Vertial para integrar datos de tu negocio con sistemas externos (n8n, Zapier, webs corporativas, etc.).
 
 ## Autenticación
 
@@ -32,8 +32,8 @@ Configura URLs de destino en **Ajustes → Webhooks** para recibir eventos en ti
 Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verificar la autenticidad.
 `,
     contact: {
-      name: 'Soporte Udar Edge',
-      email: 'soporte@udar.app',
+      name: 'Soporte Vertial',
+      email: 'soporte@vertialapp.com',
     },
     license: {
       name: 'Propietario',
@@ -41,11 +41,11 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
   },
   servers: [
     {
-      url: BASE_URL || 'https://tu-dominio.udar.app',
+      url: BASE_URL || 'https://api.vertialapp.com',
       description: 'Producción',
     },
     {
-      url: 'https://api.udaredge.com',
+      url: 'http://localhost:3000',
       description: 'Desarrollo local',
     },
   ],
@@ -340,7 +340,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
               'application/json': {
                 example: {
                   ok: true,
-                  name: 'Udar Edge API',
+                  name: 'Vertial API',
                   version: '1',
                   userId: 'usr_abc123',
                   permissions: ['vehicles:read', 'leads:write'],
@@ -870,7 +870,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
       post: {
         tags: ['Webhooks'],
         summary: 'Crear webhook',
-        description: 'Registra una nueva URL de webhook para recibir eventos de Udar Edge.',
+        description: 'Registra una nueva URL de webhook para recibir eventos de Vertial.',
         operationId: 'createWebhook',
         requestBody: {
           required: true,
@@ -986,7 +986,7 @@ docsRouter.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Udar Edge API — Documentación</title>
+  <title>Vertial API — Documentación</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>" />
   <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   <style>
@@ -998,7 +998,7 @@ docsRouter.get('/', (req, res) => {
     .swagger-ui .topbar .topbar-wrapper { gap: 16px; }
     .swagger-ui .topbar-wrapper img { display: none; }
     .swagger-ui .topbar-wrapper::before {
-      content: '🚗 Udar Edge API';
+      content: '🚗 Vertial API';
       color: #fff;
       font-size: 20px;
       font-weight: 700;

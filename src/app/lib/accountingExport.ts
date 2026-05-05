@@ -294,7 +294,7 @@ export function exportAccountingToExcel(movements: FinanceMovementRecord[], comp
   wb.Props = {
     Title: 'Exportación Contable',
     Subject: 'Asientos Libro Diario - PGC España',
-    Author: companyName || 'Udar Edge',
+    Author: companyName || 'Vertial',
     CreatedDate: new Date(),
   };
 

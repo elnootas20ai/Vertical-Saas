@@ -200,7 +200,7 @@ export function SAAS__Block10CompleteModal({ onComplete }: Props) {
 
         <div className="border-t border-gray-200 dark:border-gray-700 px-8 py-6 bg-gray-50 dark:bg-gray-800 rounded-b-2xl">
           <p className="text-center text-gray-700 dark:text-gray-300 mb-4">
-            El MVP de UDAR EDGE está <span className="font-bold text-green-600">100% funcional</span> y listo para demostración.
+            El MVP de Vertial está <span className="font-bold text-green-600">100% funcional</span> y listo para demostración.
             Todos los módulos principales están implementados con navegación completa y 0 botones rotos.
           </p>
           <button

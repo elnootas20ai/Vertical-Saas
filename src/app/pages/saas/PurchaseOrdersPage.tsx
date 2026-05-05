@@ -426,7 +426,7 @@ function DetailModal({ order, onClose, onStatusChange, onReceive, onSend, sendin
               >
                 <Globe className="w-4 h-4 text-violet-500" />
                 <div className="text-left">
-                  <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">Portal UDAR</p>
+                  <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">Portal Vertial</p>
                   <p className="text-[10px] text-gray-400">Portal proveedor</p>
                 </div>
               </button>
@@ -899,7 +899,7 @@ export function PurchaseOrdersPage() {
       }
       setOrders(prev => prev.map(o => o._id === order._id ? result.order : o));
       if (viewingOrder?._id === order._id) setViewingOrder(result.order);
-      toast.success(`Pedido enviado por ${method === 'email' ? 'email' : method === 'whatsapp' ? 'WhatsApp' : 'Portal UDAR'}`);
+      toast.success(`Pedido enviado por ${method === 'email' ? 'email' : method === 'whatsapp' ? 'WhatsApp' : 'Portal Vertial'}`);
     } catch (err: any) {
       toast.error(err?.message || 'Error al enviar pedido');
     } finally {

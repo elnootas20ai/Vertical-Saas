@@ -36,7 +36,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
     {
       icon: Mail,
       label: 'Contacto por email',
-      description: 'soporte@udaredge.com',
+      description: 'soporte@vertialapp.com',
       link: '/saas/help#contacto',
       color: 'text-purple-600',
       bgColor: 'bg-purple-100',
@@ -154,8 +154,8 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
           {/* Version Info */}
           <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-              <div>UDAR Edge v1.0.0</div>
-              <div>© 2024 UDAR Edge</div>
+              <div>Vertial v1.0.0</div>
+              <div>© {new Date().getFullYear()} Vertial</div>
             </div>
           </div>
         </div>

@@ -337,7 +337,7 @@ export function ConfiguracionGeneral() {
   }, [bizId, modulesData]);
 
   const handleCopyEmail = useCallback(() => {
-    const email = invoiceEmailData?.email || `facturas-${bizId || 'xxx'}@udaredge.com`;
+    const email = invoiceEmailData?.email || `facturas-${bizId || 'xxx'}@vertialapp.com`;
     navigator.clipboard.writeText(email).then(() => {
       setCopied(true);
       toast.success('Email copiado al portapapeles');
@@ -676,7 +676,7 @@ export function ConfiguracionGeneral() {
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Tu correo de recepción</p>
               <p className="text-sm font-mono font-bold text-gray-900 dark:text-gray-100 truncate">
-                {invoiceEmailData?.email || `facturas-${bizId || 'xxx'}@udaredge.com`}
+                {invoiceEmailData?.email || `facturas-${bizId || 'xxx'}@vertialapp.com`}
               </p>
             </div>
             <div className="flex items-center gap-2">

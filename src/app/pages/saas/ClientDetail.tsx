@@ -2622,7 +2622,7 @@ export function ClientDetail() {
         vehicles={vehicles || []}
         userId={authUser?.user_id || authUser?.id || ''}
         responsibleName={authUser?.fullName || ''}
-        companyName={authUser?.companyName || 'Udar Automoción'}
+        companyName={authUser?.companyName || 'Vertial'}
         onSubmit={() => setShowCreateContractModal(false)}
       />
 

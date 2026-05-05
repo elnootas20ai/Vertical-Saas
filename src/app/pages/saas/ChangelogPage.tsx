@@ -102,7 +102,7 @@ export function ChangelogPage() {
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-black">Novedades de UDAR Edge</h2>
+              <h2 className="text-xl font-black">Novedades de Vertial</h2>
               <p className="text-sm text-blue-200">Changelog de la plataforma</p>
             </div>
           </div>

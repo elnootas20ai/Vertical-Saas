@@ -579,7 +579,7 @@ function SendStep({
                   >
                     <Globe className="w-5 h-5 text-violet-500" />
                     <div className="text-left">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Portal UDAR</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Portal Vertial</p>
                       <p className="text-xs text-gray-400">Acceso proveedor</p>
                     </div>
                   </button>
@@ -758,7 +758,7 @@ export function NewOrderWizard({ isOpen, onClose, onComplete }: WizardProps) {
         window.open(result.waUrl, '_blank');
       }
       setCreatedOrders(prev => prev.map(o => o._id === orderId ? result.order : o));
-      toast.success(`Pedido enviado por ${method === 'email' ? 'email' : method === 'whatsapp' ? 'WhatsApp' : 'Portal UDAR'}`);
+      toast.success(`Pedido enviado por ${method === 'email' ? 'email' : method === 'whatsapp' ? 'WhatsApp' : 'Portal Vertial'}`);
     } catch (err: any) {
       toast.error(err?.message || 'Error al enviar pedido');
     } finally {

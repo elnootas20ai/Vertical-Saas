@@ -1,4 +1,4 @@
-// ─── Sistema de tokens de diseño compartido para Udar Edge ───────────────────
+// ─── Sistema de tokens de diseño compartido para Vertial ───────────────────
 // Úsalo en todos los módulos para garantizar coherencia visual
 
 // ── Venta / Fase ─────────────────────────────────────────────────────────────

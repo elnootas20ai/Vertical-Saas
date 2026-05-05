@@ -323,7 +323,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
 
   const handleSendLink = async () => {
     const loginUrl = `${window.location.origin}/auth/login`;
-    const text = `Accede a UDAR Edge:\nURL: ${loginUrl}\nEmail: ${email}${generatedPassword ? `\nContraseña temporal: ${generatedPassword}` : ''}`;
+    const text = `Accede a Vertial:\nURL: ${loginUrl}\nEmail: ${email}${generatedPassword ? `\nContraseña temporal: ${generatedPassword}` : ''}`;
     await navigator.clipboard.writeText(text);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2500);

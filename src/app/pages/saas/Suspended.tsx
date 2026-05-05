@@ -23,7 +23,7 @@ export function Suspended() {
           <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl mb-8">
             <p className="text-sm text-red-900">
               <strong>¿Qué significa esto?</strong><br />
-              No puedes acceder a las funcionalidades de UDAR Edge hasta que resuelvas el problema de pago.
+              No puedes acceder a las funcionalidades de Vertial hasta que resuelvas el problema de pago.
               Tus datos están seguros y se mantendrán durante 30 días.
             </p>
           </div>
@@ -48,7 +48,7 @@ export function Suspended() {
             </div>
             <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2">Contactar soporte</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              ¿Necesitas ayuda? Escríbenos a soporte@udaredge.com
+              ¿Necesitas ayuda? Escríbenos a soporte@vertialapp.com
             </p>
           </button>
 

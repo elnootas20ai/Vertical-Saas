@@ -783,7 +783,7 @@ export function WebConfig() {
               </div>
               <div className="flex-1 mx-4">
                 <div className="bg-white dark:bg-gray-700 rounded-md px-3 py-1 text-xs text-gray-400 text-center truncate">
-                  {storeUrl || 'udaredge.com/web/tu-tienda'}
+                  {storeUrl || 'vertialapp.com/web/tu-tienda'}
                 </div>
               </div>
             </div>

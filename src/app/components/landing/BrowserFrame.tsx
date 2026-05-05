@@ -18,7 +18,7 @@ export function BrowserFrame({ children, className = '' }: BrowserFrameProps) {
         <div className="flex-1 ml-3">
           <div className="bg-white rounded-md px-3 py-1.5 text-xs text-slate-400 border border-slate-200 flex items-center gap-1.5">
             <div className="w-3 h-3 bg-slate-200 rounded-full flex-shrink-0" />
-            app.udaredge.com
+            app.vertialapp.com
           </div>
         </div>
       </div>

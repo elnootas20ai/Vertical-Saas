@@ -52,9 +52,9 @@ export default defineConfig(({ mode }) => {
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
 
       manifest: {
-        name: 'Udar — Gestión de Concesionarios',
-        short_name: 'Udar',
-        description: 'Plataforma SaaS para gestión de concesionarios de vehículos de segunda mano',
+        name: 'Vertial',
+        short_name: 'Vertial',
+        description: 'Plataforma SaaS multi-vertical',
         theme_color: '#030213',
         background_color: '#ffffff',
         display: 'standalone',

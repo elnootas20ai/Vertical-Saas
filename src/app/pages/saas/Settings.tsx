@@ -884,7 +884,7 @@ function TabBilling() {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    downloadInvoicePdf(invoice, user?.companyName || 'Udar');
+                    downloadInvoicePdf(invoice, user?.companyName || 'Vertial');
                   }}
                   className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors"
                 >
@@ -956,7 +956,7 @@ function TabBilling() {
                   type="button"
                   onClick={() => {
                     if (!selectedInvoice) return;
-                    downloadInvoicePdf(selectedInvoice, user?.companyName || 'Udar');
+                    downloadInvoicePdf(selectedInvoice, user?.companyName || 'Vertial');
                   }}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-black"
                 >
