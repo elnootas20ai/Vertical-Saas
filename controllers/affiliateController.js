@@ -74,12 +74,12 @@ function getAffiliateContactEmail() {
     process.env.DEFAULT_CONTACT_EMAIL ||
     process.env.EMAIL_FROM ||
     process.env.SMTP_USER ||
-    'hola@udar.app'
+    'hola@vertialapp.com'
   );
 }
 
 function getPublicSiteUrl() {
-  return process.env.APP_URL || 'https://udar.app';
+  return process.env.APP_URL || 'https://vertialapp.com';
 }
 
 export async function findAffiliateByReferralCode(req, code) {

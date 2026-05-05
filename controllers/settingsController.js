@@ -62,7 +62,7 @@ function getBillingEmailDomain() {
     process.env.SMTP_USER ||
     '';
   const match = String(fromEmail).match(/@([^>\s]+)/);
-  return (match?.[1] || 'udar.app').toLowerCase();
+  return (match?.[1] || 'vertialapp.com').toLowerCase();
 }
 
 function buildDefaultInvoiceEmail(businessId) {
