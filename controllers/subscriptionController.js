@@ -95,7 +95,7 @@ export async function createAndActivate(req, res) {
       interval,
       intervalCount: 1,
       trialPeriodDays: 14,
-      description: `UDAR ${plan.name} (${isAnnual ? 'anual' : 'mensual'})`,
+      description: `Vertial ${plan.name} (${isAnnual ? 'anual' : 'mensual'})`,
       customerName: account.fullName || `${account.firstName} ${account.lastName}`.trim(),
       customerEmail: account.email,
       callbackUrl,

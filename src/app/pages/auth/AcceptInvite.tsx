@@ -4,7 +4,7 @@ import { Lock, CheckCircle, AlertCircle, Loader2, Building2, UserPlus } from 'lu
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 
 export function AcceptInvite() {
@@ -65,7 +65,7 @@ export function AcceptInvite() {
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <UserPlus className="w-6 h-6 text-blue-600 dark:text-blue-400" />

@@ -1,4 +1,4 @@
 pm2 start index.js \
-  --name "udaredge" \
+  --name "vertial" \
   --env production \
   -i max

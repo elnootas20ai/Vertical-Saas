@@ -94,7 +94,7 @@ const GroupContext = createContext<GroupContextType | undefined>(undefined);
 
 function getStoredGroupId(userId: string): string | null {
   try {
-    return localStorage.getItem(`udar_current_group:${userId}`);
+    return localStorage.getItem(`vertial_current_group:${userId}`);
   } catch {
     return null;
   }
@@ -103,9 +103,9 @@ function getStoredGroupId(userId: string): string | null {
 function storeGroupId(userId: string, groupId: string | null) {
   try {
     if (groupId) {
-      localStorage.setItem(`udar_current_group:${userId}`, groupId);
+      localStorage.setItem(`vertial_current_group:${userId}`, groupId);
     } else {
-      localStorage.removeItem(`udar_current_group:${userId}`);
+      localStorage.removeItem(`vertial_current_group:${userId}`);
     }
   } catch {
     // ignore

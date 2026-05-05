@@ -457,7 +457,7 @@ export function DeliveryOpsCenter() {
   const { currentBusiness } = useBusiness();
   const sessionUserId = useMemo(() => {
     try {
-      const raw = localStorage.getItem('udar_session_user');
+      const raw = localStorage.getItem('vertial_session_user');
       if (!raw) return null;
       const parsed = JSON.parse(raw) as { user_id?: string; id?: string; userId?: string; _id?: string };
       return parsed.user_id || parsed.id || parsed.userId || parsed._id || null;

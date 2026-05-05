@@ -1,4 +1,4 @@
-# 🎨 Sistema Tipográfico UDAR 360
+# 🎨 Sistema Tipográfico Vertial
 
 ## 📐 Tipografías Base
 
@@ -417,7 +417,7 @@ Usar tamaños completos sin restricciones.
 
 ## 🎯 Resultado Final
 
-El sistema tipográfico de **UDAR 360** transmite:
+El sistema tipográfico de **Vertial** transmite:
 
 ✨ **Profesionalidad** - Inter es la tipografía de referencia en SaaS  
 ✨ **Claridad** - Jerarquía visual bien definida  
@@ -428,4 +428,4 @@ El sistema tipográfico de **UDAR 360** transmite:
 ---
 
 **Última actualización:** Enero 2025  
-**Sistema tipográfico unificado para todo UDAR 360** ✅
+**Sistema tipográfico unificado para todo Vertial** ✅

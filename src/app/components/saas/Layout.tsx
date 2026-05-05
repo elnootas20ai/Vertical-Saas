@@ -78,20 +78,20 @@ export function Layout({ children, title, subtitle, noPadding }: LayoutProps) {
 
   const isDashboard = location.pathname === '/saas/dashboard';
   const isGeneralActive = isDashboard && (() => {
-    try { return localStorage.getItem('udar_dash_general') === '1'; } catch { return false; }
+    try { return localStorage.getItem('vertial_dash_general') === '1'; } catch { return false; }
   })();
 
   const handleSelectGeneral = useCallback(() => {
-    try { localStorage.setItem('udar_dash_general', '1'); } catch { /* noop */ }
-    window.dispatchEvent(new CustomEvent('udar:layout-general'));
+    try { localStorage.setItem('vertial_dash_general', '1'); } catch { /* noop */ }
+    window.dispatchEvent(new CustomEvent('vertial:layout-general'));
     navigate('/saas/dashboard');
   }, [navigate]);
 
   const handleSwitchBusiness = useCallback((businessId: string) => {
     switchBusiness(businessId);
     if (isDashboard) {
-      try { localStorage.setItem('udar_dash_general', '0'); } catch { /* noop */ }
-      window.dispatchEvent(new CustomEvent('udar:layout-business'));
+      try { localStorage.setItem('vertial_dash_general', '0'); } catch { /* noop */ }
+      window.dispatchEvent(new CustomEvent('vertial:layout-business'));
     }
   }, [switchBusiness, isDashboard]);
 
@@ -162,10 +162,10 @@ export function Layout({ children, title, subtitle, noPadding }: LayoutProps) {
 
         // N+X dispatches a custom event pages can listen to
         const NEW_MAP: Record<string, string> = {
-          'N+V': 'udar:new-vehicle',
-          'N+L': 'udar:new-lead',
-          'N+C': 'udar:new-client',
-          'N+S': 'udar:new-sale',
+          'N+V': 'vertial:new-vehicle',
+          'N+L': 'vertial:new-lead',
+          'N+C': 'vertial:new-client',
+          'N+S': 'vertial:new-sale',
         };
 
         if (NEW_MAP[seq]) {

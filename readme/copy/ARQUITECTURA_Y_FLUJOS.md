@@ -1,4 +1,4 @@
-# 🏗️ ARQUITECTURA Y FLUJOS DE DATOS - UDAR 360
+# 🏗️ ARQUITECTURA Y FLUJOS DE DATOS - Vertial
 
 **Diagramas visuales y flujos de integración**
 
@@ -696,6 +696,6 @@ Usa este checklist para verificar que todo funciona:
 
 ---
 
-**Con esta guía visual tienes una comprensión completa de cómo fluyen los datos en UDAR 360** 🎯
+**Con esta guía visual tienes una comprensión completa de cómo fluyen los datos en Vertial** 🎯
 
 **Última actualización:** 11 de enero de 2026

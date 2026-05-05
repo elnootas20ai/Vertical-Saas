@@ -47,7 +47,7 @@
  */
 
 const MULTITENANT_ENABLED = process.env.MULTITENANT_ENABLED === 'true';
-const LEGACY_PREFIX       = (process.env.VITE_COUCHDB_DB || 'udar').replace(/\/+$/, '');
+const LEGACY_PREFIX       = (process.env.VITE_COUCHDB_DB || 'vertial').replace(/\/+$/, '');
 
 // ── Tipos de DB por empresa ───────────────────────────────────────────────────
 

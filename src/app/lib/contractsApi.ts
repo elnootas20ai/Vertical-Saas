@@ -115,7 +115,7 @@ async function ensureDatabase(dbName: string) {
 }
 
 export const CONTRACTS_DB_NAME = normalizeDbName(
-  env.VITE_CONTRACTS_DB || `${env.VITE_COUCHDB_DB || 'udar'}-contracts`,
+  env.VITE_CONTRACTS_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-contracts`,
 );
 
 function normalizeUserId(userId: string): string {

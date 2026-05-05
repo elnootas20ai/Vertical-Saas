@@ -294,7 +294,7 @@ Evaluar si se usan estos componentes y eliminar los innecesarios:
 - ✅ Sin errores de compilación
 - ✅ Todas las funcionalidades verificadas
 
-**El proyecto UDAR 360 ahora está más limpio, optimizado y listo para seguir desarrollándose.** 🚀
+**El proyecto Vertial ahora está más limpio, optimizado y listo para seguir desarrollándose.** 🚀
 
 ---
 

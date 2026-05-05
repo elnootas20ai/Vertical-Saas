@@ -1,0 +1,130 @@
+# Vertial — referencia rápida de producción (sin secretos)
+
+Este archivo solo lista **nombres** de variables, rutas y comandos. Los valores sensibles van en **`deploy/local-values.env`** (no se versiona; está en `.gitignore`).
+
+## Arquitectura típica (Scaleway + Nginx + PM2)
+
+- **Público**: Nginx `443` → `https://vertialapp.com` / `https://www.vertialapp.com`
+- **Estáticos**: `/var/www/vertial/dist` (build Vite)
+- **API**: mismo dominio → `proxy_pass` a Node en `127.0.0.1:3000` (ruta `/api`)
+- **CouchDB**: solo localhost en el VPS (no exponer a internet)
+
+## Qué va en el servidor (runtime Node)
+
+Rellenar en `deploy/local-values.env` y cargar en PM2 / systemd según tu setup:
+
+- `NODE_ENV=production`
+- `PORT=3000` (debe coincidir con el `proxy_pass` de Nginx)
+- `APP_URL=https://vertialapp.com`
+- `ALLOWED_ORIGINS=https://vertialapp.com,https://www.vertialapp.com`
+- `COUCHDB_URL=http://127.0.0.1:5984` (o la URL interna que uses)
+- `COUCHDB_USER`, `COUCHDB_PASSWORD`, `COUCHDB_DB`
+- `JWT_SECRET`, `JWT_REFRESH_SECRET`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (login Google en backend)
+- Opcional: `OPENAI_*`, email (`RESEND_*` / `SMTP_*`), `MONEI_*`, etc.
+
+## Qué va en el **build** del frontend (solo variables `VITE_*`)
+
+Se incrustan en `dist/` en el momento de `npm run build`:
+
+- `VITE_GOOGLE_CLIENT_ID` — **debe ser el mismo Client ID** que `GOOGLE_CLIENT_ID`
+- `VITE_GOOGLE_MAPS_API_KEY` (si usáis Maps)
+- Couch headers si aplica: `VITE_COUCHDB_*` (solo si el front los necesita)
+- Para API same-origin: **`VITE_API_URL` vacío** (el front usa `/api/...` en el mismo dominio)
+
+Guarda una copia de tus valores de build en `deploy/local-values.env` para no olvidarlos al reconstruir.
+
+## Desplegar solo **frontend** (cambios React/UI/SW)
+
+### Opción rápida (recomendada): un comando desde tu PC
+
+1. Copia `deploy/local-values.template.env` → `deploy/local-values.env`
+2. Rellena al menos: `DEPLOY_USER`, `DEPLOY_HOST`, `DEPLOY_DIST_PATH`
+3. Pon ahí también tus **`VITE_*`** (Google Maps, `VITE_GOOGLE_CLIENT_ID`, etc.) para que el build sea correcto
+4. Ejecuta:
+
+```bash
+npm run deploy:frontend
+```
+
+Esto hace `npm run build` inyectando las variables del `local-values.env` y sube `dist/` con `rsync` (o `scp` si no hay rsync).
+
+### Opción manual
+
+En tu PC:
+
+```bash
+npm ci
+npm run build
+```
+
+En el VPS (ajusta usuario e IP):
+
+```bash
+rsync -avz --delete dist/ USUARIO@IP_VPS:/var/www/vertial/dist/
+```
+
+Comprobación:
+
+```bash
+curl -sSI https://vertialapp.com/ | head
+```
+
+Si un usuario ve versión vieja: limpiar Service Worker (DevTools → Application → Service Workers) o ventana incógnita.
+
+## Desplegar **backend** (cambios `index.js`, `controllers/`, etc.)
+
+### Opción rápida desde tu PC
+
+Con `REPO_PATH_ON_VPS` y `PM2_BACKEND_NAME` en `deploy/local-values.env`:
+
+```bash
+npm run deploy:backend
+```
+
+### Opción manual en el VPS
+
+En el VPS (ruta del repo = la tuya real):
+
+```bash
+cd /ruta/al/repo
+git pull
+npm ci --omit=dev
+pm2 restart NOMBRE_PROCESO_BACKEND
+pm2 logs NOMBRE_PROCESO_BACKEND --lines 80
+```
+
+Comprobación:
+
+```bash
+curl -sS http://127.0.0.1:3000/health
+curl -sS https://vertialapp.com/health
+```
+
+## DNS / SSL (recordatorio)
+
+- **A** `vertialapp.com` → IP VPS  
+- **A** `www.vertialapp.com` → IP VPS  
+- **Certbot** renovación automática (comprobar de vez en cuando: `sudo certbot certificates`)
+
+## Si la web da error pero `/api/*` va bien
+
+Desde tu PC (usa tu `deploy/local-values.env`):
+
+```bash
+npm run deploy:diagnose
+```
+
+Si el log sugiere permisos en `dist/`:
+
+```bash
+npm run deploy:fix-dist
+```
+
+(No puedo ejecutar SSH contra tu VPS desde aquí; estos comandos hacen por ti lo que pediría en el servidor.)
+
+## Seguridad
+
+- No subas `.env` con secretos al repo.
+- No pegues claves en chats; usa gestor de contraseñas (1Password, Bitwarden, etc.).
+- Mantén CouchDB cerrado al mundo; firewall solo 80/443.

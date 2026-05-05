@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "udar-frontend",
+      name: "vertial-frontend",
       script: "npx",
       args: "vite",
       node_args: "--max-old-space-size=4192",
@@ -9,7 +9,7 @@ module.exports = {
       watch: false,
     },
     {
-      name: "udar-backend",
+      name: "vertial-backend",
       script: "index.js",
       cwd: "./",
       watch: false,

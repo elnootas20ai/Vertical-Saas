@@ -121,7 +121,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-const CONFIG_DB = (env.VITE_COUCHDB_DB || 'udar') + '-config';
+const CONFIG_DB = (env.VITE_COUCHDB_DB || 'vertial') + '-config';
 
 async function ensureDb() {
   await req(`/api/couch/db/${encodeURIComponent(CONFIG_DB)}`, { method: 'PUT' });

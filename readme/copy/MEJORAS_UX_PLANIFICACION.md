@@ -1,4 +1,4 @@
-# 🎯 Mejoras UX para Planificación Horaria - UDAR 360
+# 🎯 Mejoras UX para Planificación Horaria - Vertial
 
 ## 📸 Análisis de las Capturas
 
@@ -451,4 +451,4 @@ Una ventana de planificación que:
 
 **Documento creado:** Enero 2025  
 **Basado en:** Análisis de capturas de pantalla reales  
-**Objetivo:** Convertir UDAR 360 en el SaaS más eficiente de gestión de horarios
+**Objetivo:** Convertir Vertial en el SaaS más eficiente de gestión de horarios

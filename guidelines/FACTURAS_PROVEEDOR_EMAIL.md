@@ -914,4 +914,4 @@ TOTAL ESTIMADO: 32-42 horas (~4-5 días efectivos)
 
 **Documento creado:** Abril 2026  
 **Versión:** 1.0  
-**Proyecto:** UDAR 360 — Módulo de Facturas de Proveedor por Email
+**Proyecto:** Vertial — Módulo de Facturas de Proveedor por Email

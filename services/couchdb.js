@@ -1938,7 +1938,7 @@ function normalizeDbName(value) {
 }
 
 function getDbPrefix() {
-  return normalizeDbName(process.env.COUCHDB_DB || 'udar');
+  return normalizeDbName(process.env.COUCHDB_DB || 'vertial');
 }
 
 export function getSalesDbName() {
@@ -4168,12 +4168,12 @@ export async function listLocationsByUser(req, userId) {
 // ─── GDPR / RGPD ─────────────────────────────────────────────────────────────
 
 export function getGdprConsentsDbName() {
-  const prefix = process.env.COUCHDB_DB || 'udar';
+  const prefix = process.env.COUCHDB_DB || 'vertial';
   return `${prefix}-gdpr-consents`;
 }
 
 export function getGdprRequestsDbName() {
-  const prefix = process.env.COUCHDB_DB || 'udar';
+  const prefix = process.env.COUCHDB_DB || 'vertial';
   return `${prefix}-gdpr-requests`;
 }
 

@@ -1,4 +1,4 @@
-# 🔌 GUÍA DE INTEGRACIÓN BACKEND - UDAR 360
+# 🔌 GUÍA DE INTEGRACIÓN BACKEND - Vertial
 
 **Fecha:** 11 de enero de 2026  
 **Versión:** 1.0  
@@ -24,7 +24,7 @@
 ## 📖 INTRODUCCIÓN
 
 ### Estado Actual
-El proyecto UDAR 360 está **100% funcional** con datos mockeados. Todos los componentes UI, flujos de navegación, responsive design y funcionalidades están implementados y probados.
+El proyecto Vertial está **100% funcional** con datos mockeados. Todos los componentes UI, flujos de navegación, responsive design y funcionalidades están implementados y probados.
 
 ### Objetivo
 Conectar la aplicación frontend con un backend real (Supabase recomendado) manteniendo la misma experiencia de usuario y funcionalidades.

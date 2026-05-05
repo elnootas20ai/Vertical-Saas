@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-const STORAGE_PREFIX = 'udar_saved_filters_';
+const STORAGE_PREFIX = 'vertial_saved_filters_';
 
 export interface FilterPreset<T> {
   id: string;

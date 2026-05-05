@@ -68,7 +68,7 @@ self.addEventListener('push', (event) => {
     body: payload.body || '',
     icon: payload.icon || '/pwa-192x192.png',
     badge: payload.badge || '/pwa-192x192.png',
-    tag: 'udar-notification',
+    tag: 'vertial-notification',
     renotify: true,
     data: payload.data || {},
   };

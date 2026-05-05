@@ -37,7 +37,7 @@ function getCouchHeaders() {
 
 const API_BASE = getApiBase();
 export const STAFF_EXPENSES_DB_NAME = normalizeDbName(
-  env.VITE_STAFF_EXPENSES_DB || `${env.VITE_COUCHDB_DB || 'udar'}-staff-expenses`,
+  env.VITE_STAFF_EXPENSES_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-staff-expenses`,
 );
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

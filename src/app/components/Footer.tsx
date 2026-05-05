@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Info } from 'lucide-react';
-import { UdarLogo } from './UdarLogo';
+import { VertialLogo } from './VertialLogo';
 
 export function Footer() {
   const navigate = useNavigate();
@@ -36,7 +36,7 @@ export function Footer() {
             {/* Brand */}
             <div>
               <div className="mb-4">
-                <UdarLogo size="lg" />
+                <VertialLogo size="lg" />
               </div>
               <p className="text-blue-300 mb-4 text-sm leading-relaxed">
                 Software de gestión para negocios profesionales. Compraventa, taller y delivery en una sola plataforma.

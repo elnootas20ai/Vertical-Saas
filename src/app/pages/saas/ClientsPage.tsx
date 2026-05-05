@@ -1464,7 +1464,7 @@ export function ClientsPage() {
   const { user: authUser } = useAuth();
   const { currentBusiness } = useBusiness();
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
-  const invoicesStorageKey = user?.id ? `udar-crm-invoices:${user.id}` : 'udar-crm-invoices:guest';
+  const invoicesStorageKey = user?.id ? `vertial-crm-invoices:${user.id}` : 'vertial-crm-invoices:guest';
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
 

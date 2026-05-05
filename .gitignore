@@ -49,3 +49,9 @@ Thumbs.db
 
 # Payment gateway keys (secrets)
 .gateway-keys.json
+
+# Valores reales de despliegue (copia desde deploy/local-values.template.env)
+deploy/local-values.env
+
+# Backups locales CouchDB (no versionar volúmenes de datos)
+backups/*.json.gz

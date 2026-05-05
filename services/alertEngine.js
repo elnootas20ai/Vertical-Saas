@@ -40,6 +40,7 @@ import { getButcherDbName } from './butcherShop.js';
 import { emitGlobalAlert } from './alertEmitter.js';
 import { runCompraventaAlerts, getCompraventaAlertConfig } from './compraventaAlertEngine.js';
 import { runScrapyardAlerts, getScrapyardAlertConfig } from './scrapyardAlertEngine.js';
+import { expireOverdueRequests, sendScheduledReminders } from './signatureAutomation.js';
 import logger from './logger.js';
 
 const ALERT_INTERVAL_MS = 3_600_000;

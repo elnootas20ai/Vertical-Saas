@@ -8,7 +8,7 @@ export const API_TOKENS_DB = 'api-tokens';
 const tokenRouter = Router();
 
 function generateApiToken() {
-  return `udar_sk_${crypto.randomBytes(32).toString('hex')}`;
+  return `vertial_sk_${crypto.randomBytes(32).toString('hex')}`;
 }
 
 function hashToken(token) {

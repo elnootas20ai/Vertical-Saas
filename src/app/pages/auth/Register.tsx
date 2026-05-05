@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useTheme } from 'next-themes';
 import { Mail, Lock, User, Phone, CheckCircle, Eye, EyeOff, Sparkles, Building2, Gift } from 'lucide-react';
 import { validateReferralCode } from '../../lib/affiliatesApi';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn } from '../../hooks/useGoogleSignIn';
 import type { GoogleUserProfile } from '../../lib/authApi';
@@ -44,6 +45,7 @@ export function Register() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { resolvedTheme } = useTheme();
   const { register, googleLogin } = useAuth();
 
   const locationState = (location.state || {}) as LocationState;
@@ -134,9 +136,10 @@ export function Register() {
 
   useEffect(() => {
     if (googleReady && googleBtnRef.current && !isGoogleFlow) {
-      renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', text: 'signup_with' });
+      const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
+      renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signup_with' });
     }
-  }, [googleReady, renderButton, isGoogleFlow]);
+  }, [googleReady, renderButton, isGoogleFlow, resolvedTheme]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,7 +195,7 @@ export function Register() {
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               {isUserAccount ? 'Crear cuenta de usuario' : 'Crear cuenta de empresa'}
@@ -464,8 +467,8 @@ export function Register() {
                   </div>
                 </div>
 
-                <div className="flex justify-center">
-                  <div ref={googleBtnRef} className="min-h-[44px]" />
+                <div className="flex justify-center w-full">
+                  <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
                 </div>
               </>
             )}

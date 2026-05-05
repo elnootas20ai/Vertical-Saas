@@ -606,7 +606,7 @@ export interface AppContextType {
 // This prevents the "used outside Provider" error caused by HMR creating a new
 // context object identity while the old Provider is still in the React tree.
 
-const CONTEXT_KEY = '__udar_app_ctx__';
+const CONTEXT_KEY = '__vertial_app_ctx__';
 
 function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> {
   const g = globalThis as any;
@@ -732,11 +732,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     : authUser?.user_id
       ? `u:${authUser.user_id}`
       : 'guest';
-  const vehiclesStorageKey = `udar-vehicles:${scopeKey}`;
-  const parkingZonesStorageKey = `udar-parking-zones:${scopeKey}`;
-  const leadsStorageKey = `udar-leads:${scopeKey}`;
-  const clientsStorageKey = `udar-clients:${scopeKey}`;
-  const notificationsStorageKey = `udar-notifications:${scopeKey}`;
+  const vehiclesStorageKey = `vertial-vehicles:${scopeKey}`;
+  const parkingZonesStorageKey = `vertial-parking-zones:${scopeKey}`;
+  const leadsStorageKey = `vertial-leads:${scopeKey}`;
+  const clientsStorageKey = `vertial-clients:${scopeKey}`;
+  const notificationsStorageKey = `vertial-notifications:${scopeKey}`;
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
@@ -745,7 +745,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [leads, setLeads] = useState<Lead[]>(() => {
     try {
-      const saved = localStorage.getItem('udar-leads:guest');
+      const saved = localStorage.getItem('vertial-leads:guest');
       if (saved) return JSON.parse(saved).map(deserializeLead);
       return [
         {
@@ -799,7 +799,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [clients, setClients] = useState<Client[]>(() => {
     try {
-      const saved = localStorage.getItem('udar-clients:guest');
+      const saved = localStorage.getItem('vertial-clients:guest');
       if (saved) return JSON.parse(saved).map(deserializeClient);
       // Si no hay clientes guardados, crear algunos de ejemplo
       return [
@@ -896,7 +896,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {
-      const saved = localStorage.getItem('udar-notifications:guest');
+      const saved = localStorage.getItem('vertial-notifications:guest');
       return saved ? JSON.parse(saved).map(deserializeNotification) : [];
     } catch {
       return [];
@@ -976,7 +976,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authUser?.user_id) {
       try {
-        const saved = localStorage.getItem('udar-leads:guest');
+        const saved = localStorage.getItem('vertial-leads:guest');
         if (saved) {
           setLeads(JSON.parse(saved).map(deserializeLead));
         }
@@ -997,7 +997,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((error) => {
         console.error('Error loading leads from CouchDB:', error);
         try {
-          const saved = localStorage.getItem(`udar-leads:${authUser.user_id}`);
+          const saved = localStorage.getItem(`vertial-leads:${authUser.user_id}`);
           if (saved && !cancelled) {
             setLeads(JSON.parse(saved).map(deserializeLead));
           }
@@ -1014,7 +1014,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authUser?.user_id) {
       try {
-        const saved = localStorage.getItem('udar-clients:guest');
+        const saved = localStorage.getItem('vertial-clients:guest');
         if (saved) {
           setClients(JSON.parse(saved).map(deserializeClient));
         }
@@ -1038,7 +1038,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((error) => {
         console.error('Error loading clients from CouchDB:', error);
         try {
-          const saved = localStorage.getItem(`udar-clients:${authUser.user_id}`);
+          const saved = localStorage.getItem(`vertial-clients:${authUser.user_id}`);
           if (saved && !cancelled) {
             setClients(JSON.parse(saved).map(deserializeClient));
           }
@@ -1056,7 +1056,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authUser?.user_id) {
       try {
-        const saved = localStorage.getItem('udar-notifications:guest');
+        const saved = localStorage.getItem('vertial-notifications:guest');
         setNotifications(saved ? JSON.parse(saved).map(deserializeNotification) : []);
       } catch (storageError) {
         console.error('Error loading guest notifications:', storageError);
@@ -1076,7 +1076,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((error) => {
         console.error('Error loading notifications:', error);
         try {
-          const saved = localStorage.getItem(`udar-notifications:${authUser.user_id}`);
+          const saved = localStorage.getItem(`vertial-notifications:${authUser.user_id}`);
           if (saved && !cancelled) {
             setNotifications(JSON.parse(saved).map(deserializeNotification));
           } else if (!cancelled) {
@@ -1099,7 +1099,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authUser?.user_id) {
       try {
-        const saved = localStorage.getItem('udar-sales');
+        const saved = localStorage.getItem('vertial-sales');
         if (saved) setSales(JSON.parse(saved).map(deserializeSale));
       } catch { /* ignore */ }
       return;
@@ -1129,7 +1129,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         console.error('Error loading sales from CouchDB:', err);
         try {
-          const saved = localStorage.getItem('udar-sales');
+          const saved = localStorage.getItem('vertial-sales');
           if (saved && !cancelled) setSales(JSON.parse(saved).map(deserializeSale));
         } catch { /* ignore */ }
       });
@@ -1140,7 +1140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authUser?.user_id) {
       try {
-        const saved = localStorage.getItem('udar-documents');
+        const saved = localStorage.getItem('vertial-documents');
         if (saved) setDocuments(JSON.parse(saved).map(deserializeDocument));
       } catch { /* ignore */ }
       return;
@@ -1169,7 +1169,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         console.error('Error loading documents from CouchDB:', err);
         try {
-          const saved = localStorage.getItem('udar-documents');
+          const saved = localStorage.getItem('vertial-documents');
           if (saved && !cancelled) setDocuments(JSON.parse(saved).map(deserializeDocument));
         } catch { /* ignore */ }
       });
@@ -1857,7 +1857,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sseToken = useMemo(() => {
     if (!authUser?.user_id) return null;
     return typeof window !== 'undefined'
-      ? localStorage.getItem('udar_access_token')
+      ? localStorage.getItem('vertial_access_token')
       : null;
   }, [authUser?.user_id]);
 

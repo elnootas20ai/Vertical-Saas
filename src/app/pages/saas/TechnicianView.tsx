@@ -518,9 +518,9 @@ export function TechnicianView() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<WorkOrder | null>(null);
   const [mechanicName, setMechanicName] = useState(
-    () => localStorage.getItem('udar_mechanic_name') || '',
+    () => localStorage.getItem('vertial_mechanic_name') || '',
   );
-  const [nameSet, setNameSet] = useState(() => !!localStorage.getItem('udar_mechanic_name'));
+  const [nameSet, setNameSet] = useState(() => !!localStorage.getItem('vertial_mechanic_name'));
   const isStandalone = location.pathname === '/mecanico';
 
   const load = useCallback(async () => {
@@ -541,7 +541,7 @@ export function TechnicianView() {
   const handleSetName = (e: React.FormEvent) => {
     e.preventDefault();
     if (!mechanicName.trim()) return;
-    localStorage.setItem('udar_mechanic_name', mechanicName.trim());
+    localStorage.setItem('vertial_mechanic_name', mechanicName.trim());
     setNameSet(true);
   };
 
@@ -669,7 +669,7 @@ export function TechnicianView() {
 
           <button
             onClick={() => {
-              localStorage.removeItem('udar_mechanic_name');
+              localStorage.removeItem('vertial_mechanic_name');
               setNameSet(false);
               setMechanicName('');
             }}

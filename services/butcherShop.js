@@ -7,7 +7,7 @@ import {
 } from './couchdb.js';
 
 function getDbPrefix() {
-  return (process.env.VITE_COUCHDB_DB || 'udar').toLowerCase().replace(/[^a-z0-9_$()+\-/]/g, '_');
+  return (process.env.VITE_COUCHDB_DB || 'vertial').toLowerCase().replace(/[^a-z0-9_$()+\-/]/g, '_');
 }
 
 export function getButcherDbName() {

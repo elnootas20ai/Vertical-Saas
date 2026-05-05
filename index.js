@@ -287,7 +287,7 @@ function normalizeDbName(value) {
 }
 
 const CALLS_DB_NAME = normalizeDbName(
-  process.env.VITE_CALLS_DB || `${process.env.VITE_COUCHDB_DB || 'udar'}-calls`,
+  process.env.VITE_CALLS_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-calls`,
 );
 
 function getAiConfig() {
@@ -1762,10 +1762,10 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     res.setHeader('X-Cache', 'MISS');
 
     const leadsDb = normalizeDbName(
-      process.env.VITE_CRM_LEADS_DB || `${process.env.VITE_COUCHDB_DB || 'udar'}-leads`,
+      process.env.VITE_CRM_LEADS_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-leads`,
     );
     const salesDb = normalizeDbName(
-      process.env.VITE_SALES_DB || `${process.env.VITE_COUCHDB_DB || 'udar'}-sales`,
+      process.env.VITE_SALES_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-sales`,
     );
     const vehiclesDb = 'vehicles';
     const financeDb = getFinanceDbName();
@@ -2573,7 +2573,9 @@ app.post('/api/backup/run', requireAuth, sensitiveOpLimiter, async (req, res) =>
 
 // ─── ADM-02: Numeración configurable de documentos ───────────────────────────
 
-const SETTINGS_DB = 'udar-settings';
+const SETTINGS_DB = normalizeDbName(
+  `${(process.env.COUCHDB_DB || process.env.VITE_COUCHDB_DB || 'vertial').replace(/\/+$/, '')}-settings`,
+);
 const NUMBERING_CONFIG_ID = 'numbering-config';
 
 const DEFAULT_NUMBERING = {

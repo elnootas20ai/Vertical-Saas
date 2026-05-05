@@ -150,7 +150,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const API_BASE = getApiBase();
 export const CALLS_DB_NAME = normalizeDbName(
-  env.VITE_CALLS_DB || `${env.VITE_COUCHDB_DB || 'udar'}-calls`,
+  env.VITE_CALLS_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-calls`,
 );
 
 export async function ensureCallsDatabase() {

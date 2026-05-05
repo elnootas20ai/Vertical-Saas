@@ -37,7 +37,7 @@ function getStoredSessionUserId(): string | null {
   }
 
   try {
-    const raw = window.localStorage.getItem('udar_session_user');
+    const raw = window.localStorage.getItem('vertial_session_user');
     if (!raw) {
       return null;
     }

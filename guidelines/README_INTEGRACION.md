@@ -1,4 +1,4 @@
-# 🚀 UDAR 360 - LISTO PARA INTEGRACIÓN BACKEND
+# 🚀 Vertial - LISTO PARA INTEGRACIÓN BACKEND
 
 **Estado del Proyecto:** ✅ 100% Frontend Completo  
 **Fecha:** 11 de enero de 2026  
@@ -8,7 +8,7 @@
 
 ## 📋 RESUMEN EJECUTIVO
 
-UDAR 360 es un **SaaS B2B multiempresa y multivertical** para gestión de restauración/delivery, talleres y construcción. El frontend está **completamente desarrollado, testeado y optimizado**. 
+Vertial es un **SaaS B2B multiempresa y multivertical** para gestión de restauración/delivery, talleres y construcción. El frontend está **completamente desarrollado, testeado y optimizado**. 
 
 ### ✅ Lo que está LISTO
 - ✅ **UI/UX completa** para 2 perfiles (Gerente y Trabajador)
@@ -424,7 +424,7 @@ npx supabase gen types typescript --project-id PROJECT_ID > src/types/database.t
 
 ## 🎉 CONCLUSIÓN
 
-UDAR 360 está **listo para que un programador backend lo conecte a Supabase** siguiendo la guía detallada. Todo el código frontend está optimizado, limpio y funcionando con datos mock. 
+Vertial está **listo para que un programador backend lo conecte a Supabase** siguiendo la guía detallada. Todo el código frontend está optimizado, limpio y funcionando con datos mock. 
 
 La integración es **directa** siguiendo los documentos proporcionados:
 
@@ -453,6 +453,6 @@ La integración es **directa** siguiendo los documentos proporcionados:
 
 **¡El proyecto está esperando por ti!** 🚀
 
-**Creado por:** Equipo UDAR 360  
+**Creado por:** Equipo Vertial  
 **Última actualización:** 11 de enero de 2026  
 **Versión:** 1.0

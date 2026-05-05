@@ -102,7 +102,7 @@ setupEmptySession()    // Configura usuario sin empresas
 
 ```typescript
 useEffect(() => {
-  const existingUser = localStorage.getItem('udar-current-user');
+  const existingUser = localStorage.getItem('vertial-current-user');
   
   if (!existingUser) {
     console.log('🔧 Configurando sesión de desarrollo...');

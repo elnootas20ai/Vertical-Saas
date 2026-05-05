@@ -85,10 +85,10 @@ const TOUR_STEPS: TourStep[] = [
   },
 ];
 
-const STORAGE_KEY = 'udar_onboarding_completed';
+const STORAGE_KEY = 'vertial_onboarding_completed';
 const STORAGE_VERSION = '2';
-const STEP_KEY = 'udar_onboarding_step';
-const ACTIVE_KEY = 'udar_onboarding_active';
+const STEP_KEY = 'vertial_onboarding_step';
+const ACTIVE_KEY = 'vertial_onboarding_active';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

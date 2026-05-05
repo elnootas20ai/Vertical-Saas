@@ -38,7 +38,7 @@ function getCouchHeaders() {
 
 const API_BASE = getApiBase();
 export const LOCATIONS_DB_NAME = normalizeDbName(
-  env.VITE_LOCATIONS_DB || `${env.VITE_COUCHDB_DB || 'udar'}-locations`,
+  env.VITE_LOCATIONS_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-locations`,
 );
 
 interface ParkingZoneRecord extends ParkingZone {

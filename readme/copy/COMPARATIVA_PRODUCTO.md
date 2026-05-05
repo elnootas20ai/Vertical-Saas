@@ -96,7 +96,7 @@
 - ✅ Margen calculado
 
 ### Paso 4: Marcas
-- ✅ **Marcas asociadas** (ej: UDAR Premium, UDAR Classic)
+- ✅ **Marcas asociadas** (ej: Vertial Premium, Vertial Classic)
 
 ### Paso 5: Puntos de Venta
 - ✅ Opción "Todos los PDV"
@@ -124,7 +124,7 @@
 2. **Alérgenos** (Gluten, Lácteos, etc.)
 
 ### ❌ FALTAN EN DETALLE (aparecen en wizard pero no se muestran):
-1. **Marcas** (UDAR Premium, UDAR Classic, etc.)
+1. **Marcas** (Vertial Premium, Vertial Classic, etc.)
 2. **Código de barras** (está en wizard pero no aparece destacado en detalle)
 
 ### 📊 SOLO EN DETALLE (datos generados automáticamente):

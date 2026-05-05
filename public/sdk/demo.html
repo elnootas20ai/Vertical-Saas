@@ -95,7 +95,7 @@
       <button onclick="VertialWidget.setTheme('dark'); document.querySelectorAll('.controls button').forEach(b=>b.classList.remove('active')); this.classList.add('active')">🌙 Tema oscuro</button>
       <button onclick="VertialWidget.refresh()">🔄 Recargar stock</button>
     </div>
-    <div id="udar-stock"></div>
+    <div id="vertial-stock"></div>
     <div id="vehicle-detail">
       <h4>Detalles del vehículo seleccionado</h4>
       <pre id="vehicle-json"></pre>
@@ -110,8 +110,8 @@
 
     <h3>2. Carga el widget con tu API key:</h3>
     <pre><code><span class="highlight">&lt;script</span>
-  <span class="highlight-green">src</span>=<span class="highlight-yellow">"https://vertialapp.com/sdk/udar-widget.js"</span>
-  <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"udar_sk_xxxxxxxxxxxxxxxx"</span>
+  <span class="highlight-green">src</span>=<span class="highlight-yellow">"https://vertialapp.com/sdk/vertial-widget.js"</span>
+  <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"vertial_sk_xxxxxxxxxxxxxxxx"</span>
   <span class="highlight-green">data-container</span>=<span class="highlight-yellow">"#mi-catalogo"</span>
   <span class="highlight-green">data-theme</span>=<span class="highlight-yellow">"light"</span>
   <span class="highlight-green">data-per-page</span>=<span class="highlight-yellow">"12"</span>
@@ -126,9 +126,9 @@
   <div class="section">
     <h2>Todas las opciones</h2>
     <pre><code><span class="highlight">&lt;script</span>
-  src="https://vertialapp.com/sdk/udar-widget.js"
+  src="https://vertialapp.com/sdk/vertial-widget.js"
 
-  <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"udar_sk_..."</span>         <span style="color:#64748b"><!-- (requerido) Tu API key --></span>
+  <span class="highlight-green">data-api-key</span>=<span class="highlight-yellow">"vertial_sk_..."</span>         <span style="color:#64748b"><!-- (requerido) Tu API key --></span>
   <span class="highlight-green">data-container</span>=<span class="highlight-yellow">"#mi-catalogo"</span>  <span style="color:#64748b"><!-- Selector CSS del contenedor --></span>
   <span class="highlight-green">data-lang</span>=<span class="highlight-yellow">"es"</span>              <span style="color:#64748b"><!-- Idioma: "es" | "en" --></span>
   <span class="highlight-green">data-theme</span>=<span class="highlight-yellow">"auto"</span>           <span style="color:#64748b"><!-- Tema: "light" | "dark" | "auto" --></span>
@@ -153,7 +153,7 @@ function abrirModal(vehiculo) {
 
 <span class="highlight-green">// Opción B: evento DOM</span>
 document.getElementById('mi-catalogo').addEventListener(
-  'udar:vehicle-click',
+  'vertial:vehicle-click',
   (e) => {
     const vehiculo = e.detail.vehicle;
     window.location.href = '/vehiculos/' + vehiculo._id;
@@ -180,8 +180,8 @@ function verificarFirma(secret, body, signatureHeader) {
 }
 
 <span class="highlight-green">// En tu servidor n8n / Express:</span>
-app.post('/webhook/udar', (req, res) => {
-  const sig = req.headers['x-udar-signature'];
+app.post('/webhook/vertial', (req, res) => {
+  const sig = req.headers['x-vertial-signature'];
   const raw = JSON.stringify(req.body);
   if (!verificarFirma(process.env.WEBHOOK_SECRET, raw, sig)) {
     return res.status(401).send('Firma inválida');
@@ -200,9 +200,9 @@ app.post('/webhook/udar', (req, res) => {
 
 <!-- Widget con demo (usa datos reales si tienes API key) -->
 <script
-  src="/sdk/udar-widget.js"
+  src="/sdk/vertial-widget.js"
   data-api-key=""
-  data-container="#udar-stock"
+  data-container="#vertial-stock"
   data-theme="light"
   data-per-page="6"
   data-status="all"

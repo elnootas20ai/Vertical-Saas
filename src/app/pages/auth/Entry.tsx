@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Building2, User, ArrowRight, Users, BriefcaseBusiness, ClipboardList, UserCheck } from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 
 type AccountType = 'user' | 'company';
 
@@ -22,7 +22,7 @@ export function Entry() {
         <div className="w-full max-w-3xl">
           <div className="text-center mb-10">
             <div className="flex items-center justify-center mb-6">
-              <UdarLogo size="xl" />
+              <VertialLogo size="xl" />
             </div>
             <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               ¿Cómo quieres usar Vertial?
@@ -176,7 +176,7 @@ export function Entry() {
       <div className="w-full max-w-5xl">
         <div className="text-center mb-12">
           <div className="flex items-center justify-center mb-6">
-            <UdarLogo size="xl" />
+            <VertialLogo size="xl" />
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
             Bienvenido a Vertial

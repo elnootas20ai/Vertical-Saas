@@ -1,13 +1,13 @@
-# 👋 ¡EMPIEZA AQUÍ! - UDAR 360
+# 👋 ¡EMPIEZA AQUÍ! - Vertial
 
-**Bienvenido al proyecto UDAR 360**  
+**Bienvenido al proyecto Vertial**  
 **Estado:** ✅ Frontend 100% completo, listo para integración backend
 
 ---
 
-## 🎯 ¿QUÉ ES UDAR 360?
+## 🎯 ¿QUÉ ES Vertial?
 
-UDAR 360 es un **SaaS B2B multiempresa y multivertical** para gestión integral de:
+Vertial es un **SaaS B2B multiempresa y multivertical** para gestión integral de:
 - 🍕 **Restauración/Delivery**
 - 🔧 **Talleres**
 - 🏗️ **Construcción**
@@ -114,7 +114,7 @@ VITE_SUPABASE_ANON_KEY=xxx
 ## 📊 ESTRUCTURA DEL PROYECTO
 
 ```
-UDAR-360/
+Vertial/
 │
 ├── 📄 DOCUMENTACIÓN (13 archivos .md)
 │   ├── START_HERE.md ⭐ (este archivo)
@@ -386,4 +386,4 @@ Todo está listo para que empieces. La documentación es exhaustiva y el fronten
 
 **Creado:** 11 de enero de 2026  
 **Versión:** 1.0  
-**Proyecto:** UDAR 360 - SaaS B2B Multiempresa y Multivertical
+**Proyecto:** Vertial - SaaS B2B Multiempresa y Multivertical

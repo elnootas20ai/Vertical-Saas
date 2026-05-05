@@ -48,13 +48,13 @@ npm run build
 
 Sube la carpeta `dist/` al VPS en:
 
-- `/var/www/udar/dist`
+- `/var/www/vertial/dist`
 
 ### 4) Nginx (entrada pública)
 
 Usa `deploy/nginx.scaleway.conf` como base:
 
-- sirve `/` desde `/var/www/udar/dist`
+- sirve `/` desde `/var/www/vertial/dist`
 - proxya `/api/*` a `127.0.0.1:3000`
 
 ### 5) Verificación rápida

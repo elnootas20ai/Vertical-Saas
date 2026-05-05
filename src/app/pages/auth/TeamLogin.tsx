@@ -4,7 +4,7 @@ import { Eye, Building2, User, Lock, ShieldAlert, ArrowLeft, ArrowRight } from '
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 
 type Step = 'companyCode' | 'credentials';
@@ -90,7 +90,7 @@ export function TeamLogin() {
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Acceso de equipo

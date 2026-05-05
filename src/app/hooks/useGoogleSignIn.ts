@@ -61,17 +61,30 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
     window.google.accounts.id.prompt();
   }, []);
 
-  const renderButton = useCallback((element: HTMLElement | null, options?: { theme?: string; size?: string; width?: number; text?: string }) => {
-    if (!element || !window.google?.accounts?.id) return;
-    window.google.accounts.id.renderButton(element, {
-      type: 'standard',
-      theme: (options?.theme as 'outline') || 'outline',
-      size: (options?.size as 'large') || 'large',
-      width: options?.width,
-      text: (options?.text as 'signin_with') || 'signin_with',
-      logo_alignment: 'left',
-    });
-  }, []);
+  const renderButton = useCallback(
+    (
+      element: HTMLElement | null,
+      options?: { theme?: string; size?: string; width?: number; text?: string; shape?: string },
+    ) => {
+      if (!element || !window.google?.accounts?.id) return;
+      // Evita botones duplicados si el efecto corre dos veces (p. ej. React Strict Mode) o el tema cambia.
+      element.replaceChildren();
+      const width =
+        options?.width ??
+        Math.min(400, Math.max(280, Math.floor(element.getBoundingClientRect().width || 320)));
+      window.google.accounts.id.renderButton(element, {
+        type: 'standard',
+        // Estilos actuales de GIS: filled_blue / filled_black suelen verse más “nuevos” que outline.
+        theme: (options?.theme as 'filled_blue') || 'filled_blue',
+        size: (options?.size as 'large') || 'large',
+        width,
+        text: (options?.text as 'signin_with') || 'signin_with',
+        shape: (options?.shape as 'pill') || 'pill',
+        logo_alignment: 'left',
+      });
+    },
+    [],
+  );
 
   return { ready, prompt, renderButton, clientId: GOOGLE_CLIENT_ID };
 }

@@ -1,4 +1,4 @@
-# 🔍 AUDITORÍA DE ARCHIVOS HUÉRFANOS - UDAR 360
+# 🔍 AUDITORÍA DE ARCHIVOS HUÉRFANOS - Vertial
 
 **Fecha:** 11 de enero de 2026  
 **Objetivo:** Identificar código duplicado, archivos no utilizados y optimizar el proyecto
@@ -139,7 +139,7 @@
 /src/app/components/ui/tooltip.tsx
 ```
 
-**Razón:** Las versiones custom están adaptadas al diseño de UDAR 360 y son las que se importan en todos los componentes.
+**Razón:** Las versiones custom están adaptadas al diseño de Vertial y son las que se importan en todos los componentes.
 
 ---
 

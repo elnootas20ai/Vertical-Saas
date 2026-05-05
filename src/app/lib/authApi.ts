@@ -297,7 +297,7 @@ const API_BASE = getApiBase();
 
 let _onUnauthorized: (() => void) | null = null;
 
-const TOKEN_STORAGE_KEY = 'udar_access_token';
+const TOKEN_STORAGE_KEY = 'vertial_access_token';
 
 let _inMemoryToken: string | null = localStorage.getItem(TOKEN_STORAGE_KEY);
 
@@ -329,7 +329,7 @@ export function setAuthTokens(_tokens: { accessToken: string; refreshToken: stri
 export function clearAuthTokens() {
   _inMemoryToken = null;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
-  localStorage.removeItem('udar_refresh_token');
+  localStorage.removeItem('vertial_refresh_token');
 }
 
 export function setOnUnauthorized(callback: () => void) {

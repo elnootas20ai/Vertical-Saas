@@ -1518,7 +1518,7 @@ pluginRouter.post('/settings/smtp', (req, res) => {
   if (from !== undefined) current.from = String(from).trim();
 
   if (!current.from && current.user) {
-    current.from = `UDAR <${current.user}>`;
+    current.from = `Vertial <${current.user}>`;
   }
 
   _saveSmtpConfig(current);
@@ -1562,10 +1562,10 @@ pluginRouter.post('/settings/smtp/test', async (req, res) => {
       auth: { user: cfg.user, pass: cfg.pass },
     });
     await transporter.sendMail({
-      from: cfg.from || `UDAR <${cfg.user}>`,
+      from: cfg.from || `Vertial <${cfg.user}>`,
       to: to || cfg.user,
-      subject: 'Test SMTP · UDAR',
-      html: '<h2>Funciona!</h2><p>La configuración SMTP de UDAR está correcta.</p>',
+      subject: 'Test SMTP · Vertial',
+      html: '<h2>Funciona!</h2><p>La configuración SMTP de Vertial está correcta.</p>',
     });
     res.json({ ok: true, sentTo: to || cfg.user });
   } catch (err) {

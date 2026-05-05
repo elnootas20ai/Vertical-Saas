@@ -1,4 +1,4 @@
-﻿# 📊 ANÁLISIS TÉCNICO: ARQUITECTURA PDV, STOCK Y CATÁLOGO
+# 📊 ANÁLISIS TÉCNICO: ARQUITECTURA PDV, STOCK Y CATÁLOGO
 
 **Sistema:** Vertial - SaaS B2B Multiempresa y Multivertical  
 **Fecha:** 17 de enero de 2025  
@@ -284,7 +284,7 @@ interface Brand {
 
 **Uso actual de Marcas:**
 - Organizar productos bajo nombres comerciales diferentes
-- Ejemplo: "UDAR Premium", "UDAR Classic", "UDAR Gourmet"
+- Ejemplo: "Vertial Premium", "Vertial Classic", "Vertial Gourmet"
 - Útil para empresas multimarca o franquicias
 - **PERO** la marca es global, no por PDV
 

@@ -304,7 +304,7 @@ export function TeamChat() {
     );
   }, []);
 
-  const token = useMemo(() => localStorage.getItem('udar_access_token'), []);
+  const token = useMemo(() => localStorage.getItem('vertial_access_token'), []);
 
   const sseHandlers = useMemo(
     () => ({
