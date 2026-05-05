@@ -60,7 +60,7 @@ export function QAIndex() {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-2 mb-6">
             <div className="w-12 h-12 bg-[#0f1419] rounded-lg" />
-            <span className="text-3xl font-semibold">Udar Edge</span>
+            <span className="text-3xl font-semibold">Vertial</span>
           </div>
           <h1 className="text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
             Sistema de QA

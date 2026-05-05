@@ -4,7 +4,7 @@ const items: QAItem[] = [
   // Layout Components
   {
     module: 'SAAS__ Layout - Sidebar',
-    feature: 'Logo Udar Edge visible',
+    feature: 'Logo Vertial visible',
     status: 'ok'
   },
   {

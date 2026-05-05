@@ -17,7 +17,7 @@ export function FinalQA() {
           </h1>
           
           <p className="text-xl text-gray-600 dark:text-gray-400 mb-8">
-            UDAR EDGE es ahora un prototipo 100% navegable y coherente
+            Vertial es ahora un prototipo 100% navegable y coherente
           </p>
 
           <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 mb-8">
@@ -85,7 +85,7 @@ export function FinalQA() {
 
           <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Prototipo creado siguiendo las especificaciones de UDAR EDGE<br />
+              Prototipo creado siguiendo las especificaciones de Vertial<br />
               Siguiendo patrones de UX/UI + QA de Figma
             </p>
           </div>

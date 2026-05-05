@@ -15,7 +15,7 @@ const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '').trim();
 const ADMIN_FIRST_NAME = String(process.env.ADMIN_FIRST_NAME || 'Admin').trim();
 const ADMIN_LAST_NAME = String(process.env.ADMIN_LAST_NAME || 'Udar').trim();
-const ADMIN_COMPANY = String(process.env.ADMIN_COMPANY || 'UDAR Edge').trim();
+const ADMIN_COMPANY = String(process.env.ADMIN_COMPANY || 'Vertial').trim();
 const ACCOUNTS_DB = 'accounts';
 
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {

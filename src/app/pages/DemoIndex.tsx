@@ -54,7 +54,7 @@ export function DemoIndex() {
     {
       id: 'project',
       title: 'Resumen del Proyecto',
-      description: 'Vista general completa de UDAR EDGE',
+      description: 'Vista general completa de Vertial',
       icon: <Zap className="w-8 h-8" />,
       color: 'from-gray-700 to-gray-900',
       path: '/project-summary',
@@ -70,7 +70,7 @@ export function DemoIndex() {
             <Home className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-4">
-            UDAR EDGE - Demos
+            Vertial - Demos
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400">
             Prototipo completo para compraventas de coches en España

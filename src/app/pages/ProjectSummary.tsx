@@ -73,7 +73,7 @@ export function ProjectSummary() {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-3 mb-6">
             <div className="w-16 h-16 bg-[#0f1419] rounded-xl shadow-lg" />
-            <h1 className="text-5xl font-bold text-gray-900 dark:text-gray-100">Udar Edge</h1>
+            <h1 className="text-5xl font-bold text-gray-900 dark:text-gray-100">Vertial</h1>
           </div>
           <div className="inline-flex items-center gap-2 bg-green-100 text-green-800 px-4 py-2 rounded-full mb-4">
             <CheckCircle className="w-5 h-5" />

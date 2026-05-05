@@ -63,7 +63,7 @@ export function SubscriptionDemo() {
             Sistema de Suscripción
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400 mb-6">
-            Gestión completa de estados y facturación para UDAR EDGE
+            Gestión completa de estados y facturación para Vertial
           </p>
           <div className="flex gap-4 justify-center flex-wrap">
             <WEB__Button
