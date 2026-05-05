@@ -1113,7 +1113,7 @@ function BackupTab() {
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(null);
   const [history, setHistory] = useState<BackupHistoryEntry[]>(() => {
-    try { return JSON.parse(localStorage.getItem('udar_backup_history_v2') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('vertial_backup_history_v2') || '[]'); } catch { return []; }
   });
   const [importProgress, setImportProgress] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1121,7 +1121,7 @@ function BackupTab() {
   const addHistory = useCallback((entry: BackupHistoryEntry) => {
     const next = [entry, ...history].slice(0, 30);
     setHistory(next);
-    localStorage.setItem('udar_backup_history_v2', JSON.stringify(next));
+    localStorage.setItem('vertial_backup_history_v2', JSON.stringify(next));
   }, [history]);
 
   const loadSummary = useCallback(async () => {
@@ -1350,7 +1350,7 @@ function BackupTab() {
             <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Clock className="w-4 h-4" />Historial de operaciones</h3>
             <button
               type="button"
-              onClick={() => { setHistory([]); localStorage.removeItem('udar_backup_history_v2'); }}
+              onClick={() => { setHistory([]); localStorage.removeItem('vertial_backup_history_v2'); }}
               className="text-xs text-gray-400 hover:text-red-600 transition-colors"
             >
               Limpiar

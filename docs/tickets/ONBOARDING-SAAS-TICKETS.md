@@ -31,7 +31,7 @@
 | Modal con 7 pasos fijos (Bienvenida → Primera venta → Listo) | Funcional |
 | Navegación por pasos con dots y progress bar | Funcional |
 | Redirige a rutas relevantes (settings, clients, catalog, sales) | Funcional |
-| Persistencia en `localStorage` (`udar_onboarding_completed`) | Funcional |
+| Persistencia en `localStorage` (`vertial_onboarding_completed`) | Funcional |
 | Pasos dinámicos según vertical | **NO** — siempre muestra los mismos 7 pasos |
 | Pasos condicionales según módulos contratados (TPV, stock, CRM) | **NO** |
 | Persistencia en backend | **NO** — solo `localStorage` |

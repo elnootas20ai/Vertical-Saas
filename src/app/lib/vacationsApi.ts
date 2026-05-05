@@ -11,7 +11,7 @@ function getApiBase() {
 }
 
 function getHeaders(): Record<string, string> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('udar_access_token') : null;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = `Bearer ${token}`;
   if (env.VITE_COUCHDB_URL) h['x-couch-url'] = env.VITE_COUCHDB_URL;
@@ -20,7 +20,7 @@ function getHeaders(): Record<string, string> {
   return h;
 }
 
-const DB = (env.VITE_COUCHDB_DB || 'udar') + '-vacations';
+const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-vacations';
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBase()}${path}`, {

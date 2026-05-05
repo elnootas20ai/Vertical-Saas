@@ -42,8 +42,8 @@ interface ActivationChecklistContextType {
 
 const ActivationChecklistContext = createContext<ActivationChecklistContextType | undefined>(undefined);
 
-const DISMISSED_KEY = 'udar_activation_dismissed';
-const IN_PROGRESS_KEY = 'udar_onboarding_in_progress_step';
+const DISMISSED_KEY = 'vertial_activation_dismissed';
+const IN_PROGRESS_KEY = 'vertial_onboarding_in_progress_step';
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 

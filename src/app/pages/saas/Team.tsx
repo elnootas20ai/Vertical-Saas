@@ -181,7 +181,7 @@ const SKIN_PRESETS: AgentSkin[] = [
   },
 ];
 
-const SKINS_STORAGE_KEY = 'udar_agent_skins';
+const SKINS_STORAGE_KEY = 'vertial_agent_skins';
 
 // ─── Animation System ─────────────────────────────────────────────────────────
 

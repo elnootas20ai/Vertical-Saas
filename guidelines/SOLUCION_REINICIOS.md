@@ -1,4 +1,4 @@
-﻿# Solución a Reinicios Constantes - Vertial
+# Solución a Reinicios Constantes - Vertial
 
 ## 🔧 Problema Identificado
 
@@ -53,12 +53,12 @@ const getStoredValue = <T,>(key: string, defaultValue: T): T => {
 
 // Estados inicializados desde localStorage
 const [currentSection, setCurrentSectionState] = useState<string>(() =>
-  getStoredValue('udar-current-section', 'dashboard')
+  getStoredValue('vertial-current-section', 'dashboard')
 );
 
 // Auto-persistir cambios
 useEffect(() => {
-  setStoredValue('udar-current-section', currentSection);
+  setStoredValue('vertial-current-section', currentSection);
 }, [currentSection]);
 ```
 
@@ -150,7 +150,7 @@ Si vuelves a experimentar reinicios, revisa:
 // Limpiar si es necesario:
 localStorage.clear();
 // O específicamente:
-localStorage.removeItem('udar-current-section');
+localStorage.removeItem('vertial-current-section');
 ```
 
 ### 3. **Hot Module Replacement**
@@ -168,14 +168,14 @@ localStorage.removeItem('udar-current-section');
 ## 📝 Notas Técnicas
 
 ### Claves de localStorage Usadas:
-- `udar-current-user` - Usuario actual
-- `udar-current-company` - Empresa seleccionada
-- `udar-view-mode` - Modo de vista (single/global)
-- `udar-current-section` - Sección de navegación
-- `udar-user-role` - Rol del usuario (gerente/trabajador)
+- `vertial-current-user` - Usuario actual
+- `vertial-current-company` - Empresa seleccionada
+- `vertial-view-mode` - Modo de vista (single/global)
+- `vertial-current-section` - Sección de navegación
+- `vertial-user-role` - Rol del usuario (gerente/trabajador)
 
-### Prefix "udar-":
-Se usa el prefijo `udar-` para evitar conflictos con otras apps en el mismo dominio.
+### Prefijo "vertial-":
+Se usa el prefijo `vertial-` para evitar conflictos con otras apps en el mismo dominio.
 
 ### Compatibilidad:
 - ✅ Todos los navegadores modernos

@@ -13,7 +13,7 @@ function normalizeDbName(value) {
     .replace(/^-+|-+$/g, '');
 }
 
-const DB_BASE = process.env.VITE_COUCHDB_DB || 'udar';
+const DB_BASE = process.env.VITE_COUCHDB_DB || 'vertial';
 const VEHICLES_DB = 'vehicles';
 const ACCOUNTS_DB = 'accounts';
 const LEADS_DB = normalizeDbName(process.env.VITE_CRM_LEADS_DB || `${DB_BASE}-leads`);

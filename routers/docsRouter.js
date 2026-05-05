@@ -16,7 +16,7 @@ const openApiSpec = {
 Todas las rutas bajo \`/api/v1/\` requieren un **API Token** de tipo Bearer.
 
 \`\`\`
-Authorization: Bearer udar_sk_xxxxxxxxxxxxxxxx
+Authorization: Bearer vertial_sk_xxxxxxxxxxxxxxxx
 \`\`\`
 
 Los tokens se generan desde **Ajustes → API Tokens** en la aplicación.
@@ -29,7 +29,7 @@ Los tokens se generan desde **Ajustes → API Tokens** en la aplicación.
 ## Webhooks salientes
 
 Configura URLs de destino en **Ajustes → Webhooks** para recibir eventos en tiempo real.  
-Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verificar la autenticidad.
+Cada envío incluye la cabecera \`X-Vertial-Signature\` con HMAC-SHA256 para verificar la autenticidad.
 `,
     contact: {
       name: 'Soporte Vertial',
@@ -55,7 +55,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
       bearerAuth: {
         type: 'http',
         scheme: 'bearer',
-        bearerFormat: 'API Token (udar_sk_...)',
+        bearerFormat: 'API Token (vertial_sk_...)',
         description: 'Token de API generado en Ajustes → API Tokens',
       },
     },
@@ -242,7 +242,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
           id: { type: 'string', example: 'wh_abc123' },
           userId: { type: 'string' },
           name: { type: 'string', example: 'Notificar n8n leads' },
-          url: { type: 'string', format: 'uri', example: 'https://n8n.mi-empresa.com/webhook/udar' },
+          url: { type: 'string', format: 'uri', example: 'https://n8n.mi-empresa.com/webhook/vertial' },
           events: {
             type: 'array',
             items: {
@@ -260,7 +260,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
           },
           secret: {
             type: 'string',
-            description: 'Secreto HMAC para verificar la firma X-Udar-Signature',
+            description: 'Secreto HMAC para verificar la firma X-Vertial-Signature',
           },
           active: { type: 'boolean', example: true },
           createdAt: { type: 'string', format: 'date-time' },
@@ -273,7 +273,7 @@ Cada envío incluye la cabecera \`X-Udar-Signature\` con HMAC-SHA256 para verifi
         required: ['name', 'url', 'userId'],
         properties: {
           name: { type: 'string', example: 'Notificar n8n leads' },
-          url: { type: 'string', format: 'uri', example: 'https://n8n.mi-empresa.com/webhook/udar' },
+          url: { type: 'string', format: 'uri', example: 'https://n8n.mi-empresa.com/webhook/vertial' },
           userId: { type: 'string' },
           events: {
             type: 'array',

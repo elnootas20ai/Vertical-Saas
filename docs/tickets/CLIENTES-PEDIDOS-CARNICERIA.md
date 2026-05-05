@@ -24,13 +24,13 @@
 
 | Sistema | Ubicación | BD |
 |---|---|---|
-| Modelo `client` | `services/couchdb.js` → `buildClientDocument` | CouchDB `udar-clients` |
+| Modelo `client` | `services/couchdb.js` → `buildClientDocument` | CouchDB `vertial-clients` |
 | CRUD completo | `controllers/clientsController.js` + `routers/clientsRouter.js` | 18 endpoints |
 | Detalle cliente | `getClientDetail` — resumen con ventas, documentos, actividad | CouchDB multi-BD |
-| Notas sobre cliente | `clientNotes` — CRUD completo incrustado | CouchDB `udar-clients` |
-| Promociones cliente | `clientPromotions` — CRUD completo | CouchDB `udar-clients` |
+| Notas sobre cliente | `clientNotes` — CRUD completo incrustado | CouchDB `vertial-clients` |
+| Promociones cliente | `clientPromotions` — CRUD completo | CouchDB `vertial-clients` |
 | CLV (Customer Lifetime Value) | `getClientCLV` — cálculo dinámico | CouchDB cruzado |
-| Duplicados y merge | `checkClientDuplicates` / `mergeClient` | CouchDB `udar-clients` |
+| Duplicados y merge | `checkClientDuplicates` / `mergeClient` | CouchDB `vertial-clients` |
 | Portal del cliente | `generateClientPortalToken` | JWT |
 | Actividad del cliente | `getClientActivity` — historial de interacciones | CouchDB |
 | Leads + pipeline | `leadsController.js`, `crmController.js` | CouchDB |
@@ -143,7 +143,7 @@ Crear un modelo ligero de cliente específico para carnicería que reutilice la 
      - `createdAt`, `updatedAt`
    - Función `sanitizeButcherClient` — validación y limpieza
 
-2. **BD:** Usar `getButcherDbName()` → `udar-butcher` (BD dedicada de la vertical, compartida con pedidos y ventas de carnicería)
+2. **BD:** Usar `getButcherDbName()` → `vertial-butcher` (BD dedicada de la vertical, compartida con pedidos y ventas de carnicería)
 
 3. **Funciones de consulta:**
    - `listButcherClientsByUser(req, userId)` — todos los clientes activos

@@ -15,7 +15,7 @@ const API_BASE = getApiBase();
 
 function getHeaders(): Record<string, string> {
   const token =
-    typeof localStorage !== 'undefined' ? localStorage.getItem('udar_access_token') : null;
+    typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;

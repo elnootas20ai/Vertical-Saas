@@ -15,7 +15,7 @@ function getApiBase() {
 }
 
 function authHeaders() {
-  const token = localStorage.getItem('udar_access_token') || '';
+  const token = localStorage.getItem('vertial_access_token') || '';
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 }
 

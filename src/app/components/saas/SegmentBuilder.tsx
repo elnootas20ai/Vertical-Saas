@@ -33,7 +33,7 @@ export interface SavedSegment {
   createdAt: string;
 }
 
-const STORAGE_KEY = 'udar-crm-segments';
+const STORAGE_KEY = 'vertial-crm-segments';
 
 // ─── Field Definitions ───────────────────────────────────────────────────────
 

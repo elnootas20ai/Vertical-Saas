@@ -79,7 +79,7 @@ interface OnboardingContextType {
   advanceStep: (stepIndex: number) => void;
 }
 
-const STORAGE_KEY = 'udar_onboarding_data';
+const STORAGE_KEY = 'vertial_onboarding_data';
 
 const initialData: OnboardingData = {
   completedStep: -1,

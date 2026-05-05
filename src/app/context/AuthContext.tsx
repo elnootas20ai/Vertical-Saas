@@ -123,10 +123,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function persistSession(nextUser: User | null) {
   if (nextUser) {
-    localStorage.setItem('udar_session_user', JSON.stringify(nextUser));
+    localStorage.setItem('vertial_session_user', JSON.stringify(nextUser));
     return;
   }
-  localStorage.removeItem('udar_session_user');
+  localStorage.removeItem('vertial_session_user');
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthTokens();
     });
 
-    const sessionUser = localStorage.getItem('udar_session_user');
+    const sessionUser = localStorage.getItem('vertial_session_user');
     if (!sessionUser) {
       setIsInitializing(false);
       return;

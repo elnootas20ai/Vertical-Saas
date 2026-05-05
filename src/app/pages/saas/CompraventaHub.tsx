@@ -77,7 +77,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'rendimiento', label: 'Rendimiento (gerente)', visible: true, managerOnly: true },
 ];
 
-const CONFIG_KEY = 'udar_compraventa_config_v1';
+const CONFIG_KEY = 'vertial_compraventa_config_v1';
 
 function loadConfig(scopeId?: string): WidgetConfig[] {
   try {

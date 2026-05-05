@@ -21,7 +21,7 @@ import { sendAppointmentReminderRequest } from '../../lib/crmApi';
 async function generatePortalLinkRequest(userId: string, clientId: string): Promise<string | null> {
   try {
     const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('udar_access_token') : null;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
@@ -47,7 +47,7 @@ function getClientApiBase(): string {
 
 function getClientApiHeaders(): Record<string, string> {
   const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('udar_access_token') : null;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;

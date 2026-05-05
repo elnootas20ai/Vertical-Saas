@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.udar.app',
+  appId: 'com.vertial.app',
   appName: 'Vertial',
   webDir: 'dist',
   server: {

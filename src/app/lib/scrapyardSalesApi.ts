@@ -30,7 +30,7 @@ const API_BASE = getApiBase();
 
 function getStoredUserId(): string {
   try {
-    const raw = window.localStorage.getItem('udar_session_user');
+    const raw = window.localStorage.getItem('vertial_session_user');
     if (!raw) return '';
     return (JSON.parse(raw) as { user_id?: string })?.user_id || '';
   } catch { return ''; }

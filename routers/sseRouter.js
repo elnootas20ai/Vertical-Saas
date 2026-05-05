@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { addSSEClient, removeSSEClient } from '../services/sseService.js';
 
 const sseRouter = Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'udar-dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
 
 /**
  * GET /api/sse

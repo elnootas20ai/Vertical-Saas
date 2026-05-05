@@ -28,7 +28,7 @@ const API_BASE = getApiBase();
 function getStoredSessionUserId(): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem('udar_session_user');
+    const raw = window.localStorage.getItem('vertial_session_user');
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { user_id?: string };
     return parsed?.user_id || null;

@@ -20,7 +20,11 @@
     "cap:add:ios": "npx cap add ios",
     "cap:update": "npx cap update",
     "monitor": "node scripts/monitor.mjs",
-    "couch:check": "node scripts/verify-couch.mjs"
+    "couch:check": "node scripts/verify-couch.mjs",
+    "deploy:frontend": "node scripts/deploy-frontend.mjs",
+    "deploy:backend": "node scripts/deploy-backend.mjs",
+    "deploy:diagnose": "node scripts/remote-diagnose.mjs",
+    "deploy:fix-dist": "node scripts/remote-fix-dist-perms.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

@@ -443,7 +443,7 @@ La ventana de Planificación Horaria ha pasado de ser una herramienta funcional 
 4. **Acelera tareas repetitivas** en un 80%
 5. **Proporciona feedback constante** al usuario
 
-**UDAR 360 ahora tiene una UX de planificación horaria comparable a los mejores SaaS del mercado** 🚀
+**Vertial ahora tiene una UX de planificación horaria comparable a los mejores SaaS del mercado** 🚀
 
 ---
 

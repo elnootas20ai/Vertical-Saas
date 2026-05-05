@@ -2,7 +2,7 @@
 
 ## Contexto General
 
-El módulo de Horarios está diseñado para gestionar la planificación de turnos de trabajadores en UDAR 360, un SaaS B2B multiempresa y multivertical.
+El módulo de Horarios está diseñado para gestionar la planificación de turnos de trabajadores en Vertial, un SaaS B2B multiempresa y multivertical.
 
 ## Información Importante para el Programador
 
@@ -141,4 +141,4 @@ incidents (
 
 **Última actualización**: Enero 2025  
 **Versión**: 1.0  
-**Desarrollado para**: UDAR 360 - SaaS B2B Multiempresa
+**Desarrollado para**: Vertial - SaaS B2B Multiempresa

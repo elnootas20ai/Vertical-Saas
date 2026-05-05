@@ -44,7 +44,7 @@ const BusinessContext = createContext<BusinessContextType | undefined>(undefined
 
 function getStoredBusinessId(userId: string): string | null {
   try {
-    return localStorage.getItem(`udar_current_business:${userId}`);
+    return localStorage.getItem(`vertial_current_business:${userId}`);
   } catch {
     return null;
   }
@@ -53,9 +53,9 @@ function getStoredBusinessId(userId: string): string | null {
 function storeBusinessId(userId: string, businessId: string | null) {
   try {
     if (businessId) {
-      localStorage.setItem(`udar_current_business:${userId}`, businessId);
+      localStorage.setItem(`vertial_current_business:${userId}`, businessId);
     } else {
-      localStorage.removeItem(`udar_current_business:${userId}`);
+      localStorage.removeItem(`vertial_current_business:${userId}`);
     }
   } catch {
     // ignore

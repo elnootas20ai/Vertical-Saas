@@ -901,12 +901,12 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
     <tr><td align="center">
       <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
         <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">UDAR</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
           <span style="color:#9ca3af;font-size:14px;margin-left:12px;">· Solicitud de afiliado</span>
         </td></tr>
         <tr><td style="padding:32px 32px 0;">
           <h2 style="margin:0 0 8px;color:#111;font-size:20px;">Nueva solicitud de afiliado</h2>
-          <p style="color:#6b7280;margin:0 0 24px;font-size:14px;">Has recibido una nueva solicitud para unirse al programa de afiliados de UDAR.</p>
+          <p style="color:#6b7280;margin:0 0 24px;font-size:14px;">Has recibido una nueva solicitud para unirse al programa de afiliados de Vertial.</p>
         </td></tr>
         <tr><td style="padding:0 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">

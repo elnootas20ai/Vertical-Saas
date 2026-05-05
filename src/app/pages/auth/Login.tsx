@@ -2,14 +2,15 @@ import { useState, useCallback, useRef, useEffect, type FormEvent, type PointerE
 import { useNavigate } from 'react-router';
 import { Eye, Mail, Lock, ShieldAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from 'next-themes';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn } from '../../hooks/useGoogleSignIn';
 
-const CREDENTIALS_KEY = 'udar_saved_credentials';
+const CREDENTIALS_KEY = 'vertial_saved_credentials';
 
 function loadSavedCredentials(): { email: string; password: string } | null {
   try {
@@ -26,6 +27,7 @@ export function Login() {
   const navigate = useNavigate();
   const { login, googleLogin } = useAuth();
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
 
   const saved = loadSavedCredentials();
   const [formData, setFormData] = useState({
@@ -115,9 +117,10 @@ export function Login() {
 
   useEffect(() => {
     if (googleReady && googleBtnRef.current) {
-      renderButton(googleBtnRef.current, { theme: 'outline', size: 'large', text: 'signin_with' });
+      const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
+      renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signin_with' });
     }
-  }, [googleReady, renderButton]);
+  }, [googleReady, renderButton, resolvedTheme]);
 
   useEffect(() => {
     if (googleReady) {
@@ -137,7 +140,7 @@ export function Login() {
           {/* Header */}
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               {t('auth.login')}
@@ -235,8 +238,8 @@ export function Login() {
               </div>
             </div>
 
-            <div className="flex justify-center">
-              <div ref={googleBtnRef} className="min-h-[44px]" />
+            <div className="flex justify-center w-full">
+              <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
             </div>
             {!googleReady && !googleTimedOut && (
               <button

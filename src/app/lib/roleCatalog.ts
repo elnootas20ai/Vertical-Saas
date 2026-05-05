@@ -44,7 +44,7 @@ export interface CreateRoleInput {
 }
 
 export function getRoleCatalogStorageKey(scope = 'guest') {
-  return `udar-custom-roles:${scope}`;
+  return `vertial-custom-roles:${scope}`;
 }
 
 export function loadCustomRoles(scope = 'guest'): RoleDefinition[] {

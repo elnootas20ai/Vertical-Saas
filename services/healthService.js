@@ -59,7 +59,7 @@ const COUCH_TIMEOUT   = Number(process.env.HEALTH_COUCH_TIMEOUT_MS ?? 5000);
 
 // ── Databases to probe ────────────────────────────────────────────────────────
 function getKeyDbs() {
-  const prefix = (process.env.VITE_COUCHDB_DB || 'udar').replace(/\/+$/, '');
+  const prefix = (process.env.VITE_COUCHDB_DB || 'vertial').replace(/\/+$/, '');
   return [
     'accounts',
     'businesses',

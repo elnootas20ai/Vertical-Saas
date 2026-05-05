@@ -16,7 +16,7 @@ import 'dotenv/config';
 const COUCHDB_URL = process.env.COUCHDB_URL || 'http://localhost:5984';
 const COUCHDB_USER = process.env.COUCHDB_USER || '';
 const COUCHDB_PASSWORD = process.env.COUCHDB_PASSWORD || '';
-const DB_PREFIX = process.env.DB_PREFIX || 'udar';
+const DB_PREFIX = process.env.DB_PREFIX || 'vertial';
 const DB_NAME = `${DB_PREFIX}-delivery`;
 const DRY_RUN = !process.argv.includes('--apply');
 

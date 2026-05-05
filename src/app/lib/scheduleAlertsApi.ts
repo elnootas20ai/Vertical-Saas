@@ -310,7 +310,7 @@ export function generateAlerts(data: AlertGeneratorData): ScheduleAlert[] {
 
 // ─── Dismissed alerts (localStorage) ─────────────────────────────────────────
 
-const DISMISSED_KEY = 'udar_dismissed_alerts';
+const DISMISSED_KEY = 'vertial_dismissed_alerts';
 
 export function getDismissedAlertIds(): Set<string> {
   try {

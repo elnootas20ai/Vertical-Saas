@@ -448,7 +448,7 @@ Crear el componente de filtros que aparece debajo del header del centro operativ
    - **Responsive:** En móvil, la barra se convierte en un botón "Filtros (N activos)" que abre un sheet/drawer con todos los filtros apilados verticalmente
 
 2. **Persistencia de filtros:**
-   - Guardar filtros activos en `localStorage` con key `udar_delivery_ops_filters:${userId}:${businessId}`
+   - Guardar filtros activos en `localStorage` con key `vertial_delivery_ops_filters:${userId}:${businessId}`
    - Reflejar filtros en URL query params para deep linking: `?pdv=pdv_001&channel=glovo&slot=lunch&date=2026-04-14`
    - Al entrar con query params, priorizar sobre localStorage
 
@@ -907,7 +907,7 @@ Implementar la lógica que muestra u oculta widgets según la configuración del
 
 4. **Personalización manual (fase 2):**
    - Permitir al gerente ocultar/mostrar widgets adicionales (como `PersonalizePanel` del Dashboard)
-   - Persistir en `localStorage` con key `udar_delivery_ops_widgets:${userId}:${businessId}`
+   - Persistir en `localStorage` con key `vertial_delivery_ops_widgets:${userId}:${businessId}`
 
 **Criterios de aceptación:**
 - Los widgets se muestran/ocultan correctamente según la configuración

@@ -37,7 +37,7 @@ function getCouchHeaders() {
 
 const API_BASE = getApiBase();
 export const PAYROLL_DB_NAME = normalizeDbName(
-  env.VITE_PAYROLL_DB || `${env.VITE_COUCHDB_DB || 'udar'}-payroll`,
+  env.VITE_PAYROLL_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-payroll`,
 );
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -22,7 +22,7 @@ import { broadcastToUser } from '../services/sseService.js';
 import { sendPushToUser } from '../services/pushService.js';
 import logger from '../services/logger.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'udar-dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
 const APP_URL = process.env.VITE_APP_URL || process.env.APP_URL || 'http://localhost:5173';
 
 function badRequest(res, error) {

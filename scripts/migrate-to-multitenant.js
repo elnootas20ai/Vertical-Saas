@@ -27,7 +27,7 @@
  *     COUCHDB_URL
  *     COUCHDB_USER
  *     COUCHDB_PASSWORD
- *     VITE_COUCHDB_DB  (prefijo legado, p.ej. "udar")
+ *     VITE_COUCHDB_DB  (prefijo de CouchDB, p.ej. "vertial")
  *
  * ══════════════════════════════════════════════════════════════════════════════
  * PASO SIGUIENTE TRAS LA MIGRACIÓN
@@ -53,7 +53,7 @@ import {
 const __filename  = fileURLToPath(import.meta.url);
 const __dirname   = path.dirname(__filename);
 const LOG_FILE    = path.resolve(__dirname, '../migration-log.json');
-const LEGACY_PREFIX = (process.env.COUCHDB_DB || 'udar').replace(/\/+$/, '');
+const LEGACY_PREFIX = (process.env.COUCHDB_DB || 'vertial').replace(/\/+$/, '');
 
 // ── CLI args ──────────────────────────────────────────────────────────────────
 const args     = process.argv.slice(2);

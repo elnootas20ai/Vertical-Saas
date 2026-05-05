@@ -15,7 +15,7 @@ function normalizeDbName(value) {
 }
 
 function getDbPrefix() {
-  return normalizeDbName(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'udar');
+  return normalizeDbName(process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial');
 }
 
 export function getSalaDbName() {

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { ChevronDown, Menu, X } from 'lucide-react';
-import { UdarLogo } from './UdarLogo';
+import { VertialLogo } from './VertialLogo';
 import { useModalClose } from '../hooks/useModalClose';
 
 export function Header() {
@@ -50,7 +50,7 @@ export function Header() {
               onClick={() => { navigate('/'); setMobileMenuOpen(false); }}
               className="flex items-center gap-2 hover:opacity-80 transition-opacity"
             >
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </button>
 
             {/* Desktop Navigation */}

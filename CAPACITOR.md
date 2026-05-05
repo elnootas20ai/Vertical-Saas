@@ -1,6 +1,6 @@
-# Udar — Capacitor (App Nativa)
+# Vertial — Capacitor (App nativa)
 
-Este documento describe cómo compilar y publicar la aplicación **Udar** como app nativa en **Android** (Google Play) e **iOS** (App Store) usando [Capacitor](https://capacitorjs.com/).
+Este documento describe cómo compilar y publicar la aplicación **Vertial** como app nativa en **Android** (Google Play) e **iOS** (App Store) usando [Capacitor](https://capacitorjs.com/).
 
 ---
 
@@ -130,7 +130,7 @@ El componente `CameraButton` (`src/app/components/saas/CameraButton.tsx`) encaps
 
 | Campo | Valor |
 |-------|-------|
-| App ID | `com.udar.app` |
-| Nombre | `Udar` |
+| App ID | `com.vertial.app` |
+| Nombre | `Vertial` |
 | Web Dir | `dist` |
 | Versión inicial | `1.0.0` |

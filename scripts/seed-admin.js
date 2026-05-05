@@ -68,7 +68,7 @@ async function main() {
     status: 'active',
     inviteStatus: 'accepted',
     invitedBy: '',
-    companyName: 'UDAR Edge',
+    companyName: 'Vertial Edge',
     onboardingCompleted: true,
     onboardingData: { source: 'seed' },
     provider: 'email',

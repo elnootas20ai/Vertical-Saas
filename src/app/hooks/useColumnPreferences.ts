@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 
-const STORAGE_PREFIX = 'udar_col_prefs_';
+const STORAGE_PREFIX = 'vertial_col_prefs_';
 
 export interface ColumnDef<T extends string = string> {
   id: T;

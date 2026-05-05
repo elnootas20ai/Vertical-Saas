@@ -10,7 +10,7 @@ interface CookiePreferences {
   preferences: boolean;
 }
 
-const STORAGE_KEY = 'udar_cookie_consent';
+const STORAGE_KEY = 'vertial_cookie_consent';
 const VERSION = 'v1';
 
 interface StoredConsent {

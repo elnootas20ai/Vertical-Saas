@@ -1,5 +1,5 @@
 # 🔍 AUDITORÍA DE COHERENCIA ENTRE PERFILES GERENTE Y TRABAJADOR
-## UDAR 360 - SaaS B2B Multiempresa y Multivertical
+## Vertial - SaaS B2B Multiempresa y Multivertical
 
 **Fecha:** 11 de enero de 2026
 **Versión:** 1.0
@@ -365,5 +365,5 @@ El sistema tiene una **base muy sólida** con buena coherencia en la mayoría de
 
 ---
 
-**Preparado por:** Asistente de Auditoría UDAR 360
+**Preparado por:** Asistente de Auditoría Vertial
 **Fecha:** 11 de enero de 2026

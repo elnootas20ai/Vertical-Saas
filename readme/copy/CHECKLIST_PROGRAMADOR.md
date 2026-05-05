@@ -1,4 +1,4 @@
-# ✅ CHECKLIST DEL PROGRAMADOR - UDAR 360
+# ✅ CHECKLIST DEL PROGRAMADOR - Vertial
 
 **Sprint de Integración Backend**  
 **Tiempo estimado:** 15-20 días

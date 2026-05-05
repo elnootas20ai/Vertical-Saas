@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Mail, RefreshCw, CheckCircle, AlertCircle, ArrowRight, Clock } from 'lucide-react';
-import { UdarLogo } from '../../components/UdarLogo';
+import { VertialLogo } from '../../components/VertialLogo';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useAuth } from '../../context/AuthContext';
 
@@ -106,7 +106,7 @@ export function VerifyEmailPending() {
         <div className="w-full max-w-md text-center">
           <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
             <div className="flex justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <div className="flex justify-center mb-6">
               <div className="w-12 h-12 border-4 border-gray-200 dark:border-gray-700 border-t-black rounded-full animate-spin" />
@@ -125,7 +125,7 @@ export function VerifyEmailPending() {
         <div className="w-full max-w-md text-center">
           <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
             <div className="flex justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <div className="flex justify-center mb-6">
               <CheckCircle className="w-16 h-16 text-green-500" />
@@ -147,7 +147,7 @@ export function VerifyEmailPending() {
         <div className="w-full max-w-md">
           <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
             <div className="flex justify-center mb-6">
-              <UdarLogo size="lg" />
+              <VertialLogo size="lg" />
             </div>
             <div className="flex justify-center mb-6">
               <AlertCircle className="w-16 h-16 text-red-500" />
@@ -213,7 +213,7 @@ export function VerifyEmailPending() {
       <div className="w-full max-w-md">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
           <div className="flex justify-center mb-6">
-            <UdarLogo size="lg" />
+            <VertialLogo size="lg" />
           </div>
 
           {/* Icono */}

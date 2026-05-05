@@ -60,9 +60,9 @@ async function sendWebhookRequest(webhook, event, data, retries = 2) {
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': 'Vertial-Webhooks/1.0',
-          'X-Udar-Event': event,
-          'X-Udar-Signature': signature,
-          'X-Udar-Webhook-Id': webhook._id || '',
+          'X-Vertial-Event': event,
+          'X-Vertial-Signature': signature,
+          'X-Vertial-Webhook-Id': webhook._id || '',
         },
         body: payload,
         signal: AbortSignal.timeout(8000),

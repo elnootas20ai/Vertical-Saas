@@ -37,7 +37,7 @@ function getCouchHeaders() {
 
 const API_BASE = getApiBase();
 export const DOCUMENTS_DB_NAME = normalizeDbName(
-  env.VITE_DOCUMENTS_DB || `${env.VITE_COUCHDB_DB || 'udar'}-documents`,
+  env.VITE_DOCUMENTS_DB || `${env.VITE_COUCHDB_DB || 'vertial'}-documents`,
 );
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -20,7 +20,7 @@ export interface DocumentTemplate {
   updatedAt: string;
 }
 
-export const DOCUMENT_TEMPLATE_STORAGE_KEY = 'udar-document-templates';
+export const DOCUMENT_TEMPLATE_STORAGE_KEY = 'vertial-document-templates';
 
 export const DOCUMENT_TEMPLATE_SCOPE_OPTIONS: { value: DocumentTemplateScope; label: string; helper: string }[] = [
   { value: 'global', label: 'General', helper: 'Disponible para cualquier flujo de la plataforma.' },

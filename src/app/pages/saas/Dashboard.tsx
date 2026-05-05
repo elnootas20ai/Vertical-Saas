@@ -72,8 +72,8 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'actividad',     label: 'Actividad reciente',     visible: true },
 ];
 
-const DASH_CONFIG_KEY = 'udar_dashboard_config_v2';
-const DASH_RUNTIME_CACHE_KEY = 'udar_dashboard_runtime_v1';
+const DASH_CONFIG_KEY = 'vertial_dashboard_config_v2';
+const DASH_RUNTIME_CACHE_KEY = 'vertial_dashboard_runtime_v1';
 const DASH_RUNTIME_TTL_MS = 90_000;
 
 function getDashboardConfigStorageKey(scopeId?: string): string {
@@ -497,17 +497,17 @@ const FUNNEL_STAGE_KEYS = [
 export function Dashboard() {
   const { currentBusiness, businesses } = useBusiness();
   const [generalView, setGeneralView] = useState(() => {
-    try { return localStorage.getItem('udar_dash_general') === '1'; } catch { return false; }
+    try { return localStorage.getItem('vertial_dash_general') === '1'; } catch { return false; }
   });
 
   useEffect(() => {
     const onGeneral = () => setGeneralView(true);
     const onBusiness = () => setGeneralView(false);
-    window.addEventListener('udar:layout-general', onGeneral);
-    window.addEventListener('udar:layout-business', onBusiness);
+    window.addEventListener('vertial:layout-general', onGeneral);
+    window.addEventListener('vertial:layout-business', onBusiness);
     return () => {
-      window.removeEventListener('udar:layout-general', onGeneral);
-      window.removeEventListener('udar:layout-business', onBusiness);
+      window.removeEventListener('vertial:layout-general', onGeneral);
+      window.removeEventListener('vertial:layout-business', onBusiness);
     };
   }, []);
 
@@ -515,12 +515,12 @@ export function Dashboard() {
 
   const goGeneral = useCallback(() => {
     setGeneralView(true);
-    try { localStorage.setItem('udar_dash_general', '1'); } catch { /* noop */ }
+    try { localStorage.setItem('vertial_dash_general', '1'); } catch { /* noop */ }
   }, []);
 
   const goBusiness = useCallback((_bid?: string) => {
     setGeneralView(false);
-    try { localStorage.setItem('udar_dash_general', '0'); } catch { /* noop */ }
+    try { localStorage.setItem('vertial_dash_general', '0'); } catch { /* noop */ }
   }, []);
 
   if (showGeneral) {

@@ -623,7 +623,7 @@ export function Quotes() {
       const host = window.location.hostname;
       const protocol = window.location.protocol.replace(':', '');
       const apiBase = env.VITE_API_URL || `${protocol}://${host}:${env.VITE_API_PORT || '3001'}`;
-      const token = localStorage.getItem('udar_access_token');
+      const token = localStorage.getItem('vertial_access_token');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
       if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;

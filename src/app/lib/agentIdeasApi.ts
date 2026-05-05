@@ -3,8 +3,8 @@
  * Persistencia en localStorage (por usuario).
  */
 
-const STORAGE_KEY_MESSAGES = 'udar_agent_ideas_messages';
-const STORAGE_KEY_PROGRESS = 'udar_agent_progress';
+const STORAGE_KEY_MESSAGES = 'vertial_agent_ideas_messages';
+const STORAGE_KEY_PROGRESS = 'vertial_agent_progress';
 
 export interface ChatMessage {
   id: string;
