@@ -8,8 +8,7 @@ node_modules/
 .pnp
 .pnp.js
 
-# Build / dist
-dist/
+# Build (dist se versiona para despliegue directo al VPS vía git pull)
 build/
 .vite/
 
