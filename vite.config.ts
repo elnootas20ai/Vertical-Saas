@@ -3,11 +3,23 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+function devApiProxyTarget(env: Record<string, string>) {
+  const raw =
+    (env.VITE_API_URL || '').trim() ||
+    `${env.VITE_API_PROTOCOL || 'http'}://${env.VITE_API_HOST || 'localhost'}:${env.VITE_API_PORT || '3001'}`;
+  try {
+    const u = new URL(raw.replace(/\/+$/, ''));
+    // En Windows, `localhost` puede resolver a ::1 y el proxy falla si Express solo escucha en IPv4.
+    if (u.hostname === 'localhost') u.hostname = '127.0.0.1';
+    return u.origin;
+  } catch {
+    return raw.replace(/\/+$/, '');
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const apiTarget =
-    env.VITE_API_URL ||
-    `${env.VITE_API_PROTOCOL || 'http'}://${env.VITE_API_HOST || 'localhost'}:${env.VITE_API_PORT || '3001'}`;
+  const apiTarget = devApiProxyTarget(env);
 
   return {
     server: {
@@ -30,6 +42,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          secure: false,
         },
       },
     },
