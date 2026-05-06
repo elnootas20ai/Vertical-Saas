@@ -2,18 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../../context/AppContext';
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 import {
   AlertTriangle, ShieldCheck, FileText, ClipboardList,
   ScanLine, ChevronRight, X, RefreshCw,
 } from 'lucide-react';
 
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-function _apiBase() {
-  if (_env.VITE_API_URL) return _env.VITE_API_URL;
-  const host = _env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const proto = _env.VITE_API_PROTOCOL || (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  return `${proto}://${host}:${_env.VITE_API_PORT || '3001'}`;
-}
 function _couchHeaders() {
   const h: Record<string, string> = {};
   if (_env.VITE_COUCHDB_URL) h['x-couch-url'] = _env.VITE_COUCHDB_URL;
@@ -60,7 +55,7 @@ export function DocumentAlertsWidget() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const res = await authFetch(`${_apiBase()}/api/documents/${user.id}/alerts`, {
+      const res = await authFetch(`${getApiBase()}/api/documents/${user.id}/alerts`, {
         headers: { ...getAuthHeaders(), ..._couchHeaders() },
       });
       const data = await res.json();

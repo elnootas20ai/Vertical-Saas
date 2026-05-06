@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { getApiBase } from '../lib/apiBase';
 
 export type SSEEventHandler = (data: unknown) => void;
 export type SSEEventMap = Record<string, SSEEventHandler>;
@@ -20,26 +21,9 @@ const RECONNECT_INITIAL_MS = 3_000;
 const RECONNECT_MAX_MS = 60_000;
 
 function getSseUrl(token: string, businessId?: string | null): string {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-  const browserHost =
-    typeof window !== 'undefined' && window.location.hostname
-      ? window.location.hostname
-      : 'localhost';
-
-  const protocol =
-    env.VITE_API_PROTOCOL ||
-    (typeof window !== 'undefined' && window.location.protocol
-      ? window.location.protocol.replace(':', '')
-      : 'http');
-
-  const host = env.VITE_API_HOST || browserHost;
-  const port = env.VITE_API_PORT || '3001';
-  const base = `${protocol}://${host}:${port}`;
-
+  const base = getApiBase();
   const params = new URLSearchParams({ token });
   if (businessId) params.set('businessId', businessId);
-
   return `${base}/api/sse?${params.toString()}`;
 }
 

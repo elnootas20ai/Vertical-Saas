@@ -74,6 +74,7 @@ import {
   type PlanFeature,
 } from '../../lib/planPricingApi';
 import { MoneiPaymentsTab } from './MoneiPaymentsTab';
+import { getApiBase } from '../../lib/apiBase';
 import {
   listAffiliates,
   updateAffiliateStatus,
@@ -93,13 +94,6 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function getApiBase() {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-  const host = env.VITE_API_HOST || window.location.hostname;
-  const port = env.VITE_API_PORT || '3001';
-  const protocol = window.location.protocol.replace(':', '');
-  return `${protocol}://${host}:${port}`;
-}
 
 const API_BASE = getApiBase();
 

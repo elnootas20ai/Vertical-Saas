@@ -31,14 +31,8 @@ import {
 } from 'lucide-react';
 
 import { getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 
-function getApiBase() {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-  const host = env.VITE_API_HOST || window.location.hostname;
-  const port = env.VITE_API_PORT || '3001';
-  const protocol = window.location.protocol.replace(':', '');
-  return `${protocol}://${host}:${port}`;
-}
 
 const API = getApiBase();
 

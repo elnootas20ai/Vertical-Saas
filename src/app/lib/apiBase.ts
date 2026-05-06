@@ -4,22 +4,30 @@ function trimTrailingSlash(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
+/**
+ * Prefijo para montar URLs tipo `${getApiBase()}/api/...`.
+ * - `VITE_API_URL` vacío o `/api`: mismo origen (Nginx / proxy Vite → sin puerto en producción).
+ * - URL absoluta `http(s)://...`: API en otro host (dev contra backend directo u otro dominio).
+ */
 export function getApiBase(): string {
-  if (env.VITE_API_URL) return trimTrailingSlash(env.VITE_API_URL);
+  const raw = (env.VITE_API_URL ?? '').trim();
 
-  // En producción, lo más robusto es usar same-origin (sin CORS) y llamar a `/api/*`.
-  // Esto evita "failed to fetch" por DNS/SSL/mixed-content cuando el frontend y backend
-  // están detrás del mismo dominio (reverse proxy).
-  if (typeof window !== 'undefined') return '';
+  if (!raw || raw === '/api') {
+    return '';
+  }
 
-  const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const protocol =
-    env.VITE_API_PROTOCOL ||
-    (typeof window !== 'undefined' && window.location.protocol
-      ? window.location.protocol.replace(':', '')
-      : 'http');
-  const host = env.VITE_API_HOST || browserHost;
-  const port = env.VITE_API_PORT || '3001';
-  return trimTrailingSlash(`${protocol}://${host}:${port}`);
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    try {
+      const u = new URL(raw.replace(/\/+$/, ''));
+      const pathname = u.pathname.replace(/\/+$/, '');
+      if (!pathname || pathname === '/') {
+        return trimTrailingSlash(u.origin);
+      }
+      return trimTrailingSlash(`${u.origin}${u.pathname}`);
+    } catch {
+      return trimTrailingSlash(raw);
+    }
+  }
+
+  return trimTrailingSlash(raw.startsWith('/') ? raw : `/${raw}`);
 }
-

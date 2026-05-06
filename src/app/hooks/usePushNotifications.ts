@@ -1,14 +1,8 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { getApiBase } from '../lib/apiBase';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
-function getApiBase(): string {
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const host = env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const protocol = env.VITE_API_PROTOCOL || (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  const port = env.VITE_API_PORT || '3001';
-  return `${protocol}://${host}:${port}`;
-}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);

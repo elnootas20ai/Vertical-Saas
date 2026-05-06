@@ -17,6 +17,7 @@ import { LEAD_STATUS_TOKEN, type LeadStatus } from '../../components/saas/Design
 import { listUsersRequest, getAuthHeaders, type AuthUser } from '../../lib/authApi';
 import { getDniOrNieError } from '../../lib/dniCifValidator';
 import { sendAppointmentReminderRequest } from '../../lib/crmApi';
+import { getApiBase } from '../../lib/apiBase';
 
 async function generatePortalLinkRequest(userId: string, clientId: string): Promise<string | null> {
   try {
@@ -27,8 +28,7 @@ async function generatePortalLinkRequest(userId: string, clientId: string): Prom
     if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
     if (env.VITE_COUCHDB_USER) headers['x-couch-user'] = env.VITE_COUCHDB_USER;
     if (env.VITE_COUCHDB_PASSWORD) headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-    const apiPort = env.VITE_API_PORT || '3001';
-    const apiBase = env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+    const apiBase = getApiBase();
     const res = await fetch(`${apiBase}/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}/portal-token`, {
       method: 'POST', headers,
     });
@@ -39,10 +39,7 @@ async function generatePortalLinkRequest(userId: string, clientId: string): Prom
   } catch { return null; }
 }
 function getClientApiBase(): string {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const apiPort = env.VITE_API_PORT || '3001';
-  return `${window.location.protocol}//${window.location.hostname}:${apiPort}`;
+  return getApiBase();
 }
 
 function getClientApiHeaders(): Record<string, string> {

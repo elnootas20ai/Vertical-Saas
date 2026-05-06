@@ -4,16 +4,25 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 function devApiProxyTarget(env: Record<string, string>) {
-  const raw =
-    (env.VITE_API_URL || '').trim() ||
-    `${env.VITE_API_PROTOCOL || 'http'}://${env.VITE_API_HOST || 'localhost'}:${env.VITE_API_PORT || '3001'}`;
+  const raw = (env.VITE_API_URL || '').trim();
+  // Rutas relativas (/api, etc.): el proxy debe hablar con el backend real en LAN.
+  if (!raw || raw === '/api' || (raw.startsWith('/') && !raw.startsWith('//'))) {
+    const protocol = env.VITE_API_PROTOCOL || 'http';
+    let host = env.VITE_API_HOST || 'localhost';
+    const port = env.VITE_API_PORT || '3001';
+    if (host === 'localhost') host = '127.0.0.1';
+    return `${protocol}://${host}:${port}`;
+  }
   try {
     const u = new URL(raw.replace(/\/+$/, ''));
-    // En Windows, `localhost` puede resolver a ::1 y el proxy falla si Express solo escucha en IPv4.
     if (u.hostname === 'localhost') u.hostname = '127.0.0.1';
     return u.origin;
   } catch {
-    return raw.replace(/\/+$/, '');
+    const protocol = env.VITE_API_PROTOCOL || 'http';
+    let host = env.VITE_API_HOST || '127.0.0.1';
+    const port = env.VITE_API_PORT || '3001';
+    if (host === 'localhost') host = '127.0.0.1';
+    return `${protocol}://${host}:${port}`;
   }
 }
 

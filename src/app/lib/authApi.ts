@@ -1,3 +1,4 @@
+import { getApiBase } from './apiBase';
 // S-07: Sesión activa (dispositivo)
 export interface ActiveSession {
   sessionId: string;
@@ -274,20 +275,6 @@ interface ApiEnvelope<T> {
 
 // ── Configuración base de la API ──────────────────────────────────────────────
 
-function getApiBase(): string {
-  const env = import.meta.env;
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  if (typeof window !== 'undefined') return '';
-  const browserHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const protocol =
-    env.VITE_API_PROTOCOL ||
-    (typeof window !== 'undefined' && window.location.protocol
-      ? window.location.protocol.replace(':', '')
-      : 'http');
-  const host = env.VITE_API_HOST || browserHost;
-  const port = env.VITE_API_PORT || '3001';
-  return `${protocol}://${host}:${port}`;
-}
 
 const API_BASE = getApiBase();
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router';
+import { getApiBase } from '../../lib/apiBase';
 import {
   Wrench,
   Car,
@@ -71,14 +72,6 @@ const STEPS = [
 
 // ─── Public API call (no auth) ────────────────────────────────────────────────
 
-function getApiBase() {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const protocol = typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http';
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const port = env.VITE_API_PORT || '3001';
-  return `${protocol}://${host}:${port}`;
-}
 
 async function fetchPublicWorkOrder(workOrderId: string): Promise<PublicWorkOrder | null> {
   try {

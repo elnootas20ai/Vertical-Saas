@@ -8,6 +8,7 @@ import { SAAS__SendToAgencyModal } from '../../components/design-system/SAAS__Se
 import { SAAS__EditDocumentModal } from '../../components/design-system/SAAS__EditDocumentModal';
 import { DOCUMENTS_DB_NAME } from '../../lib/documentsApi';
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 import {
   ArrowLeft, FileText, Download, Edit2, Trash2, Send,
   CheckCircle, Clock, User, Car, Calendar, History,
@@ -15,12 +16,6 @@ import {
 } from 'lucide-react';
 
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-function _apiBase() {
-  if (_env.VITE_API_URL) return _env.VITE_API_URL;
-  const host = _env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const proto = _env.VITE_API_PROTOCOL || (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  return `${proto}://${host}:${_env.VITE_API_PORT || '3001'}`;
-}
 function _couchHeaders() {
   const h: Record<string, string> = {};
   if (_env.VITE_COUCHDB_URL) h['x-couch-url'] = _env.VITE_COUCHDB_URL;
@@ -117,7 +112,7 @@ export function DocumentDetail() {
 
     const docId = encodeURIComponent(raw._id);
     const dbName = encodeURIComponent(DOCUMENTS_DB_NAME);
-    authFetch(`${_apiBase()}/api/couch/doc/${dbName}/${docId}`, {
+    authFetch(`${getApiBase()}/api/couch/doc/${dbName}/${docId}`, {
       headers: { ...getAuthHeaders(), ..._couchHeaders() },
     })
       .then(r => r.json())
@@ -129,7 +124,7 @@ export function DocumentDetail() {
             setAttachment({
               name: attachName,
               contentType: meta.content_type || 'application/octet-stream',
-              url: `${_apiBase()}/api/couch/attachment/${dbName}/${docId}/${encodeURIComponent(attachName)}`,
+              url: `${getApiBase()}/api/couch/attachment/${dbName}/${docId}/${encodeURIComponent(attachName)}`,
             });
           }
         }

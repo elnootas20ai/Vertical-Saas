@@ -60,6 +60,7 @@ import {
   type QuoteRecord,
   type QuoteStatus,
 } from '../../lib/quotesApi';
+import { getApiBase } from '../../lib/apiBase';
 import { createSaleInCouch } from '../../lib/salesApi';
 import { createClientInvoiceRequest } from '../../lib/clientInvoicesApi';
 import { generateInvoicePdf } from '../../lib/invoicePdfGenerator';
@@ -620,9 +621,7 @@ export function Quotes() {
     }
     try {
       const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-      const host = window.location.hostname;
-      const protocol = window.location.protocol.replace(':', '');
-      const apiBase = env.VITE_API_URL || `${protocol}://${host}:${env.VITE_API_PORT || '3001'}`;
+      const apiBase = getApiBase();
       const token = localStorage.getItem('vertial_access_token');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;

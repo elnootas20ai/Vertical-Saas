@@ -4,6 +4,7 @@ import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { createVerticalDashboardApi, type VerticalDashboardData } from '../../../lib/verticalApiFactory';
 import { authFetch, getAuthHeaders } from '../../../lib/authApi';
+import { getApiBase } from '../../../lib/apiBase';
 import {
   Car, Package, TrendingUp, FileX, LayoutGrid, Truck,
   ShoppingCart, AlertTriangle, Clock, ClipboardCheck,
@@ -13,12 +14,6 @@ import {
 } from 'lucide-react';
 
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-function _apiBase() {
-  if (_env.VITE_API_URL) return _env.VITE_API_URL;
-  const host = _env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const proto = _env.VITE_API_PROTOCOL || (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  return `${proto}://${host}:${_env.VITE_API_PORT || '3001'}`;
-}
 function _couchHeaders() {
   const h: Record<string, string> = {};
   if (_env.VITE_COUCHDB_URL) h['x-couch-url'] = _env.VITE_COUCHDB_URL;
@@ -82,7 +77,7 @@ export function ScrapyardDashboard({ onSelectGeneral }: ScrapyardDashboardProps)
 
   useEffect(() => {
     if (!userId) return;
-    authFetch(`${_apiBase()}/api/documents/${userId}/alerts`, {
+    authFetch(`${getApiBase()}/api/documents/${userId}/alerts`, {
       headers: { ...getAuthHeaders(), ..._couchHeaders() },
     })
       .then(r => r.json())

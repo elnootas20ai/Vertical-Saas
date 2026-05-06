@@ -1,16 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle, Car, User, Phone, Mail, MessageSquare, Send, AlertCircle } from 'lucide-react';
+import { getApiBase } from '../../lib/apiBase';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
-function getApiBase() {
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const protocol = typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http';
-  const host = env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const port = env.VITE_API_PORT || '3001';
-  return `${protocol}://${host}:${port}`;
-}
 
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};

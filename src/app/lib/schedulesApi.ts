@@ -1,14 +1,6 @@
+import { getApiBase } from './apiBase';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
-function getApiBase() {
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const host =
-    typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
-  const protocol =
-    env.VITE_API_PROTOCOL ||
-    (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  return `${protocol}://${host}:${env.VITE_API_PORT || '3001'}`;
-}
 
 function getHeaders(): Record<string, string> {
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;

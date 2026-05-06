@@ -11,6 +11,7 @@ import { SAAS__EditDocumentModal } from '../../components/design-system/SAAS__Ed
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { DOCUMENTS_DB_NAME, createDocumentRequest, type CompraventaDocCategory } from '../../lib/documentsApi';
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import { useBusiness } from '../../context/BusinessContext';
 import {
@@ -22,12 +23,6 @@ import {
 } from 'lucide-react';
 
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-function _apiBase() {
-  if (_env.VITE_API_URL) return _env.VITE_API_URL;
-  const host = _env.VITE_API_HOST || (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
-  const proto = _env.VITE_API_PROTOCOL || (typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http');
-  return `${proto}://${host}:${_env.VITE_API_PORT || '3001'}`;
-}
 function _couchHeaders() {
   const h: Record<string, string> = {};
   if (_env.VITE_COUCHDB_URL) h['x-couch-url'] = _env.VITE_COUCHDB_URL;
@@ -588,7 +583,7 @@ export function DocumentsPage() {
       try {
         const buf = Uint8Array.from(atob(payload.fileBase64), c => c.charCodeAt(0));
         await authFetch(
-          `${_apiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
+          `${getApiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
           { method: 'PUT', headers: { 'Content-Type': payload.fileMimeType || 'application/octet-stream', ...getAuthHeaders(), ..._couchHeaders() }, body: buf },
         );
       } catch (e) { console.error('Error uploading OCR attachment:', e); }

@@ -23,6 +23,7 @@ import {
   type SupplierOption,
   type ProductOption,
 } from '../../lib/butcherPurchaseApi';
+import { getApiBase } from '../../lib/apiBase';
 import {
   ShoppingCart, Plus, Search, X, Filter, Trash2, Edit3, CheckCircle2,
   Clock, AlertTriangle, Package, Eye, ChevronDown, Camera,
@@ -319,7 +320,7 @@ export function ButcherPurchasesPage() {
         reader.readAsDataURL(file);
       });
 
-      const API = import.meta.env.VITE_API_URL || '';
+      const API = getApiBase();
       const token = localStorage.getItem('token') || '';
       const scanRes = await fetch(`${API}/api/ocr/scan`, {
         method: 'POST',
@@ -840,7 +841,7 @@ function LotsTab({ userId }: { userId: string }) {
     (async () => {
       setLoading(true);
       try {
-        const API = import.meta.env.VITE_API_URL || '';
+        const API = getApiBase();
         const token = localStorage.getItem('token') || '';
         const r = await fetch(`${API}/api/butcher/batches/${userId}`, {
           headers: { Authorization: `Bearer ${token}` },

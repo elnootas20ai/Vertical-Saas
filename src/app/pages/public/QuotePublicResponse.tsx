@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { getApiBase } from '../../lib/apiBase';
 
 interface QuoteLine {
   description: string;
@@ -42,11 +43,6 @@ interface PublicQuote {
 
 type ViewState = 'loading' | 'preview' | 'confirming' | 'success' | 'error' | 'already_processed';
 
-function getApiBase() {
-  const host = window.location.hostname;
-  const protocol = window.location.protocol.replace(':', '');
-  return `${protocol}://${host}:${import.meta.env.VITE_API_PORT || '3001'}`;
-}
 
 export function QuotePublicResponse() {
   const [searchParams] = useSearchParams();
@@ -57,7 +53,7 @@ export function QuotePublicResponse() {
   const [viewState, setViewState] = useState<ViewState>('loading');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const apiBase = import.meta.env.VITE_API_URL || getApiBase();
+  const apiBase = getApiBase();
 
   const loadQuote = useCallback(async () => {
     try {

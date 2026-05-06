@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router';
 import { Car, FileText, Receipt, User, Mail, Phone, MapPin, CheckCircle, Clock, AlertCircle, Shield, Calendar } from 'lucide-react';
+import { getApiBase } from '../../lib/apiBase';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
-function getApiBase() {
-  if (env.VITE_API_URL) return env.VITE_API_URL;
-  const protocol = typeof window !== 'undefined' ? window.location.protocol.replace(':', '') : 'http';
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const port = env.VITE_API_PORT || '3001';
-  return `${protocol}://${host}:${port}`;
-}
 
 function getCouchHeaders(): Record<string, string> {
   const h: Record<string, string> = {};
