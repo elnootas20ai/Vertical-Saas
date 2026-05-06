@@ -9,6 +9,8 @@ import {
   listDeliveryOrdersByUser,
   findAccountByUserId,
   logAccountActivity,
+  getCouchConfig,
+  buildCouchAuthHeader,
 } from '../services/couchdb.js';
 import { broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
@@ -22,8 +24,13 @@ async function getIntegrationConfig(req, businessId) {
   await ensureDatabase(req, db);
   try {
     const { default: nano } = await import('nano');
-    const url = process.env.COUCHDB_URL || 'http://localhost:5984';
-    const couch = nano(url);
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return {};
+    const auth = buildCouchAuthHeader(null);
+    const couch = nano({
+      url: cfg.baseUrl,
+      ...(auth ? { headers: { Authorization: auth } } : {}),
+    });
     const dbConn = couch.db.use(db);
     const doc = await dbConn.get(`web_config:${businessId}`);
     return doc?.integrations || {};

@@ -14,6 +14,8 @@ import {
   softDeleteDocument,
   writeChangelog,
   normalizeVehicleDocType,
+  getCouchConfig,
+  buildCouchAuthHeader,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 
@@ -22,22 +24,12 @@ import { applyQueryOptions } from '../middleware/queryOptions.js';
 // Guarda un documento de alerta en activity-logs cada vez que se crea un vehículo.
 const ACTIVITY_LOGS_DB = 'activity-logs';
 
-function getCouchBaseUrlForAlert() {
-  const url = process.env.COUCHDB_URL || 'http://localhost:5984';
-  return url.replace(/\/+$/, '');
-}
-
-function getCouchAuthHeaderForAlert() {
-  const user = process.env.COUCHDB_USER || '';
-  const pass = process.env.COUCHDB_PASSWORD || '';
-  if (!user || !pass) return '';
-  return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
-}
-
 async function saveVehicleCreationAlert({ user, vehicleLabel, vehicleId, count }) {
   try {
-    const base = getCouchBaseUrlForAlert();
-    const auth = getCouchAuthHeaderForAlert();
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return;
+    const base = cfg.baseUrl.replace(/\/+$/, '');
+    const auth = buildCouchAuthHeader(null);
     const headers = { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) };
     const now = new Date();
     const isBulk = count > 1;

@@ -38,6 +38,7 @@ import {
   updateAiSearchTicket,
   deleteAiSearchTicket,
 } from './kanbanManager.js';
+import { getCouchConfig, buildCouchAuthHeader } from '../../../services/couchdb.js';
 import {
   createAgent,
   getAgent,
@@ -2621,14 +2622,28 @@ Responde SOLO con JSON válido (sin markdown, sin backticks):
 }`,
 };
 
+async function pluginCouchFetch(pathname, init = {}) {
+  const cfg = getCouchConfig(null);
+  if (!cfg.baseUrl) return null;
+  const base = cfg.baseUrl.replace(/\/+$/, '');
+  const auth = buildCouchAuthHeader(null);
+  const path = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  return fetch(`${base}${path}`, {
+    ...init,
+    headers: {
+      ...(auth ? { Authorization: auth } : {}),
+      ...(init.headers || {}),
+    },
+  });
+}
+
 // ── Activity Logs (proxy to activity-logs DB or fallback) ──
 
 pluginRouter.get('/logs', async (_req, res) => {
   try {
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
     const dbName = 'activity-logs';
-    const resp = await fetch(`${couchUrl}/${dbName}/_all_docs?include_docs=true&limit=500&descending=true`);
-    if (!resp.ok) {
+    const resp = await pluginCouchFetch(`/${dbName}/_all_docs?include_docs=true&limit=500&descending=true`);
+    if (!resp || !resp.ok) {
       return res.json({ logs: [] });
     }
     const data = await resp.json();
@@ -2654,10 +2669,9 @@ pluginRouter.get('/logs', async (_req, res) => {
 
 pluginRouter.get('/logs/stats', async (_req, res) => {
   try {
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
     const dbName = 'activity-logs';
-    const resp = await fetch(`${couchUrl}/${dbName}/_all_docs?include_docs=true&limit=2000`);
-    if (!resp.ok) {
+    const resp = await pluginCouchFetch(`/${dbName}/_all_docs?include_docs=true&limit=2000`);
+    if (!resp || !resp.ok) {
       return res.json({ byCategory: {}, byLevel: {}, topUsers: [], total: 0 });
     }
     const data = await resp.json();
@@ -2689,9 +2703,8 @@ const LOG_RULES_DB = 'activity-logs';
 
 pluginRouter.get('/logs/rules', async (_req, res) => {
   try {
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
-    const resp = await fetch(`${couchUrl}/${LOG_RULES_DB}/_all_docs?include_docs=true`);
-    if (!resp.ok) return res.json({ rules: [] });
+    const resp = await pluginCouchFetch(`/${LOG_RULES_DB}/_all_docs?include_docs=true`);
+    if (!resp || !resp.ok) return res.json({ rules: [] });
     const data = await resp.json();
     const rules = (data.rows || [])
       .map(r => r.doc)
@@ -2718,8 +2731,7 @@ pluginRouter.post('/logs/rules', async (req, res) => {
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ error: 'prompt is required' });
     }
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
-    await fetch(`${couchUrl}/${LOG_RULES_DB}`, { method: 'PUT' }).catch(() => null);
+    await pluginCouchFetch(`/${LOG_RULES_DB}`, { method: 'PUT' }).catch(() => null);
     const id = `rule:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
     const doc = {
       _id: id,
@@ -2730,13 +2742,13 @@ pluginRouter.post('/logs/rules', async (req, res) => {
       activatedAt: '',
       agentId: '',
     };
-    const putResp = await fetch(`${couchUrl}/${LOG_RULES_DB}/${encodeURIComponent(id)}`, {
+    const putResp = await pluginCouchFetch(`/${LOG_RULES_DB}/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(doc),
     });
     const result = await putResp.json().catch(() => ({}));
-    if (!putResp.ok) return res.status(500).json({ error: 'Failed to save rule' });
+    if (!putResp || !putResp.ok) return res.status(500).json({ error: 'Failed to save rule' });
     res.json({ rule: { ...doc, _rev: result.rev } });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error creating rule' });
@@ -2747,9 +2759,8 @@ pluginRouter.patch('/logs/rules/:id', async (req, res) => {
   try {
     const ruleId = req.params.id;
     const updates = req.body || {};
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
-    const getResp = await fetch(`${couchUrl}/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`);
-    if (!getResp.ok) return res.status(404).json({ error: 'Rule not found' });
+    const getResp = await pluginCouchFetch(`/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`);
+    if (!getResp || !getResp.ok) return res.status(404).json({ error: 'Rule not found' });
     const existing = await getResp.json();
     const updated = {
       ...existing,
@@ -2758,13 +2769,13 @@ pluginRouter.patch('/logs/rules/:id', async (req, res) => {
       _rev: existing._rev,
       type: 'log-rule',
     };
-    const putResp = await fetch(`${couchUrl}/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`, {
+    const putResp = await pluginCouchFetch(`/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated),
     });
     const result = await putResp.json().catch(() => ({}));
-    if (!putResp.ok) return res.status(500).json({ error: 'Failed to update rule' });
+    if (!putResp || !putResp.ok) return res.status(500).json({ error: 'Failed to update rule' });
     res.json({ rule: { ...updated, _rev: result.rev } });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error updating rule' });
@@ -2774,15 +2785,14 @@ pluginRouter.patch('/logs/rules/:id', async (req, res) => {
 pluginRouter.delete('/logs/rules/:id', async (req, res) => {
   try {
     const ruleId = req.params.id;
-    const couchUrl = process.env.COUCHDB_URL || 'http://admin:admin@localhost:5984';
-    const getResp = await fetch(`${couchUrl}/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`);
-    if (!getResp.ok) return res.status(404).json({ error: 'Rule not found' });
+    const getResp = await pluginCouchFetch(`/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}`);
+    if (!getResp || !getResp.ok) return res.status(404).json({ error: 'Rule not found' });
     const existing = await getResp.json();
-    const delResp = await fetch(
-      `${couchUrl}/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}?rev=${encodeURIComponent(existing._rev)}`,
+    const delResp = await pluginCouchFetch(
+      `/${LOG_RULES_DB}/${encodeURIComponent(ruleId)}?rev=${encodeURIComponent(existing._rev)}`,
       { method: 'DELETE' },
     );
-    if (!delResp.ok) return res.status(500).json({ error: 'Failed to delete rule' });
+    if (!delResp || !delResp.ok) return res.status(500).json({ error: 'Failed to delete rule' });
     res.json({ ok: true, id: ruleId });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : 'Error deleting rule' });

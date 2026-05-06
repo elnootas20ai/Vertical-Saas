@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { getCouchConfig, buildCouchAuthHeader } from '../services/couchdb.js';
 
 const LOGS_DB = 'activity-logs';
 
@@ -52,26 +53,16 @@ const RESOURCE_LABELS = {
   affiliates: 'afiliado',
 };
 
-function getCouchBaseUrl() {
-  const url = process.env.COUCHDB_URL || 'http://localhost:5984';
-  return url.replace(/\/+$/, '');
-}
-
-function getCouchAuth() {
-  const user = process.env.COUCHDB_USER || '';
-  const pass = process.env.COUCHDB_PASSWORD || '';
-  if (!user || !pass) return '';
-  return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
-}
-
 let _dbEnsured = false;
 let _designEnsured = false;
 
 async function ensureLogsDb() {
   if (_dbEnsured) return;
   try {
-    const base = getCouchBaseUrl();
-    const auth = getCouchAuth();
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return;
+    const base = cfg.baseUrl.replace(/\/+$/, '');
+    const auth = buildCouchAuthHeader(null);
     const headers = auth ? { Authorization: auth } : {};
     await fetch(`${base}/${LOGS_DB}`, { method: 'PUT', headers }).catch(() => null);
     _dbEnsured = true;
@@ -83,8 +74,10 @@ async function ensureLogsDb() {
 async function ensureDesignDoc() {
   if (_designEnsured) return;
   try {
-    const base = getCouchBaseUrl();
-    const auth = getCouchAuth();
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return;
+    const base = cfg.baseUrl.replace(/\/+$/, '');
+    const auth = buildCouchAuthHeader(null);
     const headers = { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) };
     const designId = '_design/logs';
     const designUrl = `${base}/${LOGS_DB}/${designId}`;
@@ -137,8 +130,10 @@ async function ensureDesignDoc() {
 
 async function saveLog(doc) {
   try {
-    const base = getCouchBaseUrl();
-    const auth = getCouchAuth();
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return;
+    const base = cfg.baseUrl.replace(/\/+$/, '');
+    const auth = buildCouchAuthHeader(null);
     const headers = { 'Content-Type': 'application/json', ...(auth ? { Authorization: auth } : {}) };
     await fetch(`${base}/${LOGS_DB}`, {
       method: 'POST',

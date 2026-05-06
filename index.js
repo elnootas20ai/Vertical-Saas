@@ -140,6 +140,8 @@ import {
   getCatalogDbName,
   getPartsDbName,
   getLeadsDbName as getLeadsDbNameFromService,
+  couchRequest,
+  buildCouchAuthHeader,
 } from './services/couchdb.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -240,42 +242,6 @@ function getClientIp(req) {
     return header.split(',')[0].trim();
   }
   return req.socket?.remoteAddress || 'unknown';
-}
-
-function getCouchConfig(req) {
-  return {
-    baseUrl: (process.env.COUCHDB_URL || '').replace(
-      /\/+$/,
-      '',
-    ),
-    username: process.env.COUCHDB_USER || '',
-    password: process.env.COUCHDB_PASSWORD || '',
-  };
-}
-
-function buildCouchAuthHeader(req) {
-  const cfg = getCouchConfig(req);
-  if (!cfg.username || !cfg.password) {
-    return '';
-  }
-  return `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString('base64')}`;
-}
-
-async function couchRequest(req, pathname, init = {}) {
-  const cfg = getCouchConfig(req);
-  if (!cfg.baseUrl) {
-    throw new Error('COUCHDB_URL no configurado en backend');
-  }
-  const auth = buildCouchAuthHeader(req);
-  const response = await fetch(`${cfg.baseUrl}${pathname}`, {
-    ...init,
-    headers: {
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(auth ? { Authorization: auth } : {}),
-      ...(init.headers || {}),
-    },
-  });
-  return response;
 }
 
 function normalizeDbName(value) {
@@ -704,7 +670,7 @@ app.use((req, res, next) => {
 // I-03: Health check robusto — CouchDB, DBs individuales, memoria, disco,
 //        proceso (loadAvg), conexiones activas y latencia P50/P95/P99.
 app.get('/health', async (req, res) => {
-  const cfg        = getCouchConfig(req);
+  const cfg        = getCouchConfigFromService(req);
   const authHeader = buildCouchAuthHeader(req);
 
   const result = await runHealthCheck({

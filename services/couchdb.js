@@ -56,12 +56,32 @@ function addDays(date, amount) {
   return next.toISOString();
 }
 
+/**
+ * baseUrl sin userinfo (Node fetch/undici rechaza URLs con user:pass).
+ * Auth vía COUCHDB_USER / COUCHDB_PASSWORD (cabecera Basic).
+ * Si la URL legacy incluye credenciales y las env están vacías, se leen de la URL (migración).
+ */
 export function getCouchConfig(req) {
-  return {
-    baseUrl: normalizeBaseUrl(process.env.COUCHDB_URL || ''),
-    username: String(process.env.COUCHDB_USER || ''),
-    password: String(process.env.COUCHDB_PASSWORD || ''),
-  };
+  void req;
+  const raw = String(process.env.COUCHDB_URL || '').trim();
+  let username = String(process.env.COUCHDB_USER || '');
+  let password = String(process.env.COUCHDB_PASSWORD || '');
+  let baseUrl = '';
+
+  if (raw) {
+    try {
+      const href = /^[a-zA-Z][a-zA-Z+\-.]*:\/\//.test(raw) ? raw : `http://${raw}`;
+      const u = new URL(href);
+      const pathPart = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/+$/, '') : '';
+      baseUrl = normalizeBaseUrl(`${u.origin}${pathPart}`);
+      if (!username && u.username) username = decodeURIComponent(u.username);
+      if (!password && u.password) password = decodeURIComponent(u.password);
+    } catch {
+      baseUrl = normalizeBaseUrl(raw.replace(/^(https?:\/\/)(?:[^/@]+)@/i, '$1'));
+    }
+  }
+
+  return { baseUrl, username, password };
 }
 
 export function buildCouchAuthHeader(req) {

@@ -21,6 +21,7 @@ import zlib from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { Readable }  from 'node:stream';
 import logger from './logger.js';
+import { getCouchConfig, buildCouchAuthHeader } from './couchdb.js';
 
 const BACKUP_DIR       = process.env.BACKUP_DIR             || path.resolve(process.cwd(), 'backups');
 const INTERVAL_HOURS   = Math.max(1, Number(process.env.BACKUP_INTERVAL_HOURS  ?? 24));
@@ -51,13 +52,12 @@ export function getBackupState() {
 
 // ── CouchDB helpers ───────────────────────────────────────────────────────────
 function getCouchBase() {
-  return (process.env.COUCHDB_URL || '').replace(/\/+$/, '');
+  const { baseUrl } = getCouchConfig(null);
+  return (baseUrl || '').replace(/\/+$/, '');
 }
 
 function getCouchAuthHeader() {
-  const user = process.env.COUCHDB_USER || '';
-  const pass = process.env.COUCHDB_PASSWORD || '';
-  return user ? `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}` : '';
+  return buildCouchAuthHeader(null);
 }
 
 async function couchFetch(urlPath, init = {}) {
