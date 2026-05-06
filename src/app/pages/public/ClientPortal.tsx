@@ -3,17 +3,6 @@ import { useParams } from 'react-router';
 import { Car, FileText, Receipt, User, Mail, Phone, MapPin, CheckCircle, Clock, AlertCircle, Shield, Calendar } from 'lucide-react';
 import { getApiBase } from '../../lib/apiBase';
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
-function getCouchHeaders(): Record<string, string> {
-  const h: Record<string, string> = {};
-  if (env.VITE_COUCHDB_URL) h['x-couch-url'] = env.VITE_COUCHDB_URL;
-  if (env.VITE_COUCHDB_USER) h['x-couch-user'] = env.VITE_COUCHDB_USER;
-  if (env.VITE_COUCHDB_PASSWORD) h['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-  return h;
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PortalSale {
@@ -113,7 +102,7 @@ export function ClientPortal() {
     if (!token) return;
     setLoading(true);
     fetch(`${getApiBase()}/api/portal/data/${encodeURIComponent(token)}`, {
-      headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
+      headers: { 'Content-Type': 'application/json' },
     })
       .then(r => r.json())
       .then(payload => {

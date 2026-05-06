@@ -90,9 +90,6 @@ const CONFIG_DOC_ID = 'plan-pricing-config';
 
 function getCouchHeaders(): Record<string, string> {
   const h: Record<string, string> = {};
-  if (env.VITE_COUCHDB_URL) h['x-couch-url'] = env.VITE_COUCHDB_URL;
-  if (env.VITE_COUCHDB_USER) h['x-couch-user'] = env.VITE_COUCHDB_USER;
-  if (env.VITE_COUCHDB_PASSWORD) h['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
   return h;
 }
 

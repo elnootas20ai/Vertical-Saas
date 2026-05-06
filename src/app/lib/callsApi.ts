@@ -87,28 +87,11 @@ function normalizeDbName(value: string) {
     .replace(/^-+|-+$/g, '');
 }
 
-function getCouchHeaders() {
-  const headers: Record<string, string> = {};
-
-  if (env.VITE_COUCHDB_URL) {
-    headers['x-couch-url'] = env.VITE_COUCHDB_URL;
-  }
-  if (env.VITE_COUCHDB_USER) {
-    headers['x-couch-user'] = env.VITE_COUCHDB_USER;
-  }
-  if (env.VITE_COUCHDB_PASSWORD) {
-    headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-  }
-
-  return headers;
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
-      ...getCouchHeaders(),
       ...(init?.headers || {}),
     },
     ...init,

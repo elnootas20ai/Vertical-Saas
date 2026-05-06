@@ -14,9 +14,6 @@ const API_BASE = getApiBase();
 
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
-  if (env.VITE_COUCHDB_USER) headers['x-couch-user'] = env.VITE_COUCHDB_USER;
-  if (env.VITE_COUCHDB_PASSWORD) headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
   return headers;
 }
 

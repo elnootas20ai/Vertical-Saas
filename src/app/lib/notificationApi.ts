@@ -27,25 +27,6 @@ interface NotificationEnvelope {
   notifications?: NotificationRecord[];
 }
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
-function getCouchHeaders() {
-  const headers: Record<string, string> = {};
-
-  if (env.VITE_COUCHDB_URL) {
-    headers['x-couch-url'] = env.VITE_COUCHDB_URL;
-  }
-  if (env.VITE_COUCHDB_USER) {
-    headers['x-couch-user'] = env.VITE_COUCHDB_USER;
-  }
-  if (env.VITE_COUCHDB_PASSWORD) {
-    headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-  }
-
-  return headers;
-}
-
 const API_BASE = getApiBase();
 
 async function request(path: string, init?: RequestInit) {
@@ -53,7 +34,6 @@ async function request(path: string, init?: RequestInit) {
     headers: {
       'Content-Type': 'application/json',
       ...getAuthHeaders(),
-      ...getCouchHeaders(),
       ...(init?.headers || {}),
     },
     credentials: 'include',

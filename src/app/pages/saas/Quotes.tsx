@@ -620,15 +620,10 @@ export function Quotes() {
       return;
     }
     try {
-      const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
       const apiBase = getApiBase();
       const token = localStorage.getItem('vertial_access_token');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-      if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
-      if (env.VITE_COUCHDB_USER) headers['x-couch-user'] = env.VITE_COUCHDB_USER;
-      if (env.VITE_COUCHDB_PASSWORD) headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-
       const res = await fetch(`${apiBase}/api/quotes/send/${encodeURIComponent(quote._id)}`, {
         method: 'POST',
         headers,

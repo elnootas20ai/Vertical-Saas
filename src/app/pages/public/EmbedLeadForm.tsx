@@ -3,17 +3,6 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle, Car, User, Phone, Mail, MessageSquare, Send, AlertCircle } from 'lucide-react';
 import { getApiBase } from '../../lib/apiBase';
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
-function getCouchHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (env.VITE_COUCHDB_URL) headers['x-couch-url'] = env.VITE_COUCHDB_URL;
-  if (env.VITE_COUCHDB_USER) headers['x-couch-user'] = env.VITE_COUCHDB_USER;
-  if (env.VITE_COUCHDB_PASSWORD) headers['x-couch-password'] = env.VITE_COUCHDB_PASSWORD;
-  return headers;
-}
-
 interface DealerInfo {
   name: string;
   logo: string | null;
@@ -58,7 +47,7 @@ export function EmbedLeadForm() {
   useEffect(() => {
     if (!dealerId) return;
     fetch(`${getApiBase()}/api/embed/${encodeURIComponent(dealerId)}/info`, {
-      headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
+      headers: { 'Content-Type': 'application/json' },
     })
       .then((r) => r.json())
       .then((data) => {
@@ -88,7 +77,7 @@ export function EmbedLeadForm() {
     try {
       const res = await fetch(`${getApiBase()}/api/embed/${encodeURIComponent(dealerId!)}/lead`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: form.name.trim(),
           phone: form.phone.trim(),

@@ -16,9 +16,6 @@ import {
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 function _couchHeaders() {
   const h: Record<string, string> = {};
-  if (_env.VITE_COUCHDB_URL) h['x-couch-url'] = _env.VITE_COUCHDB_URL;
-  if (_env.VITE_COUCHDB_USER) h['x-couch-user'] = _env.VITE_COUCHDB_USER;
-  if (_env.VITE_COUCHDB_PASSWORD) h['x-couch-password'] = _env.VITE_COUCHDB_PASSWORD;
   return h;
 }
 
