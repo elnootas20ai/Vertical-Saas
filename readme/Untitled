@@ -2,7 +2,7 @@
 
 Base de prueba actual del backend:
 
-- `https://api.udaredge.com/health`
+- `https://api.vertialapp.com/health`
 
 ## 1) Requisitos
 
@@ -51,7 +51,7 @@ Chequeo rapido del servicio.
 Ejemplo:
 
 ```bash
-curl -s https://api.udaredge.com/health
+curl -s https://api.vertialapp.com/health
 ```
 
 Respuesta esperada:
@@ -76,7 +76,7 @@ Metricas completas de salud del proceso:
 Ejemplo:
 
 ```bash
-curl -s https://api.udaredge.com/metrics
+curl -s https://api.vertialapp.com/metrics
 ```
 
 ### `GET /api/stats`
@@ -90,7 +90,7 @@ Resumen ligero para monitorizacion rapida:
 Ejemplo:
 
 ```bash
-curl -s https://api.udaredge.com/api/stats
+curl -s https://api.vertialapp.com/api/stats
 ```
 
 ## 5) Como validar que las metricas "van bien"
@@ -106,7 +106,7 @@ Referencia operativa (orientativa):
 Comprobacion simple cada 10s:
 
 ```bash
-watch -n 10 'curl -s https://api.udaredge.com/metrics'
+watch -n 10 'curl -s https://api.vertialapp.com/metrics'
 ```
 
 ## 6) PM2 en puertos con nombres `frontend` y `backend` (4014 MB)
@@ -144,9 +144,9 @@ pm2 startup
 
 ## 8) Verificacion final
 
-- Backend OK: `curl -s https://api.udaredge.com/health`
-- Metricas OK: `curl -s https://api.udaredge.com/metrics`
-- Frontend OK: abrir `https://www.udaredge.com`
+- Backend OK: `curl -s https://api.vertialapp.com/health`
+- Metricas OK: `curl -s https://api.vertialapp.com/metrics`
+- Frontend OK: abrir `https://www.vertialapp.com`
 
 ## 9) Nota importante de seguridad
 
