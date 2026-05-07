@@ -9,6 +9,12 @@ function getFromAddress() {
   return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'noreply@vertialapp.com';
 }
 
+/** Keys reales de Resend empiezan por re_; evita activar Resend con placeholders tipo CAMBIAR_… */
+function hasUsableResendKey() {
+  const k = String(process.env.RESEND_API_KEY || '').trim();
+  return k.startsWith('re_') && k.length > 12;
+}
+
 async function sendViaResend(to, subject, html) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -45,15 +51,59 @@ async function sendViaSMTP(to, subject, html) {
 }
 
 export async function sendEmail({ to, subject, html }) {
-  if (process.env.RESEND_API_KEY) {
-    return sendViaResend(to, subject, html);
+  const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
+
+  // Si defines EMAIL_PROVIDER=smtp, SIEMPRE usa SMTP (evita que un RESEND_API_KEY viejo/placeholder bloquee Gmail).
+  if (provider === 'smtp') {
+    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+      try {
+        await sendViaSMTP(to, subject, html);
+      } catch (err) {
+        logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
+        throw err;
+      }
+      return;
+    }
+    logger.warn({ tag: 'EMAIL', to, subject }, 'EMAIL_PROVIDER=smtp pero faltan SMTP_HOST o SMTP_USER');
+    return;
+  }
+
+  if (provider === 'resend') {
+    if (!hasUsableResendKey()) {
+      logger.warn({ tag: 'EMAIL', to, subject }, 'EMAIL_PROVIDER=resend pero RESEND_API_KEY no válida');
+      return;
+    }
+    try {
+      await sendViaResend(to, subject, html);
+    } catch (err) {
+      logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
+      throw err;
+    }
+    return;
+  }
+
+  // Sin EMAIL_PROVIDER: Resend solo si la key parece real; si no, SMTP.
+  if (hasUsableResendKey()) {
+    try {
+      await sendViaResend(to, subject, html);
+    } catch (err) {
+      logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
+      throw err;
+    }
+    return;
   }
 
   if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-    return sendViaSMTP(to, subject, html);
+    try {
+      await sendViaSMTP(to, subject, html);
+    } catch (err) {
+      logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
+      throw err;
+    }
+    return;
   }
 
-  logger.warn({ tag: 'EMAIL_DEV', to, subject }, 'Email no enviado: sin proveedor configurado (RESEND_API_KEY o SMTP_HOST). Modo desarrollo.');
+  logger.warn({ tag: 'EMAIL_DEV', to, subject }, 'Email no enviado: sin proveedor (RESEND_API_KEY, SMTP o EMAIL_PROVIDER).');
   logger.debug({ tag: 'EMAIL_DEV', html }, 'Contenido HTML del email simulado');
 }
 
