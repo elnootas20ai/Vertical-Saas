@@ -118,6 +118,7 @@ import { runHealthCheck, recordLatency } from './services/healthService.js';
 import * as cacheService from './services/cache.js';
 import { cacheResponse, invalidateOnWrite } from './middleware/cache.js';
 import { startBackupScheduler, runBackup, getBackupState } from './services/backupScheduler.js';
+import { runSaasBootstrapIfEnabled } from './services/saasBootstrapStartup.js';
 import {
   VEHICLES_DB,
   ACCOUNTS_DB,
@@ -2764,6 +2765,11 @@ setTimeout(() => {
     logger.error({ tag: 'INIT', err: err?.message }, 'Error inicializando CouchDB'),
   );
 }, 3000);
+
+// Cuenta admin SaaS desde env (sin script manual): SAAS_AUTO_BOOTSTRAP=true + SAAS_LOGIN_*
+setTimeout(() => {
+  runSaasBootstrapIfEnabled();
+}, 4500);
 
 // V-10 → ALERT_ENGINE: Motor unificado de alertas (Compras + Stock + Ventas + Operación)
 // Reemplaza el antiguo runStockAlerts individual. Fase 1.

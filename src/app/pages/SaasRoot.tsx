@@ -10,7 +10,7 @@ import { PluginPanel } from '../../plugin/PluginPanel';
 import { useAuth } from '../context/AuthContext';
 import { EMAIL_SKIP_KEY } from './auth/VerifyEmailPending';
 
-const SUPERADMIN_EMAIL = 'admin1@gmail.com';
+const SUPERADMIN_EMAIL = 'uriel@admin.com';
 
 interface OnboardingCompanyProfile {
   tradeName?: string;
