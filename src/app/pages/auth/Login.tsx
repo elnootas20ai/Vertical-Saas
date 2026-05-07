@@ -8,7 +8,7 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
-import { useGoogleSignIn } from '../../hooks/useGoogleSignIn';
+import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 
 const CREDENTIALS_KEY = 'vertial_saved_credentials';
 
@@ -123,7 +123,7 @@ export function Login() {
   }, [googleReady, renderButton, resolvedTheme]);
 
   useEffect(() => {
-    if (googleReady) {
+    if (googleReady || !googleClientConfigured) {
       setGoogleTimedOut(false);
       return;
     }
@@ -241,7 +241,15 @@ export function Login() {
             <div className="flex justify-center w-full">
               <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
             </div>
-            {!googleReady && !googleTimedOut && (
+            {!googleClientConfigured && (
+              <div className="w-full py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
+                Inicio con Google no está activo en este sitio: falta{' '}
+                <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
+                <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
+                <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
+              </div>
+            )}
+            {googleClientConfigured && !googleReady && !googleTimedOut && (
               <button
                 type="button"
                 disabled
@@ -254,7 +262,7 @@ export function Login() {
                 {t('auth.googleLogin')}
               </button>
             )}
-            {!googleReady && googleTimedOut && (
+            {googleClientConfigured && !googleReady && googleTimedOut && (
               <div className="w-full py-3 px-4 border-2 border-amber-200 bg-amber-50 rounded-lg text-sm text-amber-700 text-center">
                 Google no disponible temporalmente. Puedes iniciar sesión con email y contraseña.
               </div>

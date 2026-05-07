@@ -8,7 +8,7 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
-import { useGoogleSignIn } from '../../hooks/useGoogleSignIn';
+import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import type { GoogleUserProfile } from '../../lib/authApi';
 
 type AccountType = 'user' | 'company';
@@ -470,6 +470,13 @@ export function Register() {
                 <div className="flex justify-center w-full">
                   <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
                 </div>
+                {!googleClientConfigured && (
+                  <div className="w-full py-2 px-3 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
+                    Google no disponible en este entorno (revisa{' '}
+                    <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> al hacer{' '}
+                    <strong>build</strong>).
+                  </div>
+                )}
               </>
             )}
           </form>

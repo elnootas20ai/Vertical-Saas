@@ -30,7 +30,24 @@ function addDays(dateIso, amount) {
 }
 
 export async function runSaasBootstrapIfEnabled() {
-  if (!truthy(process.env.SAAS_AUTO_BOOTSTRAP)) return;
+  const rawBootstrap = process.env.SAAS_AUTO_BOOTSTRAP;
+  if (!truthy(rawBootstrap)) {
+    const defined = rawBootstrap !== undefined && String(rawBootstrap).trim() !== '';
+    if (defined) {
+      logger.warn(
+        { tag: 'SAAS_BOOTSTRAP' },
+        'SAAS_AUTO_BOOTSTRAP está definido pero no activo (solo cuenta true, 1 o yes)',
+      );
+    } else {
+      logger.debug(
+        { tag: 'SAAS_BOOTSTRAP' },
+        'Omitido: sin SAAS_AUTO_BOOTSTRAP (pon true en .env / .env.<NODE_ENV> o env del proceso PM2)',
+      );
+    }
+    return;
+  }
+
+  logger.info({ tag: 'SAAS_BOOTSTRAP' }, 'Ejecutando bootstrap SaaS (tras init Couch)');
 
   const forceSync = truthy(process.env.SAAS_BOOTSTRAP_FORCE_SYNC);
 

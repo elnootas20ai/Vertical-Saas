@@ -2760,16 +2760,16 @@ async function initializeCouchDB() {
   logger.info({ tag: 'INIT' }, 'Índices Mango y vistas MapReduce inicializados');
 }
 
+// Couch primero; SaaS bootstrap después (evita carrera en prod si Couch tarda).
 setTimeout(() => {
-  initializeCouchDB().catch((err) =>
-    logger.error({ tag: 'INIT', err: err?.message }, 'Error inicializando CouchDB'),
-  );
+  initializeCouchDB()
+    .catch((err) =>
+      logger.error({ tag: 'INIT', err: err?.message }, 'Error inicializando CouchDB'),
+    )
+    .finally(() => {
+      void runSaasBootstrapIfEnabled();
+    });
 }, 3000);
-
-// Cuenta admin SaaS desde env (sin script manual): SAAS_AUTO_BOOTSTRAP=true + SAAS_LOGIN_*
-setTimeout(() => {
-  runSaasBootstrapIfEnabled();
-}, 4500);
 
 // V-10 → ALERT_ENGINE: Motor unificado de alertas (Compras + Stock + Ventas + Operación)
 // Reemplaza el antiguo runStockAlerts individual. Fase 1.

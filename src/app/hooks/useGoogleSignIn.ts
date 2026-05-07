@@ -5,6 +5,9 @@ const GOOGLE_GSI_SRC = 'https://accounts.google.com/gsi/client';
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 const GOOGLE_CLIENT_ID = env.VITE_GOOGLE_CLIENT_ID || '';
 
+/** false si el build se hizo sin VITE_GOOGLE_CLIENT_ID (muy típico en prod si solo pusiste GOOGLE_CLIENT_ID en el servidor). */
+export const googleClientConfigured = Boolean(GOOGLE_CLIENT_ID.trim());
+
 interface GoogleCredentialResponse {
   credential: string;
   select_by: string;
@@ -19,8 +22,8 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
   callbackRef.current = onCredential;
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) {
-      console.warn('[GoogleSignIn] VITE_GOOGLE_CLIENT_ID no configurado');
+    if (!GOOGLE_CLIENT_ID.trim()) {
+      console.warn('[GoogleSignIn] VITE_GOOGLE_CLIENT_ID no configurado en el build');
       return;
     }
 
@@ -86,7 +89,13 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
     [],
   );
 
-  return { ready, prompt, renderButton, clientId: GOOGLE_CLIENT_ID };
+  return {
+    ready,
+    prompt,
+    renderButton,
+    clientId: GOOGLE_CLIENT_ID,
+    clientConfigured: googleClientConfigured,
+  };
 }
 
 declare global {

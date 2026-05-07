@@ -1,11 +1,11 @@
 /**
  * Carga variables de entorno en orden de precedencia:
- *   1. .env.<NODE_ENV>   (sobreescribe la base)
- *   2. .env              (base compartida / fallback)
+ *   1. .env.<NODE_ENV>   (primero: define valores por entorno)
+ *   2. .env              (después: solo rellena claves aún no definidas)
  *
- * El archivo específico de entorno tiene mayor prioridad porque dotenv
- * respeta por defecto las variables ya definidas (override: false),
- * por lo que cargamos el específico PRIMERO y el base DESPUÉS sin override.
+ * dotenv no sobreescribe variables ya presentes en process.env (override: false).
+ * Por tanto las claves que aparecen en .env.production ganan sobre las mismas en .env.
+ * Variables solo en .env sí se aplican en producción si no están en .env.production.
  */
 import dotenv from 'dotenv';
 import path from 'node:path';
