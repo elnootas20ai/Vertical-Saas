@@ -245,7 +245,8 @@ const menuItemDefs = [
   { id: 'delivery-montaje', navKey: 'deliveryMontaje', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/delivery-montaje' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
-  { id: 'delivery-crm',     navKey: 'clients',         icon: <Users className="w-5 h-5" />,     path: '/saas/delivery-crm' },
+  { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/clients' },
+  { id: 'delivery-crm',     navKey: 'deliveryCrm',     icon: <Contact2 className="w-5 h-5" />,    path: '/saas/delivery-crm' },
   { id: 'delivery-catalog', navKey: 'deliveryCatalog', icon: <BookOpen className="w-5 h-5" />, path: '/saas/delivery-catalog' },
   { id: 'delivery-reparto', navKey: 'deliveryReparto', icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery-reparto' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
@@ -413,7 +414,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -715,6 +716,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id === 'delivery-kitchen' && location.pathname.startsWith('/saas/delivery-kitchen')) ||
     (item.id === 'delivery-montaje' && location.pathname.startsWith('/saas/delivery-montaje')) ||
     (item.id === 'delivery-catalog' && location.pathname.startsWith('/saas/delivery-catalog')) ||
+    (item.id === 'delivery-clients' && location.pathname.startsWith('/saas/clients')) ||
+    (item.id === 'delivery-crm' && location.pathname.startsWith('/saas/delivery-crm')) ||
     (item.id === 'caja' && location.pathname.startsWith('/saas/vertical/delivery/caja')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||

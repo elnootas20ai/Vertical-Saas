@@ -29,6 +29,7 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 
 const DEFAULT_UNIT_OPTIONS = [
   { value: 'ud', label: 'Unidad' },
@@ -853,6 +854,11 @@ export function CatalogPage() {
   const [filterType, setFilterType] = useState<'all' | CatalogItemType>('all');
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [catalogDeleteGuardItem, setCatalogDeleteGuardItem] = useState<CatalogItem | null>(null);
+  const catalogDeleteItemRef = useRef<CatalogItem | null>(null);
+  useEffect(() => {
+    catalogDeleteItemRef.current = catalogDeleteGuardItem;
+  }, [catalogDeleteGuardItem]);
 
   const vc = verticalConfig;
 
@@ -1156,17 +1162,23 @@ export function CatalogPage() {
     }
   };
 
-  const handleDeleteItem = async (item: CatalogItem) => {
+  const handleDeleteItem = (item: CatalogItem) => {
     if (!user?.id) return;
-    if (!confirm(`¿Eliminar "${item.name}"?`)) return;
+    setCatalogDeleteGuardItem(item);
+  };
+
+  const executeCatalogDeleteAfterGuard = useCallback(async () => {
+    const item = catalogDeleteItemRef.current;
+    setCatalogDeleteGuardItem(null);
+    if (!user?.id || !item) return;
     try {
       await deleteCatalogItemRequest(user.id, item._id);
-      setCatalogItems(prev => prev.filter(i => i._id !== item._id));
+      setCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
       toast.success('Elemento eliminado');
     } catch {
       toast.error('Error al eliminar');
     }
-  };
+  }, [user?.id]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
     if (!user?.id) return;
@@ -1421,6 +1433,19 @@ export function CatalogPage() {
         moduleLabel="Catálogo"
         fields={CATALOG_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
+      />
+
+      <CatalogDeleteGuardModal
+        open={catalogDeleteGuardItem !== null}
+        payload={
+          catalogDeleteGuardItem
+            ? { mode: 'single', itemName: catalogDeleteGuardItem.name }
+            : null
+        }
+        onClose={() => setCatalogDeleteGuardItem(null)}
+        onVerified={() => {
+          void executeCatalogDeleteAfterGuard();
+        }}
       />
 
       <GenericImportModal

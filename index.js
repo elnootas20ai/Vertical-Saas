@@ -1718,6 +1718,14 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Falta userId' });
     }
 
+    // Determine business vertical to adapt KPIs (delivery vs others)
+    let businessType = '';
+    try {
+      const { findAccountByUserId } = await import('./services/couchdb.js');
+      const account = await findAccountByUserId(req, userId).catch(() => null);
+      businessType = String(account?.businessType || '').trim();
+    } catch { /* best-effort */ }
+
     const cacheKey = cacheService.buildKey('kpi', userId, 'v2');
     const cached = cacheService.get(cacheKey);
     if (cached) {
@@ -1738,6 +1746,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     const catalogDb = getCatalogDbName();
     const partsDb = getPartsDbName();
     const workshopDb = getWorkshopDbName();
+    const deliveryDb = getDeliveryDbName();
 
     async function fetchAllDocs(dbName) {
       return cacheService.getOrFetch(
@@ -1754,7 +1763,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       );
     }
 
-    const [vehicleDocs, leadDocs, saleDocs, financeDocs, clockinDocs, catalogDocs, partsDocs, workshopDocs] = await Promise.all([
+    const [vehicleDocs, leadDocs, saleDocs, financeDocs, clockinDocs, catalogDocs, partsDocs, workshopDocs, deliveryDocs] = await Promise.all([
       fetchAllDocs(vehiclesDb).catch(() => []),
       fetchAllDocs(leadsDb).catch(() => []),
       fetchAllDocs(salesDb).catch(() => []),
@@ -1763,6 +1772,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       fetchAllDocs(catalogDb).catch(() => []),
       fetchAllDocs(partsDb).catch(() => []),
       fetchAllDocs(workshopDb).catch(() => []),
+      fetchAllDocs(deliveryDb).catch(() => []),
     ]);
 
     const now = new Date();
@@ -1825,7 +1835,10 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     );
     const cobrosCount = pendingFinanceMovements.length + pendingSales.length;
     const oportunidades = userLeads.filter((l) => l.status !== 'won' && l.status !== 'lost').length;
-    const pendingDeliveries = saleDocs.filter((s) => s.status === 'pending').length;
+    // NOTE: pendingDeliveries means different things depending on vertical.
+    // - carDealership: deliveries of sold vehicles pending
+    // - delivery: active delivery orders pending completion
+    let pendingDeliveries = saleDocs.filter((s) => s.status === 'pending').length;
 
     const funnelStages = ['new', 'contacted', 'appointment', 'reserved', 'negotiation', 'won', 'lost'];
     const funnel = {};
@@ -1847,18 +1860,32 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       .filter((d) => d.type === 'pago' && String(d.date || '').startsWith(monthStr))
       .reduce((s, d) => s + Number(d.totalAmount || 0), 0);
 
-    // Ventas hoy: vehicle sales + finance income today
+    // ── Delivery revenue (delivery orders delivered) ──
+    const userDeliveryOrders = deliveryDocs.filter((d) => d?.type === 'delivery_order' && d?.user_id === userId && !d?.deletedAt);
+    const deliveredDeliveryOrdersToday = userDeliveryOrders.filter((o) => o.status === 'entregado' && String(o.deliveredAt || '').startsWith(todayStr));
+    const deliveredDeliveryOrdersMonth = userDeliveryOrders.filter((o) => o.status === 'entregado' && String(o.deliveredAt || '').startsWith(monthStr));
+    const deliveryRevenueToday = deliveredDeliveryOrdersToday.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    const deliveryRevenueMonth = deliveredDeliveryOrdersMonth.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    const activeDeliveryOrders = userDeliveryOrders.filter((o) => !['entregado', 'cancelled'].includes(String(o.status || '')));
+    if (businessType === 'delivery') {
+      pendingDeliveries = activeDeliveryOrders.length;
+    }
+
+    // Ventas hoy: vehicle sales + finance income today + delivery revenue today
     const soldToday = userVehicles.filter((v) => {
       if (v.status !== 'vendido' && v.status !== 'sold') return false;
       if (!v.soldAt) return false;
       return String(v.soldAt).startsWith(todayStr);
     });
     const vehicleSalesToday = soldToday.reduce((s, v) => s + Number(v.salePrice || 0), 0);
-    const salesToday = vehicleSalesToday + incomeToday;
-    const salesTodayCount = soldToday.length + userFinance.filter((d) => d.type === 'cobro' && d.date === todayStr).length;
+    const salesToday = vehicleSalesToday + incomeToday + deliveryRevenueToday;
+    const salesTodayCount =
+      soldToday.length +
+      userFinance.filter((d) => d.type === 'cobro' && d.date === todayStr).length +
+      deliveredDeliveryOrdersToday.length;
 
-    // Ventas mes total (vehicle sales + finance income)
-    const salesMonthTotal = salesVolume + incomeMonth;
+    // Ventas mes total (vehicle sales + finance income + delivery revenue month)
+    const salesMonthTotal = salesVolume + incomeMonth + deliveryRevenueMonth;
 
     // Beneficio estimado
     const estimatedProfit = salesMonthTotal - expensesMonth;
@@ -1984,7 +2011,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
 
     // ── Quick Finance ──
     const quickFinance = {
-      incomeMonth: incomeMonth + salesVolume,
+      incomeMonth: incomeMonth + salesVolume + deliveryRevenueMonth,
       expensesMonth,
       estimatedProfit,
       pendingInvoices: cobrosCount,

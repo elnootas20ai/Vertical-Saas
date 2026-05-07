@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
@@ -47,6 +47,7 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -1158,6 +1159,15 @@ export function DeliveryCatalog() {
   const [filterCategory, setFilterCategory] = useState('all');
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
+  type CatalogDeleteOp =
+    | null
+    | { mode: 'single'; item: CatalogItem }
+    | { mode: 'bulk'; items: CatalogItem[] };
+  const [catalogDeleteGuard, setCatalogDeleteGuard] = useState<CatalogDeleteOp>(null);
+  const catalogDeleteOpRef = useRef<CatalogDeleteOp>(null);
+  useEffect(() => {
+    catalogDeleteOpRef.current = catalogDeleteGuard;
+  }, [catalogDeleteGuard]);
 
   // Stock state
   const [stockAdjustItem, setStockAdjustItem] = useState<CatalogItem | null>(null);
@@ -1432,35 +1442,47 @@ export function DeliveryCatalog() {
     }
   };
 
-  const handleDeleteItem = async (item: CatalogItem) => {
+  const handleDeleteItem = (item: CatalogItem) => {
     if (!user?.id) return;
     if (bulkDeletingCatalog || deletingItemIds.has(item._id)) return;
-    if (!confirm(`¿Eliminar "${item.name}"?`)) return;
-    setDeletingItemIds((prev) => new Set(prev).add(item._id));
-    try {
-      await deleteCatalogItemRequest(user.id, item._id);
-      setCatalogItems(prev => prev.filter(i => i._id !== item._id));
-      toast.success('Artículo eliminado');
-    } catch {
-      toast.error('Error al eliminar el artículo');
-    } finally {
-      setDeletingItemIds((prev) => {
-        const next = new Set(prev);
-        next.delete(item._id);
-        return next;
-      });
-    }
+    setCatalogDeleteGuard({ mode: 'single', item });
   };
 
-  const handleDeleteFilteredCatalog = async () => {
+  const handleDeleteFilteredCatalog = () => {
     if (!user?.id || filteredCatalog.length === 0 || bulkDeletingCatalog) return;
-    const total = filteredCatalog.length;
-    if (!confirm(`¿Eliminar ${total} artículo(s) del filtro actual?`)) return;
+    setCatalogDeleteGuard({ mode: 'bulk', items: [...filteredCatalog] });
+  };
+
+  const executeCatalogDeleteAfterGuard = useCallback(async () => {
+    const op = catalogDeleteOpRef.current;
+    setCatalogDeleteGuard(null);
+    if (!user?.id || !op) return;
+
+    if (op.mode === 'single') {
+      const item = op.item;
+      setDeletingItemIds((prev) => new Set(prev).add(item._id));
+      try {
+        await deleteCatalogItemRequest(user.id, item._id);
+        setCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
+        toast.success('Artículo eliminado');
+      } catch {
+        toast.error('Error al eliminar el artículo');
+      } finally {
+        setDeletingItemIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item._id);
+          return next;
+        });
+      }
+      return;
+    }
+
+    const list = op.items;
     setBulkDeletingCatalog(true);
     let deleted = 0;
     let failed = 0;
     try {
-      for (const item of filteredCatalog) {
+      for (const item of list) {
         try {
           await deleteCatalogItemRequest(user.id, item._id);
           deleted += 1;
@@ -1474,7 +1496,7 @@ export function DeliveryCatalog() {
     } finally {
       setBulkDeletingCatalog(false);
     }
-  };
+  }, [user?.id, loadCatalog]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
     if (!user?.id) return;
@@ -2287,6 +2309,21 @@ export function DeliveryCatalog() {
         fields={MODULE_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
       />
+      <CatalogDeleteGuardModal
+        open={catalogDeleteGuard !== null}
+        payload={
+          catalogDeleteGuard?.mode === 'single'
+            ? { mode: 'single', itemName: catalogDeleteGuard.item.name }
+            : catalogDeleteGuard?.mode === 'bulk'
+              ? { mode: 'bulk', count: catalogDeleteGuard.items.length }
+              : null
+        }
+        onClose={() => setCatalogDeleteGuard(null)}
+        onVerified={() => {
+          void executeCatalogDeleteAfterGuard();
+        }}
+      />
+
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}

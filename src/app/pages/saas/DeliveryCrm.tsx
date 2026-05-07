@@ -127,7 +127,8 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'amber' }: {
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export function DeliveryCrm() {
-  const { userId } = useAuth();
+  const { user, isInitializing } = useAuth();
+  const userId = user?.user_id || user?.id || '';
   const { addClient } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [loading, setLoading] = useState(true);
@@ -177,14 +178,18 @@ export function DeliveryCrm() {
   ];
 
   const loadAll = useCallback(async () => {
-    if (!userId) return;
+    const uid = user?.user_id || user?.id || '';
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [dash, cls, camps, alertData] = await Promise.all([
-        getDashboardRequest(userId),
-        listCrmClientsRequest(userId),
-        listCampaignsRequest(userId),
-        getAlertsRequest(userId),
+        getDashboardRequest(uid),
+        listCrmClientsRequest(uid),
+        listCampaignsRequest(uid),
+        getAlertsRequest(uid),
       ]);
       if (dash) setDashboard(dash);
       setClients(cls);
@@ -193,11 +198,17 @@ export function DeliveryCrm() {
         setAlerts(alertData.alerts);
         setAlertsSummary(alertData.summary);
       }
-    } catch { toast.error('Error cargando datos CRM Delivery'); }
-    setLoading(false);
-  }, [userId]);
+    } catch {
+      toast.error('Error cargando datos CRM Delivery');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.user_id, user?.id]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => {
+    if (isInitializing) return;
+    void loadAll();
+  }, [isInitializing, loadAll]);
 
   const createClientsFromEntries = useCallback(
     async (entries: Array<Record<string, unknown>>) => {

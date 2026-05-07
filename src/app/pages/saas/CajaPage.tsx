@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -21,6 +22,7 @@ import {
   ChevronDown, ChevronUp, Filter, Download, Calendar, Eye,
   ShieldCheck, ShieldX, MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin, Settings, Save, Bell,
+  ArrowLeft,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -486,6 +488,7 @@ type TabId = 'estado' | 'historial' | 'incidencias' | 'configuracion';
 export function CajaPage() {
   const { user } = useAuth();
   const userId = user?.user_id || user?.id || '';
+  const navigate = useNavigate();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [driverSessions, setDriverSessions] = useState<DriverCashSession[]>([]);
@@ -639,9 +642,27 @@ export function CajaPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Control de efectivo y cobros de cada TPV</p>
+        <div className="flex items-start gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              // Si la ruta fue abierta "directa" (sin historial), volvemos al hub de Delivery.
+              if (typeof window !== 'undefined' && window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/saas/vertical/delivery');
+              }
+            }}
+            className="mt-0.5 inline-flex items-center justify-center w-10 h-10 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            aria-label="Volver"
+            title="Volver"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Control de efectivo y cobros de cada TPV</p>
+          </div>
         </div>
 
         {/* Pending validations banner */}

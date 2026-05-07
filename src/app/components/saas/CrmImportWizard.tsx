@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useModalClose } from '../../hooks/useModalClose';
+import { toast } from 'sonner';
 import {
   X, Upload, FileText, CheckCircle, AlertCircle, ArrowRight,
   ArrowLeft, Download, LoaderCircle, Users, User,
@@ -71,7 +72,14 @@ const CLIENT_REQUIRED: ClientField[] = ['name', 'phone', 'email'];
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function normalizeHeader(h: string) {
-  return String(h || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return String(h || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    // Quitar ruido típico de plantillas: asteriscos, paréntesis, etc.
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 const LEAD_ALIASES: Record<string, LeadField> = {
@@ -156,6 +164,10 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
 
   const activeFields = mode === 'leads' ? LEAD_FIELDS : CLIENT_FIELDS;
   const requiredFields: ImportField[] = mode === 'leads' ? LEAD_REQUIRED : CLIENT_REQUIRED;
+  const missingRequiredMapped = useMemo(() => {
+    const mappedFields = Object.values(mapping);
+    return requiredFields.filter((f) => !mappedFields.includes(f));
+  }, [mapping, requiredFields]);
 
   const mappedRows = useMemo((): MappedData[] => {
     return rows.map((row) => {
@@ -182,9 +194,16 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
         skipEmptyLines: true,
         complete: (result) => {
           const data = result.data as string[][];
-          if (!data.length) return;
+          if (!data.length) {
+            toast.error('El archivo está vacío o no se pudo leer');
+            return;
+          }
           const hdrs = data[0].map(String);
           const body = data.slice(1);
+          if (!hdrs.length || body.length === 0) {
+            toast.error('No se detectaron filas de datos en el archivo');
+            return;
+          }
           setHeaders(hdrs);
           setRows(body);
           const auto: Record<number, ImportField> = {};
@@ -192,24 +211,52 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           setMapping(auto);
           setStep(2);
         },
+        error: () => toast.error('No se pudo leer el CSV'),
       });
     } else {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const wb = XLSX.read(e.target?.result, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 });
-        if (!data.length) return;
-        const hdrs = (data[0] as string[]).map(String);
-        const body = data.slice(1) as string[][];
-        setHeaders(hdrs);
-        setRows(body);
-        const auto: Record<number, ImportField> = {};
-        hdrs.forEach((h, i) => { auto[i] = autoDetect(h, mode); });
-        setMapping(auto);
-        setStep(2);
+        try {
+          const raw = e.target?.result;
+          if (!raw) {
+            toast.error('No se pudo leer el archivo');
+            return;
+          }
+          // Usamos ArrayBuffer (más compatible que readAsBinaryString)
+          const wb = XLSX.read(raw, { type: 'array' });
+          const sheetName = wb.SheetNames?.[0];
+          const ws = sheetName ? wb.Sheets[sheetName] : null;
+          if (!ws) {
+            toast.error('No se encontró ninguna hoja en el Excel');
+            return;
+          }
+          const data = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false }) as unknown[][];
+          if (!data.length) {
+            toast.error('El Excel está vacío');
+            return;
+          }
+          const hdrs = (data[0] as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean);
+          const body = (data.slice(1) as unknown[][])
+            .map((row) => row.map((x) => String(x ?? '').trim()))
+            .filter((row) => row.some((v) => String(v || '').trim() !== ''));
+
+          if (!hdrs.length || body.length === 0) {
+            toast.error('No se detectaron filas de datos en el Excel');
+            return;
+          }
+          setHeaders(hdrs);
+          setRows(body);
+          const auto: Record<number, ImportField> = {};
+          hdrs.forEach((h, i) => { auto[i] = autoDetect(h, mode); });
+          setMapping(auto);
+          setStep(2);
+        } catch (err) {
+          console.error('CRM import Excel parse error', err);
+          toast.error('Error leyendo el Excel. Prueba a guardarlo como XLSX o CSV');
+        }
       };
-      reader.readAsBinaryString(file);
+      reader.onerror = () => toast.error('No se pudo leer el archivo');
+      reader.readAsArrayBuffer(file);
     }
   };
 
@@ -226,10 +273,8 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
   };
 
   const handleValidate = () => {
-    const mappedFields = Object.values(mapping);
-    const missingRequired = requiredFields.filter((f) => !mappedFields.includes(f));
-    if (missingRequired.length > 0) {
-      alert(`Debes mapear los campos obligatorios: ${missingRequired.join(', ')}`);
+    if (missingRequiredMapped.length > 0) {
+      toast.error(`Debes mapear los campos obligatorios: ${missingRequiredMapped.join(', ')}`);
       return;
     }
     const errs = validateRows();
@@ -448,6 +493,12 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
                   <p className="text-xs text-gray-500 dark:text-gray-400">{rows.length} filas detectadas en «{fileName}»</p>
                 </div>
               </div>
+              {missingRequiredMapped.length > 0 && (
+                <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold">
+                  Falta mapear campos obligatorios para continuar: {missingRequiredMapped.join(', ')}.
+                  <span className="font-medium"> Asegúrate de haber subido la plantilla correcta (Clientes) y asigna cada columna.</span>
+                </div>
+              )}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
@@ -602,7 +653,8 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
               {step === 2 && (
                 <button
                   onClick={handleValidate}
-                  className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  disabled={headers.length === 0 || rows.length === 0 || missingRequiredMapped.length > 0}
+                  className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Revisar datos
                   <ArrowRight className="w-4 h-4" />

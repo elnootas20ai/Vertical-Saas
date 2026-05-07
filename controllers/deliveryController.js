@@ -56,6 +56,20 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function assertUserScope(req, res, userId) {
+  const authId = String(req.authUser?.user_id || req.authUser?.id || '').trim();
+  const paramId = String(userId || '').trim();
+  if (!authId || !paramId) return true;
+  // Allow exact match or "account:" prefix variants
+  const authNormalized = authId.startsWith('account:') ? authId.slice('account:'.length) : authId;
+  const paramNormalized = paramId.startsWith('account:') ? paramId.slice('account:'.length) : paramId;
+  if (authNormalized !== paramNormalized) {
+    res.status(403).json({ ok: false, error: 'Acceso denegado' });
+    return false;
+  }
+  return true;
+}
+
 function normalizeDuplicateValue(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -127,6 +141,7 @@ export async function listDeliveryOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
+    if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const orders = await listDeliveryOrdersByUser(req, userId);
@@ -141,6 +156,7 @@ export async function createDeliveryOrder(req, res) {
     const { userId } = req.params;
     const { order } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
+    if (!assertUserScope(req, res, userId)) return;
     if (!order || typeof order !== 'object') return badRequest(res, 'Falta el objeto order en el body');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -171,6 +187,7 @@ export async function updateDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { order } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
     if (!order || typeof order !== 'object') return badRequest(res, 'Faltan datos del pedido');
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
@@ -190,7 +207,7 @@ export async function updateDeliveryOrder(req, res) {
       metadata: { status: doc.status },
     });
 
-    if (doc.status === 'delivered' && existing.status !== 'delivered') {
+    if (doc.status === 'entregado' && existing.status !== 'entregado') {
       try {
         const orderItems = (doc.items || [])
           .filter(item => (item.catalogItemId || item.productId) && item.quantity)
@@ -228,6 +245,7 @@ export async function updateDeliveryOrder(req, res) {
 export async function removeDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
+    if (!assertUserScope(req, res, userId)) return;
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     const account = await findAccountByUserId(req, userId);
@@ -256,6 +274,7 @@ export async function cancelDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { cancelReason } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
     if (!cancelReason || String(cancelReason).trim().length < 10) {
       return badRequest(res, 'El motivo de cancelación es obligatorio (mínimo 10 caracteres)');
     }
@@ -303,6 +322,7 @@ export async function reopenDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { notes } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     if (existing.status !== 'cancelled' && existing.status !== 'entregado') {
@@ -342,6 +362,7 @@ export async function registerPayment(req, res) {
   try {
     const { userId, orderId } = req.params;
     const { paymentMethod, paidAmount } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
     if (!paymentMethod) return badRequest(res, 'Falta el método de pago');
     if (!paidAmount || Number(paidAmount) <= 0) return badRequest(res, 'El importe debe ser mayor que 0');
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
@@ -424,6 +445,7 @@ export async function filterDeliveryOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
+    if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     let orders = await listDeliveryOrdersByUser(req, userId);
@@ -464,6 +486,7 @@ export async function clientOrderHistory(req, res) {
   try {
     const { userId, clientId } = req.params;
     if (!userId || !clientId) return badRequest(res, 'Falta userId o clientId');
+    if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     let orders = await listDeliveryOrdersByUser(req, userId);
@@ -483,6 +506,7 @@ export async function listCatalogItems(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
+    if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const filterModule = req.query.module || undefined;

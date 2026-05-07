@@ -1182,6 +1182,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   openIncidents={openIncidents}
                   cobrosCount={cobrosCount}
                   activeWorkers={activeWorkers}
+                  pendingDeliveries={serverData?.kpis?.pendingDeliveries ?? 0}
                   loading={serverLoading}
                   salesClosure={serverData?.salesClosure}
                 />
@@ -1505,11 +1506,11 @@ function FinanceStat({ label, value, color, bg, icon, sub }: {
 // ─── Operative block (adapts to vertical) ───────────────────────────────────
 
 function OperativeBlock({
-  vertical, stockCount, oportunidades, openIncidents, cobrosCount, activeWorkers, loading,
+  vertical, stockCount, oportunidades, openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
   salesClosure,
 }: {
   vertical: string; stockCount: number; oportunidades: number; openIncidents: number;
-  cobrosCount: number; activeWorkers: number; loading: boolean;
+  cobrosCount: number; activeWorkers: number; pendingDeliveries: number; loading: boolean;
   salesClosure?: SalesClosureKpis;
 }) {
   const navigate = useNavigate();
@@ -1524,7 +1525,7 @@ function OperativeBlock({
     const verticalSpecific: Record<string, { title: string; value: string; sub: string; icon: React.ReactNode; bg: string; text: string; route: string }> = {
       carDealership: { title: 'Stock vehículos', value: String(stockCount), sub: 'Disponibles', icon: <Car className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vehicles' },
       workshop: { title: 'Órdenes taller', value: '—', sub: 'Abiertas', icon: <Wrench className="w-4 h-4" />, bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600', route: '/saas/workshop' },
-      delivery: { title: 'Pedidos activos', value: '—', sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/delivery' },
+      delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery' },
       cleaning: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/cleaning-hub' },
       gym: { title: 'Socios activos', value: '—', sub: 'Este mes', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-members' },
       clinic: { title: 'Citas hoy', value: '—', sub: 'Programadas', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/clinic-appointments' },
@@ -1561,7 +1562,7 @@ function OperativeBlock({
       });
     }
     return row;
-  }, [vertical, stockCount, oportunidades, cobrosCount, activeWorkers, salesClosure]);
+  }, [vertical, stockCount, oportunidades, cobrosCount, activeWorkers, pendingDeliveries, salesClosure]);
 
   return (
     <>

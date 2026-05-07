@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 // SSE events are emitted by the backend (delivery_order_created, etc.)
 // and handled globally; auto-refresh provides real-time updates
 import {
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   updateDeliveryOrderRequest,
   cancelDeliveryOrderRequest,
@@ -105,6 +105,7 @@ const EMPTY_FILTERS: Filters = { channel: '', salesPointId: '', status: '', date
 
 export function DeliveryOrders() {
   const { user } = useAuth();
+  const userId = user?.user_id || user?.id || '';
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
@@ -120,6 +121,7 @@ export function DeliveryOrders() {
   const [actionLoading, setActionLoading] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [selectedDay, setSelectedDay] = useState<string>(() => new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
 
   const MODULE_AI_FIELDS: AIFieldDef[] = [
     { key: 'client', label: 'Cliente' },
@@ -153,14 +155,16 @@ export function DeliveryOrders() {
   const canPayment = true;
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
+      const dateFrom = `${selectedDay}T00:00:00.000Z`;
+      const dateTo = `${selectedDay}T23:59:59.999Z`;
       const [ordersData, catalogData, pdvData] = await Promise.all([
-        listDeliveryOrdersRequest(user.id),
-        listCatalogItemsRequest(user.id, 'catalog'),
-        listPointsOfSaleRequest(user.id),
+        filterDeliveryOrdersRequest(userId, { dateFrom, dateTo, limit: 500 }),
+        listCatalogItemsRequest(userId, 'catalog'),
+        listPointsOfSaleRequest(userId),
       ]);
-      setOrders(ordersData);
+      setOrders(ordersData.orders);
       setCatalogItems(catalogData);
       setPointsOfSale(pdvData);
     } catch {
@@ -168,7 +172,7 @@ export function DeliveryOrders() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [userId, selectedDay]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -181,9 +185,9 @@ export function DeliveryOrders() {
   // ─── Actions ─────────────────────────────────────────────────────────────
 
   const handleCreate = async (data: Partial<DeliveryOrder>) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const created = await createDeliveryOrderRequest(user.id, data);
+      const created = await createDeliveryOrderRequest(userId, data);
       setOrders((prev) => [created, ...prev]);
       setShowCreate(false);
       toast.success(`Pedido ${created.orderNumber} creado`);
@@ -193,7 +197,7 @@ export function DeliveryOrders() {
   };
 
   const handleAdvanceStatus = async (order: DeliveryOrder) => {
-    if (!user?.id) return;
+    if (!userId) return;
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     try {
@@ -202,7 +206,7 @@ export function DeliveryOrders() {
       if (next === 'cocina') extras.kitchenStartedAt = now;
       if (next === 'listo') { extras.kitchenCompletedAt = now; extras.assemblyStartedAt = now; }
       if (next === 'entregado') { extras.assemblyCompletedAt = now; extras.deliveredAt = now; }
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, ...extras, status: next,
         stageHistory: [...(order.stageHistory || []), { status: next, date: now, user: user.fullName || 'Sistema' }],
       });
@@ -215,10 +219,10 @@ export function DeliveryOrders() {
   };
 
   const handleCancel = async (reason: string) => {
-    if (!user?.id || !cancelOrder) return;
+    if (!userId || !cancelOrder) return;
     setActionLoading(true);
     try {
-      const updated = await cancelDeliveryOrderRequest(user.id, cancelOrder._id, reason);
+      const updated = await cancelDeliveryOrderRequest(userId, cancelOrder._id, reason);
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       setCancelOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
@@ -231,10 +235,10 @@ export function DeliveryOrders() {
   };
 
   const handleReopen = async (notes: string) => {
-    if (!user?.id || !reopenOrder) return;
+    if (!userId || !reopenOrder) return;
     setActionLoading(true);
     try {
-      const updated = await reopenDeliveryOrderRequest(user.id, reopenOrder._id, notes);
+      const updated = await reopenDeliveryOrderRequest(userId, reopenOrder._id, notes);
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       setReopenOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
@@ -247,10 +251,10 @@ export function DeliveryOrders() {
   };
 
   const handlePayment = async (method: string) => {
-    if (!user?.id || !paymentOrder) return;
+    if (!userId || !paymentOrder) return;
     setActionLoading(true);
     try {
-      const updated = await registerPaymentRequest(user.id, paymentOrder._id, method, paymentOrder.totalAmount - paymentOrder.paidAmount);
+      const updated = await registerPaymentRequest(userId, paymentOrder._id, method, paymentOrder.totalAmount - paymentOrder.paidAmount);
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       setPaymentOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
@@ -288,36 +292,36 @@ export function DeliveryOrders() {
   // ─── KPIs ────────────────────────────────────────────────────────────────
 
   const kpis = useMemo(() => ({
-    nuevo:     orders.filter((o) => o.status === 'nuevo').length,
-    cocina:    orders.filter((o) => o.status === 'cocina').length,
-    listo:     orders.filter((o) => o.status === 'listo').length,
-    entregado: orders.filter((o) => o.status === 'entregado').length,
-    cancelled: orders.filter((o) => o.status === 'cancelled').length,
-    total:     orders.length,
-  }), [orders]);
+    nuevo:     filtered.filter((o) => o.status === 'nuevo').length,
+    cocina:    filtered.filter((o) => o.status === 'cocina').length,
+    listo:     filtered.filter((o) => o.status === 'listo').length,
+    entregado: filtered.filter((o) => o.status === 'entregado').length,
+    cancelled: filtered.filter((o) => o.status === 'cancelled').length,
+    total:     filtered.length,
+  }), [filtered]);
 
   // ─── Alerts ──────────────────────────────────────────────────────────────
 
   const alerts = useMemo((): DeliveryAlert[] => {
     const result: DeliveryAlert[] = [];
     const now = Date.now();
-    const unattended = orders.filter((o) => o.status === 'nuevo' && (now - new Date(o.createdAt).getTime()) > 5 * 60000);
+    const unattended = filtered.filter((o) => o.status === 'nuevo' && (now - new Date(o.createdAt).getTime()) > 5 * 60000);
     if (unattended.length > 0) {
       result.push({ id: 'unattended', level: 'warning', title: `${unattended.length} pedido${unattended.length > 1 ? 's' : ''} sin atender`,
         message: `Pedidos nuevos esperando más de 5 minutos`, action: { label: 'Ver', onClick: () => setFilters((f) => ({ ...f, status: 'nuevo' })) } });
     }
-    const unpaid = orders.filter((o) => o.status === 'entregado' && o.paymentStatus !== 'paid');
+    const unpaid = filtered.filter((o) => o.status === 'entregado' && o.paymentStatus !== 'paid');
     if (unpaid.length > 0) {
       result.push({ id: 'unpaid', level: 'warning', title: `${unpaid.length} pedido${unpaid.length > 1 ? 's' : ''} sin cobrar`,
         message: `Pedidos entregados pendientes de cobro`, action: { label: 'Ver', onClick: () => setFilters((f) => ({ ...f, status: 'entregado' })) } });
     }
-    const noAddr = orders.filter((o) => o.deliveryType === 'domicilio' && !o.customerAddress?.trim() && !['cancelled', 'entregado'].includes(o.status));
+    const noAddr = filtered.filter((o) => o.deliveryType === 'domicilio' && !o.customerAddress?.trim() && !['cancelled', 'entregado'].includes(o.status));
     if (noAddr.length > 0) {
       result.push({ id: 'noaddr', level: 'critical', title: `${noAddr.length} pedido${noAddr.length > 1 ? 's' : ''} a domicilio sin dirección`,
         message: `Pedidos marcados como domicilio sin dirección de entrega` });
     }
     return result.filter((a) => !dismissedAlerts.has(a.id));
-  }, [orders, dismissedAlerts]);
+  }, [filtered, dismissedAlerts]);
 
   const hasActiveFilters = Object.values(filters).some((v) => v !== '');
 
@@ -352,6 +356,21 @@ export function DeliveryOrders() {
 
         {/* Toolbar */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={selectedDay}
+              onChange={(e) => setSelectedDay(e.target.value)}
+              className="px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-100 focus:outline-none"
+              title="Día de operativa / historial"
+            />
+            <button
+              onClick={() => setSelectedDay(new Date().toISOString().slice(0, 10))}
+              className="px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+            >
+              Hoy
+            </button>
+          </div>
           <div className="relative flex-1 w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input value={filters.search} onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}

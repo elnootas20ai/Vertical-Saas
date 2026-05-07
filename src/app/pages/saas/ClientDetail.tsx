@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useApp } from '../../context/AppContext';
+import { useBusiness } from '../../context/BusinessContext';
 import type { ConsentHistoryEntry, GdprRecord, LeadInteraction } from '../../context/AppContext';
 import { computeLeadScore, getScoreColor, getScoreLabel } from '../../lib/leadScoring';
 import { InteractionTimeline, type TimelineEvent } from '../../components/saas/InteractionTimeline';
@@ -120,6 +121,7 @@ import {
   Upload, FolderOpen, Eye, FileCheck, Receipt, IdCard, FolderClosed, ChevronRight,
   BarChart3, Database, Users, Megaphone, Globe, Building2, UserCircle,
   Hash, Percent, Gift, ToggleLeft, ToggleRight, ClipboardList, PenLine, Send,
+  ShoppingBag,
 } from 'lucide-react';
 import { getClientQuotesRequest, type ClientQuote } from '../../lib/crmApi';
 import { listClientInvoicesRequest, type ClientInvoiceRecord } from '../../lib/clientInvoicesApi';
@@ -230,7 +232,9 @@ export function ClientDetail() {
   const { t } = useTranslation();
   const { id } = useParams();
   const { vehicles, clients, leads, updateClient, updateLead, deleteClient } = useApp();
+  const { currentBusiness } = useBusiness();
   const { user: authUser } = useAuth();
+  const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const [activeTab, setActiveTab] = useState('resumen');
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
   const [showDeleteClientModal, setShowDeleteClientModal] = useState(false);
@@ -1069,6 +1073,24 @@ export function ClientDetail() {
     const summary = clientSummary;
     return (
       <div className="space-y-6">
+        {isDeliveryBusiness && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/90 dark:bg-emerald-950/35">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">Pedido desde esta ficha</p>
+              <p className="text-xs text-emerald-800/90 dark:text-emerald-300 mt-0.5">
+                Abre el TPV rápido con {client.name} ya seleccionado (tipo de envío y productos en el TPV).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(client.id)}`)}
+              className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors shadow-sm"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              Nuevo pedido delivery
+            </button>
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6">
             <div className="flex items-center gap-2 mb-2">
@@ -2504,6 +2526,16 @@ export function ClientDetail() {
               </div>
             </div>
             <div className="flex flex-col gap-2 flex-shrink-0">
+              {isDeliveryBusiness && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(client.id)}`)}
+                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm shadow-md shadow-emerald-900/15"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  Nuevo pedido delivery
+                </button>
+              )}
               <button
                 onClick={handleCreateContract}
                 className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 text-blue-600 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"

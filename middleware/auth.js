@@ -4,6 +4,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-produ
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || `${JWT_SECRET}_refresh`;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+const AUTH_EPOCH = Number.parseInt(String(process.env.AUTH_EPOCH || '0'), 10) || 0;
 
 // Convierte strings tipo "15m", "8h", "7d", "30d" a milisegundos
 function parseDurationMs(duration) {
@@ -39,11 +40,11 @@ export function clearAuthCookies(res) {
 }
 
 export function signAccessToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign({ ...payload, epoch: AUTH_EPOCH }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
 export function signRefreshToken(payload) {
-  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN });
+  return jwt.sign({ ...payload, epoch: AUTH_EPOCH }, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN });
 }
 
 export function verifyRefreshToken(token) {
@@ -67,6 +68,10 @@ export function requireAuth(req, res, next) {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    if ((payload?.epoch ?? 0) !== AUTH_EPOCH) {
+      clearAuthCookies(res);
+      return res.status(401).json({ ok: false, error: 'Sesión inválida. Vuelve a iniciar sesión.' });
+    }
     req.authUser = payload;
     return next();
   } catch (error) {

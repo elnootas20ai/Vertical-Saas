@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -73,9 +73,11 @@ function formatPrice(n: number): string {
 
 export function TpvRapidoPage() {
   const { user } = useAuth();
-  const { addClient } = useApp();
+  const { addClient, clients } = useApp();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedClientIdFromUrl = useRef<string | null>(null);
   const userId = user?.user_id || user?.id || '';
   const [selectedCashierId, setSelectedCashierId] = useState<string>('');
 
@@ -331,6 +333,7 @@ export function TpvRapidoPage() {
   }, []);
 
   const resetFlowFromClientStep = useCallback(() => {
+    appliedClientIdFromUrl.current = null;
     clearSelection();
     setCompletedSteps(new Set());
     setCurrentStep('client');
@@ -370,6 +373,26 @@ export function TpvRapidoPage() {
     },
     [selectClient, completeStep],
   );
+
+  const clientIdFromUrl = searchParams.get('clientId');
+  useEffect(() => {
+    if (!clientIdFromUrl || !userId) return;
+    if (appliedClientIdFromUrl.current === clientIdFromUrl) return;
+    const match = clients.find((c) => c.id === clientIdFromUrl);
+    if (!match) return;
+    appliedClientIdFromUrl.current = clientIdFromUrl;
+    handleSelectClient(match);
+    setPhonePrefix(match.phonePrefix || '+34');
+    setPhoneInput(match.phone || '');
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('clientId');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [clientIdFromUrl, userId, clients, handleSelectClient, setSearchParams]);
 
   const handleCreateClient = useCallback(async () => {
     if (!newClientName.trim() || !phoneInput.trim() || !newClientStreet.trim()) {
@@ -545,6 +568,7 @@ export function TpvRapidoPage() {
 
   // ─── Reset ────────────────────────────────────────────────────────────────
   const handleReset = useCallback(() => {
+    appliedClientIdFromUrl.current = null;
     setCurrentStep('client');
     setCompletedSteps(new Set());
     setPhoneInput('');

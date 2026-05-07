@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
+import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
@@ -185,7 +186,7 @@ function QuickAccess({ cfg, kpis, cashPend, incidents }: {
     { l: 'Incidencias', i: AlertTriangle, r: '/saas/delivery', b: incidents > 0 ? incidents : null, bc: 'bg-red-500', v: true },
     { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Stock', i: Boxes, r: '/saas/articles', b: null, v: true },
-    { l: 'Clientes', i: Users, r: '/saas/delivery-crm', b: null, v: true },
+    { l: 'Clientes', i: Users, r: '/saas/clients', b: null, v: true },
     { l: 'Finanzas', i: Euro, r: '/saas/finance', b: null, v: true },
   ];
   return (
@@ -457,6 +458,24 @@ export function DeliveryOpsCenter() {
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
 
+  const deliveryOpsTabs = useMemo(
+    () => [
+      { id: 'operativa', label: 'Operativa' },
+      { id: 'pedidos', label: 'Pedidos' },
+      { id: 'clients', label: 'Clientes' },
+    ],
+    [],
+  );
+
+  const onDeliveryOpsSectionTab = useCallback(
+    (id: string) => {
+      if (id === 'clients') navigate('/saas/delivery?tab=clients');
+      else if (id === 'pedidos') navigate('/saas/delivery');
+      else navigate('/saas/delivery-ops');
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const workerMode = window.localStorage.getItem('saas-worker-mode') === 'true';
@@ -575,6 +594,8 @@ export function DeliveryOpsCenter() {
         </div>
 
         <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={data?.pointsOfSale || []} />
+
+        <Tabs tabs={deliveryOpsTabs} activeTab="operativa" onChange={onDeliveryOpsSectionTab} />
 
         {data?.alerts && data.alerts.length > 0 && <Alerts alerts={data.alerts} />}
 

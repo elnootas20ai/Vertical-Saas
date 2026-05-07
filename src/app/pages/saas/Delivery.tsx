@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -69,6 +70,8 @@ import {
   Monitor,
   Smartphone,
   Printer,
+  Users,
+  ExternalLink,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; badgeClass: string }> = {
@@ -87,6 +90,11 @@ const PRIORITY_CONFIG: Record<string, { label: string; badgeClass: string; dot: 
 };
 
 const CHANNEL_LABELS: Record<string, string> = { direct: 'Directo', phone: 'Teléfono', web: 'Web', app: 'App', tpv: 'TPV', glovo: 'Glovo', justeat: 'Just Eat', ubereats: 'Uber Eats' };
+
+/** Tabs en `/saas/delivery` — sincronizadas con `?tab=` */
+const DELIVERY_MAIN_TAB_IDS = new Set([
+  'orders', 'clients', 'kitchen', 'assembly', 'delivery', 'driverCash', 'pointsOfSale', 'incidents', 'history',
+]);
 
 const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
   nuevo: 'cocina', cocina: 'listo', listo: 'entregado',
@@ -1276,12 +1284,14 @@ function ClosedSessionSummary({ session }: { session: DriverCashSession }) {
 
 export function Delivery() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userId = user?.user_id || user?.id || '';
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [cashSessions, setCashSessions] = useState<DriverCashSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('orders');
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<DeliveryOrderStatus | 'all'>('all');
@@ -1294,6 +1304,39 @@ export function Delivery() {
   const [checklistState, setChecklistState] = useState<Record<string, boolean[]>>({});
   const [showCashModal, setShowCashModal] = useState(false);
 
+  const tabParam = searchParams.get('tab');
+  const activeTab =
+    tabParam && DELIVERY_MAIN_TAB_IDS.has(tabParam) ? tabParam : 'orders';
+
+  const setActiveTab = useCallback(
+    (tabId: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (tabId === 'orders') next.delete('tab');
+          else next.set('tab', tabId);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t && !DELIVERY_MAIN_TAB_IDS.has(t)) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [searchParams, setSearchParams]);
+
   useModalClose(showCreate, () => setShowCreate(false));
   useModalClose(showCashModal, () => setShowCashModal(false));
   useModalClose(!!selectedOrder, () => setSelectedOrder(null));
@@ -1302,13 +1345,13 @@ export function Delivery() {
   useModalClose(!!assignDriverOrder, () => setAssignDriverOrder(null));
 
   const loadOrders = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
       const [ordersData, catalogData, sessionsData, pdvData] = await Promise.all([
-        listDeliveryOrdersRequest(user.id),
-        listCatalogItemsRequest(user.id),
-        listDriverCashSessionsRequest(user.id),
-        listPointsOfSaleRequest(user.id),
+        listDeliveryOrdersRequest(userId),
+        listCatalogItemsRequest(userId),
+        listDriverCashSessionsRequest(userId),
+        listPointsOfSaleRequest(userId),
       ]);
       setOrders(ordersData);
       setCatalogItems(catalogData);
@@ -1319,14 +1362,14 @@ export function Delivery() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [userId]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
   const handleCreate = async (data: Partial<DeliveryOrder>) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const created = await createDeliveryOrderRequest(user.id, data);
+      const created = await createDeliveryOrderRequest(userId, data);
       setOrders(prev => [created, ...prev]);
       setShowCreate(false);
       toast.success(`Pedido ${created.orderNumber} creado`);
@@ -1336,10 +1379,10 @@ export function Delivery() {
   };
 
   const handleDelete = async (order: DeliveryOrder) => {
-    if (!user?.id) return;
+    if (!userId) return;
     if (!confirm(`¿Eliminar el pedido ${order.orderNumber}?`)) return;
     try {
-      await deleteDeliveryOrderRequest(user.id, order._id);
+      await deleteDeliveryOrderRequest(userId, order._id);
       setOrders(prev => prev.filter(o => o._id !== order._id));
       toast.success('Pedido eliminado');
     } catch {
@@ -1348,7 +1391,7 @@ export function Delivery() {
   };
 
   const handleAdvanceStatus = async (order: DeliveryOrder) => {
-    if (!user?.id) return;
+    if (!userId) return;
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     try {
@@ -1358,7 +1401,7 @@ export function Delivery() {
       if (next === 'listo') { extras.kitchenCompletedAt = now; extras.assemblyStartedAt = now; }
       if (next === 'entregado') { extras.assemblyCompletedAt = now; extras.deliveredAt = now; }
 
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, ...extras, status: next,
         stageHistory: [...(order.stageHistory || []), { status: next, date: now, user: user.fullName || 'Sistema' }],
       });
@@ -1371,9 +1414,9 @@ export function Delivery() {
   };
 
   const handleSetStatus = async (order: DeliveryOrder, status: DeliveryOrderStatus, notes?: string) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, status,
         incidentNotes: status === 'incident' ? (notes || order.incidentNotes) : order.incidentNotes,
         incidentType: status === 'incident' ? (order.incidentType || 'general') : order.incidentType,
@@ -1388,9 +1431,9 @@ export function Delivery() {
   };
 
   const handleIncident = async (order: DeliveryOrder, incType: string, notes: string) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, status: 'incident' as DeliveryOrderStatus, incidentNotes: notes, incidentType: incType,
         stageHistory: [...(order.stageHistory || []), { status: 'incident' as DeliveryOrderStatus, date: new Date().toISOString(), user: user.fullName || 'Sistema', notes: `[${incType}] ${notes}` }],
       });
@@ -1403,9 +1446,9 @@ export function Delivery() {
   };
 
   const handleResolveIncident = async (order: DeliveryOrder, notes: string) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, status: 'nuevo' as DeliveryOrderStatus,
         stageHistory: [...(order.stageHistory || []), { status: 'nuevo' as DeliveryOrderStatus, date: new Date().toISOString(), user: user.fullName || 'Sistema', notes: `Incidencia resuelta${notes ? `: ${notes}` : ''}` }],
       });
@@ -1418,9 +1461,9 @@ export function Delivery() {
   };
 
   const handleAssignDriver = async (order: DeliveryOrder, driverName: string) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order, assignedDriver: driverName,
         stageHistory: [...(order.stageHistory || []), { status: order.status, date: new Date().toISOString(), user: user.fullName || 'Sistema', notes: `Repartidor asignado: ${driverName}` }],
       });
@@ -1433,9 +1476,9 @@ export function Delivery() {
   };
 
   const handlePayment = async (order: DeliveryOrder, method: string) => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
-      const updated = await updateDeliveryOrderRequest(user.id, {
+      const updated = await updateDeliveryOrderRequest(userId, {
         ...order,
         stageHistory: [...(order.stageHistory || []), { status: order.status, date: new Date().toISOString(), user: user.fullName || 'Sistema', notes: `Cobro registrado: ${PAYMENT_LABELS[method] || method} — ${order.totalAmount?.toFixed(2)}€` }],
       });
@@ -1475,10 +1518,33 @@ export function Delivery() {
     incidents: orders.filter(o => o.status === 'incident').length,
   }), [orders]);
 
+  const clientsPreview = useMemo(() => {
+    const map = new Map<string, { name: string; phone: string; orderCount: number; lastAt: string }>();
+    for (const o of orders) {
+      const phone = (o.customerPhone || '').trim();
+      const name = (o.customerName || '').trim() || 'Sin nombre';
+      const key = phone || `${name}|${(o.customerAddress || '').trim()}`;
+      const created = o.createdAt || '';
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, { name, phone: phone || '—', orderCount: 1, lastAt: created });
+      } else {
+        const nextCount = prev.orderCount + 1;
+        const lastAt =
+          created && (!prev.lastAt || new Date(created) > new Date(prev.lastAt)) ? created : prev.lastAt;
+        map.set(key, { ...prev, orderCount: nextCount, lastAt });
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => b.orderCount - a.orderCount || (b.lastAt || '').localeCompare(a.lastAt || ''),
+    );
+  }, [orders]);
+
   const openCashSessions = cashSessions.filter(s => s.status === 'open');
 
   const tabsConfig = [
     { id: 'orders', label: 'Pedidos', count: orders.filter(o => !['entregado', 'cancelled'].includes(o.status)).length || undefined },
+    { id: 'clients', label: 'Clientes', count: clientsPreview.length || undefined },
     { id: 'kitchen', label: 'Cocina', count: kpis.kitchen || undefined },
     { id: 'assembly', label: 'Montaje', count: kpis.assembly || undefined },
     { id: 'delivery', label: 'Reparto', count: kpis.delivery || undefined },
@@ -1487,6 +1553,88 @@ export function Delivery() {
     { id: 'incidents', label: 'Incidencias', count: kpis.incidents || undefined },
     { id: 'history', label: 'Historial' },
   ];
+
+  // ═══ TAB: Clientes ═══
+  const renderClientsTab = () => (
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-violet-100 dark:bg-violet-950/40 rounded-xl flex items-center justify-center">
+            <Users className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-gray-100">Clientes</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Listado completo en CRM; aquí ves los que aparecen en tus pedidos de delivery.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/saas/clients')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white text-sm font-semibold transition-colors"
+          >
+            <ExternalLink className="w-4 h-4" /> Abrir gestión de clientes
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/saas/delivery-crm')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            CRM Delivery
+          </button>
+        </div>
+      </div>
+
+      {clientsPreview.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+          <Users className="w-12 h-12 text-gray-300 mb-3" />
+          <p className="font-semibold text-gray-700 dark:text-gray-300">Aún no hay clientes en pedidos</p>
+          <p className="text-sm mt-1 text-center max-w-md">Cuando crees pedidos con nombre o teléfono, aparecerán aquí como vista rápida.</p>
+          <button
+            type="button"
+            onClick={() => navigate('/saas/clients')}
+            className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-sm font-medium"
+          >
+            Ir al CRM de clientes
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
+                {['Cliente', 'Teléfono', 'Pedidos', 'Último pedido'].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {clientsPreview.map((row, idx) => (
+                <tr key={`${row.phone}-${row.name}-${idx}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                  <td className="px-4 py-3 text-sm font-semibold text-gray-900 dark:text-gray-100">{row.name}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+                    {row.phone !== '—' ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Phone className="w-3.5 h-3.5 text-gray-400" /> {row.phone}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm font-bold text-violet-600 dark:text-violet-400">{row.orderCount}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{row.lastAt ? formatDateES(row.lastAt) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 
   // ═══ TAB: Pedidos ═══
   const renderOrdersTab = () => (
@@ -1890,14 +2038,14 @@ export function Delivery() {
     const removeTerminal = (id: string) => setPdvTerminals(prev => prev.filter(t => t.id !== id));
 
     const handleSave = async () => {
-      if (!user?.id || !pdvName.trim()) return;
+      if (!userId || !pdvName.trim()) return;
       try {
         if (editPdv) {
-          const updated = await updatePointOfSaleRequest(user.id, { ...editPdv, name: pdvName, code: pdvCode, address: pdvAddress, terminals: pdvTerminals });
+          const updated = await updatePointOfSaleRequest(userId, { ...editPdv, name: pdvName, code: pdvCode, address: pdvAddress, terminals: pdvTerminals });
           setPointsOfSale(prev => prev.map(p => p._id === updated._id ? updated : p));
           toast.success(`Punto de venta "${pdvName}" actualizado`);
         } else {
-          const created = await createPointOfSaleRequest(user.id, { name: pdvName, code: pdvCode, address: pdvAddress, terminals: pdvTerminals } as Partial<PointOfSale>);
+          const created = await createPointOfSaleRequest(userId, { name: pdvName, code: pdvCode, address: pdvAddress, terminals: pdvTerminals } as Partial<PointOfSale>);
           setPointsOfSale(prev => [...prev, created]);
           toast.success(`Punto de venta "${pdvName}" creado con ${pdvTerminals.length} terminales`);
         }
@@ -1906,10 +2054,10 @@ export function Delivery() {
     };
 
     const handleDelete = async (pdv: PointOfSale) => {
-      if (!user?.id) return;
+      if (!userId) return;
       if (!confirm(`¿Eliminar el punto de venta "${pdv.name}" y todos sus terminales?`)) return;
       try {
-        await deletePointOfSaleRequest(user.id, pdv._id);
+        await deletePointOfSaleRequest(userId, pdv._id);
         setPointsOfSale(prev => prev.filter(p => p._id !== pdv._id));
         toast.success('Punto de venta eliminado');
       } catch { toast.error('Error al eliminar'); }
@@ -2050,6 +2198,7 @@ export function Delivery() {
       <div className="space-y-6">
         <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
         {activeTab === 'orders' && renderOrdersTab()}
+        {activeTab === 'clients' && renderClientsTab()}
         {activeTab === 'kitchen' && renderKitchenTab()}
         {activeTab === 'assembly' && renderAssemblyTab()}
         {activeTab === 'delivery' && renderDeliveryTab()}

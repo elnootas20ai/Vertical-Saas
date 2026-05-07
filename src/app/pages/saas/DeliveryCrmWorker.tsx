@@ -27,7 +27,8 @@ const FREQUENCY_LABELS: Record<string, string> = {
 };
 
 export function DeliveryCrmWorker() {
-  const { userId } = useAuth();
+  const { user, isInitializing } = useAuth();
+  const userId = user?.user_id || user?.id || '';
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<DeliveryCrmClient[]>([]);
   const [search, setSearch] = useState('');
@@ -36,16 +37,26 @@ export function DeliveryCrmWorker() {
   const [loadingOrders, setLoadingOrders] = useState(false);
 
   const loadClients = useCallback(async () => {
-    if (!userId) return;
+    const uid = user?.user_id || user?.id || '';
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await listCrmClientsRequest(userId);
+      const data = await listCrmClientsRequest(uid);
       setClients(data);
-    } catch { toast.error('Error cargando clientes'); }
-    setLoading(false);
-  }, [userId]);
+    } catch {
+      toast.error('Error cargando clientes');
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.user_id, user?.id]);
 
-  useEffect(() => { loadClients(); }, [loadClients]);
+  useEffect(() => {
+    if (isInitializing) return;
+    void loadClients();
+  }, [isInitializing, loadClients]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
