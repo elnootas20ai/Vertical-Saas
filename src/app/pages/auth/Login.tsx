@@ -10,14 +10,14 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 
-const CREDENTIALS_KEY = 'vertial_saved_credentials';
+const CREDENTIALS_KEY = 'vertial_saved_login';
 
-function loadSavedCredentials(): { email: string; password: string } | null {
+function loadSavedLogin(): { email: string } | null {
   try {
     const raw = localStorage.getItem(CREDENTIALS_KEY);
     if (!raw) return null;
     const decoded = atob(raw);
-    return JSON.parse(decoded) as { email: string; password: string };
+    return JSON.parse(decoded) as { email: string };
   } catch {
     return null;
   }
@@ -29,10 +29,10 @@ export function Login() {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
 
-  const saved = loadSavedCredentials();
+  const saved = loadSavedLogin();
   const [formData, setFormData] = useState({
     email: saved?.email ?? '',
-    password: saved?.password ?? '',
+    password: '',
     remember: saved !== null,
   });
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
@@ -67,7 +67,7 @@ export function Login() {
     }
     
     if (formData.remember) {
-      const encoded = btoa(JSON.stringify({ email: formData.email, password: formData.password }));
+      const encoded = btoa(JSON.stringify({ email: formData.email }));
       localStorage.setItem(CREDENTIALS_KEY, encoded);
     } else {
       localStorage.removeItem(CREDENTIALS_KEY);
