@@ -65,7 +65,6 @@ import { clockinAlertsRouter } from './routers/clockinAlertsRouter.js';
 import { teamAlertsRouter } from './routers/teamAlertsRouter.js';
 import { salaRouter } from './routers/salaRouter.js';
 import { cleaningClientsRouter } from './routers/cleaningClientsRouter.js';
-import { pluginRouter } from './src/plugin/server/router.js';
 import { ocrApiRouter } from './routers/ocrRouter.js';
 import aiParserRouter from './routers/aiParserRouter.js';
 import { affiliateRouter } from './routers/affiliateRouter.js';
@@ -963,8 +962,7 @@ app.get('/api/public/vehicle/:vehicleId', async (req, res) => {
   }
 });
 
-// Plugin — Agent Hub (self-contained, no auth required for dev)
-app.use('/api/plugin', pluginRouter);
+// Plugin — Agent Hub: REMOVED (security hardening)
 
 // OCR Transversal — procesamiento, clasificación y enrutamiento de documentos
 app.use('/api/ocr', requireAuth, ocrApiRouter);

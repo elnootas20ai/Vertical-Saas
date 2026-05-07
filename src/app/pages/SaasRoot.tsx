@@ -6,11 +6,8 @@ import { GroupProvider } from '../context/GroupContext';
 import { ActivationChecklistProvider } from '../context/ActivationChecklistContext';
 import { SetupProgressProvider, useSetupProgress } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
-import { PluginPanel } from '../../plugin/PluginPanel';
 import { useAuth } from '../context/AuthContext';
 import { EMAIL_SKIP_KEY } from './auth/VerifyEmailPending';
-
-const SUPERADMIN_EMAIL = 'uriel@admin.com';
 
 interface OnboardingCompanyProfile {
   tradeName?: string;
@@ -156,13 +153,10 @@ function SaasContent() {
     return null;
   }
 
-  const isSuperAdmin = user?.email === SUPERADMIN_EMAIL;
-
   if (location.pathname === '/saas/suspended') {
     return (
       <>
         <Outlet />
-        {isSuperAdmin && <PluginPanel />}
       </>
     );
   }
@@ -170,7 +164,6 @@ function SaasContent() {
   return (
     <>
       <Outlet />
-      {isSuperAdmin && <PluginPanel />}
     </>
   );
 }

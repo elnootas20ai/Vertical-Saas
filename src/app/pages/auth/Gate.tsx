@@ -80,6 +80,8 @@ export function Gate() {
   const { logout, user } = useAuth();
   const { businesses, currentBusiness, switchBusiness, isLoading: isLoadingBusinesses, createBusiness, reloadBusinesses } = useBusiness();
   const { vehicles, leads, clients, sales } = useApp();
+  const isSuperAdmin = (user?.email || '').trim().toLowerCase() === 'uriel@admin.com';
+  const showAncoveIntegration = currentBusiness?.businessType === 'carDealership';
 
   useEffect(() => {
     if (user?.accountType === 'user' && !user?.linkedBusinessId) {
@@ -282,7 +284,13 @@ export function Gate() {
             Bienvenido a Vertial{user?.firstName ? `, ${user.firstName}` : ''}
           </h2>
           <p className="text-lg text-gray-600 dark:text-gray-400 mb-4">
-            Plataforma SaaS multi-vertical para digitalizar negocios. Tu acceso actual es <strong>{user?.role || 'Admin'}</strong>.
+            Plataforma SaaS multi-vertical para digitalizar negocios.
+            {isSuperAdmin ? (
+              <>
+                {' '}
+                Tu acceso actual es <strong>{user?.role || 'Admin'}</strong>.
+              </>
+            ) : null}
           </p>
           <div className="flex flex-wrap gap-2">
             <BadgeStatus label="Compraventa" status="available" />
@@ -438,34 +446,34 @@ export function Gate() {
               )}
             </div>
 
-            {/* Integraciones - ANCOVE reubicado */}
-            <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Integraciones</h3>
-              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                <div className="flex items-start gap-3 mb-2">
-                  <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Building className="w-4 h-4 text-amber-600" />
+            {/* Integraciones (solo Compraventa) */}
+            {showAncoveIntegration ? (
+              <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Integraciones</h3>
+                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                  <div className="flex items-start gap-3 mb-2">
+                    <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Building className="w-4 h-4 text-amber-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-gray-900 dark:text-gray-100">ANCOVE</h4>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">(Opcional)</p>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-full">
+                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full"></span>
+                        No conectado
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-gray-900 dark:text-gray-100">ANCOVE</h4>
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">(Opcional)</p>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-full">
-                      <span className="w-1.5 h-1.5 bg-gray-500 rounded-full"></span>
-                      No conectado
-                    </span>
-                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Configúralo cuando lo necesites</p>
+                  <button
+                    onClick={() => navigate('/saas/ancove')}
+                    className="w-full px-4 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
+                  >
+                    Configurar
+                  </button>
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                  Configúralo cuando lo necesites
-                </p>
-                <button
-                  onClick={() => navigate('/saas/ancove')}
-                  className="w-full px-4 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
-                >
-                  Configurar
-                </button>
               </div>
-            </div>
+            ) : null}
           </div>
         </div>
       </div>

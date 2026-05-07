@@ -413,7 +413,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['delivery-ops', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'tpv-rapido', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -809,13 +809,14 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const workerById = new Map(workerMenuItems.map((item) => [item.id, item]));
   const ADMIN_ONLY_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
+  const WORKER_HIDDEN_ITEM_IDS = new Set(['delivery-ops']);
   const verticalGroupsForWorker = sidebarGroups
     .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
     .map((group) => ({
       ...group,
       items: group.itemIds
         .map((id) => visibleById.get(id))
-        .filter((item): item is SidebarItem => Boolean(item)),
+        .filter((item): item is SidebarItem => Boolean(item) && !WORKER_HIDDEN_ITEM_IDS.has(item.id)),
     }))
     .filter((group) => group.items.length > 0);
   const workerGroupedItems = [

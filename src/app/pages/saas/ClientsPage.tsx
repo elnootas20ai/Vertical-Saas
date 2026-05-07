@@ -1467,6 +1467,7 @@ export function ClientsPage() {
   const invoicesStorageKey = user?.id ? `vertial-crm-invoices:${user.id}` : 'vertial-crm-invoices:guest';
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
+  const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
 
   const [activeTab,               setActiveTab]               = useState<ClientTabId>('clients');
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
@@ -2591,36 +2592,41 @@ export function ClientsPage() {
   const renderClientsTab = () => (
     <div className="space-y-3">
       {/* Toolbar */}
-      <div className="flex items-center gap-2">
-        {branches.length > 0 && (
-          <div className="relative flex-shrink-0">
-            <Store className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500 pointer-events-none" />
-            <select
-              value={filterBranch}
-              onChange={e => setFilterBranch(e.target.value)}
-              className={`pl-7 pr-7 py-2.5 border-2 rounded-xl text-xs font-semibold focus:outline-none transition-all appearance-none bg-white dark:bg-gray-800 ${
-                filterBranch !== 'all'
-                  ? 'border-violet-400 text-violet-700 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20'
-                  : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
-              }`}
-            >
-              <option value="all">Todos los PDV</option>
-              {branches.map(b => (
-                <option key={b.branch_id} value={b.branch_id}>{b.name}</option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
-          </div>
-        )}
-        <ViewToggle view={clientsView} setView={setClientsView} />
-        <AddButtonDropdown
-          label="Cliente"
-          onQuickAdd={() => setShowAddClientModal(true)}
-          onAIAdd={() => setShowAIClientModal(true)}
-          onImport={() => setCrmImportMode('clients')}
-          quickAddLabel="Alta rápida"
-          quickAddDesc="Formulario de nuevo cliente"
-        />
+      <div className={`flex items-center gap-2 ${isDeliveryBusiness ? 'justify-between' : ''}`}>
+        <div className="flex items-center gap-2 min-w-0">
+          {branches.length > 0 && (
+            <div className="relative flex-shrink-0">
+              <Store className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <select
+                value={filterBranch}
+                onChange={e => setFilterBranch(e.target.value)}
+                className={`pl-7 pr-7 py-2.5 border-2 rounded-xl text-xs font-semibold focus:outline-none transition-all appearance-none bg-white dark:bg-gray-800 ${
+                  filterBranch !== 'all'
+                    ? 'border-violet-400 text-violet-700 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
+                }`}
+              >
+                <option value="all">Todos los PDV</option>
+                {branches.map(b => (
+                  <option key={b.branch_id} value={b.branch_id}>{b.name}</option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
+            </div>
+          )}
+          <ViewToggle view={clientsView} setView={setClientsView} />
+        </div>
+
+        <div className={isDeliveryBusiness ? 'ml-auto flex-shrink-0' : ''}>
+          <AddButtonDropdown
+            label="Cliente"
+            onQuickAdd={() => setShowAddClientModal(true)}
+            onAIAdd={() => setShowAIClientModal(true)}
+            onImport={() => setCrmImportMode('clients')}
+            quickAddLabel="Alta rápida"
+            quickAddDesc="Formulario de nuevo cliente"
+          />
+        </div>
       </div>
 
       {/* Filtro por tags de clientes */}

@@ -455,6 +455,15 @@ function ChannelsW({ data }: { data: Record<string, number> }) {
 export function DeliveryOpsCenter() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const workerMode = window.localStorage.getItem('saas-worker-mode') === 'true';
+    if (workerMode) {
+      navigate('/saas/vertical/delivery/caja', { replace: true });
+    }
+  }, [navigate]);
   const sessionUserId = useMemo(() => {
     try {
       const raw = localStorage.getItem('vertial_session_user');

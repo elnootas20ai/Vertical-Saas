@@ -54,6 +54,10 @@ import {
   type InitialImportData,
 } from '../../lib/configApi';
 import { toast } from 'sonner';
+import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
+import { ImportStockWizard } from '../../components/saas/ImportStockWizard';
+import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateCatalogItemsRequest } from '../../lib/deliveryApi';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -292,9 +296,78 @@ export function ConfiguracionGeneral() {
   const [importData, setImportData] = useState<InitialImportData | null>(null);
   const [togglingModule, setTogglingModule] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [importPopup, setImportPopup] = useState<null | 'stock' | 'clients' | 'catalog'>(null);
 
   const biz = currentBusiness;
   const bizId = biz?.business_id;
+  const resolvedImportStatus = importData || biz?.initialImportStatus || null;
+
+  const catalogImportFields: ImportFieldDef[] = useMemo(() => {
+    const fields: ImportFieldDef[] = [
+      { key: 'name', label: 'Nombre', required: true, example: 'Artículo ejemplo' },
+      { key: 'sku', label: 'SKU', example: 'SKU-001' },
+      { key: 'description', label: 'Descripción', example: 'Descripción breve' },
+      { key: 'category', label: 'Categoría', example: 'general' },
+      { key: 'unit', label: 'Unidad', example: 'ud' },
+      { key: 'unitPrice', label: 'Precio venta', required: true, example: '2.50' },
+      { key: 'costPrice', label: 'Precio coste', example: '0.80' },
+      { key: 'image', label: 'Imagen (URL opcional)', example: '' },
+      { key: 'stockQuantity', label: 'Stock actual', example: '100' },
+      { key: 'minStock', label: 'Stock mínimo', example: '20' },
+      { key: 'notes', label: 'Notas', example: '' },
+    ];
+    return fields;
+  }, []);
+
+  const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
+    if (!user?.user_id) return 0;
+    const businessType = biz?.businessType || 'delivery';
+    const items = entries
+      .map((entry) => {
+        const name = String(entry.name || '').trim();
+        if (!name) return null;
+        return {
+          name,
+          description: entry.description || '',
+          category: entry.category || '',
+          unit: entry.unit || 'ud',
+          vertical: businessType,
+          module: 'catalog' as const,
+          unitPrice: Number(entry.unitPrice) || 0,
+          costPrice: Number(entry.costPrice) || 0,
+          stockQuantity: Number(entry.stockQuantity) || 0,
+          minStock: Number(entry.minStock) || 0,
+          active: true,
+          webVisible: true,
+          available: true,
+          notes: entry.notes || '',
+          sku: entry.sku || undefined,
+          image: entry.image || undefined,
+          customFields: {},
+        };
+      })
+      .filter(Boolean) as Record<string, unknown>[];
+
+    if (items.length === 0) {
+      toast.error('No se detectaron filas válidas para importar');
+      return 0;
+    }
+
+    const result = await bulkCreateCatalogItemsRequest(user.user_id, items as any);
+
+    // Marcar como completado si se creó al menos 1.
+    if (bizId && result.created > 0) {
+      const nextStatus = {
+        stock: resolvedImportStatus?.stock || 'pending',
+        clients: resolvedImportStatus?.clients || 'pending',
+        catalog: 'completed' as const,
+      };
+      await saveInitialImportStatus(bizId, nextStatus).catch(() => {});
+      setImportData((prev) => prev ? { ...prev, ...nextStatus } : ({ ...nextStatus, onboardingImportPending: true } as InitialImportData));
+    }
+
+    return result.created;
+  }, [user?.user_id, biz?.businessType, bizId, resolvedImportStatus?.stock, resolvedImportStatus?.clients]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -550,7 +623,9 @@ export function ConfiguracionGeneral() {
                 key={block.id}
                 onClick={() => {
                   if (block.route.startsWith('#')) {
-                    document.getElementById(block.route.slice(1))?.scrollIntoView({ behavior: 'smooth' });
+                    document
+                      .getElementById(block.route.slice(1))
+                      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     return;
                   }
                   navigate(block.route);
@@ -752,7 +827,7 @@ export function ConfiguracionGeneral() {
                     <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Completado</span>
                   ) : (
                     <button
-                      onClick={() => navigate(item.route)}
+                      onClick={() => setImportPopup(item.key)}
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
                     >
                       <Upload className="w-3 h-3" />
@@ -764,6 +839,25 @@ export function ConfiguracionGeneral() {
             })}
           </div>
         </section>
+
+        {/* ── Popups de importación (sin redirección) ─────────────────────── */}
+        <CrmImportWizard
+          isOpen={importPopup === 'clients'}
+          onClose={() => setImportPopup(null)}
+          initialMode="clients"
+        />
+        {importPopup === 'stock' ? (
+          <ImportStockWizard onClose={() => setImportPopup(null)} />
+        ) : null}
+        <GenericImportModal
+          isOpen={importPopup === 'catalog'}
+          onClose={() => setImportPopup(null)}
+          moduleLabel="Catálogo"
+          importLabel="Catálogo"
+          templateFileName="plantilla_catalogo.xlsx"
+          fields={catalogImportFields}
+          onImport={handleCatalogImport}
+        />
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}
         {activeModulesSet.has('tpv') && (
