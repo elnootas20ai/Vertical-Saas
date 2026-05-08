@@ -274,8 +274,10 @@ export async function validateReferralCode(code: string): Promise<{ valid: boole
 
 export async function listAffiliateVerticals(): Promise<string[]> {
   const res = await fetch(`${BASE}/verticals`);
+  if (!res.ok) throw new Error(`Affiliate verticals: HTTP ${res.status}`);
   const data = await res.json().catch(() => ({ ok: false }));
-  return data.ok && Array.isArray(data.verticals) ? data.verticals : [];
+  if (!data.ok || !Array.isArray(data.verticals)) throw new Error('Respuesta inválida');
+  return data.verticals;
 }
 
 // ── Aggregated stats ──────────────────────────────────────────────────────────

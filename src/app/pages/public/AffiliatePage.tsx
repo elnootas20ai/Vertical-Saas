@@ -64,6 +64,7 @@ interface FieldErrors {
 export function AffiliatePage() {
   const navigate = useNavigate();
   const [verticalOptions, setVerticalOptions] = useState<string[]>([]);
+  const [verticalsLoadError, setVerticalsLoadError] = useState(false);
   const [formState, setFormState] = useState<FormState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -77,8 +78,14 @@ export function AffiliatePage() {
 
   useEffect(() => {
     listAffiliateVerticals()
-      .then((verticals) => setVerticalOptions(verticals))
-      .catch(() => {});
+      .then((verticals) => {
+        setVerticalOptions(verticals);
+        setVerticalsLoadError(false);
+      })
+      .catch(() => {
+        setVerticalOptions([]);
+        setVerticalsLoadError(true);
+      });
   }, []);
 
   const toggleVertical = (v: string) => {
@@ -430,7 +437,12 @@ export function AffiliatePage() {
                 Sectores que deseas ofrecer <span className="text-red-500">*</span>
               </h3>
               <p className="text-xs text-slate-500 mb-4">Selecciona los sectores en los que tienes contactos o experiencia.</p>
-              {verticalOptions.length > 0 ? (
+              {verticalsLoadError ? (
+                <div className="flex items-start gap-2 text-amber-800 text-sm py-4 px-3 rounded-xl bg-amber-50 border border-amber-200">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>No se pudieron cargar los sectores. Comprueba que el backend está en marcha y recarga la página. Si usas otro puerto de desarrollo, revisa CORS / proxy en Vite.</span>
+                </div>
+              ) : verticalOptions.length > 0 ? (
                 <div className="grid sm:grid-cols-2 gap-2.5">
                   {verticalOptions.map((v) => {
                     const selected = form.verticals.includes(v);
