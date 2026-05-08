@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -14,9 +14,12 @@ interface Props {
   onClose: () => void;
   onDocumentCreated?: (payload: Record<string, unknown>) => Promise<void>;
   targetModule?: string;
+  context?: Record<string, unknown>;
   vehicles?: Array<{ id: string; brand?: string; model?: string; registrationPlate?: string }>;
   clients?: Array<{ id: string; name?: string; nif?: string }>;
   defaultOcrMode?: 'financial' | 'vehicle';
+  /** Si true, al abrir intenta lanzar cámara (mobile capture). */
+  autoOpenCamera?: boolean;
 }
 
 function formatCurrency(amount: number | null | undefined, currency?: string | null) {
@@ -50,7 +53,29 @@ function WarningsList({ warnings }: { warnings: Array<{ code: string; field: str
   );
 }
 
-export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetModule, vehicles, clients, defaultOcrMode }: Props) {
+async function pdfFileToPngBase64(file: File): Promise<string> {
+  // Usar el build "legacy" en navegador para evitar errores de bundling/transpilación.
+  // @ts-expect-error pdfjs-dist exports differ by build
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // Necesario para evitar: "No 'GlobalWorkerOptions.workerSrc' specified."
+  // @ts-expect-error pdfjs-dist types vary by build
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).toString();
+  // @ts-expect-error pdfjs-dist types vary by build
+  const loadingTask = pdfjs.getDocument({ data: await file.arrayBuffer() });
+  const pdf = await loadingTask.promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2 });
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No se pudo crear canvas para renderizar el PDF');
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const dataUrl = canvas.toDataURL('image/png');
+  return dataUrl.split(',')[1] || '';
+}
+
+export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetModule, context, vehicles, clients, defaultOcrMode, autoOpenCamera }: Props) {
   const [ocrMode, setOcrMode] = useState<'financial' | 'vehicle'>(defaultOcrMode || 'financial');
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -67,6 +92,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const base64Ref = useRef<string>('');
   const mimeRef = useRef<string>('');
 
@@ -82,9 +108,30 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
 
   const handleClose = () => { reset(); onClose(); };
 
+  // Auto-open camera input on open when requested.
+  // (Only when no file selected yet.)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!autoOpenCamera) return;
+    if (step !== 'upload') return;
+    if (file) return;
+    const t = setTimeout(() => cameraInputRef.current?.click(), 50);
+    return () => clearTimeout(t);
+  }, [isOpen, autoOpenCamera, step, file]);
+
   const handleFileSelect = (selectedFile: File) => {
     setFile(selectedFile);
-    mimeRef.current = selectedFile.type || 'image/jpeg';
+    const name = (selectedFile.name || '').toLowerCase();
+    // Algunos navegadores/devices suben PDFs/fotos sin type. Inferimos por extensión.
+    const inferred =
+      name.endsWith('.pdf') ? 'application/pdf'
+      : name.endsWith('.jpg') || name.endsWith('.jpeg') ? 'image/jpeg'
+      : name.endsWith('.png') ? 'image/png'
+      : name.endsWith('.webp') ? 'image/webp'
+      : name.endsWith('.gif') ? 'image/gif'
+      : '';
+    mimeRef.current = (selectedFile.type || inferred || 'application/octet-stream');
     if (selectedFile.type.startsWith('image/')) {
       setPreviewUrl(URL.createObjectURL(selectedFile));
     } else {
@@ -98,9 +145,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const dropped = e.dataTransfer.files[0];
-    if (dropped && /^(image\/(jpeg|jpg|png|webp|gif)|application\/pdf)$/.test(dropped.type)) {
-      handleFileSelect(dropped);
-    }
+    if (dropped) handleFileSelect(dropped);
   };
 
   const startScan = async () => {
@@ -109,7 +154,23 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
     setError(null);
 
     try {
-      const scanRes = await scanDocument(base64Ref.current, mimeRef.current, { targetModule }, ocrMode);
+      const mt = (mimeRef.current || '').toLowerCase().trim();
+      const name = (file.name || '').toLowerCase();
+      const looksLikePdf = mt === 'application/pdf' || name.endsWith('.pdf');
+      const looksLikeImage = mt.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/.test(name);
+      const isSupported = looksLikePdf || looksLikeImage;
+      if (!isSupported) {
+        throw new Error('Formato no soportado. Sube una imagen (jpg/png/webp/gif) o un PDF.');
+      }
+
+      // En local (Windows) la conversión de PDF en backend puede fallar.
+      // Convertimos aquí el PDF a PNG para que el OCR siempre reciba imagen.
+      if (looksLikePdf) {
+        base64Ref.current = await pdfFileToPngBase64(file);
+        mimeRef.current = 'image/png';
+      }
+
+      const scanRes = await scanDocument(base64Ref.current, mimeRef.current, { targetModule, ...(context || {}) }, ocrMode);
 
       if (scanRes.data?.parseError) throw new Error('No se pudo interpretar el documento. Intenta con una imagen mas clara.');
 
@@ -272,6 +333,13 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
                   className="hidden"
                 />
+                <input
+                  ref={cameraInputRef} type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                  className="hidden"
+                />
                 {file ? (
                   <div>
                     {previewUrl && file.type.startsWith('image/') ? (
@@ -288,6 +356,13 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                     <div className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Arrastra cualquier documento</div>
                     <div className="text-sm text-gray-500">Facturas, tickets, contratos, nominas, albaranes, certificados...</div>
                     <div className="text-xs text-gray-400 mt-2">JPG, PNG, WebP o PDF &bull; La IA lo clasificara automaticamente</div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+                      className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
+                    >
+                      <ScanLine className="w-4 h-4" /> Usar cámara
+                    </button>
                   </div>
                 )}
               </div>

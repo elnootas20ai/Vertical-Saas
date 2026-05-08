@@ -11,7 +11,7 @@ export const ocrApiRouter = Router();
 
 ocrApiRouter.post('/process', async (req, res) => {
   try {
-    const userId = req.userId || req.body?.userId;
+    const userId = req.authUser?.userId || req.userId || req.body?.userId;
     if (!userId) return res.status(401).json({ error: 'Se requiere autenticacion' });
     const b = req.body || {};
     if (!b.ocrData) return res.status(400).json({ error: 'Se requiere ocrData' });
@@ -31,7 +31,7 @@ ocrApiRouter.post('/process', async (req, res) => {
 
 ocrApiRouter.post('/proposals/:id/approve', async (req, res) => {
   try {
-    const userId = req.userId || req.body?.userId;
+    const userId = req.authUser?.userId || req.userId || req.body?.userId;
     if (!userId) return res.status(401).json({ error: 'Se requiere autenticacion' });
     const db = getOcrLogsDbName();
     await ensureDatabase(fakeReq, db);
@@ -51,7 +51,7 @@ ocrApiRouter.post('/proposals/:id/approve', async (req, res) => {
 
 ocrApiRouter.post('/proposals/:id/reject', async (req, res) => {
   try {
-    const userId = req.userId || req.body?.userId;
+    const userId = req.authUser?.userId || req.userId || req.body?.userId;
     const db = getOcrLogsDbName();
     await ensureDatabase(fakeReq, db);
     const proposal = await getDocument(fakeReq, db, req.params.id);

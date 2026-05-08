@@ -114,6 +114,25 @@ import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { activityLogger } from './middleware/activityLogger.js';
 import { runHealthCheck, recordLatency } from './services/healthService.js';
+import { sendAdminAlert } from './services/adminAlerts.js';
+
+const _5xxTimes = [];
+function track5xxAndMaybeAlert(url) {
+  const now = Date.now();
+  const windowMs = Number(process.env.ALERT_5XX_WINDOW_MS || 60_000);
+  const threshold = Number(process.env.ALERT_5XX_THRESHOLD || 10);
+  while (_5xxTimes.length && now - _5xxTimes[0] > windowMs) _5xxTimes.shift();
+  _5xxTimes.push(now);
+  if (_5xxTimes.length >= threshold) {
+    _5xxTimes.length = 0;
+    sendAdminAlert({
+      key: 'spike_5xx',
+      subject: `🚨 Vertial: pico de errores 5xx (>=${threshold}/min)`,
+      html: `<p><b>Pico de errores 5xx</b></p><ul><li>umbral: ${threshold} / ${Math.round(windowMs / 1000)}s</li><li>última url: ${escapeHtml(url)}</li></ul>`,
+      cooldownMs: Number(process.env.ALERT_5XX_COOLDOWN_MS || 10 * 60_000),
+    }).catch(() => null);
+  }
+}
 import * as cacheService from './services/cache.js';
 import { cacheResponse, invalidateOnWrite } from './middleware/cache.js';
 import { startBackupScheduler, runBackup, getBackupState } from './services/backupScheduler.js';
@@ -660,6 +679,14 @@ app.use((req, res, next) => {
       ip,
       ua,
     });
+
+    if (res.statusCode >= 500) {
+      try {
+        track5xxAndMaybeAlert(req.originalUrl);
+      } catch {
+        // noop
+      }
+    }
 
     return originalEnd(chunk, encoding, callback);
   };
@@ -2902,4 +2929,91 @@ setInterval(() => {
     sockets: activeSockets.size,
     visitors: uniqueVisitors.size,
   });
+
+  // Alertas "gordas": RAM alta y disco bajo (anti-spam por cooldown).
+  (async () => {
+    try {
+      const rssMB = bytesToMB(mem.rss);
+      const heapMB = bytesToMB(mem.heapUsed);
+
+      // RAM alta: RSS > 1200 MB o heap > 900 MB (ajustable por env).
+      const rssLimitMB = Number(process.env.ALERT_RSS_MB || 1200);
+      const heapLimitMB = Number(process.env.ALERT_HEAP_MB || 900);
+      if (rssMB >= rssLimitMB || heapMB >= heapLimitMB) {
+        await sendAdminAlert({
+          key: 'ram_high',
+          subject: `⚠️ Vertial: RAM alta (rss=${rssMB}MB heap=${heapMB}MB)`,
+          html: `<p><b>RAM alta</b></p><ul><li>rssMB: ${rssMB}</li><li>heapMB: ${heapMB}</li><li>host: ${os.hostname()}</li></ul>`,
+          cooldownMs: 30 * 60_000,
+        });
+      }
+
+      // Disco casi lleno: usa statfs sobre el directorio del proyecto (Linux/VPS).
+      if (typeof fs.statfs === 'function') {
+        const st = await fs.promises.statfs(process.cwd());
+        const freeBytes = Number(st.bavail) * Number(st.bsize);
+        const totalBytes = Number(st.blocks) * Number(st.bsize);
+        if (totalBytes > 0) {
+          const freePct = (freeBytes / totalBytes) * 100;
+          const freeGB = Math.round((freeBytes / (1024 ** 3)) * 10) / 10;
+          const limitPct = Number(process.env.ALERT_DISK_FREE_PCT || 10);
+          const limitGB = Number(process.env.ALERT_DISK_FREE_GB || 2);
+          if (freePct <= limitPct || freeGB <= limitGB) {
+            await sendAdminAlert({
+              key: 'disk_low',
+              subject: `⚠️ Vertial: disco bajo (${freeGB}GB libres, ${freePct.toFixed(1)}%)`,
+              html: `<p><b>Disco casi lleno</b></p><ul><li>freeGB: ${freeGB}</li><li>freePct: ${freePct.toFixed(2)}%</li><li>path: ${process.cwd()}</li><li>host: ${os.hostname()}</li></ul>`,
+              cooldownMs: 60 * 60_000,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn({ tag: 'ADMIN_ALERT', err: err?.message }, 'No se pudo evaluar RAM/disco para alertas');
+    }
+  })();
 }, 30000);
+
+// CouchDB caído: chequeo periódico del /_up (usa el mismo healthService).
+let lastCouchOk = true;
+setInterval(async () => {
+  try {
+    const cfg = getCouchConfigFromService({ headers: {} });
+    const authHeader = buildCouchAuthHeader({ headers: {} });
+    const result = await runHealthCheck({
+      baseUrl: cfg.baseUrl,
+      authHeader,
+      activeSockets: activeSockets.size,
+      // opcional: limitar trabajo
+      mode: 'couchdb',
+    });
+
+    const couchOk = !!result?.checks?.couchdb?.ok;
+    if (!couchOk && lastCouchOk) {
+      await sendAdminAlert({
+        key: 'couchdb_down',
+        subject: '🚨 Vertial: CouchDB caído / no responde',
+        html: `<p><b>CouchDB no responde</b></p><pre>${escapeHtml(JSON.stringify(result?.checks?.couchdb || result, null, 2))}</pre>`,
+        cooldownMs: 15 * 60_000,
+      });
+    }
+    lastCouchOk = couchOk;
+  } catch (err) {
+    if (lastCouchOk) {
+      await sendAdminAlert({
+        key: 'couchdb_down',
+        subject: '🚨 Vertial: error chequeando CouchDB',
+        html: `<p><b>Error chequeando CouchDB</b></p><pre>${escapeHtml(String(err?.message || err))}</pre>`,
+        cooldownMs: 15 * 60_000,
+      });
+    }
+    lastCouchOk = false;
+  }
+}, Number(process.env.ALERT_COUCH_INTERVAL_MS || 60_000));
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}

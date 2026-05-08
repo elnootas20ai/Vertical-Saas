@@ -11,11 +11,22 @@ import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 interface TopbarProps {
   title: string;
   subtitle?: string;
+  /** Sustituye el color por defecto del título (ej. marca por pantalla) */
+  titleClassName?: string;
+  /** Sustituye el color por defecto del subtítulo */
+  subtitleClassName?: string;
   onToggleSidebar: () => void;
   onOpenGlobalSearch?: () => void;
 }
 
-export function Topbar({ title, subtitle, onToggleSidebar, onOpenGlobalSearch }: TopbarProps) {
+export function Topbar({
+  title,
+  subtitle,
+  titleClassName,
+  subtitleClassName,
+  onToggleSidebar,
+  onOpenGlobalSearch,
+}: TopbarProps) {
   const { notifications } = useApp();
   const { user } = useAuth();
   const { setTheme, resolvedTheme } = useTheme();
@@ -63,11 +74,19 @@ export function Topbar({ title, subtitle, onToggleSidebar, onOpenGlobalSearch }:
               <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
             <div className="min-w-0">
-              <h1 className="text-lg md:text-2xl font-semibold text-gray-900 dark:text-gray-100 truncate leading-tight">
+              <h1
+                className={`text-lg md:text-2xl font-semibold truncate leading-tight ${
+                  titleClassName ?? 'text-gray-900 dark:text-gray-100'
+                }`}
+              >
                 {title}
               </h1>
               {subtitle && (
-                <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 truncate hidden sm:block">
+                <p
+                  className={`text-xs md:text-sm truncate hidden sm:block ${
+                    subtitleClassName ?? 'text-gray-500 dark:text-gray-400'
+                  }`}
+                >
                   {subtitle}
                 </p>
               )}
@@ -132,7 +151,8 @@ export function Topbar({ title, subtitle, onToggleSidebar, onOpenGlobalSearch }:
             {mounted && (
               <button
                 onClick={handleThemeToggle}
-                className="hidden md:flex p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                type="button"
+                className="flex p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors shrink-0"
                 title={isDark ? t('topbar.lightMode') : t('topbar.darkMode')}
                 aria-label={isDark ? t('topbar.lightMode') : t('topbar.darkMode')}
               >

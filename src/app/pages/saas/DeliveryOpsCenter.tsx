@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
 import { getAuthHeaders } from '../../lib/authApi';
+import { Delivery } from './Delivery';
 import {
   getOpsCenterRequest,
   updateDeliveryOrderRequest,
@@ -20,11 +21,17 @@ import {
 } from '../../lib/deliveryApi';
 import {
   Activity, ChefHat, Package, Truck, CheckCircle2, Clock, AlertTriangle,
-  ShoppingBag, Wallet, AlertCircle, Monitor, Euro, Receipt,
+  ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
   Timer, Users, Bell, ChevronDown, ChevronUp,
   Filter, X, Armchair, Boxes, BookOpen, Hash,
   RefreshCw,
+  Zap,
+  ClipboardCheck,
+  Banknote,
+  Globe,
 } from 'lucide-react';
+import { ClientsPage } from './ClientsPage';
+import { PromotionsPage } from './PromotionsPage';
 
 const STATUS_CFG: Record<string, { label: string; bg: string; border: string; text: string; icon: typeof Clock }> = {
   nuevo:     { label: 'Nuevos',      bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-800',   text: 'text-amber-700 dark:text-amber-400',   icon: Clock },
@@ -51,23 +58,48 @@ function eur(n: number) {
   return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function extractBrandIds(order: DeliveryOrder): string[] {
+  const raw = (order.items || []).flatMap((it) => Array.isArray((it as any).brandIds) ? (it as any).brandIds : []);
+  return Array.from(new Set(raw.map((s) => String(s || '').trim()).filter(Boolean))).slice(0, 4);
+}
+
 /* ── Filters Bar ─────────────────────────────────────────────────────────── */
 
-function FiltersBar({ filters, onChange, config, pdvs }: {
+function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   filters: OpsCenterFilters; onChange: (f: OpsCenterFilters) => void;
   config: DeliveryConfig | null; pdvs: PointOfSale[];
+  /** Solo útil fuera de paneles con scroll interno; dentro de Ops evita huecos raros */
+  sticky?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const nav = useNavigate();
   const ac = [filters.salesPointId, filters.channel, filters.timeSlot].filter(Boolean).length;
-  const sel = 'px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
+  const sel = 'px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
 
   const inner = (
-    <div className="flex flex-wrap gap-3 items-center">
-      {pdvs.length > 1 && (
-        <select className={sel} value={filters.salesPointId || ''} onChange={e => onChange({ ...filters, salesPointId: e.target.value || undefined })}>
-          <option value="">Todos los PDV</option>
-          {pdvs.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+    <div className="flex flex-wrap gap-2 items-center">
+      {pdvs.length > 1 ? (
+        <select
+          className={sel}
+          value={filters.salesPointId || ''}
+          onChange={(e) => onChange({ ...filters, salesPointId: e.target.value || undefined })}
+        >
+          <option value="">Todas las tiendas</option>
+          {pdvs.map((p) => (
+            <option key={p._id} value={p._id}>
+              {p.name}
+            </option>
+          ))}
         </select>
+      ) : (
+        <button
+          type="button"
+          onClick={() => nav('/saas/settings/sales-points')}
+          className="px-3 py-2 rounded-lg text-sm font-semibold border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm hover:opacity-95 transition-opacity"
+          title="Activa multi-tienda (PRO)"
+        >
+          Multi-tienda (PRO)
+        </button>
       )}
       <select className={sel} value={filters.channel || ''} onChange={e => onChange({ ...filters, channel: e.target.value || undefined })}>
         <option value="">Todos los canales</option>
@@ -82,21 +114,31 @@ function FiltersBar({ filters, onChange, config, pdvs }: {
       <input type="date" className={sel} value={filters.date || new Date().toISOString().slice(0, 10)}
         onChange={e => onChange({ ...filters, date: e.target.value || undefined })} />
       {ac > 0 && (
-        <button onClick={() => onChange({})} className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1">
+        <button onClick={() => onChange({})} className="px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1">
           <X className="w-3.5 h-3.5" /> Limpiar
         </button>
       )}
     </div>
   );
 
+  const desktopWrap = sticky ? 'sticky top-0 z-10' : '';
+
   return (
     <>
-      <div className="hidden md:block">{inner}</div>
+      <div className={`hidden md:block ${desktopWrap}`}>
+        <div className="bg-white/95 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200/90 dark:border-gray-700 rounded-xl px-3 py-2 shadow-sm">
+          {inner}
+        </div>
+      </div>
       <div className="md:hidden">
-        <button onClick={() => setOpen(!open)} className="px-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium flex items-center gap-2 bg-white dark:bg-gray-800">
+        <button onClick={() => setOpen(!open)} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold flex items-center gap-2 bg-white dark:bg-gray-800">
           <Filter className="w-4 h-4" /> Filtros {ac > 0 && <span className="px-1.5 py-0.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-full text-xs font-bold">{ac}</span>}
         </button>
-        {open && <div className="mt-3">{inner}</div>}
+        {open && (
+          <div className="mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5">
+            {inner}
+          </div>
+        )}
       </div>
     </>
   );
@@ -109,16 +151,19 @@ function Pipeline({ byStatus, active, onFilter }: {
 }) {
   const phases = ['nuevo', 'cocina', 'listo', 'entregado', 'incident'] as const;
   return (
-    <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
+    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
       {phases.map(s => {
         const c = STATUS_CFG[s]; if (!c) return null;
         const Icon = c.icon; const on = active === s;
         return (
           <button key={s} onClick={() => onFilter(on ? null : s)}
-            className={`p-4 rounded-xl border-2 transition-all ${c.bg} ${c.border} ${on ? 'ring-2 ring-offset-2 ring-gray-900 dark:ring-gray-100 dark:ring-offset-gray-900 scale-[1.02]' : 'hover:scale-[1.01]'}`}>
-            <div className={`${c.text} mb-1.5`}><Icon className="w-5 h-5" /></div>
-            <div className={`text-2xl font-bold ${c.text}`}>{byStatus[s] || 0}</div>
-            <div className={`text-xs font-medium ${c.text} mt-0.5`}>{c.label}</div>
+            type="button"
+            className={`p-3 rounded-lg border transition-all text-left ${c.bg} ${c.border} ${on ? 'ring-1 ring-gray-900 dark:ring-gray-100 ring-offset-1 ring-offset-white dark:ring-offset-gray-950 shadow-sm' : 'hover:brightness-[0.98] dark:hover:brightness-110'}`}>
+            <div className={`${c.text} mb-1 flex items-center justify-between gap-1`}>
+              <Icon className="w-[18px] h-[18px] shrink-0 opacity-90" />
+              <span className={`text-xl font-bold tabular-nums leading-none ${c.text}`}>{byStatus[s] || 0}</span>
+            </div>
+            <div className={`text-[11px] font-semibold leading-tight ${c.text} opacity-90`}>{c.label}</div>
           </button>
         );
       })}
@@ -129,35 +174,115 @@ function Pipeline({ byStatus, active, onFilter }: {
 /* ── Alerts ───────────────────────────────────────────────────────────────── */
 
 function Alerts({ alerts }: { alerts: OpsAlert[] }) {
-  const [exp, setExp] = useState(true);
+  const [exp, setExp] = useState(() => {
+    try {
+      return sessionStorage.getItem('deliveryOps.alertsPanelExpanded') !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const [hide, setHide] = useState<Set<string>>(new Set());
+  const [snoozed, setSnoozed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('deliveryOps.alertsSnoozed') === '1';
+    } catch {
+      return false;
+    }
+  });
   const nav = useNavigate();
   const vis = alerts.filter(a => !hide.has(a.id));
   if (!vis.length) return null;
   const crit = vis.some(a => a.severity === 'critical');
   const bg = crit ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800' : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
   const ICONS: Record<string, typeof AlertTriangle> = { delayed_order: Timer, kitchen_saturated: ChefHat, cash_pending_close: Wallet, critical_stock: Boxes, open_incident: AlertCircle };
+  const snooze = () => {
+    setSnoozed(true);
+    try {
+      localStorage.setItem('deliveryOps.alertsSnoozed', '1');
+    } catch { /* ignore */ }
+  };
+  const unsnooze = () => {
+    setSnoozed(false);
+    try {
+      localStorage.setItem('deliveryOps.alertsSnoozed', '0');
+    } catch { /* ignore */ }
+  };
+
+  if (snoozed) {
+    const tone = crit
+      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/35'
+      : 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/35';
+    const iconBg = crit
+      ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
+      : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-500';
+    const titleCls = crit ? 'text-red-900 dark:text-red-100' : 'text-amber-950 dark:text-amber-100';
+    const subCls = crit ? 'text-red-800/85 dark:text-red-200/90' : 'text-amber-900/75 dark:text-amber-200/85';
+    return (
+      <button
+        type="button"
+        onClick={unsnooze}
+        className={`w-full rounded-xl border-2 ${tone} px-3 py-3 flex items-center gap-3 text-left shadow-sm hover:shadow-md transition-shadow`}
+        title="Mostrar y gestionar alertas"
+      >
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${iconBg}`}>
+          <Bell className="w-[22px] h-[22px]" aria-hidden />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={`text-[15px] font-bold leading-tight ${titleCls}`}>
+            {vis.length} alerta{vis.length !== 1 ? 's' : ''} pendiente{vis.length !== 1 ? 's' : ''}
+          </p>
+          <p className={`text-xs font-medium mt-0.5 ${subCls}`}>Revisa incidencias y avisos del día</p>
+        </div>
+        <span
+          className={`shrink-0 inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold border shadow-sm ${
+            crit
+              ? 'bg-white dark:bg-gray-900 text-red-700 dark:text-red-300 border-red-200 dark:border-red-700'
+              : 'bg-white dark:bg-gray-900 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+          }`}
+        >
+          Ver alertas
+        </span>
+      </button>
+    );
+  }
 
   return (
-    <div className={`rounded-xl border-2 ${bg} overflow-hidden`}>
-      <button onClick={() => setExp(!exp)} className="w-full px-4 py-3 flex items-center justify-between">
+    <div className={`rounded-lg border ${bg} overflow-hidden`}>
+      <button type="button" onClick={() => {
+          const next = !exp;
+          setExp(next);
+          try {
+            sessionStorage.setItem('deliveryOps.alertsPanelExpanded', String(next));
+          } catch { /* ignore */ }
+        }} className="w-full px-3 py-2.5 flex items-center justify-between"
+      >
         <div className="flex items-center gap-2">
-          <Bell className={`w-4 h-4 ${crit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
-          <span className={`text-sm font-bold ${crit ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>{vis.length} alerta{vis.length !== 1 ? 's' : ''}</span>
+          <Bell className={`w-3.5 h-3.5 ${crit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+          <span className={`text-xs font-bold ${crit ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>{vis.length} alerta{vis.length !== 1 ? 's' : ''}</span>
         </div>
-        {exp ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); snooze(); }}
+            className="px-2 py-1 rounded-lg text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-900/20 border border-gray-200/60 dark:border-gray-700/60"
+            title="Ocultar por ahora"
+          >
+            Ver luego
+          </button>
+          {exp ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        </div>
       </button>
       {exp && (
-        <div className="px-4 pb-3 space-y-2">
+        <div className="px-3 pb-2 space-y-1.5">
           {vis.map(a => { const I = ICONS[a.type] || AlertTriangle; return (
-            <div key={a.id} className="flex items-start gap-3 bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-100 dark:border-gray-700">
+            <div key={a.id} className="flex items-start gap-2 bg-white dark:bg-gray-800 rounded-md p-2 border border-gray-100 dark:border-gray-700">
               <I className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-500' : 'text-amber-500'}`} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{a.title}</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{a.message}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => nav(a.route)} className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg">Ver</button>
+                <button onClick={() => nav(a.route, { state: { returnToOps: true } })} className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg">Ver</button>
                 <button onClick={() => setHide(p => new Set(p).add(a.id))} className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"><X className="w-3.5 h-3.5" /></button>
               </div>
             </div>
@@ -170,34 +295,43 @@ function Alerts({ alerts }: { alerts: OpsAlert[] }) {
 
 /* ── Quick Access ─────────────────────────────────────────────────────────── */
 
-function QuickAccess({ cfg, kpis, cashPend, incidents }: {
+function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueCount }: {
   cfg: DeliveryConfig | null; kpis: OpsCenterData['kpis'] | null; cashPend: number; incidents: number;
+  onNavigate: (path: string) => void;
+  /** Cola nuevo+cocina+listo (preferible a KPI suelto; evita parpadeos) */
+  pedidosQueueCount: number;
 }) {
-  const nav = useNavigate();
-  type QItem = { l: string; i: typeof Monitor; r: string; b: number | null; bc?: string; v: boolean };
+  type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean };
   const items: QItem[] = [
-    { l: 'TPV', i: Monitor, r: '/saas/vertical/delivery/tpv', b: null, v: true },
-    { l: 'Pedidos', i: ShoppingBag, r: '/saas/delivery', b: kpis ? kpis.byStatus.nuevo + kpis.byStatus.cocina + kpis.byStatus.listo : null, v: true },
-    { l: 'Cocina', i: ChefHat, r: '/saas/delivery', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
-    { l: 'Montaje', i: Package, r: '/saas/delivery', b: null, v: cfg?.hasAssemblyStation !== false },
-    { l: 'Sala', i: Armchair, r: '/saas/delivery', b: null, v: cfg?.hasPhysicalTables === true },
-    { l: 'Reparto', i: Truck, r: '/saas/delivery', b: null, v: cfg?.hasOwnDelivery !== false },
-    { l: 'Caja', i: Wallet, r: '/saas/delivery', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true },
-    { l: 'Incidencias', i: AlertTriangle, r: '/saas/delivery', b: incidents > 0 ? incidents : null, bc: 'bg-red-500', v: true },
-    { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
-    { l: 'Stock', i: Boxes, r: '/saas/articles', b: null, v: true },
-    { l: 'Clientes', i: Users, r: '/saas/clients', b: null, v: true },
-    { l: 'Finanzas', i: Euro, r: '/saas/finance', b: null, v: true },
+    // Solo vertical Delivery (coherente con Sidebar)
+    { l: 'TPV rápido', i: Zap, r: '/saas/vertical/delivery/tpv', b: null, v: true },
+    { l: 'Pedidos', i: Truck, r: '/saas/delivery', b: pedidosQueueCount > 0 ? pedidosQueueCount : null, v: true },
+    { l: 'Cocina', i: ChefHat, r: '/saas/delivery-kitchen', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
+    { l: 'Montaje', i: ClipboardCheck, r: '/saas/delivery-montaje', b: kpis?.byStatus.listo ?? null, v: cfg?.hasAssemblyStation !== false },
+    { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
+    { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: cfg?.hasPhysicalTables === true },
+    { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true },
+    { l: 'Catálogo', i: BookOpen, r: '/saas/delivery-catalog', b: null, v: true },
+    { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
+    { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },
   ];
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+    <div className="flex gap-2.5 sm:gap-3 overflow-x-auto pb-1.5 pt-1 scrollbar-thin overflow-y-visible -mx-0.5">
       {items.filter(x => x.v).map(x => (
-        <button key={x.l} onClick={() => nav(x.r)}
-          className="flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition-all min-w-[72px] shrink-0 relative">
-          <x.i className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-          <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-400">{x.l}</span>
+        <button
+          key={x.l}
+          type="button"
+          onClick={() => onNavigate(x.r)}
+          className="flex flex-col items-center justify-center gap-2 px-3 py-3.5 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-amber-400/80 dark:hover:border-amber-600/50 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 hover:shadow-md active:scale-[0.98] transition-all min-w-[88px] sm:min-w-[102px] shrink-0 relative overflow-visible shadow-sm"
+        >
+          <x.i className="w-7 h-7 sm:w-8 sm:h-8 text-gray-700 dark:text-gray-200" strokeWidth={2} />
+          <span className="text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-200 leading-tight text-center max-w-[5.5rem]">{x.l}</span>
           {x.b != null && x.b > 0 && (
-            <span className={`absolute -top-1.5 -right-1.5 px-1.5 py-0.5 ${x.bc || 'bg-gray-900 dark:bg-gray-100'} text-white dark:text-gray-900 rounded-full text-[9px] font-bold leading-none`}>{x.b}</span>
+            <span
+              className={`absolute -top-1 -right-1 min-h-[1.35rem] min-w-[1.35rem] px-1.5 py-0.5 flex items-center justify-center ${x.bc || 'bg-gray-900 dark:bg-gray-100'} text-white dark:text-gray-900 rounded-full text-[11px] sm:text-xs font-bold leading-none shadow-md border-[3px] border-white dark:border-gray-900`}
+            >
+              {x.b > 99 ? '99+' : x.b}
+            </span>
           )}
         </button>
       ))}
@@ -218,14 +352,14 @@ function Metrics({ kpis }: { kpis: OpsCenterData['kpis'] | null }) {
     { l: 'Puntualidad', v: `${kpis.onTimePercentage}%`, i: CheckCircle2, c: kpis.onTimePercentage >= 80 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
   ];
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 p-5">
-      <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2"><Activity className="w-4 h-4 text-gray-500" /> Métricas del día</h3>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3.5">
+      <h3 className="text-xs font-bold mb-2.5 flex items-center gap-1.5 uppercase tracking-wide text-gray-500 dark:text-gray-400"><Activity className="w-4 h-4 opacity-80" /> Métricas del día</h3>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
         {cards.map(c => (
-          <div key={c.l} className="text-center">
-            <c.i className={`w-5 h-5 mx-auto mb-1 ${c.c}`} />
-            <p className={`text-lg font-bold ${c.c}`}>{c.v}</p>
-            <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mt-0.5">{c.l}</p>
+          <div key={c.l} className="text-center py-0.5">
+            <c.i className={`w-[18px] h-[18px] mx-auto mb-0.5 ${c.c}`} />
+            <p className={`text-lg font-bold tabular-nums ${c.c}`}>{c.v}</p>
+            <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">{c.l}</p>
           </div>
         ))}
       </div>
@@ -243,8 +377,8 @@ function KitchenW({ ks, orders, onAdv }: {
   const list = orders.filter(o => o.status === 'cocina').slice(0, 5);
   const col = ks.saturationPercent < 50 ? 'bg-green-500' : ks.saturationPercent < 80 ? 'bg-amber-500' : 'bg-red-500';
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ChefHat className="w-5 h-5 text-orange-600 dark:text-orange-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cocina</h3>
@@ -255,18 +389,31 @@ function KitchenW({ ks, orders, onAdv }: {
           <span>Media: {Math.round(ks.avgWaitMinutes)}m</span>
         </div>
       </div>
-      <div className="px-4 pt-3 pb-1">
+      <div className="px-3 pt-2 pb-1">
         <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
           <div className={`h-full ${col} rounded-full transition-all`} style={{ width: `${Math.min(100, ks.saturationPercent)}%` }} />
         </div>
         <p className="text-[10px] text-gray-400 mt-1 text-right">{ks.saturationPercent}% capacidad</p>
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {!list.length && <div className="px-4 py-6 text-center text-gray-400 text-sm">Sin pedidos en cocina</div>}
+        {!list.length && <div className="px-3 py-4 text-center text-gray-400 text-xs">Sin pedidos en cocina</div>}
         {list.map(o => (
-          <div key={o._id} className="px-4 py-3 flex items-center justify-between gap-3">
+          <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber} <span className="text-xs text-gray-500 font-normal">{o.items?.slice(0, 2).map(i => i.name).join(', ')}</span></p>
+              {extractBrandIds(o).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {extractBrandIds(o).map((b) => (
+                    <span
+                      key={b}
+                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
+                      title="Marca (deducida del catálogo)"
+                    >
+                      {b}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className={`text-xs mt-0.5 ${(Date.now() - new Date(o.createdAt).getTime()) / 60000 > 25 ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{ago(o.createdAt)}</p>
             </div>
             <button onClick={() => onAdv(o, 'listo')} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-semibold shrink-0">Listo</button>
@@ -282,18 +429,31 @@ function KitchenW({ ks, orders, onAdv }: {
 function AssemblyW({ orders, onAdv }: { orders: DeliveryOrder[]; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void }) {
   const list = orders.filter(o => o.status === 'listo' && !o.assignedDriver && o.deliveryType !== 'sala').slice(0, 5);
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
         <Package className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Montaje</h3>
         <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-full text-xs font-bold">{list.length}</span>
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {!list.length && <div className="px-4 py-6 text-center text-gray-400 text-sm">Sin pedidos en montaje</div>}
+        {!list.length && <div className="px-3 py-4 text-center text-gray-400 text-xs">Sin pedidos en montaje</div>}
         {list.map(o => (
-          <div key={o._id} className="px-4 py-3 flex items-center justify-between gap-3">
+          <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
+              {extractBrandIds(o).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {extractBrandIds(o).map((b) => (
+                    <span
+                      key={b}
+                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
+                      title="Marca (deducida del catálogo)"
+                    >
+                      {b}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-gray-400 mt-0.5">{o.deliveryType === 'recogida' ? 'Recogida' : 'Domicilio'} — {ago(o.createdAt)}</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shrink-0">Completado</button>
@@ -313,8 +473,8 @@ function RepartoW({ ds, orders, cfg, onAdv }: {
   if (!cfg?.hasOwnDelivery && !cfg?.hasPlatformDelivery) return null;
   const list = orders.filter(o => o.status === 'listo' && o.assignedDriver).slice(0, 5);
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Truck className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Reparto</h3>
@@ -326,11 +486,24 @@ function RepartoW({ ds, orders, cfg, onAdv }: {
         </div>}
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {!list.length && <div className="px-4 py-6 text-center text-gray-400 text-sm">{cfg?.hasOwnDelivery ? 'Sin pedidos en reparto' : 'Pedidos en plataformas'}</div>}
+        {!list.length && <div className="px-3 py-4 text-center text-gray-400 text-xs">{cfg?.hasOwnDelivery ? 'Sin pedidos en reparto' : 'Pedidos en plataformas'}</div>}
         {list.map(o => (
-          <div key={o._id} className="px-4 py-3 flex items-center justify-between gap-3">
+          <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
+              {extractBrandIds(o).length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {extractBrandIds(o).map((b) => (
+                    <span
+                      key={b}
+                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
+                      title="Marca (deducida del catálogo)"
+                    >
+                      {b}
+                    </span>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-gray-400 mt-0.5">{o.assignedDriver} — {(o.customerAddress || '').slice(0, 30)}</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-semibold shrink-0">Entregado</button>
@@ -347,8 +520,8 @@ function CashW({ cs }: { cs: OpsCenterData['cashStatus'] | null }) {
   if (!cs) return null;
   const tot = cs.openTpvSessions.length + cs.openDriverSessions.length;
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Wallet className="w-5 h-5 text-violet-600 dark:text-violet-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Caja</h3>
@@ -356,9 +529,9 @@ function CashW({ cs }: { cs: OpsCenterData['cashStatus'] | null }) {
         </div>
         {cs.pendingClose > 0 && <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-xs font-bold animate-pulse">{cs.pendingClose} cierre pend.</span>}
       </div>
-      <div className="p-4">
-        <div className="text-center mb-3">
-          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{eur(cs.totalCashInRegisters)} €</p>
+      <div className="p-3">
+        <div className="text-center mb-2">
+          <p className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{eur(cs.totalCashInRegisters)} €</p>
           <p className="text-xs text-gray-500 mt-0.5">Efectivo en cajas</p>
         </div>
         {cs.openTpvSessions.slice(0, 3).map(s => (
@@ -374,25 +547,24 @@ function CashW({ cs }: { cs: OpsCenterData['cashStatus'] | null }) {
 
 /* ── Incidents Widget ────────────────────────────────────────────────────── */
 
-function IncidentsW({ orders }: { orders: DeliveryOrder[] }) {
+function IncidentsW({ orders, onNavigate }: { orders: DeliveryOrder[]; onNavigate: (path: string) => void }) {
   const list = orders.filter(o => o.status === 'incident');
-  const nav = useNavigate();
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
         <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Incidencias</h3>
         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${list.length ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'}`}>{list.length}</span>
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {!list.length && <div className="px-4 py-6 text-center"><CheckCircle2 className="w-8 h-8 text-green-400 mx-auto mb-2" /><p className="text-sm text-green-600 dark:text-green-400 font-semibold">Sin incidencias</p></div>}
+        {!list.length && <div className="px-3 py-4 text-center"><CheckCircle2 className="w-6 h-6 text-green-400 mx-auto mb-1.5" /><p className="text-xs text-green-600 dark:text-green-400 font-semibold">Sin incidencias</p></div>}
         {list.slice(0, 4).map(o => (
-          <div key={o._id} className="px-4 py-3 flex items-start justify-between gap-2">
+          <div key={o._id} className="px-3 py-2 flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber} — {o.customerName}</p>
               <p className="text-xs text-gray-500 mt-0.5">{o.incidentType || 'General'}: {(o.incidentNotes || '').slice(0, 50)}</p>
             </div>
-            <button onClick={() => nav('/saas/delivery')} className="px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg shrink-0">Resolver</button>
+            <button onClick={() => onNavigate('/saas/delivery')} className="px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg shrink-0">Resolver</button>
           </div>
         ))}
       </div>
@@ -408,14 +580,14 @@ function TablesW({ cfg, orders }: { cfg: DeliveryConfig; orders: DeliveryOrder[]
     orders.filter(o => o.deliveryType === 'sala' && o.tableNumber && !['entregado', 'cancelled'].includes(o.status)).map(o => o.tableNumber)
   );
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-      <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
         <Armchair className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
         <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Sala</h3>
         <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-full text-xs font-bold">{used.size}/{cfg.tableCount}</span>
       </div>
-      <div className="p-4">
-        <div className="grid grid-cols-5 sm:grid-cols-8 gap-2">
+      <div className="p-3">
+        <div className="grid grid-cols-5 sm:grid-cols-8 gap-1.5">
           {Array.from({ length: cfg.tableCount }, (_, i) => i + 1).map(n => (
             <div key={n} className={`aspect-square rounded-lg flex items-center justify-center text-xs font-bold border-2 ${
               used.has(n)
@@ -436,9 +608,9 @@ function ChannelsW({ data }: { data: Record<string, number> }) {
   const mx = Math.max(...entries.map(e => e[1]), 1);
   if (!entries.length) return null;
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 p-5">
-      <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2"><Hash className="w-4 h-4 text-gray-500" /> Facturación por canal</h3>
-      <div className="space-y-2.5">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
+      <h3 className="text-[11px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5"><Hash className="w-3.5 h-3.5 opacity-70" /> Facturación por canal</h3>
+      <div className="space-y-2">
         {entries.map(([ch, val]) => (
           <div key={ch} className="flex items-center gap-3">
             <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-20 shrink-0">{CH_LABELS[ch] || ch}</span>
@@ -451,30 +623,59 @@ function ChannelsW({ data }: { data: Record<string, number> }) {
   );
 }
 
+type OpsPanelId = 'operativa' | 'pedidos' | 'clients' | 'promotions';
+
+function opsPanelFromSearch(panelParam: string | null): OpsPanelId {
+  const p = panelParam?.trim();
+  if (p === 'pedidos' || p === 'clients' || p === 'promotions') return p;
+  return 'operativa';
+}
+
 /* ═══ MAIN PAGE ══════════════════════════════════════════════════════════════ */
 
 export function DeliveryOpsCenter() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const opsPanel = opsPanelFromSearch(searchParams.get('panel'));
 
-  const deliveryOpsTabs = useMemo(
-    () => [
-      { id: 'operativa', label: 'Operativa' },
-      { id: 'pedidos', label: 'Pedidos' },
-      { id: 'clients', label: 'Clientes' },
-    ],
-    [],
-  );
+  const setOpsPanel = useCallback((next: OpsPanelId) => {
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      if (next === 'operativa') p.delete('panel');
+      else p.set('panel', next);
+      return p;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const navFromOps = useCallback((path: string) => {
+    navigate(path, { state: { returnToOps: true } });
+  }, [navigate]);
 
   const onDeliveryOpsSectionTab = useCallback(
     (id: string) => {
-      if (id === 'clients') navigate('/saas/delivery?tab=clients');
-      else if (id === 'pedidos') navigate('/saas/delivery');
-      else navigate('/saas/delivery-ops');
+      if (id === 'pedidos') setOpsPanel('pedidos');
+      else if (id === 'clients') setOpsPanel('clients');
+      else if (id === 'promotions') setOpsPanel('promotions');
+      else setOpsPanel('operativa');
     },
-    [navigate],
+    [setOpsPanel],
   );
+
+  useEffect(() => {
+    const p = searchParams.get('panel');
+    const allowed = new Set(['pedidos', 'clients', 'promotions']);
+    if (p !== null && p !== '' && !allowed.has(p)) {
+      setSearchParams((prev) => {
+        const n = new URLSearchParams(prev);
+        n.delete('panel');
+        return n;
+      }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const sectionTabActive = opsPanel;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -507,6 +708,33 @@ export function DeliveryOpsCenter() {
   const [sseOk, setSseOk] = useState(false);
   const [lastUp, setLastUp] = useState<Date | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
+  const pedidosQueueCount = useMemo(() => {
+    if (!data?.activeOrders) return 0;
+    return data.activeOrders.filter((o) => o.status === 'nuevo' || o.status === 'cocina' || o.status === 'listo').length;
+  }, [data?.activeOrders]);
+
+  const quickNav = useCallback(
+    (path: string) => {
+      if (path === '/saas/delivery') {
+        if (opsPanel !== 'pedidos') setOpsPanel('pedidos');
+        return;
+      }
+      navFromOps(path);
+    },
+    [navFromOps, opsPanel, setOpsPanel],
+  );
+
+  const deliveryOpsTabs = useMemo(
+    () => [
+      { id: 'operativa', label: 'Operativa' },
+      { id: 'pedidos', label: 'Pedidos', ...(pedidosQueueCount > 0 ? { count: pedidosQueueCount } : {}) },
+      { id: 'clients', label: 'Clientes' },
+      { id: 'promotions', label: 'Promociones' },
+    ],
+    [pedidosQueueCount],
+  );
 
   const load = useCallback(async () => {
     if (!authUserId) return;
@@ -576,51 +804,118 @@ export function DeliveryOpsCenter() {
       ? 'bg-amber-500 animate-pulse'
       : 'bg-red-500 animate-pulse';
 
+  const layoutSubtitle =
+    opsPanel === 'pedidos'
+      ? 'Pedidos e historial integrados en Ops'
+      : opsPanel === 'clients'
+        ? 'Clientes en Ops'
+        : opsPanel === 'promotions'
+          ? 'Promociones en Ops'
+          : subtitle;
+
   return (
-    <Layout title="Centro Operativo" subtitle={subtitle}>
-      <div className="space-y-5">
-        {/* Connection indicator */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connectionDotClass}`} />
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {connectionText}
-              {lastUp && ` · ${lastUp.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`}
+    <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
+      <div className="px-3 md:px-4 pt-1 pb-4 md:pb-5">
+      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 shadow-lg shadow-gray-200/40 dark:shadow-none flex flex-col overflow-hidden max-h-[calc(100dvh-8rem)] min-h-[260px]">
+        <div className="shrink-0 px-3 py-2 border-b border-gray-200/90 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-gray-50/90 dark:from-gray-900 dark:to-gray-950">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-semibold tabular-nums text-gray-500 dark:text-gray-400 border border-gray-200/80 dark:border-gray-600 rounded-md px-2 py-0.5 bg-white/60 dark:bg-gray-800/80">
+              <div className={`w-2 h-2 rounded-full shrink-0 ${connectionDotClass}`} title={connectionText} />
+              <span className="truncate max-w-[11rem] sm:max-w-none">
+                {connectionText}
+                {lastUp && ` · ${lastUp.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`}
+              </span>
+            </div>
+            <span className="text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-50 truncate">
+              Vista principal · delivery
             </span>
+            <div className="flex-1 min-w-[4px]" />
+            <button type="button" onClick={load} className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 rounded-md hover:bg-white/80 dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-600 transition-colors shrink-0" title="Actualizar">
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
-          <button onClick={load} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
         </div>
 
-        <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={data?.pointsOfSale || []} />
-
-        <Tabs tabs={deliveryOpsTabs} activeTab="operativa" onChange={onDeliveryOpsSectionTab} />
-
-        {data?.alerts && data.alerts.length > 0 && <Alerts alerts={data.alerts} />}
-
-        {data?.kpis && <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />}
-
-        <QuickAccess cfg={cfg} kpis={data?.kpis || null} cashPend={data?.cashStatus?.pendingClose || 0} incidents={data?.kpis?.byStatus?.incident || 0} />
-
-        <Metrics kpis={data?.kpis || null} />
-
-        {loading && !data ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100 rounded-full" />
+        {opsPanel === 'pedidos' ? (
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
+              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
+            </div>
+            <div className="shrink-0 px-2 pt-2 pb-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950">
+              <QuickAccess
+                cfg={cfg}
+                kpis={data?.kpis || null}
+                cashPend={data?.cashStatus?.pendingClose || 0}
+                incidents={data?.kpis?.byStatus?.incident || 0}
+                onNavigate={quickNav}
+                pedidosQueueCount={pedidosQueueCount}
+              />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
+              <Delivery embedded onEmbeddedBack={() => setOpsPanel('operativa')} />
+            </div>
+          </div>
+        ) : opsPanel === 'clients' ? (
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
+              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
+              <ClientsPage embedDeliveryOps />
+            </div>
+          </div>
+        ) : opsPanel === 'promotions' ? (
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
+              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
+              <PromotionsPage embedDeliveryOps />
+            </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {cfg?.hasKitchen !== false && <KitchenW ks={data?.kitchenStatus || null} orders={active} onAdv={advance} />}
-            {cfg?.hasAssemblyStation !== false && <AssemblyW orders={active} onAdv={advance} />}
-            {(cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) && <RepartoW ds={data?.deliveryStatus || null} orders={active} cfg={cfg} onAdv={advance} />}
-            <CashW cs={data?.cashStatus || null} />
-            <IncidentsW orders={active} />
-            {cfg?.hasPhysicalTables && cfg.tableCount > 0 && <TablesW cfg={cfg} orders={active} />}
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">
+
+            <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={data?.pointsOfSale || []} sticky={false} />
+
+            <div className="[&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
+              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
+            </div>
+
+            {data?.alerts && data.alerts.length > 0 && <Alerts alerts={data.alerts} />}
+
+            {data?.kpis && <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />}
+
+            <QuickAccess
+              cfg={cfg}
+              kpis={data?.kpis || null}
+              cashPend={data?.cashStatus?.pendingClose || 0}
+              incidents={data?.kpis?.byStatus?.incident || 0}
+              onNavigate={quickNav}
+              pedidosQueueCount={pedidosQueueCount}
+            />
+
+            <Metrics kpis={data?.kpis || null} />
+
+            {loading && !data ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100 rounded-full" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {cfg?.hasKitchen !== false && <KitchenW ks={data?.kitchenStatus || null} orders={active} onAdv={advance} />}
+                {cfg?.hasAssemblyStation !== false && <AssemblyW orders={active} onAdv={advance} />}
+                {(cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) && <RepartoW ds={data?.deliveryStatus || null} orders={active} cfg={cfg} onAdv={advance} />}
+                <CashW cs={data?.cashStatus || null} />
+                <IncidentsW orders={active} onNavigate={navFromOps} />
+                {cfg?.hasPhysicalTables && cfg.tableCount > 0 && <TablesW cfg={cfg} orders={active} />}
+              </div>
+            )}
+
+            {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && <ChannelsW data={data.revenueByChannel} />}
           </div>
         )}
-
-        {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && <ChannelsW data={data.revenueByChannel} />}
+      </div>
       </div>
     </Layout>
   );

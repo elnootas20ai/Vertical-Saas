@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useModalClose } from '../../hooks/useModalClose';
 import { v4 as uuidv4 } from 'uuid';
@@ -120,7 +120,7 @@ import {
   Shield, AlertTriangle, Download, Trash2, History, Activity, Bell,
   Upload, FolderOpen, Eye, FileCheck, Receipt, IdCard, FolderClosed, ChevronRight,
   BarChart3, Database, Users, Megaphone, Globe, Building2, UserCircle,
-  Hash, Percent, Gift, ToggleLeft, ToggleRight, ClipboardList, PenLine, Send,
+  Hash, Percent, Gift, ToggleLeft, ToggleRight, ClipboardList, PenLine, Send, Search,
   ShoppingBag,
 } from 'lucide-react';
 import { getClientQuotesRequest, type ClientQuote } from '../../lib/crmApi';
@@ -229,6 +229,7 @@ interface Interaction {
 
 export function ClientDetail() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { id } = useParams();
   const { vehicles, clients, leads, updateClient, updateLead, deleteClient } = useApp();
@@ -304,6 +305,11 @@ export function ClientDetail() {
   });
   const [clientQuotes, setClientQuotes] = useState<ClientQuote[]>([]);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [detailListSearch, setDetailListSearch] = useState('');
+
+  useEffect(() => {
+    setDetailListSearch('');
+  }, [activeTab]);
 
   useEffect(() => {
     listUsersRequest()
@@ -385,6 +391,50 @@ export function ClientDetail() {
 
   const interactions = useMemo<Interaction[]>(() => client?.interactions || [], [client]);
   const documents = useMemo(() => client?.documentsList || [], [client]);
+
+  const detailSearchNorm = detailListSearch.trim().toLowerCase();
+
+  const filteredDetailQuotes = useMemo(() => {
+    if (!detailSearchNorm) return clientQuotes;
+    return clientQuotes.filter((q) =>
+      `${q.title || ''} ${q.number || ''} ${q.status || ''}`.toLowerCase().includes(detailSearchNorm),
+    );
+  }, [clientQuotes, detailSearchNorm]);
+
+  const filteredDetailPromotions = useMemo(() => {
+    if (!detailSearchNorm) return clientPromotions;
+    return clientPromotions.filter((p) =>
+      `${p.nombre} ${p.codigo} ${p.descripcion || ''} ${p.tipo}`.toLowerCase().includes(detailSearchNorm),
+    );
+  }, [clientPromotions, detailSearchNorm]);
+
+  const filteredDetailInvoices = useMemo(() => {
+    if (!detailSearchNorm) return clientInvoices;
+    return clientInvoices.filter((inv) => {
+      const blob = `${inv.number || ''} ${inv.status || ''} ${String((inv as any).vehicleName || '')}`.toLowerCase();
+      return blob.includes(detailSearchNorm) || String(inv.total ?? '').includes(detailSearchNorm);
+    });
+  }, [clientInvoices, detailSearchNorm]);
+
+  const filteredDetailActivities = useMemo(() => {
+    if (!detailSearchNorm) return clientActivities;
+    return clientActivities.filter((a) =>
+      `${a.titulo} ${a.descripcion || ''} ${a.tipo}`.toLowerCase().includes(detailSearchNorm),
+    );
+  }, [clientActivities, detailSearchNorm]);
+
+  const filteredDetailContacts = useMemo(() => {
+    const list = client?.contacts || [];
+    if (!detailSearchNorm) return list;
+    return list.filter((c) =>
+      `${c.name} ${c.email || ''} ${c.phone || ''} ${c.role || ''}`.toLowerCase().includes(detailSearchNorm),
+    );
+  }, [client?.contacts, detailSearchNorm]);
+
+  const documentsFilteredBySearch = useMemo(() => {
+    if (!detailSearchNorm) return documents;
+    return documents.filter((d: { name?: string }) => String(d.name || '').toLowerCase().includes(detailSearchNorm));
+  }, [documents, detailSearchNorm]);
 
   const lead = useMemo(() => leads.find((l) => l.id === id) ?? null, [leads, id]);
 
@@ -503,6 +553,15 @@ export function ClientDetail() {
       </Layout>
     );
   }
+
+  const backToClients = () => {
+    const st = (location.state || {}) as any;
+    if (st?.returnToOps) {
+      navigate('/saas/delivery-ops?panel=clients', { replace: true });
+      return;
+    }
+    navigate('/saas/crm/clientes?tab=clients');
+  };
 
   const tabsConfig = [
     { id: 'resumen', label: 'Resumen', icon: <BarChart3 className="w-4 h-4" /> },
@@ -1343,7 +1402,9 @@ export function ClientDetail() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-600 dark:text-gray-400">
-          {(client.contacts?.length || 0)} personas de contacto
+          {detailSearchNorm
+            ? `${filteredDetailContacts.length} de ${client.contacts?.length || 0} contactos`
+            : `${client.contacts?.length || 0} personas de contacto`}
         </div>
         <button
           onClick={() => {
@@ -1376,9 +1437,9 @@ export function ClientDetail() {
         </div>
       )}
 
-      {(client.contacts && client.contacts.length > 0) ? (
+      {filteredDetailContacts.length > 0 ? (
         <div className="space-y-3">
-          {client.contacts.map((contact) => (
+          {filteredDetailContacts.map((contact) => (
             <div key={contact.id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-5 flex items-start gap-4 group">
               <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
                 <User className="w-5 h-5 text-blue-600" />
@@ -1400,6 +1461,13 @@ export function ClientDetail() {
               </div>
             </div>
           ))}
+        </div>
+      ) : !showContactForm && (client.contacts?.length || 0) > 0 && detailSearchNorm ? (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center dark:border-gray-700 dark:bg-gray-800">
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ningún contacto coincide con la búsqueda</p>
+          <button type="button" onClick={() => setDetailListSearch('')} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">
+            Limpiar búsqueda
+          </button>
         </div>
       ) : !showContactForm && (
         <div className="bg-white dark:bg-gray-800 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-10 text-center">
@@ -1440,11 +1508,22 @@ export function ClientDetail() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-600 dark:text-gray-400">{clientInvoices.length} facturas</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {detailSearchNorm
+              ? `${filteredDetailInvoices.length} de ${clientInvoices.length} facturas`
+              : `${clientInvoices.length} facturas`}
+          </p>
         </div>
-        {clientInvoices.length > 0 ? (
+        {clientInvoices.length > 0 && filteredDetailInvoices.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center dark:border-gray-700 dark:bg-gray-800">
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ninguna factura coincide con la búsqueda</p>
+            <button type="button" onClick={() => setDetailListSearch('')} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">
+              Limpiar búsqueda
+            </button>
+          </div>
+        ) : clientInvoices.length > 0 ? (
           <div className="space-y-2">
-            {clientInvoices.map((inv) => {
+            {filteredDetailInvoices.map((inv) => {
               const st = statusConfig[inv.status] || statusConfig.draft;
               return (
                 <div key={inv.id} className="flex items-center gap-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 hover:shadow-sm transition-all">
@@ -1532,7 +1611,11 @@ export function ClientDetail() {
   const renderPromocionesTab = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-600 dark:text-gray-400">{clientPromotions.length} promociones</p>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          {detailSearchNorm
+            ? `${filteredDetailPromotions.length} de ${clientPromotions.length} promociones`
+            : `${clientPromotions.length} promociones`}
+        </p>
         <button onClick={() => setShowPromotionForm((v) => !v)} className="px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-sm font-medium transition-colors">
           + Nueva promoción
         </button>
@@ -1545,12 +1628,19 @@ export function ClientDetail() {
             <input value={promotionForm.nombre} onChange={(e) => setPromotionForm((p) => ({ ...p, nombre: e.target.value }))} placeholder="Nombre de la promoción *" className="md:col-span-2 w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
             <select value={promotionForm.tipo} onChange={(e) => setPromotionForm((p) => ({ ...p, tipo: e.target.value }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800 text-sm">
               <option value="descuento">Descuento</option>
+              <option value="2x1">2x1</option>
               <option value="regalo">Regalo</option>
               <option value="envio_gratis">Envío gratis</option>
               <option value="puntos">Puntos</option>
               <option value="otro">Otro</option>
             </select>
-            <input value={promotionForm.descuento} onChange={(e) => setPromotionForm((p) => ({ ...p, descuento: e.target.value }))} placeholder="Descuento (%)" type="number" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            <input
+              value={promotionForm.descuento}
+              onChange={(e) => setPromotionForm((p) => ({ ...p, descuento: e.target.value }))}
+              placeholder={promotionForm.tipo === '2x1' ? 'Nº packs (opcional)' : 'Descuento (%)'}
+              type="number"
+              className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none text-sm"
+            />
             <input value={promotionForm.codigo} onChange={(e) => setPromotionForm((p) => ({ ...p, codigo: e.target.value.toUpperCase() }))} placeholder="Código promocional" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none text-sm font-mono" />
             <div className="flex gap-3">
               <div className="flex-1">
@@ -1580,9 +1670,16 @@ export function ClientDetail() {
             </div>
           ))}
         </div>
+      ) : clientPromotions.length > 0 && filteredDetailPromotions.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center dark:border-gray-700 dark:bg-gray-800">
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ninguna promoción coincide con la búsqueda</p>
+          <button type="button" onClick={() => setDetailListSearch('')} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">
+            Limpiar búsqueda
+          </button>
+        </div>
       ) : clientPromotions.length > 0 ? (
         <div className="space-y-3">
-          {clientPromotions.map((promo) => {
+          {filteredDetailPromotions.map((promo) => {
             const isActive = promo.estado === 'activa';
             const isExpired = promo.fechaFin && new Date(promo.fechaFin) < new Date();
             return (
@@ -1680,35 +1777,48 @@ export function ClientDetail() {
           </div>
         </div>
 
-        <div className="space-y-2">
-          {clientQuotes.map((q) => {
-            const statusStyle = QUOTE_STATUS_STYLES[q.status] || QUOTE_STATUS_STYLES.draft;
-            return (
-              <div key={q.id} className="flex items-center gap-3 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-sm transition-all">
-                <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 shrink-0">
-                  <ClipboardList className="w-5 h-5 text-blue-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                      {q.title || q.number || 'Presupuesto'}
-                    </p>
-                    <span className={`inline-flex px-2 py-0.5 text-[10px] font-bold rounded-full ${statusStyle.bg} ${statusStyle.text}`}>
-                      {statusStyle.label}
-                    </span>
+        {filteredDetailQuotes.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-white p-10 text-center dark:border-gray-700 dark:bg-gray-800">
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+              {detailSearchNorm ? 'Ningún presupuesto coincide con la búsqueda' : 'Sin elementos para mostrar'}
+            </p>
+            {detailSearchNorm ? (
+              <button type="button" onClick={() => setDetailListSearch('')} className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400">
+                Limpiar búsqueda
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredDetailQuotes.map((q) => {
+              const statusStyle = QUOTE_STATUS_STYLES[q.status] || QUOTE_STATUS_STYLES.draft;
+              return (
+                <div key={q.id} className="flex items-center gap-3 p-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-sm transition-all">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-900/20 shrink-0">
+                    <ClipboardList className="w-5 h-5 text-blue-500" />
                   </div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                    {q.number && `#${q.number} · `}{q.items} líneas · {new Date(q.createdAt).toLocaleDateString('es-ES')}
-                    {q.validUntil && ` · Válido hasta ${new Date(q.validUntil).toLocaleDateString('es-ES')}`}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {q.title || q.number || 'Presupuesto'}
+                      </p>
+                      <span className={`inline-flex px-2 py-0.5 text-[10px] font-bold rounded-full ${statusStyle.bg} ${statusStyle.text}`}>
+                        {statusStyle.label}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      {q.number && `#${q.number} · `}{q.items} líneas · {new Date(q.createdAt).toLocaleDateString('es-ES')}
+                      {q.validUntil && ` · Válido hasta ${new Date(q.validUntil).toLocaleDateString('es-ES')}`}
+                    </p>
+                  </div>
+                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100 shrink-0">
+                    {eurFmt.format(q.total)}
                   </p>
                 </div>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100 shrink-0">
-                  {eurFmt.format(q.total)}
-                </p>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -2438,7 +2548,7 @@ export function ClientDetail() {
       <div className="space-y-6">
         {/* Back button */}
         <button
-          onClick={() => navigate('/saas/crm/clientes?tab=clients')}
+          onClick={backToClients}
             className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -2622,6 +2732,52 @@ export function ClientDetail() {
           activeTab={activeTab}
           onChange={setActiveTab}
         />
+
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-3 shadow-sm md:px-4">
+          <div className="relative min-w-0">
+            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+            <input
+              type="text"
+              value={detailListSearch}
+              onChange={(e) => setDetailListSearch(e.target.value)}
+              placeholder={
+                activeTab === 'presupuestos'
+                  ? 'Buscar presupuestos por título o número…'
+                  : activeTab === 'promociones'
+                    ? 'Buscar promociones por nombre o código…'
+                    : activeTab === 'facturas'
+                      ? 'Buscar facturas por número…'
+                      : activeTab === 'contactos'
+                        ? 'Buscar contactos por nombre, email o teléfono…'
+                        : activeTab === 'documents'
+                          ? 'Buscar documentos por nombre…'
+                          : activeTab === 'actividad'
+                            ? 'Buscar en el historial de actividad…'
+                            : 'Buscar (disponible en listas: presupuestos, facturas, promociones…)'
+              }
+              disabled={
+                !['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab)
+              }
+              className={`h-11 w-full rounded-xl border-2 border-gray-200 bg-white pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 ${
+                !['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab)
+                  ? 'cursor-not-allowed opacity-60'
+                  : ''
+              }`}
+              aria-label="Buscar en la pestaña actual"
+            />
+            {detailListSearch &&
+            ['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab) ? (
+              <button
+                type="button"
+                onClick={() => setDetailListSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700"
+                aria-label="Limpiar búsqueda"
+              >
+                <X className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+              </button>
+            ) : null}
+          </div>
+        </div>
 
         {/* Tab Content */}
         {activeTab === 'resumen' && renderResumenTab()}

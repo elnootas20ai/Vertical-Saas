@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 // SSE events are emitted by the backend (delivery_order_created, etc.)
 // and handled globally; auto-refresh provides real-time updates
 import {
@@ -71,6 +73,11 @@ const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
   nuevo: 'cocina', cocina: 'listo', listo: 'entregado',
 };
 
+function extractBrandIds(order: DeliveryOrder): string[] {
+  const raw = (order.items || []).flatMap((it) => Array.isArray((it as any).brandIds) ? (it as any).brandIds : []);
+  return Array.from(new Set(raw.map((s) => String(s || '').trim()).filter(Boolean))).slice(0, 4);
+}
+
 function timeSince(dateStr: string): string {
   if (!dateStr) return '—';
   const ms = Date.now() - new Date(dateStr).getTime();
@@ -105,7 +112,8 @@ const EMPTY_FILTERS: Filters = { channel: '', salesPointId: '', status: '', date
 
 export function DeliveryOrders() {
   const { user } = useAuth();
-  const userId = user?.user_id || user?.id || '';
+  const { currentBusiness } = useBusiness();
+  const userId = resolveBusinessDataUserId(user, currentBusiness);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
@@ -523,6 +531,19 @@ export function DeliveryOrders() {
                         <td className="px-4 py-3">
                           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{order.totalAmount.toFixed(2)}€</p>
                           <p className="text-[10px] text-gray-400">{order.items.length} prod.</p>
+                          {extractBrandIds(order).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {extractBrandIds(order).map((b) => (
+                                <span
+                                  key={b}
+                                  className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
+                                  title="Marca (deducida del catálogo)"
+                                >
+                                  {b}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </td>
 
                         {/* Pago */}
@@ -585,6 +606,7 @@ export function DeliveryOrders() {
       {/* Modals / Drawers */}
       {showCreate && (
         <CreateOrderWizard
+          userId={userId}
           catalogItems={catalogItems}
           pointsOfSale={pointsOfSale}
           onSubmit={handleCreate}

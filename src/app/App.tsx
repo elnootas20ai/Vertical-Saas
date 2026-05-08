@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { RouterProvider } from 'react-router';
 import { ThemeProvider, useTheme } from 'next-themes';
 import { router } from './routes';
@@ -19,41 +19,64 @@ function OnboardingUserSync() {
 
 const SAAS_THEME_STORAGE_KEY = 'vertial_saas_theme';
 
+function pathnameIsSaas(pathname: string) {
+  return pathname === '/saas' || pathname.startsWith('/saas/');
+}
+
 /**
  * Reglas de tema:
- * - Fuera de /saas: siempre light (sin dark por defecto ni persistencia).
- * - Dentro de /saas: se restaura el último tema elegido para SaaS.
+ * - Fuera de /saas: siempre light (marketing/auth).
+ * - Dentro de /saas: preferencia en vertial_saas_theme.
+ * Solo aplicamos esa preferencia al cruzar el límite (entrar/salir). Si el efecto
+ * dependiera de `theme`, cada cambio a claro volvería a leer "dark" de localStorage
+ * hasta que se sincronizara — el modo oscuro parecía "atascado".
  */
 function ThemeRouteGuard() {
-  const { theme, setTheme } = useTheme();
+  const { setTheme, resolvedTheme } = useTheme();
+  const resolvedRef = useRef(resolvedTheme);
+  const prevPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    resolvedRef.current = resolvedTheme;
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    if (!pathnameIsSaas(window.location.pathname)) return;
+    const r = resolvedTheme;
+    if (r === 'dark' || r === 'light') {
+      localStorage.setItem(SAAS_THEME_STORAGE_KEY, r);
+    }
+  }, [resolvedTheme]);
 
   useEffect(() => {
     const applyForPath = (pathname: string) => {
-      const inSaas = pathname === '/saas' || pathname.startsWith('/saas/');
-      if (inSaas) {
+      const inSaas = pathnameIsSaas(pathname);
+      const prev = prevPathRef.current;
+      const prevInSaas = prev !== null && pathnameIsSaas(prev);
+
+      if (inSaas && !prevInSaas) {
         const saved = localStorage.getItem(SAAS_THEME_STORAGE_KEY);
-        if (saved && saved !== theme) setTheme(saved);
-        return;
+        if (saved === 'dark' || saved === 'light') setTheme(saved);
+      } else if (!inSaas && prevInSaas) {
+        const r = resolvedRef.current;
+        if (r === 'dark' || r === 'light') {
+          localStorage.setItem(SAAS_THEME_STORAGE_KEY, r);
+        }
+        setTheme('light');
       }
 
-      // Al salir de SaaS, recordamos el tema usado en SaaS y forzamos light fuera.
-      if (theme && theme !== 'light') {
-        localStorage.setItem(SAAS_THEME_STORAGE_KEY, theme);
-      }
-      setTheme('light');
+      prevPathRef.current = pathname;
     };
 
-    // Primer render
     applyForPath(window.location.pathname);
 
-    // Cambios de ruta (Data Router)
     const unsubscribe = router.subscribe((state) => {
       const pathname = state.location?.pathname || window.location.pathname;
       applyForPath(pathname);
     });
 
     return unsubscribe;
-  }, [setTheme, theme]);
+  }, [setTheme]);
 
   return null;
 }

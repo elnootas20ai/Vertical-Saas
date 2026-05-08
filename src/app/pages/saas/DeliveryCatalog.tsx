@@ -111,6 +111,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     name: '',
     description: '',
     category: '',
+    brandIdsCsv: '',
     unit: 'ud',
     unitPrice: '',
     costPrice: '',
@@ -129,6 +130,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
         name: editItem.name,
         description: editItem.description,
         category: editItem.category,
+        brandIdsCsv: Array.isArray(editItem.brandIds) ? editItem.brandIds.join(', ') : '',
         unit: editItem.unit || 'ud',
         unitPrice: String(editItem.unitPrice || ''),
         costPrice: String(editItem.costPrice || ''),
@@ -143,6 +145,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     } else {
       setForm({
         name: '', description: '', category: '', unit: 'ud',
+        brandIdsCsv: '',
         unitPrice: '', costPrice: '', stockQuantity: '', minStock: '',
         image: '', allergens: [], notes: '', webVisible: true, available: true,
       });
@@ -164,11 +167,16 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     }
     setSubmitting(true);
     try {
+      const parsedBrandIds = String(form.brandIdsCsv || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       await onCreate({
         ...editItem,
         name: form.name,
         description: form.description,
         category: form.category,
+        brandIds: parsedBrandIds,
         unitPrice: Number(form.unitPrice) || 0,
         costPrice: Number(form.costPrice) || 0,
         stockQuantity: Number(form.stockQuantity) || 0,
@@ -292,6 +300,18 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
               <div>
                 <label className={labelClass}>Descripción</label>
                 <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+              </div>
+              <div>
+                <label className={labelClass}>Marca (para reporting interno)</label>
+                <input
+                  className={inputClass}
+                  placeholder="Ej: pizza, burger, comunes (separadas por coma)"
+                  value={form.brandIdsCsv}
+                  onChange={(e) => setForm((f) => ({ ...f, brandIdsCsv: e.target.value }))}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Esto se copiará a cada línea del pedido al vender (histórico). Recomendado: usar <b>comunes</b> para bebidas/extras compartidos.
+                </p>
               </div>
             </div>
           )}

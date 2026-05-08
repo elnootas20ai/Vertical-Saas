@@ -103,6 +103,10 @@ interface Invoice {
 type SortState = { key: string; dir: 'asc' | 'desc' } | null;
 type ClientTabId = 'leads' | 'clients' | 'billing' | 'alerts';
 
+export type ClientsPageProps = {
+  embedDeliveryOps?: boolean;
+};
+
 // ─── Tokens ───────────────────────────────────────────────────────────────────
 
 const LEAD_TOKEN = {
@@ -1443,7 +1447,7 @@ function ViewToggle({ view, setView }: { view: 'cards' | 'table'; setView: (v: '
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function ClientsPage() {
+export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1468,6 +1472,14 @@ export function ClientsPage() {
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const viewClientDetail = useCallback((clientId: string) => {
+    const path = `/saas/crm/clientes/${clientId}`;
+    if (embedDeliveryOps) {
+      navigate(path, { state: { returnToOps: true } });
+      return;
+    }
+    navigate(path);
+  }, [embedDeliveryOps, navigate]);
 
   const [activeTab,               setActiveTab]               = useState<ClientTabId>('clients');
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
@@ -1783,6 +1795,7 @@ export function ClientsPage() {
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
+    if (embedDeliveryOps) return;
     const parsedTab = getTabFromParam(tabParam);
     if (parsedTab) {
       setActiveTab(parsedTab);
@@ -1790,9 +1803,10 @@ export function ClientsPage() {
         updateTabQueryParam(parsedTab);
       }
     }
-  }, [tabParam, getTabFromParam, updateTabQueryParam]);
+  }, [embedDeliveryOps, tabParam, getTabFromParam, updateTabQueryParam]);
 
   useEffect(() => {
+    if (embedDeliveryOps) return;
     if (!leadIdParam) {
       return;
     }
@@ -1803,7 +1817,12 @@ export function ClientsPage() {
       setSelectedLead(lead);
       setShowLeadDrawer(true);
     }
-  }, [allLeads, leadIdParam]);
+  }, [embedDeliveryOps, allLeads, leadIdParam]);
+
+  useEffect(() => {
+    if (!embedDeliveryOps) return;
+    setActiveTab('clients');
+  }, [embedDeliveryOps]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -2685,7 +2704,7 @@ export function ClientsPage() {
             {paginatedClients.map(client => (
               <div key={client.id}
                 className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer`}
-                onClick={() => navigate(`/saas/crm/clientes/${client.id}`)}>
+                onClick={() => viewClientDetail(client.id)}>
                 <div className="flex items-start justify-between gap-3 mb-2">
                   <div>
                     <h3 className="font-bold text-gray-900 dark:text-gray-100">{client.name}</h3>
@@ -2709,7 +2728,7 @@ export function ClientsPage() {
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                     <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                     <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
-                    <button onClick={() => navigate(`/saas/crm/clientes/${client.id}`)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                    <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                   </div>
                 </div>
               </div>
@@ -2779,7 +2798,7 @@ export function ClientsPage() {
                 {filteredClients.length === 0 ? (
                   <tr><td colSpan={visibleClientCols.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
                 ) : paginatedClients.map(client => (
-                  <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group cursor-pointer" onClick={() => navigate(`/saas/crm/clientes/${client.id}`)}>
+                  <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group cursor-pointer" onClick={() => viewClientDetail(client.id)}>
                     <td className="pl-3 pr-0 py-0"><div className={`w-1 h-14 rounded-full ${client.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} /></td>
                     {visibleClientCols.includes('nombre') && (
                       <td className="px-5 py-3.5">
@@ -2795,7 +2814,7 @@ export function ClientsPage() {
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                         <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                         <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
-                        <button onClick={() => navigate(`/saas/crm/clientes/${client.id}`)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                        <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                       </div>
                     </td>
                   </tr>
@@ -3425,49 +3444,64 @@ export function ClientsPage() {
     alerts: 'Alertas y recordatorios comerciales',
   };
 
-  return (
-    <Layout title={layoutTitleByTab[activeTab]} subtitle={layoutSubtitleByTab[activeTab]}>
+  const pageBody = (
+    <>
       <div className="space-y-4">
-        {/* Search — always first */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex-1 relative min-w-[12rem]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
-            <input
-              type="text"
-              placeholder={activeTab === 'billing' ? 'Buscar factura...' : activeTab === 'clients' ? 'Buscar clientes...' : 'Buscar leads...'}
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-8 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none text-sm transition-all bg-white dark:bg-gray-800"
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2">
-                <X className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
-              </button>
-            )}
-          </div>
-          {hasWorkCenters && (
-            <select
-              className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none"
-              value={filterWorkCenter}
-              onChange={e => setFilterWorkCenter(e.target.value)}
-            >
-              <option value="all">Todos los centros</option>
-              {activeWorkCenters.map((wc) => (
-                <option key={wc.id} value={wc.id}>{wc.name}</option>
-              ))}
-            </select>
-          )}
-        </div>
+        {!embedDeliveryOps && <CrmNav active={activeTab} />}
 
-        {/* CRM Navigation */}
-        <CrmNav active={activeTab} />
+        {/* Misma barra de búsqueda en todas las pestañas: debajo del nav, altura fija, sin saltos al cambiar */}
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm px-3 py-3 md:px-4 md:py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
+              <input
+                type="text"
+                placeholder={
+                  activeTab === 'billing'
+                    ? 'Buscar facturas por número, cliente o matrícula…'
+                    : activeTab === 'clients'
+                      ? 'Buscar clientes por nombre, email o teléfono…'
+                      : activeTab === 'alerts'
+                        ? 'Buscar en alertas (texto visible en la lista)…'
+                        : 'Buscar leads por nombre, vehículo o contacto…'
+                }
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-11 w-full rounded-xl border-2 border-gray-200 bg-white pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                aria-label="Buscar en CRM"
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  aria-label="Limpiar búsqueda"
+                >
+                  <X className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
+                </button>
+              ) : null}
+            </div>
+            {hasWorkCenters ? (
+              <select
+                className="h-11 w-full shrink-0 rounded-xl border-2 border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 sm:w-[min(100%,280px)] sm:min-w-[200px]"
+                value={filterWorkCenter}
+                onChange={(e) => setFilterWorkCenter(e.target.value)}
+              >
+                <option value="all">Todos los centros</option>
+                {activeWorkCenters.map((wc) => (
+                  <option key={wc.id} value={wc.id}>{wc.name}</option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+        </div>
 
         {activeTab === 'leads'   && renderLeadsTab()}
         {activeTab === 'clients' && renderClientsTab()}
         {activeTab === 'billing' && renderBillingTab()}
         {activeTab === 'alerts'  && (
           <div className="space-y-4">
-            <CrmAlertsPanel userId={authUser?.user_id || ''} />
+            <CrmAlertsPanel userId={authUser?.user_id || ''} searchQuery={searchQuery} />
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 md:p-5 space-y-5">
               <div className="flex items-center gap-2">
                 <Settings2 className="w-4 h-4 text-indigo-500" />
@@ -3590,7 +3624,6 @@ export function ClientsPage() {
         open={showAddClientModal}
         onClose={() => setShowAddClientModal(false)}
         onClientCreated={(client) => {
-          addClient(client);
           toast.success(`Cliente "${client.name}" creado correctamente`);
           setShowAddClientModal(false);
         }}
@@ -3661,6 +3694,16 @@ export function ClientsPage() {
           onClose={() => setShowDuplicates(false)}
         />
       )}
+    </>
+  );
+
+  if (embedDeliveryOps) {
+    return pageBody;
+  }
+
+  return (
+    <Layout title={layoutTitleByTab[activeTab]} subtitle={layoutSubtitleByTab[activeTab]}>
+      {pageBody}
     </Layout>
   );
 }

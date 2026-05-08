@@ -1535,7 +1535,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const { client: createdClient } = await createClientRequest(authUser.user_id, nextClient);
     if (createdClient) {
-      setClients(prev => [createdClient, ...prev]);
+      try {
+        const fresh = await listClientsRequest(authUser.user_id);
+        setClients(fresh);
+      } catch {
+        setClients((prev) => {
+          const rest = prev.filter((c) => c.id !== createdClient.id);
+          return [createdClient, ...rest];
+        });
+      }
       trackActivity({
         type: 'client',
         action: `Añadió cliente ${createdClient.name}`,

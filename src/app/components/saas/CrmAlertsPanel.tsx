@@ -35,9 +35,11 @@ const PRIORITY_STYLES = {
 
 interface CrmAlertsPanelProps {
   userId: string;
+  /** Filtra alertas y recordatorios visibles (misma barra de búsqueda que el CRM). */
+  searchQuery?: string;
 }
 
-export function CrmAlertsPanel({ userId }: CrmAlertsPanelProps) {
+export function CrmAlertsPanel({ userId, searchQuery = '' }: CrmAlertsPanelProps) {
   const navigate = useNavigate();
   const [alerts, setAlerts] = useState<CrmAlert[]>([]);
   const [summary, setSummary] = useState<CrmAlertsSummary | null>(null);
@@ -99,8 +101,28 @@ export function CrmAlertsPanel({ userId }: CrmAlertsPanelProps) {
   };
 
   const filteredAlerts = alertFilter === 'all' ? alerts : alerts.filter((a) => a.type === alertFilter);
+  const qNorm = searchQuery.trim().toLowerCase();
+  const listAlerts =
+    qNorm === ''
+      ? filteredAlerts
+      : filteredAlerts.filter((a) => {
+          const blob = `${a.name || ''} ${a.clientName || ''} ${ALERT_TYPE_LABELS[a.type] || a.type || ''} ${a.type}`.toLowerCase();
+          return blob.includes(qNorm);
+        });
   const pendingReminders = reminders.filter((r) => !r.completed);
   const completedReminders = reminders.filter((r) => r.completed);
+  const pendingRemindersFiltered =
+    qNorm === ''
+      ? pendingReminders
+      : pendingReminders.filter((r) =>
+          `${r.title} ${r.description || ''} ${r.entityName || ''} ${r.assignedTo || ''}`.toLowerCase().includes(qNorm),
+        );
+  const completedRemindersFiltered =
+    qNorm === ''
+      ? completedReminders
+      : completedReminders.filter((r) =>
+          `${r.title} ${r.description || ''} ${r.entityName || ''}`.toLowerCase().includes(qNorm),
+        );
 
   if (loading) {
     return (
@@ -153,15 +175,19 @@ export function CrmAlertsPanel({ userId }: CrmAlertsPanelProps) {
             </div>
           </div>
 
-          {filteredAlerts.length === 0 ? (
+          {listAlerts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-3" />
-              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Sin alertas pendientes</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Todo bajo control</p>
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                {filteredAlerts.length > 0 && qNorm ? 'Ninguna alerta coincide con la búsqueda' : 'Sin alertas pendientes'}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                {filteredAlerts.length > 0 && qNorm ? 'Prueba con otros términos' : 'Todo bajo control'}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {filteredAlerts.map((alert) => {
+              {listAlerts.map((alert) => {
                 const style = SEVERITY_STYLES[alert.severity] || SEVERITY_STYLES.low;
                 return (
                   <div key={alert.id}
@@ -252,14 +278,16 @@ export function CrmAlertsPanel({ userId }: CrmAlertsPanelProps) {
             </div>
           )}
 
-          {pendingReminders.length === 0 && !showNewReminder ? (
+          {pendingRemindersFiltered.length === 0 && !showNewReminder ? (
             <div className="flex flex-col items-center justify-center py-8 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
               <Calendar className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
-              <p className="text-xs text-gray-400 dark:text-gray-500">Sin recordatorios pendientes</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {pendingReminders.length > 0 && qNorm ? 'Ningún recordatorio coincide' : 'Sin recordatorios pendientes'}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {pendingReminders.map((r) => {
+              {pendingRemindersFiltered.map((r) => {
                 const pStyle = PRIORITY_STYLES[r.priority] || PRIORITY_STYLES.medium;
                 const isOverdue = new Date(r.dueDate) < new Date(new Date().toISOString().slice(0, 10));
                 return (
@@ -289,13 +317,13 @@ export function CrmAlertsPanel({ userId }: CrmAlertsPanelProps) {
             </div>
           )}
 
-          {completedReminders.length > 0 && (
+          {completedRemindersFiltered.length > 0 && (
             <details className="group">
               <summary className="text-xs font-medium text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 select-none">
-                Completados ({completedReminders.length})
+                Completados ({completedRemindersFiltered.length})
               </summary>
               <div className="space-y-1.5 mt-2">
-                {completedReminders.slice(0, 5).map((r) => (
+                {completedRemindersFiltered.slice(0, 5).map((r) => (
                   <div key={r.id} className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 opacity-60">
                     <button onClick={() => handleToggleReminder(r)}
                       className="w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">

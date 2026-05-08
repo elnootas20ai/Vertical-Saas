@@ -3102,17 +3102,83 @@ export async function listClientsByUser(req, userId) {
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
+function foldSearchText(s) {
+  return String(s || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** Texto plegado para buscar por nombre (varios campos + contactos; legados nombre/fullName). */
+function clientNameSearchHaystack(doc) {
+  const parts = [];
+  const push = (v) => {
+    const s = String(v || '').trim();
+    if (s) parts.push(s);
+  };
+  push(doc.name);
+  push(doc.legalName);
+  push(doc.nombre);
+  push(doc.fullName);
+  push(doc.displayName);
+  push(doc.email);
+  if (Array.isArray(doc.contacts)) {
+    for (const c of doc.contacts) {
+      if (c && typeof c === 'object') {
+        push(c.name);
+        push(c.nombre);
+      }
+    }
+  }
+  return foldSearchText(parts.join(' '));
+}
+
+/**
+ * Coincidencia por nombre: substring completa (sin acentos) o todas las palabras ≥2 caracteres
+ * presentes en cualquier orden (ej. "ivan ortega" vs "Ortega, Iván").
+ */
+function foldedNameQueryMatches(qFold, haystackFold) {
+  if (!qFold || qFold.length < 2 || !haystackFold) return false;
+  if (haystackFold.includes(qFold)) return true;
+  const tokens = qFold.split(/\s+/).filter((t) => t.length >= 2);
+  if (tokens.length === 0) return haystackFold.includes(qFold);
+  return tokens.every((t) => haystackFold.includes(t));
+}
+
+function clientPhoneDigitHaystacks(doc) {
+  const list = [String(doc.phone || '').replace(/\D/g, '')];
+  if (Array.isArray(doc.contacts)) {
+    for (const c of doc.contacts) {
+      if (c && typeof c === 'object') {
+        list.push(String(c.phone || c.telefono || '').replace(/\D/g, ''));
+      }
+    }
+  }
+  return list.filter(Boolean);
+}
+
+/** Búsqueda por teléfono (≥3 dígitos coincidentes) y/o por nombre del cliente (substring, sin acentos). */
 export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) {
   const db = getClientsDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
-  const q = String(phoneQuery || '').replace(/\s+/g, '');
-  if (!q) return [];
+  const raw = String(phoneQuery || '').trim();
+  if (raw.length < 2) return [];
+  const qFold = foldSearchText(raw);
+  const qDigits = raw.replace(/\D/g, '');
   return docs
     .filter((d) => {
       if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return false;
-      const phone = String(d.phone || '').replace(/\s+/g, '');
-      return phone.includes(q);
+      const phoneHaystacks = clientPhoneDigitHaystacks(d);
+      const phoneHit =
+        qDigits.length >= 3 && phoneHaystacks.some((h) => h.includes(qDigits));
+      const nameHit =
+        qFold.length >= 2 && foldedNameQueryMatches(qFold, clientNameSearchHaystack(d));
+      return phoneHit || nameHit;
     })
     .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
     .slice(0, Number(limit) || 20);
@@ -4675,6 +4741,7 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     notes: i.notes || '',
     catalogItemId: i.catalogItemId || '',
     category: i.category || '',
+    brandIds: Array.isArray(i.brandIds) ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean) : [],
     extras: Array.isArray(i.extras) ? i.extras : [],
     allergens: Array.isArray(i.allergens) ? i.allergens : [],
     ingredients: Array.isArray(i.ingredients) ? i.ingredients : [],

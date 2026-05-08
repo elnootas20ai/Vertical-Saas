@@ -129,6 +129,9 @@ import { useBusiness } from '../../context/BusinessContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { ActivationChecklist } from './ActivationChecklist';
 
+// Huella visual del calendario (fácil de revertir: poner a false).
+const CALENDAR_V2_VISUAL = true;
+
 interface SidebarItem {
   id: string;
   label: string;
@@ -245,8 +248,7 @@ const menuItemDefs = [
   { id: 'delivery-montaje', navKey: 'deliveryMontaje', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/delivery-montaje' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
-  { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/clients' },
-  { id: 'delivery-crm',     navKey: 'deliveryCrm',     icon: <Contact2 className="w-5 h-5" />,    path: '/saas/delivery-crm' },
+  { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/delivery-ops?panel=clients' },
   { id: 'delivery-catalog', navKey: 'deliveryCatalog', icon: <BookOpen className="w-5 h-5" />, path: '/saas/delivery-catalog' },
   { id: 'delivery-reparto', navKey: 'deliveryReparto', icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery-reparto' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
@@ -414,7 +416,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-crm', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -601,7 +603,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     id: g.id,
     icon: g.icon,
     itemIds: [...g.itemIds],
-    label: t(`sidebar.groups.${g.id}`),
+    label: g.id === 'equipo' ? 'RRHH' : t(`sidebar.groups.${g.id}`),
   }));
 
   const workerMenuItems: SidebarItem[] = workerMenuItemDefs.map(item => ({
@@ -686,7 +688,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     if (!user) {
       return true;
     }
-    if (['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'business-mode'].includes(item.id)) {
+    // Items base que siempre deben ser accesibles desde el menú
+    if (['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'business-mode', 'team'].includes(item.id)) {
       return true;
     }
     const permission = permissionMap[item.id]
@@ -716,8 +719,9 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id === 'delivery-kitchen' && location.pathname.startsWith('/saas/delivery-kitchen')) ||
     (item.id === 'delivery-montaje' && location.pathname.startsWith('/saas/delivery-montaje')) ||
     (item.id === 'delivery-catalog' && location.pathname.startsWith('/saas/delivery-catalog')) ||
-    (item.id === 'delivery-clients' && location.pathname.startsWith('/saas/clients')) ||
-    (item.id === 'delivery-crm' && location.pathname.startsWith('/saas/delivery-crm')) ||
+    (item.id === 'delivery-clients'
+      && (location.pathname.startsWith('/saas/clients')
+        || (location.pathname.startsWith('/saas/delivery-ops') && new URLSearchParams(location.search).get('panel') === 'clients'))) ||
     (item.id === 'caja' && location.pathname.startsWith('/saas/vertical/delivery/caja')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||
@@ -1068,7 +1072,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                   {shouldShowChildren &&
                     sortedItems.map((item) => {
                       const isActive = isItemActive(item);
+                      const isCalendar = item.id === 'calendar';
+                      /** Marca visual en sidebar: zona Ops ya trabajada / hub principal */
+                      const isDeliveryOpsHub = item.id === 'delivery-ops';
                       const itemDimmed = !dimmed && searchNorm && !itemMatchesSearch(item);
+                      const calendarV2 = CALENDAR_V2_VISUAL && isCalendar;
                       return (
                         <button
                           key={item.id}
@@ -1078,15 +1086,29 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                             !isMobile && collapsed ? 'justify-center px-0' : 'px-4'
                           } ${
                             isActive
-                              ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40'
+                              ? isDeliveryOpsHub
+                                ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-900 dark:text-teal-100 border-l-2 border-teal-600'
+                                : (isCalendar
+                                  ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-900 dark:text-violet-200 border-l-2 border-violet-600'
+                                  : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600')
+                              : (calendarV2
+                                ? 'bg-violet-50/60 dark:bg-violet-900/10 text-gray-900 dark:text-gray-100 border-l-2 border-violet-300/70 dark:border-violet-700/40 hover:bg-violet-50 dark:hover:bg-violet-900/15'
+                                : isDeliveryOpsHub
+                                  ? 'text-gray-800 dark:text-gray-100 border-l-2 border-teal-400/55 dark:border-teal-500/45 bg-teal-50/45 dark:bg-teal-950/25 hover:bg-teal-50/80 dark:hover:bg-teal-950/35'
+                                  : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40')
                           } ${item.disabled ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''} ${
                             itemDimmed ? 'opacity-30' : ''
                           }`}
                           disabled={item.disabled}
                           title={!isMobile && collapsed ? item.label : undefined}
                         >
-                          <span className={isActive ? 'text-amber-600' : 'text-gray-500 dark:text-gray-400'}>
+                          <span className={
+                            isActive
+                              ? isDeliveryOpsHub
+                                ? 'text-teal-600 dark:text-teal-400'
+                                : (isCalendar ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600')
+                              : (calendarV2 ? 'text-violet-600/80 dark:text-violet-400/90' : isDeliveryOpsHub ? 'text-teal-600 dark:text-teal-400' : 'text-gray-500 dark:text-gray-400')
+                          }>
                             {item.icon}
                           </span>
                           {(isMobile || !collapsed) && (
@@ -1095,6 +1117,24 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                           {(isMobile || !collapsed) && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0 animate-pulse">
                               {t('sidebar.new')}
+                            </span>
+                          )}
+                          {(isMobile || !collapsed) && item.id === 'calendar' && (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
+                              <CalendarDays className="w-2.5 h-2.5" />
+                              Agenda
+                            </span>
+                          )}
+                          {(isMobile || !collapsed) && item.id === 'calendar' && CALENDAR_V2_VISUAL && (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-gradient-to-r from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
+                              <Palette className="w-2.5 h-2.5" />
+                              V2
+                            </span>
+                          )}
+                          {(isMobile || !collapsed) && item.id === 'calendar' && salesPoints.length > 1 && (
+                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
+                              <Store className="w-2.5 h-2.5" />
+                              PDV
                             </span>
                           )}
                           {(isMobile || !collapsed) && item.pro && (
@@ -1110,6 +1150,15 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                           )}
                           {!isMobile && collapsed && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="absolute right-1 top-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                          )}
+                          {!isMobile && collapsed && item.id === 'calendar' && (
+                            <span className="absolute right-1 top-1 w-2 h-2 bg-violet-500 rounded-full" />
+                          )}
+                          {!isMobile && collapsed && item.id === 'calendar' && CALENDAR_V2_VISUAL && (
+                            <span className="absolute left-1 top-1 w-1.5 h-1.5 bg-fuchsia-500 rounded-full" />
+                          )}
+                          {!isMobile && collapsed && item.id === 'calendar' && salesPoints.length > 1 && (
+                            <span className="absolute right-1 top-1 w-2 h-2 bg-emerald-500 rounded-full" />
                           )}
                           {!isMobile && collapsed && item.pro && (
                             <span className="absolute right-1 top-1 w-2 h-2 bg-amber-400 rounded-full" />

@@ -9,12 +9,14 @@ import {
   listDriverCashSessionsRequest,
   getDeliveryConfigRequest,
   updateDeliveryConfigRequest,
+  listDeliveryOrdersRequest,
   type TpvRegisterSession,
   type TpvRegisterSummary,
   type PointOfSale,
   type DriverCashSession,
   type TpvIncident,
   type DeliveryConfig,
+  type DeliveryOrder,
 } from '../../lib/deliveryApi';
 import {
   Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
@@ -500,6 +502,13 @@ export function CajaPage() {
   const [validatingSession, setValidatingSession] = useState<TpvRegisterSession | null>(null);
   const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [orders, setOrders] = useState<DeliveryOrder[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [ordersFrom, setOrdersFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [ordersTo, setOrdersTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -522,6 +531,25 @@ export function CajaPage() {
   }, [userId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadOrders = useCallback(async () => {
+    if (!userId) return;
+    setLoadingOrders(true);
+    try {
+      const all = await listDeliveryOrdersRequest(userId);
+      setOrders(all || []);
+    } catch {
+      setOrders([]);
+    } finally {
+      setLoadingOrders(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (tab !== 'historial') return;
+    if (orders.length > 0 || loadingOrders) return;
+    void loadOrders();
+  }, [tab, orders.length, loadingOrders, loadOrders]);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -559,6 +587,34 @@ export function CajaPage() {
     if (filterStatus !== 'all') result = result.filter(s => s.status === filterStatus);
     return result;
   }, [sessions, filterPdv, filterStatus, tab]);
+
+  const ordersInRange = useMemo(() => {
+    if (!ordersFrom || !ordersTo) return [];
+    const from = new Date(`${ordersFrom}T00:00:00`).getTime();
+    const to = new Date(`${ordersTo}T23:59:59`).getTime();
+    return (orders || [])
+      .filter((o) => {
+        const ts = new Date(o.createdAt || o.updatedAt || '').getTime();
+        return Number.isFinite(ts) && ts >= from && ts <= to;
+      })
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }, [orders, ordersFrom, ordersTo]);
+
+  const ordersMetrics = useMemo(() => {
+    const sales = ordersInRange.filter((o) => o.status !== 'cancelled');
+    const gross = sales.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    const count = sales.length;
+    const avg = count > 0 ? gross / count : 0;
+    const byMethod: Record<string, number> = {};
+    const byChannel: Record<string, number> = {};
+    for (const o of sales) {
+      const m = String(o.paymentMethod || 'otro');
+      const ch = String(o.channel || 'direct');
+      byMethod[m] = (byMethod[m] || 0) + Number(o.totalAmount || 0);
+      byChannel[ch] = (byChannel[ch] || 0) + Number(o.totalAmount || 0);
+    }
+    return { gross, count, avg, byMethod, byChannel };
+  }, [ordersInRange]);
 
   const allIncidents = useMemo(() => {
     const incs: (TpvIncident & { sessionTerminal: string; sessionWorker: string })[] = [];
@@ -738,6 +794,102 @@ export function CajaPage() {
 
         {tab === 'historial' && (
           <div className="space-y-3">
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Tickets (pedidos)</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Métricas por rango usando los pedidos guardados</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="date"
+                    value={ordersFrom}
+                    onChange={(e) => setOrdersFrom(e.target.value)}
+                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+                  />
+                  <span className="text-xs text-gray-400">→</span>
+                  <input
+                    type="date"
+                    value={ordersTo}
+                    onChange={(e) => setOrdersTo(e.target.value)}
+                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void loadOrders()}
+                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    disabled={loadingOrders}
+                  >
+                    {loadingOrders ? 'Cargando…' : 'Actualizar'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4">
+                <KpiCard label="Ventas" value={`${ordersMetrics.gross.toFixed(2)}€`} color="blue" />
+                <KpiCard label="Tickets" value={`${ordersMetrics.count}`} color="gray" />
+                <KpiCard label="Ticket medio" value={`${ordersMetrics.avg.toFixed(2)}€`} color="gray" />
+                <KpiCard
+                  label="Efectivo"
+                  value={`${(ordersMetrics.byMethod.efectivo || 0).toFixed(2)}€`}
+                  color="green"
+                />
+                <KpiCard
+                  label="Tarjeta"
+                  value={`${(ordersMetrics.byMethod.tarjeta || 0).toFixed(2)}€`}
+                  color="blue"
+                />
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Por método</p>
+                  <div className="space-y-1">
+                    {Object.entries(ordersMetrics.byMethod).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600 dark:text-gray-300">{k}</span>
+                        <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{v.toFixed(2)}€</span>
+                      </div>
+                    ))}
+                    {Object.keys(ordersMetrics.byMethod).length === 0 && (
+                      <div className="text-xs text-gray-400">Sin datos</div>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Por canal</p>
+                  <div className="space-y-1">
+                    {Object.entries(ordersMetrics.byChannel).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => (
+                      <div key={k} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-600 dark:text-gray-300">{k}</span>
+                        <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{v.toFixed(2)}€</span>
+                      </div>
+                    ))}
+                    {Object.keys(ordersMetrics.byChannel).length === 0 && (
+                      <div className="text-xs text-gray-400">Sin datos</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Últimos tickets</p>
+                <div className="space-y-1">
+                  {ordersInRange.slice(0, 8).map((o) => (
+                    <div key={o._id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-gray-50 dark:bg-gray-900">
+                      <span className="text-gray-600 dark:text-gray-300 truncate">
+                        {new Date(o.createdAt || o.updatedAt || Date.now()).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })} · {o.orderNumber || o.id?.slice(-6)} · {o.customerName}
+                      </span>
+                      <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">{Number(o.totalAmount || 0).toFixed(2)}€</span>
+                    </div>
+                  ))}
+                  {!loadingOrders && ordersInRange.length === 0 && (
+                    <div className="text-xs text-gray-400 text-center py-4">Sin tickets en el rango</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {filteredSessions.filter(s => s.status === 'closed').length === 0 && (
               <div className="text-center py-12 text-gray-400">
                 <Calendar className="w-12 h-12 mx-auto mb-3 opacity-40" />

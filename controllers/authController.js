@@ -65,6 +65,7 @@ import {
   buildSetupWelcomeEmail,
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
+import { sendAdminAlert } from '../services/adminAlerts.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -229,6 +230,22 @@ export async function register(req, res) {
       sendWelcomeEmail(savedAccount).catch(() => null);
     }
 
+    // Aviso interno: nuevo registro (el paquete se elige más tarde en facturación).
+    sendAdminAlert({
+      key: `user_registered:${savedAccount.user_id}`,
+      subject: `👤 Nuevo registro: ${savedAccount.fullName || savedAccount.email}`,
+      html: `<p><b>Nuevo registro</b></p>
+<ul>
+  <li><b>Nombre</b>: ${escapeHtml(savedAccount.fullName || '')}</li>
+  <li><b>Email</b>: ${escapeHtml(savedAccount.email || '')}</li>
+  <li><b>Tipo</b>: ${escapeHtml(String(accountType || ''))}</li>
+  <li><b>Proveedor</b>: ${escapeHtml(String(savedAccount.provider || ''))}</li>
+  <li><b>Referral</b>: ${escapeHtml(String(resolvedReferralCode || referralCode || '—'))}</li>
+  <li><b>Paquete</b>: pendiente (se elige después)</li>
+</ul>`,
+      cooldownMs: 0,
+    }).catch(() => null);
+
     const redirectTo = isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type';
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
@@ -245,6 +262,13 @@ export async function register(req, res) {
       error: error instanceof Error ? error.message : 'Error al registrar la cuenta',
     });
   }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';

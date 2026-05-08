@@ -139,7 +139,12 @@ export interface OcrStats {
 
 // ---- API calls ----
 
-export async function scanDocument(imageBase64: string, mimeType: string, context?: { targetModule?: string }, ocrMode?: 'financial' | 'vehicle') {
+export async function scanDocument(
+  imageBase64: string,
+  mimeType: string,
+  context?: Record<string, unknown>,
+  ocrMode?: 'financial' | 'vehicle',
+) {
   return request<{ ok: boolean; data: OcrResult; meta: OcrScanMeta }>('/api/ocr/scan', {
     method: 'POST',
     body: JSON.stringify({ imageBase64, mimeType, context, ocrMode }),

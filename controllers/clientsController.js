@@ -689,7 +689,7 @@ export async function getClientActivity(req, res) {
   }
 }
 
-// ─── PHONE SEARCH ────────────────────────────────────────────────────────────
+// ─── CLIENT SEARCH (teléfono y/o nombre) ────────────────────────────────────
 
 export async function searchByPhone(req, res) {
   try {

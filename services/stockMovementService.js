@@ -19,13 +19,14 @@ const VALID_MOVEMENT_TYPES = [
   'return_customer',
   'initial',
   'recipe_consumption',
+  'recipe_consumption_reversal',
   'waste',
   'sale_reversal',
   'material_delivery',
   'material_return',
 ];
 
-const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_customer', 'initial', 'sale_reversal', 'material_return']);
+const INBOUND_TYPES = new Set(['purchase_reception', 'adjustment_in', 'return_customer', 'initial', 'sale_reversal', 'recipe_consumption_reversal', 'material_return']);
 const OUTBOUND_TYPES = new Set(['sale', 'internal_consumption', 'adjustment_out', 'return_supplier', 'recipe_consumption', 'waste', 'material_delivery']);
 
 function buildStockMovementDocument(userId, data = {}) {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   ArrowLeft,
   BarChart3,
@@ -34,6 +34,7 @@ import { Pagination } from '../../components/saas/Pagination';
 import { CrmNav } from '../../components/saas/CrmNav';
 import { usePagination } from '../../hooks/usePagination';
 import { v4 as uuidv4 } from 'uuid';
+import { readStoredPromotions, writeStoredPromotions, type StoredPromotion, setClientAppliedPromo, type AppliedPromo } from '../../lib/promoCodes';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,43 @@ interface Promotion {
   createdAt: string;
   revenue: number;
   ordersUsed: number;
+}
+
+function toStoredPromotion(p: Promotion): StoredPromotion {
+  return {
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    type: p.type,
+    status: p.status,
+    discountValue: p.discountValue,
+    code: p.code,
+    startDate: p.startDate,
+    endDate: p.endDate,
+    maxUses: p.maxUses,
+    currentUses: p.currentUses,
+    createdAt: p.createdAt,
+  };
+}
+
+function fromStoredPromotion(p: StoredPromotion): Promotion {
+  return {
+    id: p.id,
+    name: p.name || 'Promoción',
+    description: p.description || '',
+    type: (p.type || 'percentage') as PromoType,
+    status: (p.status || 'draft') as PromoStatus,
+    discountValue: Number(p.discountValue || 0),
+    code: p.code || undefined,
+    startDate: p.startDate || defaultStartDate(),
+    endDate: p.endDate || defaultEndDate(),
+    maxUses: p.maxUses ?? null,
+    currentUses: Number(p.currentUses || 0),
+    targetAudience: 'all',
+    createdAt: p.createdAt || new Date().toISOString(),
+    revenue: 0,
+    ordersUsed: 0,
+  };
 }
 
 const STATUS_CONFIG: Record<PromoStatus, { label: string; bg: string; text: string; dot: string }> = {
@@ -301,11 +339,19 @@ function PromoAnalytics({ promo }: { promo: Promotion }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export function PromotionsPage() {
+export type PromotionsPageProps = {
+  embedDeliveryOps?: boolean;
+};
+
+export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   const { user } = useAuth();
   const { clients } = useApp();
 
-  const [promotions, setPromotions] = useState<Promotion[]>(() => buildMockPromotions());
+  const [promotions, setPromotions] = useState<Promotion[]>(() => {
+    const stored = readStoredPromotions();
+    if (stored.length > 0) return stored.map(fromStoredPromotion);
+    return buildMockPromotions();
+  });
   const [activeView, setActiveView] = useState<PageView>('list');
   const [selectedPromo, setSelectedPromo] = useState<Promotion | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -317,6 +363,33 @@ export function PromotionsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info');
+  const [assignClientId, setAssignClientId] = useState<string>('');
+
+  useEffect(() => {
+    writeStoredPromotions(promotions.map(toStoredPromotion));
+  }, [promotions]);
+
+  const selectedClientLabel = useMemo(() => {
+    const id = String(assignClientId || '').trim();
+    if (!id) return '';
+    const c = (clients || []).find((x) => x.id === id);
+    return c ? c.name : '';
+  }, [assignClientId, clients]);
+
+  const canAssignToClient = useMemo(() => {
+    return Boolean(assignClientId && selectedPromo?.status === 'active' && selectedPromo?.code);
+  }, [assignClientId, selectedPromo?.status, selectedPromo?.code]);
+
+  const buildAppliedFromPromo = useCallback((p: Promotion): AppliedPromo | null => {
+    if (!p.code) return null;
+    return {
+      id: p.id,
+      name: p.name,
+      type: p.type,
+      code: p.code,
+      discountValue: Number(p.discountValue || 0),
+    };
+  }, []);
 
   // ── Form ───────────────────────────────────────────────────────────────────
   const [form, setForm] = useState({
@@ -498,11 +571,12 @@ export function PromotionsPage() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  return (
-    <Layout title="Promociones" subtitle="Gestiona campañas, descuentos y códigos promocionales" noPadding>
-      <div className="p-6 space-y-6">
-        {/* CRM Navigation */}
-        <CrmNav active="promotions" />
+  const shellClass = embedDeliveryOps ? 'space-y-4' : 'p-6 space-y-6';
+
+  const pageBody = (
+    <>
+      <div className={shellClass}>
+        {!embedDeliveryOps && <CrmNav active="promotions" />}
 
         {/* ═══════════════════════════════════════════ LIST VIEW */}
         {activeView === 'list' && (
@@ -1039,6 +1113,63 @@ export function PromotionsPage() {
               <div className="p-6">
                 {detailTab === 'info' && (
                   <div className="space-y-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-slate-200 dark:border-gray-700">
+                      <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asignar al cliente (TPV)</h4>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                        El gerente asigna un código activo a un cliente y en TPV rápido se aplicará automáticamente al seleccionarlo.
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <select
+                          value={assignClientId}
+                          onChange={(e) => setAssignClientId(e.target.value)}
+                          className="flex-1 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm"
+                        >
+                          <option value="">Selecciona un cliente…</option>
+                          {(clients || [])
+                            .slice()
+                            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!canAssignToClient}
+                          onClick={() => {
+                            const ap = buildAppliedFromPromo(selectedPromo);
+                            if (!ap) return;
+                            setClientAppliedPromo(assignClientId, ap);
+                            setAssignClientId('');
+                            showToast(`Código asignado a ${selectedClientLabel || 'cliente'}`);
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold disabled:opacity-50"
+                        >
+                          Asignar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!assignClientId}
+                          onClick={() => {
+                            setClientAppliedPromo(assignClientId, null);
+                            setAssignClientId('');
+                            showToast('Código quitado del cliente');
+                          }}
+                          className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-gray-700 text-slate-700 dark:text-slate-200 text-sm font-semibold disabled:opacity-50"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                      {selectedPromo?.status !== 'active' && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-2 font-semibold">
+                          Para asignar, la promoción debe estar en estado “Activa”.
+                        </p>
+                      )}
+                      {!selectedPromo?.code && (
+                        <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-2 font-semibold">
+                          Para asignar, la promoción debe tener un código.
+                        </p>
+                      )}
+                    </div>
                     <div className="bg-slate-50 dark:bg-gray-900 rounded-xl p-4 border border-slate-100 dark:border-gray-700">
                       <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Configuración</h4>
                       <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -1125,6 +1256,16 @@ export function PromotionsPage() {
           {toast.msg}
         </div>
       )}
+    </>
+  );
+
+  if (embedDeliveryOps) {
+    return pageBody;
+  }
+
+  return (
+    <Layout title="Promociones" subtitle="Gestiona campañas, descuentos y códigos promocionales" noPadding>
+      {pageBody}
     </Layout>
   );
 }

@@ -6,6 +6,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,9 +17,10 @@ import {
   ChevronLeft, ChevronRight, Plus, Calendar, Clock,
   User, Filter, Car, Check, X, Link, Settings,
   Users, AlertCircle, Loader2, ShoppingCart, PhoneCall,
-  Handshake, BellRing, FileSignature, Truck, Wrench,
+  Handshake, BellRing, FileSignature, Truck, Wrench, Crown, Store,
 } from 'lucide-react';
 import { listWorkOrdersRequest, type WorkOrder } from '../../lib/workshopApi';
+import { useWorkCenters } from '../../hooks/useWorkCenters';
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
   eachDayOfInterval, isSameDay, isSameMonth, isToday, addMonths, subMonths,
@@ -42,7 +44,7 @@ import {
 
 interface CalendarEvent {
   id: string;
-  type: 'appointment' | 'followup' | 'delivery' | 'test_drive' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'workshop';
+  type: 'appointment' | 'followup' | 'delivery' | 'test_drive' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop';
   title: string;
   subtitle: string;
   date: Date;
@@ -67,6 +69,43 @@ interface TeamMember {
 
 type CalendarMode = 'month' | 'week';
 
+type EventTypeColorKey =
+  | 'blue' | 'emerald' | 'amber' | 'purple' | 'green'
+  | 'cyan' | 'orange' | 'indigo' | 'rose' | 'slate';
+
+const EVENT_TYPE_COLOR_PRESETS: Record<EventTypeColorKey, { dot: string; bg: string; text: string }> = {
+  blue:    { dot: 'bg-blue-500',    bg: 'bg-blue-50',    text: 'text-blue-700' },
+  emerald: { dot: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  amber:   { dot: 'bg-amber-500',   bg: 'bg-amber-50',   text: 'text-amber-700' },
+  purple:  { dot: 'bg-purple-500',  bg: 'bg-purple-50',  text: 'text-purple-700' },
+  green:   { dot: 'bg-green-600',   bg: 'bg-green-50',   text: 'text-green-700' },
+  cyan:    { dot: 'bg-cyan-600',    bg: 'bg-cyan-50',    text: 'text-cyan-700' },
+  orange:  { dot: 'bg-orange-500',  bg: 'bg-orange-50',  text: 'text-orange-700' },
+  indigo:  { dot: 'bg-indigo-500',  bg: 'bg-indigo-50',  text: 'text-indigo-700' },
+  rose:    { dot: 'bg-rose-500',    bg: 'bg-rose-50',    text: 'text-rose-700' },
+  slate:   { dot: 'bg-slate-700',   bg: 'bg-slate-100',  text: 'text-slate-700' },
+};
+
+type EventTypeConfig = Record<string, { enabled: boolean; label: string; color: EventTypeColorKey }>;
+
+function defaultEventTypeConfig(): EventTypeConfig {
+  return {
+    sale:      { enabled: true, label: 'Venta',        color: 'green' },
+    purchase:  { enabled: true, label: 'Compra',       color: 'cyan' },
+    delivery:  { enabled: true, label: 'Entrega',      color: 'purple' },
+    paperwork: { enabled: true, label: 'Papeleo',      color: 'amber' },
+    call:      { enabled: true, label: 'Llamada',      color: 'orange' },
+    meeting:   { enabled: true, label: 'Reunión',      color: 'indigo' },
+    visit:     { enabled: true, label: 'Visita',       color: 'blue' },
+    reminder:  { enabled: true, label: 'Recordatorio', color: 'rose' },
+  };
+}
+
+function safeParseJson<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as T; } catch { return null; }
+}
+
 const EVENT_COLORS: Record<string, string> = {
   appointment: 'bg-blue-500',
   test_drive:  'bg-emerald-500',
@@ -77,6 +116,8 @@ const EVENT_COLORS: Record<string, string> = {
   call:        'bg-orange-500',
   meeting:     'bg-indigo-500',
   reminder:    'bg-rose-500',
+  paperwork:   'bg-amber-600',
+  visit:       'bg-blue-600',
   workshop:    'bg-slate-700',
 };
 
@@ -90,6 +131,8 @@ const EVENT_BG: Record<string, string> = {
   call:        'bg-orange-50',
   meeting:     'bg-indigo-50',
   reminder:    'bg-rose-50',
+  paperwork:   'bg-amber-50',
+  visit:       'bg-blue-50',
   workshop:    'bg-slate-100',
 };
 
@@ -103,6 +146,8 @@ const EVENT_TEXT_COLOR: Record<string, string> = {
   call:        'text-orange-700',
   meeting:     'text-indigo-700',
   reminder:    'text-rose-700',
+  paperwork:   'text-amber-700',
+  visit:       'text-blue-700',
   workshop:    'text-slate-700',
 };
 
@@ -116,6 +161,8 @@ const EVENT_TEXT: Record<string, string> = {
   call:        'Llamada',
   meeting:     'Reunión',
   reminder:    'Recordatorio',
+  paperwork:   'Papeleo',
+  visit:       'Visita',
   workshop:    'OT Taller',
 };
 
@@ -129,6 +176,8 @@ const EVENT_ICONS: Record<string, React.ReactNode> = {
   call:        <PhoneCall className="w-4 h-4" />,
   meeting:     <Users className="w-4 h-4" />,
   reminder:    <BellRing className="w-4 h-4" />,
+  paperwork:   <FileSignature className="w-4 h-4" />,
+  visit:       <User className="w-4 h-4" />,
   workshop:    <Wrench className="w-4 h-4" />,
 };
 
@@ -180,12 +229,16 @@ export function CalendarView() {
   const { t } = useTranslation();
   const { leads, sales, vehicles, user } = useApp();
   const { user: authUser, listUsers } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const { activeWorkCenters } = useWorkCenters();
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [mode, setMode] = useState<CalendarMode>('month');
-  const [filterType, setFilterType] = useState<'all' | 'appointment' | 'test_drive' | 'followup' | 'delivery' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'workshop'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'appointment' | 'test_drive' | 'followup' | 'delivery' | 'sale' | 'purchase' | 'call' | 'meeting' | 'reminder' | 'paperwork' | 'visit' | 'workshop'>('all');
   const [showNewEventModal, setShowNewEventModal] = useState(false);
+  const [showEventTypesSettings, setShowEventTypesSettings] = useState(false);
   const [filterPerson, setFilterPerson] = useState<string>('all');
+  const [filterSalesPoint, setFilterSalesPoint] = useState<string>('all');
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -213,6 +266,55 @@ export function CalendarView() {
   );
 
   const userId = authUser?.user_id || user?.id || '';
+  const businessType = currentBusiness?.businessType || null;
+
+  const eventTypeStorageKey = useMemo(
+    () => (userId ? `calendar_event_types_v1:${userId}` : 'calendar_event_types_v1:anon'),
+    [userId],
+  );
+
+  const [eventTypeConfig, setEventTypeConfig] = useState<EventTypeConfig>(() => defaultEventTypeConfig());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = safeParseJson<EventTypeConfig>(window.localStorage.getItem(eventTypeStorageKey));
+    setEventTypeConfig({ ...defaultEventTypeConfig(), ...(saved || {}) });
+  }, [eventTypeStorageKey]);
+
+  const persistEventTypeConfig = useCallback((next: EventTypeConfig) => {
+    setEventTypeConfig(next);
+    try { window.localStorage.setItem(eventTypeStorageKey, JSON.stringify(next)); } catch { /* ignore */ }
+  }, [eventTypeStorageKey]);
+
+  const getTypeLabel = useCallback((tpe: AppointmentType) => {
+    const cfg = eventTypeConfig[String(tpe)];
+    return cfg?.label || APPOINTMENT_TYPE_LABELS[tpe] || String(tpe);
+  }, [eventTypeConfig]);
+
+  const getTypeColors = useCallback((tpe: AppointmentType) => {
+    const cfg = eventTypeConfig[String(tpe)];
+    const preset = cfg?.color ? EVENT_TYPE_COLOR_PRESETS[cfg.color] : null;
+    if (preset) return preset;
+    return {
+      dot: EVENT_COLORS[tpe as keyof typeof EVENT_COLORS] || 'bg-gray-500',
+      bg: EVENT_BG[tpe as keyof typeof EVENT_BG] || 'bg-gray-50',
+      text: EVENT_TEXT_COLOR[tpe as keyof typeof EVENT_TEXT_COLOR] || 'text-gray-700',
+    };
+  }, [eventTypeConfig]);
+
+  const enabledCustomEventTypes = useMemo(() => {
+    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    return Object.entries(merged)
+      .filter(([, v]) => v?.enabled)
+      .map(([k]) => k);
+  }, [eventTypeConfig]);
+
+  const maxSalesPointsByPlan = useMemo(() => {
+    const planId = authUser?.subscription?.selectedPlanId || 'basic';
+    if (planId === 'pro') return 2;
+    if (planId === 'normal') return 1;
+    return 1;
+  }, [authUser?.subscription?.selectedPlanId]);
 
   // ─── Cargar citas y equipo ───────────────────────────────────────────────
   const loadAppointments = useCallback(async () => {
@@ -256,22 +358,34 @@ export function CalendarView() {
     appointments.forEach((a) => {
       if (!a.date) return;
       const date = parseISO(`${a.date}T${a.time || '00:00'}:00`);
-      const isCustomEvent = ['sale', 'purchase', 'call', 'meeting', 'reminder'].includes(a.appointmentType);
+      const isCustomEvent = ['sale', 'purchase', 'call', 'meeting', 'reminder', 'paperwork', 'visit', 'delivery'].includes(a.appointmentType);
       const evType = isCustomEvent
         ? (a.appointmentType as CalendarEvent['type'])
         : a.appointmentType === 'test_drive' ? 'test_drive' : 'appointment';
+
+      // En verticales como delivery no queremos mezclar "Venta/Compra" (compraventa).
+      if (businessType === 'delivery' && (evType === 'sale' || evType === 'purchase')) return;
+
+      const color = (() => {
+        if (evType === 'appointment' || evType === 'test_drive' || evType === 'followup' || evType === 'workshop') {
+          return EVENT_COLORS[evType] || EVENT_COLORS.appointment;
+        }
+        const c = getTypeColors(evType as unknown as AppointmentType);
+        return c.dot;
+      })();
+
       result.push({
         id: `appt-${a.id}`,
         type: evType,
         title: a.clientName,
         subtitle: isCustomEvent
-          ? (a.notes || APPOINTMENT_TYPE_LABELS[a.appointmentType])
+          ? (a.notes || getTypeLabel(a.appointmentType))
           : a.appointmentType === 'test_drive' && a.vehicleName
             ? `Prueba: ${a.vehicleName}`
-            : APPOINTMENT_TYPE_LABELS[a.appointmentType] || a.appointmentType,
+            : getTypeLabel(a.appointmentType),
         date,
         time: a.time,
-        color: EVENT_COLORS[evType] || EVENT_COLORS.appointment,
+        color,
         appointmentId: a.id,
         assignedTo: a.assignedTo,
         assignedName: a.assignedName,
@@ -281,37 +395,41 @@ export function CalendarView() {
     });
 
     // Seguimientos desde leads
-    leads
-      .filter((l) => (l.status === 'contacted' || l.status === 'negotiation') && l.lastContact)
-      .forEach((l) => {
-        result.push({
-          id: `lead-follow-${l.id}`,
-          type: 'followup',
-          title: `Seguimiento: ${l.name}`,
-          subtitle: l.vehicleInterest || 'Sin vehículo',
-          date: new Date(l.lastContact!),
-          color: EVENT_COLORS.followup,
-          route: `/saas/clients?tab=leads&leadId=${encodeURIComponent(l.id)}`,
-          assignedTo: l.responsible,
-          assignedName: l.responsible,
+    if (businessType === 'carDealership' || businessType === 'scrapyard' || businessType === 'workshop') {
+      leads
+        .filter((l) => (l.status === 'contacted' || l.status === 'negotiation') && l.lastContact)
+        .forEach((l) => {
+          result.push({
+            id: `lead-follow-${l.id}`,
+            type: 'followup',
+            title: 'Seguimiento',
+            subtitle: l.vehicleInterest || 'Sin vehículo',
+            date: new Date(l.lastContact!),
+            color: EVENT_COLORS.followup,
+            route: `/saas/clients?tab=leads&leadId=${encodeURIComponent(l.id)}`,
+            assignedTo: l.responsible,
+            assignedName: l.responsible,
+          });
         });
-      });
+    }
 
     // Entregas desde ventas
-    sales
-      .filter((s) => s.deliveryDate)
-      .forEach((s) => {
-        const vehicle = vehicles.find((v) => v.id === s.vehicleId);
-        result.push({
-          id: `sale-delivery-${s.id}`,
-          type: 'delivery',
-          title: `Entrega: ${vehicle ? `${vehicle.brand} ${vehicle.model}` : s.vehicleId}`,
-          subtitle: vehicle?.registrationPlate || '',
-          date: new Date(s.deliveryDate!),
-          color: EVENT_COLORS.delivery,
-          route: `/saas/sales/${encodeURIComponent(s.id)}`,
+    if (businessType === 'carDealership' || businessType === 'scrapyard') {
+      sales
+        .filter((s) => s.deliveryDate)
+        .forEach((s) => {
+          const vehicle = vehicles.find((v) => v.id === s.vehicleId);
+          result.push({
+            id: `sale-delivery-${s.id}`,
+            type: 'delivery',
+            title: 'Entrega',
+            subtitle: vehicle?.registrationPlate || (vehicle ? `${vehicle.brand} ${vehicle.model}` : ''),
+            date: new Date(s.deliveryDate!),
+            color: EVENT_COLORS.delivery,
+            route: `/saas/sales/${encodeURIComponent(s.id)}`,
+          });
         });
-      });
+    }
 
     // Órdenes de trabajo del taller (por fecha estimada de entrega)
     workOrders
@@ -348,14 +466,27 @@ export function CalendarView() {
       });
 
     return result;
-  }, [appointments, leads, sales, vehicles, workOrders]);
+  }, [appointments, leads, sales, vehicles, workOrders, businessType, getTypeLabel, getTypeColors]);
 
   const filteredEvents = useMemo(() => {
     let evs = events;
     if (filterType !== 'all') evs = evs.filter((e) => e.type === filterType);
     if (filterPerson !== 'all') evs = evs.filter((e) => e.assignedTo === filterPerson);
+    if (filterSalesPoint !== 'all') {
+      const spName = activeWorkCenters.find((wc) => wc.id === filterSalesPoint || (wc as any)._id === filterSalesPoint)?.name || '';
+      if (spName) {
+        evs = evs.filter((e) => {
+          // Solo filtramos citas internas por "location" (nombre del punto de venta).
+          if (e.type !== 'appointment') return true;
+          const apptId = e.appointmentId || e.id;
+          const appt = appointments.find((a) => a.id === apptId);
+          const loc = (appt?.location || '').trim();
+          return loc === spName;
+        });
+      }
+    }
     return evs;
-  }, [events, filterType, filterPerson]);
+  }, [events, filterType, filterPerson, filterSalesPoint, activeWorkCenters, appointments]);
 
   // ─── Navegación ───────────────────────────────────────────────────────────
   const prev = () => setCurrentDate((d) => mode === 'month' ? subMonths(d, 1) : subWeeks(d, 1));
@@ -498,7 +629,7 @@ export function CalendarView() {
               </button>
               <button
                 onClick={goToday}
-                className="ml-1 px-3 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                className="ml-1 px-3 py-1.5 text-xs font-semibold text-violet-700 bg-violet-50 dark:bg-violet-900/30 dark:text-violet-300 rounded-lg hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors"
               >
                 Hoy
               </button>
@@ -520,6 +651,36 @@ export function CalendarView() {
                     </option>
                   ))}
                 </select>
+              )}
+
+              {/* Punto de venta: selector si hay >1 y plan permite, si no CTA PRO */}
+              {activeWorkCenters.length > 1 && maxSalesPointsByPlan > 1 ? (
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+                    <Store className="w-3.5 h-3.5" /> Punto de venta
+                  </span>
+                  <select
+                    value={filterSalesPoint}
+                    onChange={(e) => setFilterSalesPoint(e.target.value)}
+                    className="text-xs px-2.5 py-1.5 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-blue-400"
+                    title="Ver calendario por punto de venta"
+                  >
+                    <option value="all">Todos</option>
+                    {activeWorkCenters.map((wc) => (
+                      <option key={wc.id} value={wc.id}>{wc.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/settings/facturacion')}
+                  className="text-xs px-3 py-1.5 rounded-lg font-bold text-white bg-gradient-to-r from-amber-500 to-fuchsia-600 hover:from-amber-600 hover:to-fuchsia-700 shadow-sm hover:shadow transition-all flex items-center gap-1.5"
+                  title="Multi-tienda: ver calendario por punto de venta (PRO)"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  Multi-tienda (PRO)
+                </button>
               )}
 
               {/* Modo vista */}
@@ -565,6 +726,13 @@ export function CalendarView() {
                     <User className="w-4 h-4" />
                     Nueva cita
                   </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onSelect={() => setShowEventTypesSettings(true)}
+                >
+                  <Settings className="w-4 h-4" />
+                  Tipos de evento
+                </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -602,13 +770,13 @@ export function CalendarView() {
                     await handleAppointmentDrop(droppedAppointmentId, day);
                   }}
                   className={`p-2 cursor-pointer transition-colors ${
-                    isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-750'
+                    isSelected ? 'bg-violet-50 dark:bg-violet-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-750'
                   } ${draggingAppointmentId ? 'ring-1 ring-blue-200 dark:ring-blue-700/60' : ''} ${
                     !isCurrentMonth && mode === 'month' ? 'opacity-40' : ''
                   }`}
                 >
                   <div className={`text-xs font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${
-                    isToday(day) ? 'bg-blue-600 text-white' : 'text-gray-700 dark:text-gray-300'
+                    isToday(day) ? 'bg-violet-600 text-white' : 'text-gray-700 dark:text-gray-300'
                   }`}>
                     {format(day, 'd')}
                   </div>
@@ -685,26 +853,47 @@ export function CalendarView() {
 
           {/* Leyenda */}
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-              Tipos de evento
-            </h3>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <Filter className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                Tipos de evento
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEventTypesSettings(true)}
+                className="p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 text-gray-500 dark:text-gray-400"
+                title="Configurar tipos de evento"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </div>
             <div className="space-y-1.5">
-              {(['appointment', 'test_drive', 'followup', 'delivery', 'sale', 'purchase', 'call', 'meeting', 'reminder', 'workshop'] as const).map((ft) => (
+              {(['appointment', 'test_drive', 'followup', 'delivery', 'sale', 'purchase', 'call', 'meeting', 'reminder', 'paperwork', 'visit', 'workshop'] as const)
+                .filter((ft) => {
+                  if (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop') return true;
+                  return enabledCustomEventTypes.includes(String(ft));
+                })
+                .map((ft) => {
+                  const c = getTypeColors(ft as AppointmentType);
+                  const label = (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop')
+                    ? EVENT_TEXT[ft]
+                    : getTypeLabel(ft as AppointmentType);
+                  return (
                 <button
                   key={ft}
                   onClick={() => setFilterType(filterType === ft ? 'all' : ft)}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-xl transition-colors ${
-                    filterType === ft ? `${EVENT_BG[ft]} ${EVENT_TEXT_COLOR[ft]}` : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                    filterType === ft ? `${c.bg} ${c.text}` : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                   }`}
                 >
-                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${EVENT_COLORS[ft]}`} />
-                  <span className="text-sm text-gray-600 dark:text-gray-300 flex-1 text-left">{EVENT_TEXT[ft]}</span>
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.dot}`} />
+                  <span className="text-sm text-gray-600 dark:text-gray-300 flex-1 text-left">{label}</span>
                   <span className="text-xs font-semibold text-gray-400 dark:text-gray-500">
                     {events.filter((e) => e.type === ft).length}
                   </span>
                 </button>
-              ))}
+                  );
+                })}
             </div>
           </div>
 
@@ -735,7 +924,9 @@ export function CalendarView() {
                       <div className="flex items-center gap-2 mb-1">
                         <div className={`w-2 h-2 rounded-full ${ev.color}`} />
                         <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                          {EVENT_TEXT[ev.type]}
+                          {(ev.type === 'appointment' || ev.type === 'test_drive' || ev.type === 'followup' || ev.type === 'workshop')
+                            ? EVENT_TEXT[ev.type]
+                            : getTypeLabel(ev.type as unknown as AppointmentType)}
                         </span>
                         {ev.time && (
                           <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">{ev.time}</span>
@@ -814,11 +1005,21 @@ export function CalendarView() {
         <NewEventModal
           userId={userId}
           teamMembers={teamMembers}
+          eventTypeConfig={eventTypeConfig}
           onClose={() => setShowNewEventModal(false)}
           onCreated={(appt) => {
             setAppointments((prev) => [...prev, appt]);
             setShowNewEventModal(false);
           }}
+        />
+      )}
+
+      {/* ─── Modal Tipos de evento ───────────────────────────────────────────── */}
+      {showEventTypesSettings && (
+        <EventTypesSettingsModal
+          config={eventTypeConfig}
+          onChange={persistEventTypeConfig}
+          onClose={() => setShowEventTypesSettings(false)}
         />
       )}
 
@@ -863,35 +1064,18 @@ export function CalendarView() {
 
 // ─── Modal: Nuevo Evento ──────────────────────────────────────────────────────
 
-const EVENT_CATEGORY_GROUPS = [
-  {
-    label: 'Operaciones',
-    items: [
-      { type: 'sale' as AppointmentType,     label: 'Venta',     icon: Handshake,    color: 'border-green-300 bg-green-50 text-green-800 data-[sel]:bg-green-600 data-[sel]:text-white data-[sel]:border-green-600' },
-      { type: 'purchase' as AppointmentType, label: 'Compra',    icon: ShoppingCart, color: 'border-cyan-300 bg-cyan-50 text-cyan-800 data-[sel]:bg-cyan-600 data-[sel]:text-white data-[sel]:border-cyan-600' },
-      { type: 'delivery' as AppointmentType, label: 'Entrega',   icon: Truck,        color: 'border-purple-300 bg-purple-50 text-purple-800 data-[sel]:bg-purple-600 data-[sel]:text-white data-[sel]:border-purple-600' },
-      { type: 'paperwork' as AppointmentType,label: 'Papeleo',   icon: FileSignature,color: 'border-amber-300 bg-amber-50 text-amber-800 data-[sel]:bg-amber-600 data-[sel]:text-white data-[sel]:border-amber-600' },
-    ],
-  },
-  {
-    label: 'Comunicación',
-    items: [
-      { type: 'call' as AppointmentType,    label: 'Llamada',      icon: PhoneCall, color: 'border-orange-300 bg-orange-50 text-orange-800 data-[sel]:bg-orange-600 data-[sel]:text-white data-[sel]:border-orange-600' },
-      { type: 'meeting' as AppointmentType, label: 'Reunión',      icon: Users,     color: 'border-indigo-300 bg-indigo-50 text-indigo-800 data-[sel]:bg-indigo-600 data-[sel]:text-white data-[sel]:border-indigo-600' },
-      { type: 'visit' as AppointmentType,   label: 'Visita',       icon: User,      color: 'border-blue-300 bg-blue-50 text-blue-800 data-[sel]:bg-blue-600 data-[sel]:text-white data-[sel]:border-blue-600' },
-      { type: 'reminder' as AppointmentType,label: 'Recordatorio', icon: BellRing,  color: 'border-rose-300 bg-rose-50 text-rose-800 data-[sel]:bg-rose-600 data-[sel]:text-white data-[sel]:border-rose-600' },
-    ],
-  },
-];
+// (Se genera dinámicamente dentro de NewEventModal según configuración del usuario)
 
 function NewEventModal({
   userId,
   teamMembers,
+  eventTypeConfig,
   onClose,
   onCreated,
 }: {
   userId: string;
   teamMembers: TeamMember[];
+  eventTypeConfig: EventTypeConfig;
   onClose: () => void;
   onCreated: (appt: Appointment) => void;
 }) {
@@ -906,6 +1090,74 @@ function NewEventModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const enabledTypes = useMemo(() => {
+    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    return Object.entries(merged)
+      .filter(([, v]) => v?.enabled)
+      .map(([k]) => k);
+  }, [eventTypeConfig]);
+
+  const getLabel = useCallback((tpe: AppointmentType) => {
+    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    return merged[String(tpe)]?.label || APPOINTMENT_TYPE_LABELS[tpe] || String(tpe);
+  }, [eventTypeConfig]);
+
+  const getColors = useCallback((tpe: AppointmentType) => {
+    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    const cfg = merged[String(tpe)];
+    const preset = cfg?.color ? EVENT_TYPE_COLOR_PRESETS[cfg.color] : null;
+    if (preset) return preset;
+    return {
+      dot: EVENT_COLORS[tpe as keyof typeof EVENT_COLORS] || 'bg-gray-500',
+      bg: EVENT_BG[tpe as keyof typeof EVENT_BG] || 'bg-gray-50',
+      text: EVENT_TEXT_COLOR[tpe as keyof typeof EVENT_TEXT_COLOR] || 'text-gray-700',
+    };
+  }, [eventTypeConfig]);
+
+  const categoryGroups = useMemo(() => {
+    const raw = [
+      {
+        label: 'Operaciones',
+        items: [
+          { type: 'sale' as AppointmentType,      icon: Handshake },
+          { type: 'purchase' as AppointmentType,  icon: ShoppingCart },
+          { type: 'delivery' as AppointmentType,  icon: Truck },
+          { type: 'paperwork' as AppointmentType, icon: FileSignature },
+        ],
+      },
+      {
+        label: 'Comunicación',
+        items: [
+          { type: 'call' as AppointmentType,     icon: PhoneCall },
+          { type: 'meeting' as AppointmentType,  icon: Users },
+          { type: 'visit' as AppointmentType,    icon: User },
+          { type: 'reminder' as AppointmentType, icon: BellRing },
+        ],
+      },
+    ];
+
+    return raw
+      .map((g) => ({
+        ...g,
+        items: g.items
+          .filter((it) => enabledTypes.includes(String(it.type)))
+          .map((it) => ({
+            ...it,
+            label: getLabel(it.type),
+            colors: getColors(it.type),
+          })),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [enabledTypes, getColors, getLabel]);
+
+  useEffect(() => {
+    if (!enabledTypes.includes(String(form.eventType))) {
+      const fallback = (enabledTypes[0] || 'sale') as AppointmentType;
+      setForm((f) => ({ ...f, eventType: fallback }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledTypes.join('|')]);
+
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -913,7 +1165,7 @@ function NewEventModal({
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  const selectedCat = EVENT_CATEGORY_GROUPS.flatMap((g) => g.items).find((i) => i.type === form.eventType);
+  const selectedCat = categoryGroups.flatMap((g) => g.items).find((i) => i.type === form.eventType);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -971,11 +1223,11 @@ function NewEventModal({
               <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
                 Tipo de evento
               </label>
-              {EVENT_CATEGORY_GROUPS.map((group) => (
+              {categoryGroups.map((group) => (
                 <div key={group.label} className="mb-3">
                   <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">{group.label}</p>
                   <div className="grid grid-cols-4 gap-1.5">
-                    {group.items.map(({ type, label, icon: Icon }) => {
+                    {group.items.map(({ type, label, icon: Icon, colors }) => {
                       const isSelected = form.eventType === type;
                       return (
                         <button
@@ -984,8 +1236,8 @@ function NewEventModal({
                           onClick={() => setForm((f) => ({ ...f, eventType: type }))}
                           className={`flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border-2 text-xs font-semibold transition-all ${
                             isSelected
-                              ? `${EVENT_COLORS[type]} border-transparent text-white shadow-md scale-[1.03]`
-                              : `${EVENT_BG[type]} ${EVENT_TEXT_COLOR[type]} border-transparent hover:border-current`
+                              ? `${colors.dot} border-transparent text-white shadow-md scale-[1.03]`
+                              : `${colors.bg} ${colors.text} border-transparent hover:border-current`
                           }`}
                         >
                           <Icon className="w-4 h-4" />
@@ -1009,12 +1261,6 @@ function NewEventModal({
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
                 placeholder={
-                  form.eventType === 'sale' ? 'Ej. Venta BMW Serie 3 a Juan García' :
-                  form.eventType === 'purchase' ? 'Ej. Compra Audi A4 de Automotor SL' :
-                  form.eventType === 'call' ? 'Ej. Llamada seguimiento lead María López' :
-                  form.eventType === 'meeting' ? 'Ej. Reunión con proveedor de seguros' :
-                  form.eventType === 'reminder' ? 'Ej. Renovar seguro flota' :
-                  form.eventType === 'delivery' ? 'Ej. Entrega Seat León a Pedro Martín' :
                   'Título del evento'
                 }
                 className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:border-gray-900 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
@@ -1092,10 +1338,10 @@ function NewEventModal({
 
             {/* Vista previa del chip */}
             {form.title && form.date && (
-              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${EVENT_BG[form.eventType]}`}>
-                <div className={`w-2 h-2 rounded-full ${EVENT_COLORS[form.eventType]}`} />
-                <span className={`text-xs font-semibold ${EVENT_TEXT_COLOR[form.eventType]}`}>
-                  {EVENT_TEXT[form.eventType]}
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl ${getColors(form.eventType).bg}`}>
+                <div className={`w-2 h-2 rounded-full ${getColors(form.eventType).dot}`} />
+                <span className={`text-xs font-semibold ${getColors(form.eventType).text}`}>
+                  {getLabel(form.eventType)}
                 </span>
                 <span className="text-xs text-gray-600 dark:text-gray-400 flex-1 truncate">{form.title}</span>
                 {form.date && (
@@ -1725,6 +1971,108 @@ function BookingConfigModal({
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
               Guardar
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function EventTypesSettingsModal({
+  config,
+  onChange,
+  onClose,
+}: {
+  config: EventTypeConfig;
+  onChange: (next: EventTypeConfig) => void;
+  onClose: () => void;
+}) {
+  const merged = useMemo(() => ({ ...defaultEventTypeConfig(), ...config }), [config]);
+
+  const orderedTypes: AppointmentType[] = useMemo(() => ([
+    'sale', 'purchase', 'delivery', 'paperwork',
+    'call', 'meeting', 'visit', 'reminder',
+  ] as AppointmentType[]), []);
+
+  const updateOne = (type: AppointmentType, patch: Partial<EventTypeConfig[string]>) => {
+    const current = merged[String(type)];
+    const next: EventTypeConfig = { ...merged, [String(type)]: { ...current, ...patch } as any };
+    onChange(next);
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50" onClick={onClose} />
+      <div className="fixed inset-0 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-t-3xl sm:rounded-3xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto">
+          <div className="sticky top-0 bg-gray-900 px-6 py-5 rounded-t-3xl sm:rounded-t-3xl flex items-center justify-between z-10">
+            <div>
+              <h2 className="text-lg font-bold text-white">Tipos de evento</h2>
+              <p className="text-gray-400 dark:text-gray-500 text-sm mt-0.5">Activa, renombra y cambia colores</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
+              <X className="w-5 h-5 text-white" />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-3">
+            {orderedTypes.map((tpe) => {
+              const item = merged[String(tpe)];
+              const preset = EVENT_TYPE_COLOR_PRESETS[item.color];
+              return (
+                <div key={String(tpe)} className="border border-gray-200 dark:border-gray-700 rounded-2xl p-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => updateOne(tpe, { enabled: !item.enabled })}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${item.enabled ? 'bg-gray-900' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      title={item.enabled ? 'Activo' : 'Inactivo'}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white dark:bg-gray-800 rounded-full shadow transition-transform ${item.enabled ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                    </button>
+
+                    <div className={`w-2.5 h-2.5 rounded-full ${preset.dot}`} />
+
+                    <div className="flex-1 min-w-0">
+                      <input
+                        value={item.label}
+                        onChange={(e) => updateOne(tpe, { label: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-xl text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-900 dark:focus:border-white"
+                      />
+                    </div>
+
+                    <select
+                      value={item.color}
+                      onChange={(e) => updateOne(tpe, { color: e.target.value as EventTypeColorKey })}
+                      className="text-xs px-2.5 py-2 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-gray-900"
+                      title="Color"
+                    >
+                      {Object.keys(EVENT_TYPE_COLOR_PRESETS).map((k) => (
+                        <option key={k} value={k}>{k}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={`mt-3 rounded-xl px-3 py-2 ${preset.bg}`}>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${preset.dot}`} />
+                      <span className={`text-xs font-semibold ${preset.text}`}>{item.label}</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400 truncate">Vista previa</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 rounded-b-3xl sm:rounded-b-3xl">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold text-sm transition-colors"
+            >
+              Listo
             </button>
           </div>
         </div>

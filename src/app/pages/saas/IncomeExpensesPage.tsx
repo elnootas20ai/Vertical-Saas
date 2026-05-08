@@ -518,6 +518,9 @@ export function IncomeExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showOcr, setShowOcr] = useState(false);
+  const [ocrFinanceType, setOcrFinanceType] = useState<'income' | 'expense'>('expense');
+  const [showIncomeMenu, setShowIncomeMenu] = useState(false);
+  const [showExpenseMenu, setShowExpenseMenu] = useState(false);
   const [editingItem, setEditingItem] = useState<FinanceMovementRecord | null>(null);
   const [defaultType, setDefaultType] = useState<FinanceMovementDocType>('cobro');
   const [search, setSearch] = useState('');
@@ -666,6 +669,18 @@ export function IncomeExpensesPage() {
     { id: 'pending', label: 'Pendientes', count: kpis.pendingCount || undefined },
   ];
 
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      if (t.closest?.('[data-ie-menu]')) return;
+      setShowIncomeMenu(false);
+      setShowExpenseMenu(false);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
+
   return (
     <Layout title="Ingresos y Gastos" subtitle="Control detallado de todos tus movimientos financieros">
       <div className="space-y-5">
@@ -773,18 +788,55 @@ export function IncomeExpensesPage() {
             </button>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowOcr(true)}
-              className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl flex items-center gap-1.5 font-semibold text-sm transition-all shadow-sm">
-              <ScanLine className="w-4 h-4" /> OCR
-            </button>
-            <button onClick={() => { setDefaultType('cobro'); setEditingItem(null); setShowCreate(true); }}
-              className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-xl flex items-center gap-1.5 font-semibold text-sm transition-all shadow-sm">
-              <Plus className="w-4 h-4" /> Ingreso
-            </button>
-            <button onClick={() => { setDefaultType('pago'); setEditingItem(null); setShowCreate(true); }}
-              className="px-4 py-2 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white rounded-xl flex items-center gap-1.5 font-semibold text-sm transition-all shadow-sm">
-              <Plus className="w-4 h-4" /> Gasto
-            </button>
+            <div className="relative" data-ie-menu>
+              <button
+                onClick={() => { setShowIncomeMenu(v => !v); setShowExpenseMenu(false); }}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-xl flex items-center gap-1.5 font-semibold text-sm transition-all shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> Ingreso <span className="ml-1 opacity-80">▾</span>
+              </button>
+              {showIncomeMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-xl overflow-hidden z-20">
+                  <button
+                    onClick={() => { setShowIncomeMenu(false); setDefaultType('cobro'); setEditingItem(null); setShowCreate(true); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-600" /> Manual
+                  </button>
+                  <button
+                    onClick={() => { setShowIncomeMenu(false); setOcrFinanceType('income'); setShowOcr(true); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                  >
+                    <ScanLine className="w-4 h-4 text-emerald-600" /> OCR (foto/PDF)
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="relative" data-ie-menu>
+              <button
+                onClick={() => { setShowExpenseMenu(v => !v); setShowIncomeMenu(false); }}
+                className="px-4 py-2 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white rounded-xl flex items-center gap-1.5 font-semibold text-sm transition-all shadow-sm"
+              >
+                <Plus className="w-4 h-4" /> Gasto <span className="ml-1 opacity-80">▾</span>
+              </button>
+              {showExpenseMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-xl overflow-hidden z-20">
+                  <button
+                    onClick={() => { setShowExpenseMenu(false); setDefaultType('pago'); setEditingItem(null); setShowCreate(true); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4 text-rose-600" /> Manual
+                  </button>
+                  <button
+                    onClick={() => { setShowExpenseMenu(false); setOcrFinanceType('expense'); setShowOcr(true); }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-2"
+                  >
+                    <ScanLine className="w-4 h-4 text-rose-600" /> OCR (foto/PDF)
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1024,6 +1076,8 @@ export function IncomeExpensesPage() {
         isOpen={showOcr}
         onClose={() => setShowOcr(false)}
         targetModule="finanzas"
+        context={{ financeType: ocrFinanceType }}
+        autoOpenCamera={false}
         onDocumentCreated={async () => { setShowOcr(false); await loadData(); toast.success('Documento procesado por OCR'); }}
       />
     </Layout>

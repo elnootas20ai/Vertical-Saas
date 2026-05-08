@@ -48,7 +48,7 @@ import {
 } from '../services/couchdb.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { recordMovement } from '../services/stockMovementService.js';
-import { deductOrderByRecipe } from '../services/recipeStockService.js';
+import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
 import logger from '../services/logger.js';
 
@@ -135,6 +135,78 @@ async function ensurePurchaseInvoiceOwner(req, userId, invoiceId) {
   return doc;
 }
 
+const DELIVERED_ORDER_STATUS = 'entregado';
+
+/** Estados destino que implican devolución / anulación de entrega (reponen stock). */
+function shouldReverseStockForDeliveryStatus(newStatus) {
+  const s = String(newStatus || '').toLowerCase();
+  if (s === DELIVERED_ORDER_STATUS) return false;
+  return new Set([
+    'cancelled',
+    'cancelado',
+    'devuelto',
+    'returned',
+    'reembolsado',
+    'refunded',
+    'nuevo',
+    'incident',
+    'listo',
+  ]).has(s);
+}
+
+/**
+ * Revierte descuentos de receta/venta cuando el pedido deja de estar entregado hacia un estado de devolución o reapertura.
+ */
+async function maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, previousStatus) {
+  const prev = String(previousStatus || '').toLowerCase();
+  if (prev !== DELIVERED_ORDER_STATUS) return;
+  if (!doc || String(doc.status || '').toLowerCase() === DELIVERED_ORDER_STATUS) return;
+  if (!shouldReverseStockForDeliveryStatus(doc.status)) return;
+  try {
+    const result = await restoreDeliveryOrderStockFromMovements(req, userId, {
+      orderId: doc._id,
+      orderType: 'delivery_order',
+      performedBy: 'system',
+    });
+    if (result.warnings?.length > 0) {
+      logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: result.warnings }, 'Advertencias al revertir stock delivery');
+    }
+  } catch (err) {
+    logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error revirtiendo stock delivery');
+  }
+}
+
+/**
+ * Descuenta stock (receta o venta directa del ítem) cuando el pedido pasa a entregado.
+ * - En UPDATE: solo si antes no estaba entregado (evita doble descuento).
+ * - En CREATE: si ya llega como entregado (ej. TPV mostrador), descuenta una vez.
+ */
+async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previousStatus) {
+  if (!doc || doc.status !== 'entregado') return;
+  const prev = String(previousStatus || '').toLowerCase();
+  if (prev === 'entregado') return;
+  try {
+    const orderItems = (doc.items || [])
+      .filter((item) => (item.catalogItemId || item.productId) && item.quantity)
+      .map((item) => ({
+        catalogItemId: item.catalogItemId || item.productId || '',
+        quantity: Number(item.quantity || 0),
+      }));
+    if (orderItems.length === 0) return;
+    const result = await deductOrderByRecipe(req, userId, {
+      orderId: doc._id,
+      orderType: 'delivery_order',
+      items: orderItems,
+      performedBy: 'system',
+    });
+    if (result.warnings.length > 0) {
+      logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: result.warnings }, 'Advertencias al descontar stock por receta delivery');
+    }
+  } catch (err) {
+    logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error descontando stock por receta delivery');
+  }
+}
+
 // ─── DELIVERY ORDERS ─────────────────────────────────────────────────────────
 
 export async function listDeliveryOrders(req, res) {
@@ -164,6 +236,8 @@ export async function createDeliveryOrder(req, res) {
     await ensureDatabase(req, db);
     const doc = buildDeliveryOrderDocument(userId, order);
     const saved = await putDocument(req, db, doc._id, doc);
+    const savedDoc = { ...doc, _rev: saved.rev };
+    await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
@@ -174,7 +248,7 @@ export async function createDeliveryOrder(req, res) {
       entityLabel: `${doc.orderNumber} ${doc.customerName}`.trim(),
       metadata: { status: doc.status, channel: doc.channel },
     });
-    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    const sanitized = sanitizeDeliveryOrder(savedDoc);
     broadcastToUser(userId, 'delivery_order_created', sanitized);
     triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
     return res.status(201).json({ ok: true, order: sanitized });
@@ -207,29 +281,8 @@ export async function updateDeliveryOrder(req, res) {
       metadata: { status: doc.status },
     });
 
-    if (doc.status === 'entregado' && existing.status !== 'entregado') {
-      try {
-        const orderItems = (doc.items || [])
-          .filter(item => (item.catalogItemId || item.productId) && item.quantity)
-          .map(item => ({
-            catalogItemId: item.catalogItemId || item.productId || '',
-            quantity: Number(item.quantity || 0),
-          }));
-        if (orderItems.length > 0) {
-          const result = await deductOrderByRecipe(req, userId, {
-            orderId: doc._id,
-            orderType: 'delivery_order',
-            items: orderItems,
-            performedBy: 'system',
-          });
-          if (result.warnings.length > 0) {
-            logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: result.warnings }, 'Advertencias al descontar stock por receta');
-          }
-        }
-      } catch (err) {
-        logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error descontando stock por receta delivery');
-      }
-    }
+    await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
+    await maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, existing.status);
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastToUser(userId, 'delivery_order_updated', sanitized);
@@ -250,6 +303,12 @@ export async function removeDeliveryOrder(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    if (String(existing.status || '').toLowerCase() === DELIVERED_ORDER_STATUS) {
+      await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, {
+        ...existing,
+        status: 'cancelled',
+      }, existing.status);
+    }
     const db = getDeliveryDbName();
     await softDeleteDocument(req, db, orderId);
     await logAccountActivity(req, {
@@ -342,6 +401,7 @@ export async function reopenDeliveryOrder(req, res) {
         { status: 'nuevo', date: now, user: account.fullName || 'Sistema', notes: `Pedido reabierto${notes ? `: ${notes}` : ''}` },
       ],
     }, existing);
+    await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,

@@ -7,9 +7,14 @@ import { useTpv, type TpvWorker } from '../../../context/TpvContext';
 import { TpvProvider } from '../../../context/TpvContext';
 import { NuevoClienteModal } from '../../../components/saas/NuevoClienteModal';
 import type { Client } from '../../../context/AppContext';
+import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   listCatalogItemsRequest,
+  listDeliveryOrdersRequest,
+  createDeliveryOrderRequest,
   type CatalogItem,
+  type DeliveryOrder,
+  type DeliveryOrderItem,
 } from '../../../lib/deliveryApi';
 import { listClockins, type ClockinRecord } from '../../../lib/clockinsApi';
 import type { BusinessType } from '../../../lib/businessApi';
@@ -37,10 +42,48 @@ import {
   TrendingUp,
   BarChart3,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
+
+const MAX_ORDERS_FOR_TPV_INTEL = 160;
+
+function buildCoPurchaseScores(orders: DeliveryOrder[]): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const order of orders) {
+    const ids = [
+      ...new Set(
+        (order.items || [])
+          .map((i) => String(i.catalogItemId || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (ids.length < 2) continue;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = 0; j < ids.length; j++) {
+        if (i === j) continue;
+        const a = ids[i];
+        const b = ids[j];
+        if (!out[a]) out[a] = {};
+        out[a][b] = (out[a][b] || 0) + 1;
+      }
+    }
+  }
+  return out;
+}
 
 function formatCurrency(n: number) {
   return n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+}
+
+/** Misma fecha calendario local que `new Date()` “hoy”. */
+function isSameLocalCalendarDay(iso: string | undefined, ref = new Date()): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === ref.getFullYear() &&
+    d.getMonth() === ref.getMonth() &&
+    d.getDate() === ref.getDate()
+  );
 }
 
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'transferencia';
@@ -50,15 +93,6 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ReactNode
   { id: 'bizum', label: 'Bizum', icon: <Smartphone className="w-4 h-4" /> },
   { id: 'transferencia', label: 'Transferencia', icon: <ArrowDownUp className="w-4 h-4" /> },
 ];
-
-interface SaleRecord {
-  id: string;
-  items: { name: string; qty: number; total: number }[];
-  total: number;
-  method: PaymentMethod;
-  worker: string;
-  time: Date;
-}
 
 function SalesContent() {
   const navigate = useNavigate();
@@ -77,24 +111,66 @@ function SalesContent() {
   const [workersLoading, setWorkersLoading] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [salesHistory, setSalesHistory] = useState<SaleRecord[]>([]);
+  const [submittingSale, setSubmittingSale] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false);
   const [tpvClient, setTpvClient] = useState<{ id: string; name: string; phone: string } | null>(null);
+  const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
   useModalClose(showPaymentModal, () => setShowPaymentModal(false));
   useModalClose(showHistory, () => setShowHistory(false));
 
-  const userId = user?.user_id || user?.id || '';
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = currentBusiness?.business_id || '';
 
   useEffect(() => {
-    if (!userId) return;
+    if (!dataUserId) return;
     setCatalogLoading(true);
-    listCatalogItemsRequest(userId)
+    listCatalogItemsRequest(dataUserId)
       .then(items => setCatalog(items.filter(i => i.active)))
       .catch(() => toast.error('Error al cargar catálogo'))
       .finally(() => setCatalogLoading(false));
-  }, [userId]);
+  }, [dataUserId]);
+
+  useEffect(() => {
+    if (!dataUserId) {
+      setRecentOrdersPool([]);
+      return;
+    }
+    let cancelled = false;
+    listDeliveryOrdersRequest(dataUserId)
+      .then((orders) => {
+        if (!cancelled) setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
+      })
+      .catch(() => {
+        if (!cancelled) setRecentOrdersPool([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUserId]);
+
+  const refreshOrdersPool = useCallback(async () => {
+    if (!dataUserId) return;
+    try {
+      const orders = await listDeliveryOrdersRequest(dataUserId);
+      setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
+    } catch {
+      /* mantener pool anterior */
+    }
+  }, [dataUserId]);
+
+  /** KPI e historial: pedidos reales canal TPV del día (local), alineados con TPV rápido gerente. */
+  const todayTpvFromServer = useMemo(() => {
+    const now = new Date();
+    const orders = recentOrdersPool.filter(
+      (o) => o.channel === 'tpv' && isSameLocalCalendarDay(o.createdAt, now),
+    );
+    const sorted = [...orders].sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+    );
+    const total = sorted.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
+    return { orders: sorted, count: sorted.length, total };
+  }, [recentOrdersPool]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -127,6 +203,133 @@ function SalesContent() {
     return items;
   }, [catalog, activeCategory, searchQuery]);
 
+  const clientProductScores = useMemo(() => {
+    if (!tpvClient?.id) return {};
+    const scores: Record<string, number> = {};
+    recentOrdersPool
+      .filter((o) => o.clientId === tpvClient.id)
+      .slice(0, 60)
+      .forEach((order) => {
+        order.items.forEach((item: DeliveryOrderItem) => {
+          const key = String(item.catalogItemId || '').trim();
+          if (!key) return;
+          scores[key] = (scores[key] || 0) + Number(item.quantity || 1);
+        });
+      });
+    return scores;
+  }, [recentOrdersPool, tpvClient?.id]);
+
+  const globalCoPurchaseScores = useMemo(
+    () => buildCoPurchaseScores(recentOrdersPool),
+    [recentOrdersPool],
+  );
+
+  const clientCoPurchaseScores = useMemo(() => {
+    if (!tpvClient?.id) return {};
+    return buildCoPurchaseScores(recentOrdersPool.filter((o) => o.clientId === tpvClient.id));
+  }, [recentOrdersPool, tpvClient?.id]);
+
+  const catalogById = useMemo(() => {
+    const m: Record<string, CatalogItem> = {};
+    catalog.forEach((i) => {
+      m[i._id] = i;
+    });
+    return m;
+  }, [catalog]);
+
+  const displayedCatalog = useMemo(() => {
+    const priced = (i: CatalogItem) => Number(i.unitPrice || 0) > 0;
+    return [...filteredCatalog].sort((a, b) => {
+      const pa = priced(a) ? 1 : 0;
+      const pb = priced(b) ? 1 : 0;
+      if (pa !== pb) return pb - pa;
+      return (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0);
+    });
+  }, [filteredCatalog, clientProductScores]);
+
+  const habitualProducts = useMemo(() => {
+    return catalog
+      .filter((i) => i.active && (i.itemType === 'product' || i.itemType === 'combo'))
+      .filter((p) => (clientProductScores[p._id] || 0) > 0)
+      .sort((a, b) => (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0))
+      .slice(0, 6);
+  }, [catalog, clientProductScores]);
+
+  const crossSellProducts = useMemo(() => {
+    const ticketIds = new Set(lines.map((l) => l.catalogItem._id));
+    if (ticketIds.size === 0) return [];
+
+    const merged = new Map<string, number>();
+    const accumulate = (matrix: Record<string, Record<string, number>>, weight: number) => {
+      for (const cid of ticketIds) {
+        const row = matrix[cid];
+        if (!row) continue;
+        for (const [pid, n] of Object.entries(row)) {
+          if (ticketIds.has(pid)) continue;
+          merged.set(pid, (merged.get(pid) || 0) + n * weight);
+        }
+      }
+    };
+
+    accumulate(globalCoPurchaseScores, 1);
+    if (tpvClient?.id) accumulate(clientCoPurchaseScores, 2.8);
+
+    const isSellable = (item: CatalogItem | undefined) =>
+      !!item &&
+      item.active &&
+      Number(item.unitPrice || 0) > 0 &&
+      (item.itemType === 'product' || item.itemType === 'combo');
+
+    const ranked = [...merged.entries()].sort((a, b) => b[1] - a[1]);
+    const picked: CatalogItem[] = [];
+    for (const [pid] of ranked) {
+      const item = catalogById[pid];
+      if (!isSellable(item)) continue;
+      picked.push(item);
+      if (picked.length >= 10) break;
+    }
+
+    if (picked.length < 4) {
+      const ticketCategories = new Set(
+        lines.map((l) => l.catalogItem.category).filter(Boolean) as string[],
+      );
+      for (const item of catalog) {
+        if (picked.length >= 8) break;
+        if (!item.category || !ticketCategories.has(item.category)) continue;
+        if (ticketIds.has(item._id)) continue;
+        if (!isSellable(item)) continue;
+        if (picked.some((p) => p._id === item._id)) continue;
+        picked.push(item);
+      }
+    }
+
+    if (picked.length < 3 && tpvClient?.id) {
+      for (const item of catalog) {
+        if (picked.length >= 8) break;
+        if ((clientProductScores[item._id] || 0) <= 0) continue;
+        if (ticketIds.has(item._id)) continue;
+        if (!isSellable(item)) continue;
+        if (picked.some((p) => p._id === item._id)) continue;
+        picked.push(item);
+      }
+    }
+
+    return picked.slice(0, 8);
+  }, [
+    lines,
+    globalCoPurchaseScores,
+    clientCoPurchaseScores,
+    catalogById,
+    catalog,
+    tpvClient?.id,
+    clientProductScores,
+  ]);
+
+  const clearTicketAndClient = useCallback(() => {
+    clearTicket();
+    setTpvClient(null);
+  }, [clearTicket]);
+
   const getInitials = (name: string) => {
     const parts = name.split(' ').filter(Boolean);
     return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : (parts[0]?.[0] || '?').toUpperCase();
@@ -138,23 +341,72 @@ function SalesContent() {
     setShowPaymentModal(true);
   }, [lines, activeWorker]);
 
-  const confirmSale = useCallback(() => {
-    const record: SaleRecord = {
-      id: `sale-${Date.now()}`,
-      items: lines.map(l => ({ name: l.catalogItem.name, qty: l.quantity, total: l.total })),
-      total: ticketTotal,
-      method: paymentMethod,
-      worker: activeWorker?.name || '',
-      time: new Date(),
-    };
-    setSalesHistory(prev => [record, ...prev]);
-    toast.success(`Venta de ${formatCurrency(ticketTotal)} registrada`);
-    clearTicket();
-    setShowPaymentModal(false);
-  }, [lines, ticketTotal, paymentMethod, activeWorker, clearTicket]);
+  const confirmSale = useCallback(async () => {
+    if (!dataUserId || lines.length === 0) return;
+    const items: DeliveryOrderItem[] = lines.map((l) => ({
+      id: l.id,
+      name: l.catalogItem.name,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      total: l.total,
+      catalogItemId: l.catalogItem._id,
+      category: l.catalogItem.category || '',
+      brandIds: Array.isArray(l.catalogItem.brandIds) ? l.catalogItem.brandIds : [],
+    }));
+    const workerLabel = activeWorker?.name || 'Trabajador';
+    const obsParts = [`TPV trabajador · ${workerLabel}`];
+    if (tpvClient?.name) obsParts.push(`Cliente: ${tpvClient.name}`);
+    setSubmittingSale(true);
+    try {
+      await createDeliveryOrderRequest(dataUserId, {
+        clientId: tpvClient?.id || '',
+        customerName: tpvClient?.name || 'Mostrador',
+        customerPhone: tpvClient?.phone || '',
+        customerEmail: '',
+        customerAddress: '',
+        deliveryType: 'sala',
+        channel: 'tpv',
+        status: 'entregado',
+        priority: 'normal',
+        items,
+        totalAmount: ticketTotal,
+        notes: '',
+        observations: obsParts.join(' · '),
+        paymentMethod,
+        paymentStatus: 'paid',
+        paidAmount: ticketTotal,
+        paidAt: new Date().toISOString(),
+        stageHistory: [
+          {
+            status: 'entregado',
+            date: new Date().toISOString(),
+            user: workerLabel,
+            notes: 'Venta mostrador (trabajador)',
+          },
+        ],
+      });
+      await refreshOrdersPool();
+      toast.success(`Venta de ${formatCurrency(ticketTotal)} registrada`);
+      clearTicketAndClient();
+      setShowPaymentModal(false);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar la venta en el servidor');
+    } finally {
+      setSubmittingSale(false);
+    }
+  }, [
+    dataUserId,
+    lines,
+    ticketTotal,
+    paymentMethod,
+    activeWorker,
+    tpvClient,
+    clearTicketAndClient,
+    refreshOrdersPool,
+  ]);
 
-  const todayTotal = salesHistory.reduce((s, r) => s + r.total, 0);
-  const todaySales = salesHistory.length;
+  const todayTotal = todayTpvFromServer.total;
+  const todaySales = todayTpvFromServer.count;
 
   return (
     <div className="flex flex-col h-full min-h-0 lg:flex-row">
@@ -247,14 +499,66 @@ function SalesContent() {
             <div className="flex items-center justify-center h-full">
               <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
             </div>
-          ) : filteredCatalog.length === 0 ? (
+          ) : displayedCatalog.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
               <Package className="w-10 h-10 mb-2" />
               <p className="text-sm">No se encontraron productos</p>
             </div>
           ) : (
+            <>
+            {tpvClient && habitualProducts.length > 0 && (
+              <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-0.5">
+                  Suele pedir (historial)
+                </p>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Cliente vinculado · pedidos anteriores.</p>
+                <div className="flex flex-wrap gap-2">
+                  {habitualProducts.map((item) => (
+                    <button
+                      key={`habitual-${item._id}`}
+                      type="button"
+                      onClick={() => addItem(item)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span className="truncate max-w-[140px]">{item.name}</span>
+                      <span className="text-[11px] opacity-80 tabular-nums">×{clientProductScores[item._id] || 0}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {lines.length > 0 && crossSellProducts.length > 0 && (
+              <div className="mb-3 pb-3 border-b border-gray-100 dark:border-gray-800 rounded-xl border border-violet-200/80 dark:border-violet-800/80 bg-violet-50/90 dark:bg-violet-950/30 px-3 py-3 -mx-0.5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300 mb-0.5 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Venta cruzada · suelen combinarlo
+                </p>
+                <p className="text-[10px] text-violet-600/90 dark:text-violet-400/90 mb-2">
+                  {tpvClient?.id
+                    ? 'Histórico del cliente y otros pedidos recientes.'
+                    : 'Pedidos recientes del negocio.'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {crossSellProducts.map((item) => (
+                    <button
+                      key={`cross-${item._id}`}
+                      type="button"
+                      onClick={() => addItem(item)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-gray-900 text-violet-900 dark:text-violet-100 text-xs font-medium hover:bg-violet-100/80 dark:hover:bg-violet-900/40 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3 h-3 shrink-0" />
+                      <span className="truncate max-w-[120px]">{item.name}</span>
+                      <span className="text-[11px] opacity-75 tabular-nums">{formatCurrency(item.unitPrice)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2.5">
-              {filteredCatalog.map(item => {
+              {displayedCatalog.map(item => {
                 const inTicket = lines.find(l => l.catalogItem._id === item._id);
                 return (
                   <button
@@ -291,6 +595,7 @@ function SalesContent() {
                 );
               })}
             </div>
+            </>
           )}
         </div>
 
@@ -415,7 +720,7 @@ function SalesContent() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={clearTicket}
+              onClick={clearTicketAndClient}
               disabled={lines.length === 0}
               className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
@@ -465,10 +770,12 @@ function SalesContent() {
                 Cancelar
               </button>
               <button
-                onClick={confirmSale}
-                className="flex-[2] px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-lg"
+                type="button"
+                onClick={() => void confirmSale()}
+                disabled={submittingSale}
+                className="flex-[2] px-4 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirmar venta
+                {submittingSale ? 'Guardando…' : 'Confirmar venta'}
               </button>
             </div>
           </div>
@@ -487,22 +794,34 @@ function SalesContent() {
               </button>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
-              {salesHistory.length === 0 ? (
+              {todayTpvFromServer.orders.length === 0 ? (
                 <div className="text-center py-10 text-gray-400">
                   <TrendingUp className="w-8 h-8 mx-auto mb-2" />
-                  <p className="text-sm">Sin ventas registradas hoy</p>
+                  <p className="text-sm">Sin ventas TPV registradas hoy</p>
+                  <p className="text-xs mt-2 text-gray-500">Incluye ventas desde este puesto y desde TPV rápido (gerente).</p>
                 </div>
               ) : (
-                salesHistory.map(sale => (
-                  <div key={sale.id} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatCurrency(sale.total)}</span>
-                      <span className="text-xs text-gray-500">{sale.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                todayTpvFromServer.orders.map((order) => (
+                  <div key={order._id} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatCurrency(Number(order.totalAmount || 0))}</span>
+                      <span className="text-xs text-gray-500 shrink-0">
+                        {order.createdAt
+                          ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                          : '—'}
+                      </span>
                     </div>
-                    <p className="text-xs text-gray-500">{sale.items.map(i => `${i.qty}x ${i.name}`).join(', ')}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full font-semibold">{sale.method}</span>
-                      <span className="text-[10px] text-gray-400">por {sale.worker}</span>
+                    <p className="text-[10px] font-mono text-gray-400 mb-1">{order.orderNumber}</p>
+                    <p className="text-xs text-gray-500">
+                      {(order.items || []).map((i) => `${i.quantity}x ${i.name}`).join(', ')}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-[10px] px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full font-semibold">
+                        {order.paymentMethod || '—'}
+                      </span>
+                      {order.observations && (
+                        <span className="text-[10px] text-gray-400 truncate max-w-full">{order.observations}</span>
+                      )}
                     </div>
                   </div>
                 ))

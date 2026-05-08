@@ -317,11 +317,12 @@ interface NewChatModalProps {
   onClose: () => void;
   onCreateDM: (memberId: string) => void;
   onCreateGroup: (name: string, memberIds: string[]) => void;
+  onInviteMember: () => void;
   members: Array<{ user_id: string; fullName: string; role?: string; email?: string }>;
   userId: string;
 }
 
-function NewChatModal({ open, onClose, onCreateDM, onCreateGroup, members, userId }: NewChatModalProps) {
+function NewChatModal({ open, onClose, onCreateDM, onCreateGroup, onInviteMember, members, userId }: NewChatModalProps) {
   const [mode, setMode] = useState<'select' | 'group'>('select');
   const [groupName, setGroupName] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
@@ -358,9 +359,25 @@ function NewChatModal({ open, onClose, onCreateDM, onCreateGroup, members, userI
           <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
             {mode === 'select' ? 'Nueva conversación' : 'Crear grupo'}
           </h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            {mode === 'select' && (
+              <button
+                type="button"
+                onClick={() => {
+                  onInviteMember();
+                  onClose();
+                }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-xs font-semibold"
+                title="Invitar trabajador"
+              >
+                <UserPlus className="w-4 h-4" />
+                Invitar
+              </button>
+            )}
+            <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          </div>
         </div>
 
         {mode === 'select' && (
@@ -555,7 +572,13 @@ export function Chat() {
 
   const teamMembers = useMemo(() => {
     if (!currentBusiness?.members) return [];
-    return currentBusiness.members;
+    // Solo miembros activos/aceptados para chat 1:1 y selección.
+    return currentBusiness.members.filter((m: any) => m?.status === 'active' || !m?.status);
+  }, [currentBusiness]);
+
+  const pendingMembersCount = useMemo(() => {
+    if (!currentBusiness?.members) return 0;
+    return currentBusiness.members.filter((m: any) => m?.status === 'pending').length;
   }, [currentBusiness]);
 
   const activeChannel = useMemo(() => {
@@ -989,13 +1012,22 @@ export function Chat() {
           <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Chat</h2>
-              <button
-                onClick={() => setShowNewChat(true)}
-                className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
-                title="Nueva conversación"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('/saas/team')}
+                  className="p-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                  title="Equipo"
+                >
+                  <Users className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowNewChat(true)}
+                  className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
+                  title="Nueva conversación"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1105,7 +1137,7 @@ export function Chat() {
           <div className="border-t border-gray-100 dark:border-gray-800 py-2 px-4">
             <div className="flex items-center justify-between mb-1">
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                Equipo ({teamMembers.length})
+                Equipo ({teamMembers.length}{pendingMembersCount ? ` +${pendingMembersCount} pend.` : ''})
               </p>
             </div>
             <div className="flex flex-wrap gap-1">
@@ -1401,6 +1433,7 @@ export function Chat() {
           setShowNewChat(false);
         }}
         onCreateGroup={handleCreateGroup}
+        onInviteMember={() => navigate('/saas/team')}
         members={teamMembers}
         userId={userId}
       />

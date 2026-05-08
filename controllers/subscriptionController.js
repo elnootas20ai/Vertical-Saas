@@ -16,6 +16,7 @@ import {
   writeChangelog,
 } from '../services/couchdb.js';
 import logger from '../services/logger.js';
+import { sendAdminAlert } from '../services/adminAlerts.js';
 import {
   sendPaymentSuccessNotification,
   sendPaymentFailedNotification,
@@ -138,6 +139,22 @@ export async function createAndActivate(req, res) {
       updatedAt: new Date().toISOString(),
     });
 
+    // Aviso interno: paquete seleccionado (50/150/350) y modo (mensual/anual).
+    sendAdminAlert({
+      key: `plan_selected:${userId}:${moneiSubscription.id}`,
+      subject: `💳 Plan seleccionado: ${plan.name} (${billingMode})`,
+      html: `<p><b>Plan seleccionado</b></p>
+<ul>
+  <li><b>Usuario</b>: ${escapeHtml(account.fullName || account.email || userId)}</li>
+  <li><b>Email</b>: ${escapeHtml(account.email || '')}</li>
+  <li><b>Plan</b>: ${escapeHtml(planId)} (${escapeHtml(plan.name)})</li>
+  <li><b>Modo</b>: ${escapeHtml(billingMode)}</li>
+  <li><b>Importe</b>: ${(amount / 100).toFixed(2)}€ / ${escapeHtml(interval)}</li>
+  <li><b>MONEI subscription</b>: ${escapeHtml(moneiSubscription.id)}</li>
+</ul>`,
+      cooldownMs: 0,
+    }).catch(() => null);
+
     return res.json({
       ok: true,
       redirectUrl,
@@ -151,6 +168,13 @@ export async function createAndActivate(req, res) {
       error: error instanceof Error ? error.message : 'Error al crear la suscripción',
     });
   }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 /**

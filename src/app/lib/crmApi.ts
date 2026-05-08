@@ -353,6 +353,7 @@ export async function createClientRequest(
   };
 }
 
+/** Busca clientes por dígitos de teléfono y/o por nombre (substring, sin acentos en servidor). */
 export async function searchClientsByPhoneRequest(
   userId: string,
   query: string,

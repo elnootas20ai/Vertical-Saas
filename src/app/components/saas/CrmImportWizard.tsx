@@ -323,7 +323,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
         }
       } else {
         const clientsToCreate: Client[] = mappedRows
-          .filter((row) => row.name && row.phone && row.email)
+          .filter((row) => row.name && row.phone)
           .map((row) => ({
             id: `client-${uuidv4()}`,
             type: 'client' as const,

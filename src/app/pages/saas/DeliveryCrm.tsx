@@ -165,15 +165,19 @@ export function DeliveryCrm() {
     { key: 'name', label: 'Nombre' },
     { key: 'phone', label: 'Teléfono' },
     { key: 'email', label: 'Email' },
-    { key: 'address', label: 'Dirección' },
+    { key: 'street', label: 'Calle y número' },
+    { key: 'city', label: 'Ciudad' },
+    { key: 'address', label: 'Dirección (alternativa si va todo en una línea)' },
     { key: 'notes', label: 'Notas' },
   ];
 
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'phone', label: 'Teléfono', example: '' },
+    { key: 'phone', label: 'Teléfono', required: true, example: '' },
     { key: 'email', label: 'Email', example: '' },
-    { key: 'address', label: 'Dirección', example: '' },
+    { key: 'street', label: 'Calle y número', required: true, example: '' },
+    { key: 'city', label: 'Ciudad', required: true, example: '' },
+    { key: 'address', label: 'Dirección (una columna; si no hay calle/ciudad)', example: '' },
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
@@ -215,15 +219,18 @@ export function DeliveryCrm() {
       let created = 0;
       for (const entry of entries) {
         const name = String(entry.name || '').trim();
-        if (!name) continue;
+        const street = String(entry.street || entry.address || '').trim();
+        const city = String(entry.city || '').trim();
+        const phoneDigits = String(entry.phone || '').replace(/\D/g, '');
+        if (!name || phoneDigits.length < 9 || !street || !city) continue;
         try {
           await addClient({
             name,
-            phone: String(entry.phone || ''),
+            phone: String(entry.phone || '').trim(),
             email: String(entry.email || ''),
             dni: '',
-            address: String(entry.address || ''),
-            city: '',
+            address: street,
+            city,
             postalCode: '',
             status: 'active',
             responsible: '',

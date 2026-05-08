@@ -159,6 +159,7 @@ export async function submitAffiliateRequest(req, res) {
         to: affiliateEmail,
         subject: `Nueva solicitud de afiliado: ${name.trim()}`,
         html,
+        replyTo: email.trim(),
       });
     } catch (emailErr) {
       logger.warn({ tag: 'AFFILIATE', emailErr }, 'No se pudo enviar email de notificación (la solicitud se guardó correctamente)');

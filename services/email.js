@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import logger from './logger.js';
+import { sendAdminAlert } from './adminAlerts.js';
 
 function getAppBaseUrl() {
   return (process.env.APP_URL || `http://localhost:${process.env.PORT || 3001}`).replace(/\/+$/, '');
@@ -15,14 +16,16 @@ function hasUsableResendKey() {
   return k.startsWith('re_') && k.length > 12;
 }
 
-async function sendViaResend(to, subject, html) {
+async function sendViaResend(to, subject, html, replyTo) {
+  const payload = { from: getFromAddress(), to, subject, html };
+  if (replyTo) payload.reply_to = replyTo;
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from: getFromAddress(), to, subject, html }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
@@ -31,35 +34,49 @@ async function sendViaResend(to, subject, html) {
   }
 }
 
-async function sendViaSMTP(to, subject, html) {
+async function sendViaSMTP(to, subject, html, replyTo) {
+  const smtpUser = String(process.env.SMTP_USER || '').trim();
+  const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host: String(process.env.SMTP_HOST || '').trim(),
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user: smtpUser,
+      pass: smtpPass,
     },
   });
 
-  await transporter.sendMail({
+  const mail = {
     from: getFromAddress(),
     to,
     subject,
     html,
-  });
+  };
+  const rt = replyTo ? String(replyTo).trim() : '';
+  if (rt) mail.replyTo = rt;
+
+  await transporter.sendMail(mail);
 }
 
-export async function sendEmail({ to, subject, html }) {
+export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert }) {
   const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
 
   // Si defines EMAIL_PROVIDER=smtp, SIEMPRE usa SMTP (evita que un RESEND_API_KEY viejo/placeholder bloquee Gmail).
   if (provider === 'smtp') {
     if (process.env.SMTP_HOST && process.env.SMTP_USER) {
       try {
-        await sendViaSMTP(to, subject, html);
+        await sendViaSMTP(to, subject, html, replyTo);
       } catch (err) {
         logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
+        if (!_skipAdminAlert) {
+          sendAdminAlert({
+            key: 'email_send_fail',
+            subject: '🚨 Vertial: fallo enviando email (SMTP)',
+            html: `<p><b>Fallo envío SMTP</b></p><ul><li><b>to</b>: ${escapeHtml(to)}</li><li><b>subject</b>: ${escapeHtml(subject)}</li><li><b>err</b>: ${escapeHtml(err?.message || err)}</li></ul>`,
+            cooldownMs: 15 * 60_000,
+          }).catch(() => null);
+        }
         throw err;
       }
       return;
@@ -74,9 +91,17 @@ export async function sendEmail({ to, subject, html }) {
       return;
     }
     try {
-      await sendViaResend(to, subject, html);
+      await sendViaResend(to, subject, html, replyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
+      if (!_skipAdminAlert) {
+        sendAdminAlert({
+          key: 'email_send_fail',
+          subject: '🚨 Vertial: fallo enviando email (Resend)',
+          html: `<p><b>Fallo envío Resend</b></p><ul><li><b>to</b>: ${escapeHtml(to)}</li><li><b>subject</b>: ${escapeHtml(subject)}</li><li><b>err</b>: ${escapeHtml(err?.message || err)}</li></ul>`,
+          cooldownMs: 15 * 60_000,
+        }).catch(() => null);
+      }
       throw err;
     }
     return;
@@ -85,9 +110,17 @@ export async function sendEmail({ to, subject, html }) {
   // Sin EMAIL_PROVIDER: Resend solo si la key parece real; si no, SMTP.
   if (hasUsableResendKey()) {
     try {
-      await sendViaResend(to, subject, html);
+      await sendViaResend(to, subject, html, replyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
+      if (!_skipAdminAlert) {
+        sendAdminAlert({
+          key: 'email_send_fail',
+          subject: '🚨 Vertial: fallo enviando email (Resend)',
+          html: `<p><b>Fallo envío Resend</b></p><ul><li><b>to</b>: ${escapeHtml(to)}</li><li><b>subject</b>: ${escapeHtml(subject)}</li><li><b>err</b>: ${escapeHtml(err?.message || err)}</li></ul>`,
+          cooldownMs: 15 * 60_000,
+        }).catch(() => null);
+      }
       throw err;
     }
     return;
@@ -95,9 +128,17 @@ export async function sendEmail({ to, subject, html }) {
 
   if (process.env.SMTP_HOST && process.env.SMTP_USER) {
     try {
-      await sendViaSMTP(to, subject, html);
+      await sendViaSMTP(to, subject, html, replyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
+      if (!_skipAdminAlert) {
+        sendAdminAlert({
+          key: 'email_send_fail',
+          subject: '🚨 Vertial: fallo enviando email (SMTP)',
+          html: `<p><b>Fallo envío SMTP</b></p><ul><li><b>to</b>: ${escapeHtml(to)}</li><li><b>subject</b>: ${escapeHtml(subject)}</li><li><b>err</b>: ${escapeHtml(err?.message || err)}</li></ul>`,
+          cooldownMs: 15 * 60_000,
+        }).catch(() => null);
+      }
       throw err;
     }
     return;
@@ -105,6 +146,13 @@ export async function sendEmail({ to, subject, html }) {
 
   logger.warn({ tag: 'EMAIL_DEV', to, subject }, 'Email no enviado: sin proveedor (RESEND_API_KEY, SMTP o EMAIL_PROVIDER).');
   logger.debug({ tag: 'EMAIL_DEV', html }, 'Contenido HTML del email simulado');
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }
 
 export function buildSetupWelcomeEmail({ firstName, companyName, planName, trialEndDate, businessType, modules, onboardingUrl }) {

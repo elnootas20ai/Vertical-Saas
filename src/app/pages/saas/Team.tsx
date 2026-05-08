@@ -42,6 +42,7 @@ import {
   Star,
   Trash2,
   TrendingUp,
+  UserPlus,
   Users,
   UsersRound,
   Network,
@@ -2924,6 +2925,8 @@ export function Team() {
     crmPath === '/saas/clients' && (crmTabParam === 'leads' || crmTabParam === 'lead');
   const isCrmClientsActive =
     crmPath.startsWith('/saas/clients') && !isCrmLeadsActive && crmTabParam !== 'billing';
+
+  const isDelivery = currentBusiness?.businessType === 'delivery';
   return (
     <Layout title={t('team.title')} subtitle={t('team.subtitle')}>
       <div className="space-y-4">
@@ -2944,56 +2947,58 @@ export function Team() {
           )}
         </div>
 
-        {/* Misma barra de pestañas que /saas/clients (CRM) */}
-        <div
-          className="flex bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-x-auto [&::-webkit-scrollbar]:hidden"
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {CRM_TABS.map((tab, i) => {
-            const isNavTab = tab.id === 'quotes-nav' || tab.id === 'promotions-nav';
-            const isActive = isNavTab
-              ? false
-              : tab.id === 'leads'
-                ? isCrmLeadsActive
-                : tab.id === 'billing'
-                  ? false
-                  : isCrmClientsActive;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => {
-                  if (isNavTab) {
-                    navigate((tab as { route: string }).route);
-                    return;
-                  }
-                  if (tab.id === 'billing') {
-                    navigate('/saas/clients?tab=billing');
-                    return;
-                  }
-                  navigate(tab.id === 'leads' ? '/saas/clients?tab=leads' : '/saas/clients?tab=clients');
-                }}
-                className={`relative flex-shrink-0 flex items-center gap-2 px-5 py-3.5 text-sm font-semibold transition-colors whitespace-nowrap ${
-                  isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
-                } ${i !== 0 ? 'border-l border-gray-100 dark:border-gray-800' : ''}`}
-              >
-                {tab.label}
-                {'count' in tab && tab.count != null && (
-                  <span
-                    className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
-                      isActive ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-                {isActive && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 rounded-t-full" />
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {/* Barra CRM (solo para verticales donde aplica; en delivery debe ser nulo) */}
+        {!isDelivery && (
+          <div
+            className="flex bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {CRM_TABS.map((tab, i) => {
+              const isNavTab = tab.id === 'quotes-nav' || tab.id === 'promotions-nav';
+              const isActive = isNavTab
+                ? false
+                : tab.id === 'leads'
+                  ? isCrmLeadsActive
+                  : tab.id === 'billing'
+                    ? false
+                    : isCrmClientsActive;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    if (isNavTab) {
+                      navigate((tab as { route: string }).route);
+                      return;
+                    }
+                    if (tab.id === 'billing') {
+                      navigate('/saas/clients?tab=billing');
+                      return;
+                    }
+                    navigate(tab.id === 'leads' ? '/saas/clients?tab=leads' : '/saas/clients?tab=clients');
+                  }}
+                  className={`relative flex-shrink-0 flex items-center gap-2 px-5 py-3.5 text-sm font-semibold transition-colors whitespace-nowrap ${
+                    isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
+                  } ${i !== 0 ? 'border-l border-gray-100 dark:border-gray-800' : ''}`}
+                >
+                  {tab.label}
+                  {'count' in tab && tab.count != null && (
+                    <span
+                      className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${
+                        isActive ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                  {isActive && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500 rounded-t-full" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
           <div className="flex items-center gap-3">
@@ -3011,14 +3016,14 @@ export function Team() {
               <Network className="w-4 h-4" />
               {t('team.orgchart.button')}
             </button>
-            <AddButtonDropdown
-              label={t('team.inviteUser')}
-              onQuickAdd={() => setShowInvite(true)}
-              onAIAdd={() => { toast.info('Próximamente: invitaciones con IA'); }}
-              onImport={() => setShowImportModal(true)}
-              quickAddLabel="Invitar usuario"
-              quickAddDesc="Formulario de invitación"
-            />
+            <button
+              type="button"
+              onClick={() => setShowInvite(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+            >
+              <UserPlus className="w-4 h-4" />
+              {t('team.inviteUser')}
+            </button>
           </div>
         </div>
 

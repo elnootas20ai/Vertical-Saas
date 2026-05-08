@@ -1,10 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   X, ArrowLeft, ArrowRight, Home, Briefcase, Truck, ShoppingBag,
   Search, Plus, Minus, CreditCard, Banknote, Smartphone, Wallet,
   ChevronRight, Check, MapPin, User as UserIcon, Store,
+  Loader2,
 } from 'lucide-react';
 import type { DeliveryOrder, DeliveryType, CatalogItem, PointOfSale } from '../../lib/deliveryApi';
+import type { Client } from '../../context/AppContext';
+import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'online' | '';
 
@@ -13,10 +16,14 @@ interface CartItem { catalogItem: CatalogItem; quantity: number }
 interface WizardData {
   deliveryType: DeliveryType;
   channel: string;
+  clientId: string;
   customerName: string;
   customerPhone: string;
   customerEmail: string;
-  customerAddress: string;
+  /** Calle y número (obligatorio en delivery) */
+  customerStreet: string;
+  /** Ciudad (obligatorio en delivery) */
+  customerCity: string;
   salesPointId: string;
   salesPointName: string;
   cart: CartItem[];
@@ -28,9 +35,18 @@ interface WizardData {
 
 const INITIAL_DATA: WizardData = {
   deliveryType: 'domicilio', channel: 'direct', customerName: '', customerPhone: '',
-  customerEmail: '', customerAddress: '', salesPointId: '', salesPointName: '',
+  clientId: '',
+  customerEmail: '', customerStreet: '', customerCity: '', salesPointId: '', salesPointName: '',
   cart: [], paymentMethod: '', observations: '', notes: '', priority: 'normal',
 };
+
+function isValidDeliveryPhone(phone: string): boolean {
+  const t = phone.trim();
+  if (!t) return false;
+  const digits = t.replace(/\D/g, '');
+  if (digits.length < 9) return false;
+  return /^[\d\s+\-().]+$/.test(t);
+}
 
 const DELIVERY_TYPES: { value: DeliveryType; label: string; desc: string; icon: typeof Truck }[] = [
   { value: 'domicilio', label: 'A domicilio', desc: 'Entrega en dirección del cliente', icon: Truck },
@@ -55,19 +71,55 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: typeof Credi
 const STEPS = ['Tipo y canal', 'Cliente', 'PDV', 'Productos', 'Pago y confirmar'];
 
 interface Props {
+  userId: string;
   catalogItems: CatalogItem[];
   pointsOfSale: PointOfSale[];
   onSubmit: (data: Partial<DeliveryOrder>) => void;
   onClose: () => void;
 }
 
-export function CreateOrderWizard({ catalogItems, pointsOfSale, onSubmit, onClose }: Props) {
+export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit, onClose }: Props) {
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(INITIAL_DATA);
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [phoneEditing, setPhoneEditing] = useState(true);
+  /** Misma búsqueda que TPV rápido: teléfono o nombre (API sin acentos). */
+  const [clientLookup, setClientLookup] = useState('');
 
   const update = (partial: Partial<WizardData>) => setData((prev) => ({ ...prev, ...partial }));
   const cartTotal = useMemo(() => data.cart.reduce((s, c) => s + c.catalogItem.unitPrice * c.quantity, 0), [data.cart]);
+
+  const { results, isSearching, selectedClient, selectClient, clearSelection } = useClientPhoneSearch({
+    userId,
+    phone: clientLookup,
+    enabled: step === 1 && phoneEditing,
+    matchByName: true,
+    minQueryLength: 2,
+  });
+
+  const applyClient = useCallback((client: Client) => {
+    selectClient(client);
+    setPhoneEditing(false);
+    setClientLookup('');
+    const primary = client.addresses?.find((a) => a.isPrimary) || client.addresses?.[0];
+    const street = (primary?.street || '').trim() || (client.address || '').trim();
+    const city = (primary?.city || '').trim() || (client.city || '').trim();
+    update({
+      clientId: client.id,
+      customerName: client.name || client.fullName || client.email || '',
+      customerPhone: `${client.phonePrefix || ''} ${client.phone || ''}`.trim() || client.phone || '',
+      customerEmail: client.email || '',
+      customerStreet: street,
+      customerCity: city,
+    });
+  }, [selectClient, update]);
+
+  const clearClient = useCallback(() => {
+    clearSelection();
+    setPhoneEditing(true);
+    setClientLookup('');
+    update({ clientId: '' });
+  }, [clearSelection, update]);
 
   const addToCart = (item: CatalogItem) => {
     setData((prev) => {
@@ -85,7 +137,13 @@ export function CreateOrderWizard({ catalogItems, pointsOfSale, onSubmit, onClos
   };
 
   const canAdvance = () => {
-    if (step === 1) return data.customerName.trim().length >= 2 && (data.deliveryType !== 'domicilio' || data.customerAddress.trim().length > 0);
+    if (step === 1) {
+      const nameOk = data.customerName.trim().length >= 2;
+      const phoneOk = isValidDeliveryPhone(data.customerPhone);
+      const streetOk = data.customerStreet.trim().length > 0;
+      const cityOk = data.customerCity.trim().length > 0;
+      return nameOk && phoneOk && streetOk && cityOk;
+    }
     if (step === 3) return data.cart.length > 0;
     return true;
   };
@@ -95,11 +153,16 @@ export function CreateOrderWizard({ catalogItems, pointsOfSale, onSubmit, onClos
       id: `item-${i}-${Date.now()}`, name: c.catalogItem.name,
       quantity: c.quantity, unitPrice: c.catalogItem.unitPrice,
       total: c.catalogItem.unitPrice * c.quantity,
+      catalogItemId: c.catalogItem._id,
+      category: c.catalogItem.category,
+      brandIds: Array.isArray(c.catalogItem.brandIds) ? c.catalogItem.brandIds : [],
     }));
+    const customerAddress = [data.customerStreet.trim(), data.customerCity.trim()].filter(Boolean).join(', ');
     onSubmit({
       deliveryType: data.deliveryType, channel: data.channel as DeliveryOrder['channel'],
+      clientId: data.clientId || '',
       customerName: data.customerName, customerPhone: data.customerPhone,
-      customerEmail: data.customerEmail, customerAddress: data.customerAddress,
+      customerEmail: data.customerEmail, customerAddress,
       salesPointId: data.salesPointId, salesPointName: data.salesPointName,
       items, paymentMethod: data.paymentMethod, observations: data.observations,
       notes: data.notes, priority: data.priority, status: 'nuevo',
@@ -170,26 +233,130 @@ export function CreateOrderWizard({ catalogItems, pointsOfSale, onSubmit, onClos
 
           {step === 1 && (
             <div className="space-y-4">
+              {phoneEditing && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    Buscar cliente (teléfono o nombre)
+                  </label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                    <input
+                      className={`${inputCls} pl-9`}
+                      value={clientLookup}
+                      onChange={(e) => {
+                        setClientLookup(e.target.value);
+                        update({ clientId: '' });
+                      }}
+                      placeholder="Ej. 612… o Iván Ortega"
+                      autoComplete="off"
+                    />
+                    {isSearching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                    Misma búsqueda que en TPV rápido (≥3 dígitos o ≥2 letras).
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Nombre *</label>
-                <input className={inputCls} value={data.customerName} onChange={(e) => update({ customerName: e.target.value })} placeholder="Nombre del cliente" />
+                <input
+                  className={inputCls}
+                  value={data.customerName}
+                  onChange={(e) => {
+                    setPhoneEditing(true);
+                    clearSelection();
+                    update({ customerName: e.target.value, clientId: '' });
+                  }}
+                  placeholder="Nombre del cliente"
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Teléfono</label>
-                  <input className={inputCls} value={data.customerPhone} onChange={(e) => update({ customerPhone: e.target.value })} placeholder="600 000 000" />
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Teléfono *</label>
+                  <input
+                    className={inputCls}
+                    value={data.customerPhone}
+                    onChange={(e) => {
+                      setPhoneEditing(true);
+                      clearSelection();
+                      update({ customerPhone: e.target.value, clientId: '' });
+                    }}
+                    placeholder="600 000 000"
+                  />
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Mínimo 9 dígitos.</p>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Email</label>
                   <input className={inputCls} type="email" value={data.customerEmail} onChange={(e) => update({ customerEmail: e.target.value })} placeholder="email@ejemplo.com" />
                 </div>
               </div>
-              {data.deliveryType === 'domicilio' && (
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Dirección de entrega *</label>
-                  <input className={inputCls} value={data.customerAddress} onChange={(e) => update({ customerAddress: e.target.value })} placeholder="Calle, número, piso, ciudad..." />
+              {phoneEditing && results.length > 0 && (
+                <div className="border-2 border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden bg-white dark:bg-gray-900">
+                  {results.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => applyClient(c)}
+                      className="w-full text-left px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-800 last:border-b-0"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                            {c.name || c.fullName || c.email || 'Cliente'}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {(c.phonePrefix || '+34') + ' ' + (c.phone || '')}
+                          </p>
+                        </div>
+                        <span className="text-xs font-bold text-violet-600 dark:text-violet-400">Vincular</span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               )}
+              {selectedClient && !phoneEditing && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-violet-900 dark:text-violet-200 truncate">
+                      Cliente vinculado: {selectedClient.name || selectedClient.fullName || selectedClient.email}
+                    </p>
+                    <p className="text-xs text-violet-700/80 dark:text-violet-300/80">
+                      {selectedClient.phonePrefix || '+34'} {selectedClient.phone}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearClient}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-violet-300 dark:border-violet-700 text-violet-800 dark:text-violet-200 hover:bg-white/60 dark:hover:bg-gray-900/30"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Calle y número *</label>
+                  <input
+                    className={inputCls}
+                    value={data.customerStreet}
+                    onChange={(e) => update({ customerStreet: e.target.value })}
+                    placeholder="Calle, número, piso…"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Ciudad *</label>
+                  <input
+                    className={inputCls}
+                    value={data.customerCity}
+                    onChange={(e) => update({ customerCity: e.target.value })}
+                    placeholder="Ciudad"
+                  />
+                </div>
+              </div>
             </div>
           )}
 

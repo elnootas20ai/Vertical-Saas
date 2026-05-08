@@ -5,11 +5,16 @@ import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   listCatalogItemsRequest,
   listDeliveryOrdersRequest,
   createDeliveryOrderRequest,
+  listTpvRegisterSessionsRequest,
+  updateTpvRegisterSessionRequest,
+  type TpvRegisterSession,
+  type TpvRegisterTransaction,
   type CatalogItem,
   type DeliveryOrder,
   type DeliveryOrderItem,
@@ -19,9 +24,10 @@ import {
 import { updateClientRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
+import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
+import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
 import {
   ArrowLeft,
-  Phone,
   Search,
   ShoppingBag,
   Truck,
@@ -42,6 +48,7 @@ import {
   Home,
   Briefcase,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
@@ -50,6 +57,34 @@ type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otros';
 interface CartItem {
   catalogItem: CatalogItem;
   quantity: number;
+}
+
+/** Pedidos recientes usados para hábitos del cliente y venta cruzada (co-compra). */
+const MAX_ORDERS_FOR_TPV_INTEL = 160;
+
+/** Por cada producto A, peso de B cuando ambos aparecen en el mismo pedido. */
+function buildCoPurchaseScores(orders: DeliveryOrder[]): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const order of orders) {
+    const ids = [
+      ...new Set(
+        (order.items || [])
+          .map((i) => String(i.catalogItemId || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (ids.length < 2) continue;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = 0; j < ids.length; j++) {
+        if (i === j) continue;
+        const a = ids[i];
+        const b = ids[j];
+        if (!out[a]) out[a] = {};
+        out[a][b] = (out[a][b] || 0) + 1;
+      }
+    }
+  }
+  return out;
 }
 
 const INPUT_CLASS =
@@ -78,7 +113,8 @@ export function TpvRapidoPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
-  const userId = user?.user_id || user?.id || '';
+  const userId = resolveBusinessDataUserId(user, currentBusiness);
+  const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const [selectedCashierId, setSelectedCashierId] = useState<string>('');
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
@@ -92,13 +128,22 @@ export function TpvRapidoPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [newClientStreet, setNewClientStreet] = useState('');
+  const [newClientCity, setNewClientCity] = useState('');
   const [newClientNotes, setNewClientNotes] = useState('');
+  /** Teléfono del alta manual (editable); la búsqueda puede ser por nombre en `phoneInput`. */
+  const [newClientPhone, setNewClientPhone] = useState('');
   const [newClientPayment, setNewClientPayment] = useState<PaymentMethod | ''>('');
   const [creatingClient, setCreatingClient] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
   const { results, isSearching, selectedClient, selectClient, clearSelection, clearResults } =
-    useClientPhoneSearch({ userId, phone: phoneInput, enabled: !showCreateForm });
+    useClientPhoneSearch({
+      userId,
+      phone: phoneInput,
+      enabled: !showCreateForm,
+      matchByName: true,
+      minQueryLength: 2,
+    });
 
   // Step 2 - Delivery
   const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(null);
@@ -120,17 +165,22 @@ export function TpvRapidoPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
-  const [clientProductScores, setClientProductScores] = useState<Record<string, number>>({});
 
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [cashGiven, setCashGiven] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [initialStatus, setInitialStatus] = useState<'nuevo' | 'cocina'>('nuevo');
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
+  const [promoMode, setPromoMode] = useState<'none' | 'code' | 'client'>('none');
+  const [clientPromos, setClientPromos] = useState<ClientPromotion[]>([]);
+  const [selectedClientPromoId, setSelectedClientPromoId] = useState<string>('');
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [registerLinkError, setRegisterLinkError] = useState<string | null>(null);
 
   const cashierOptions = useMemo(() => {
     const members = currentBusiness?.members || [];
@@ -179,6 +229,26 @@ export function TpvRapidoPage() {
     return () => { cancelled = true; };
   }, [userId]);
 
+  const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
+
+  useEffect(() => {
+    if (!userId) {
+      setRecentOrdersPool([]);
+      return;
+    }
+    let cancelled = false;
+    listDeliveryOrdersRequest(userId)
+      .then((orders) => {
+        if (!cancelled) setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
+      })
+      .catch(() => {
+        if (!cancelled) setRecentOrdersPool([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   // ─── Autofocus phone on mount or reset ─────────────────────────────────────
   useEffect(() => {
     if (currentStep === 'client' && !selectedClient && !createdOrder) {
@@ -186,40 +256,45 @@ export function TpvRapidoPage() {
     }
   }, [currentStep, selectedClient, createdOrder]);
 
-  // ─── Frequent products by selected client ───────────────────────────────────
-  useEffect(() => {
-    if (!userId || !selectedClient?.id) {
-      setClientProductScores({});
-      return;
-    }
-    let cancelled = false;
-    listDeliveryOrdersRequest(userId)
-      .then((orders) => {
-        if (cancelled) return;
-        const scores: Record<string, number> = {};
-        const clientOrders = orders.filter((o) => o.clientId === selectedClient.id).slice(0, 40);
-        clientOrders.forEach((order) => {
-          order.items.forEach((item) => {
-            const key = String(item.catalogItemId || '').trim();
-            if (!key) return;
-            scores[key] = (scores[key] || 0) + Number(item.quantity || 1);
-          });
-        });
-        setClientProductScores(scores);
-      })
-      .catch(() => {
-        if (!cancelled) setClientProductScores({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, selectedClient?.id]);
-
   // ─── Derived ───────────────────────────────────────────────────────────────
   const categories = useMemo(() => {
     const cats = new Set<string>();
     catalog.forEach((item) => { if (item.category) cats.add(item.category); });
     return Array.from(cats).sort();
+  }, [catalog]);
+
+  const clientProductScores = useMemo(() => {
+    if (!selectedClient?.id) return {};
+    const scores: Record<string, number> = {};
+    recentOrdersPool
+      .filter((o) => o.clientId === selectedClient.id)
+      .slice(0, 60)
+      .forEach((order) => {
+        order.items.forEach((item: DeliveryOrderItem) => {
+          const key = String(item.catalogItemId || '').trim();
+          if (!key) return;
+          scores[key] = (scores[key] || 0) + Number(item.quantity || 1);
+        });
+      });
+    return scores;
+  }, [recentOrdersPool, selectedClient?.id]);
+
+  const globalCoPurchaseScores = useMemo(
+    () => buildCoPurchaseScores(recentOrdersPool),
+    [recentOrdersPool],
+  );
+
+  const clientCoPurchaseScores = useMemo(() => {
+    if (!selectedClient?.id) return {};
+    return buildCoPurchaseScores(recentOrdersPool.filter((o) => o.clientId === selectedClient.id));
+  }, [recentOrdersPool, selectedClient?.id]);
+
+  const catalogById = useMemo(() => {
+    const m: Record<string, CatalogItem> = {};
+    catalog.forEach((i) => {
+      m[i._id] = i;
+    });
+    return m;
   }, [catalog]);
 
   const filteredProducts = useMemo(() => {
@@ -252,10 +327,127 @@ export function TpvRapidoPage() {
     [filteredProducts, clientProductScores],
   );
 
+  const crossSellProducts = useMemo(() => {
+    const cartIds = new Set(cart.map((c) => c.catalogItem._id));
+    if (cartIds.size === 0) return [];
+
+    const merged = new Map<string, number>();
+    const accumulate = (matrix: Record<string, Record<string, number>>, weight: number) => {
+      for (const cid of cartIds) {
+        const row = matrix[cid];
+        if (!row) continue;
+        for (const [pid, n] of Object.entries(row)) {
+          if (cartIds.has(pid)) continue;
+          merged.set(pid, (merged.get(pid) || 0) + n * weight);
+        }
+      }
+    };
+
+    accumulate(globalCoPurchaseScores, 1);
+    if (selectedClient?.id) accumulate(clientCoPurchaseScores, 2.8);
+
+    const isSellable = (item: CatalogItem | undefined) =>
+      !!item &&
+      item.active &&
+      Number(item.unitPrice || 0) > 0 &&
+      (item.itemType === 'product' || item.itemType === 'combo');
+
+    const ranked = [...merged.entries()].sort((a, b) => b[1] - a[1]);
+    const picked: CatalogItem[] = [];
+    for (const [pid] of ranked) {
+      const item = catalogById[pid];
+      if (!isSellable(item)) continue;
+      picked.push(item);
+      if (picked.length >= 10) break;
+    }
+
+    if (picked.length < 4) {
+      const cartCategories = new Set(
+        cart.map((c) => c.catalogItem.category).filter(Boolean) as string[],
+      );
+      for (const item of catalog) {
+        if (picked.length >= 8) break;
+        if (!item.category || !cartCategories.has(item.category)) continue;
+        if (cartIds.has(item._id)) continue;
+        if (!isSellable(item)) continue;
+        if (picked.some((p) => p._id === item._id)) continue;
+        picked.push(item);
+      }
+    }
+
+    if (picked.length < 3 && selectedClient?.id) {
+      for (const item of catalog) {
+        if (picked.length >= 8) break;
+        if ((clientProductScores[item._id] || 0) <= 0) continue;
+        if (cartIds.has(item._id)) continue;
+        if (!isSellable(item)) continue;
+        if (picked.some((p) => p._id === item._id)) continue;
+        picked.push(item);
+      }
+    }
+
+    return picked.slice(0, 8);
+  }, [
+    cart,
+    globalCoPurchaseScores,
+    clientCoPurchaseScores,
+    catalogById,
+    catalog,
+    selectedClient?.id,
+    clientProductScores,
+  ]);
+
   const cartTotal = useMemo(
     () => cart.reduce((sum, ci) => sum + ci.catalogItem.unitPrice * ci.quantity, 0),
     [cart],
   );
+
+  const clientPromoSelected = useMemo(() => {
+    if (!selectedClientPromoId) return null;
+    return clientPromos.find((p) => p.id === selectedClientPromoId) || null;
+  }, [clientPromos, selectedClientPromoId]);
+
+  const compute2x1Discount = useCallback(() => {
+    const unitPrices: number[] = [];
+    for (const ci of cart) {
+      const u = Number(ci.catalogItem.unitPrice || 0);
+      if (!Number.isFinite(u) || u <= 0) continue;
+      for (let i = 0; i < ci.quantity; i++) unitPrices.push(u);
+    }
+    if (unitPrices.length < 2) return 0;
+    unitPrices.sort((a, b) => a - b);
+    const freeCount = Math.floor(unitPrices.length / 2);
+    let discount = 0;
+    for (let i = 0; i < freeCount; i++) discount += unitPrices[i];
+    return Math.max(0, discount);
+  }, [cart]);
+
+  const effectiveCalc = useMemo(() => {
+    if (promoMode === 'code') {
+      return computePromoDiscount(cartTotal, appliedPromo);
+    }
+    if (promoMode === 'client') {
+      if (!clientPromoSelected) return { discount: 0, finalTotal: cartTotal };
+      const isActive = String(clientPromoSelected.estado || '').toLowerCase() === 'activa';
+      if (!isActive) return { discount: 0, finalTotal: cartTotal };
+      const tipo = String(clientPromoSelected.tipo || '').toLowerCase();
+      if (tipo === '2x1') {
+        const d = Math.min(cartTotal, compute2x1Discount());
+        return { discount: d, finalTotal: Math.max(0, cartTotal - d) };
+      }
+      if (tipo === 'descuento') {
+        const pct = Math.min(100, Math.max(0, Number(clientPromoSelected.descuento || 0)));
+        const d = Math.min(cartTotal, (cartTotal * pct) / 100);
+        return { discount: d, finalTotal: Math.max(0, cartTotal - d) };
+      }
+      // regalo/envio_gratis/puntos/otro -> no cambia total (solo anotación)
+      return { discount: 0, finalTotal: cartTotal };
+    }
+    return { discount: 0, finalTotal: cartTotal };
+  }, [promoMode, cartTotal, appliedPromo, clientPromoSelected, compute2x1Discount]);
+
+  const finalTotal = effectiveCalc.finalTotal;
+  const discountAmount = effectiveCalc.discount;
 
   const cartCount = useMemo(
     () => cart.reduce((sum, ci) => sum + ci.quantity, 0),
@@ -264,9 +456,32 @@ export function TpvRapidoPage() {
 
   const changeAmount = useMemo(() => {
     const given = parseFloat(cashGiven.replace(',', '.'));
-    if (isNaN(given) || given < cartTotal) return null;
-    return given - cartTotal;
-  }, [cashGiven, cartTotal]);
+    if (isNaN(given) || given < finalTotal) return null;
+    return given - finalTotal;
+  }, [cashGiven, finalTotal]);
+
+  const applyPromoCode = useCallback(() => {
+    const code = promoCodeInput.trim();
+    if (!code) {
+      toast.error('Introduce un código');
+      return;
+    }
+    const found = findActivePromotionByCode(code);
+    if (!found) {
+      toast.error('Código no válido o no está activo');
+      return;
+    }
+    setAppliedPromo(found);
+    setPromoCodeInput(found.code);
+    setPromoMode('code');
+    toast.success(`Código aplicado: ${found.code}`);
+  }, [promoCodeInput]);
+
+  const clearPromoCode = useCallback(() => {
+    setAppliedPromo(null);
+    setPromoCodeInput('');
+    if (promoMode === 'code') setPromoMode('none');
+  }, [promoMode]);
 
   const isStepReachable = useCallback(
     (step: Step) => {
@@ -348,6 +563,11 @@ export function TpvRapidoPage() {
     setCashGiven('');
     setOrderNotes('');
     setInitialStatus('nuevo');
+    setPromoCodeInput('');
+    setAppliedPromo(null);
+    setPromoMode('none');
+    setClientPromos([]);
+    setSelectedClientPromoId('');
   }, [clearSelection]);
 
   const goToPreviousStep = useCallback(() => {
@@ -367,6 +587,28 @@ export function TpvRapidoPage() {
       setPaymentMethod(
         (client.defaultPaymentMethod as PaymentMethod) || null,
       );
+      const assigned = getClientAppliedPromo(client.id);
+      if (assigned) {
+        setAppliedPromo(assigned);
+        setPromoCodeInput(assigned.code);
+        // el CEO decide en pago, pero si ya hay asignado dejamos modo "code" listo
+        setPromoMode('code');
+      } else {
+        setAppliedPromo(null);
+        setPromoCodeInput('');
+        setPromoMode('none');
+      }
+      setClientPromos([]);
+      setSelectedClientPromoId('');
+      if (userId) {
+        fetchClientPromotionsRequest(userId, client.id)
+          .then((promos) => {
+            setClientPromos(promos || []);
+            const firstActive = (promos || []).find((p) => String(p.estado || '').toLowerCase() === 'activa');
+            if (firstActive) setSelectedClientPromoId(firstActive.id);
+          })
+          .catch(() => {});
+      }
       const primary = client.addresses?.find((a) => a.isPrimary);
       if (primary) setSelectedAddressId(primary.id);
       completeStep('client');
@@ -395,8 +637,13 @@ export function TpvRapidoPage() {
   }, [clientIdFromUrl, userId, clients, handleSelectClient, setSearchParams]);
 
   const handleCreateClient = useCallback(async () => {
-    if (!newClientName.trim() || !phoneInput.trim() || !newClientStreet.trim()) {
-      toast.error('Completa nombre, teléfono y calle');
+    const phoneDigits = newClientPhone.replace(/\D/g, '');
+    if (!newClientName.trim() || phoneDigits.length < 9 || !newClientStreet.trim()) {
+      toast.error('Completa nombre, teléfono (mín. 9 dígitos) y calle');
+      return;
+    }
+    if (isDeliveryBusiness && !newClientCity.trim()) {
+      toast.error('Completa la ciudad del cliente');
       return;
     }
     setCreatingClient(true);
@@ -409,7 +656,7 @@ export function TpvRapidoPage() {
         user_id: userId,
         clientType: 'particular',
         name: newClientName.trim(),
-        phone: phoneInput.trim(),
+        phone: newClientPhone.replace(/\D/g, '') || newClientPhone.trim(),
         phonePrefix,
         email: '',
         status: 'active' as const,
@@ -417,6 +664,7 @@ export function TpvRapidoPage() {
         branch_id: primaryBranchId,
         tags: ['tpv'],
         address: newClientStreet.trim(),
+        city: isDeliveryBusiness ? newClientCity.trim() : '',
         notes: newClientNotes.trim(),
         consents: { dataProcessing: false, commercial: false, thirdParty: false },
         defaultPaymentMethod: (newClientPayment || '') as Client['defaultPaymentMethod'],
@@ -425,6 +673,7 @@ export function TpvRapidoPage() {
             id: addressId,
             label: 'Casa',
             street: newClientStreet.trim(),
+            city: isDeliveryBusiness ? newClientCity.trim() : undefined,
             isPrimary: true,
             usageCount: 0,
             lastUsedAt: null,
@@ -452,9 +701,11 @@ export function TpvRapidoPage() {
   }, [
     userId,
     phonePrefix,
-    phoneInput,
+    newClientPhone,
     newClientName,
     newClientStreet,
+    newClientCity,
+    isDeliveryBusiness,
     newClientNotes,
     newClientPayment,
     handleSelectClient,
@@ -469,6 +720,10 @@ export function TpvRapidoPage() {
   // ─── Address creation ─────────────────────────────────────────────────────
   const handleSaveNewAddress = useCallback(async () => {
     if (!newAddrStreet.trim() || !selectedClient) return;
+    if (isDeliveryBusiness && !newAddrCity.trim()) {
+      toast.error('Indica la ciudad de la dirección');
+      return;
+    }
     setSavingAddress(true);
     try {
       const newAddr: ClientAddress = {
@@ -505,7 +760,7 @@ export function TpvRapidoPage() {
     } finally {
       setSavingAddress(false);
     }
-  }, [selectedClient, userId, selectClient, newAddrLabel, newAddrStreet, newAddrCity, newAddrPostal, newAddrNotes, newAddrPrimary]);
+  }, [selectedClient, userId, selectClient, newAddrLabel, newAddrStreet, newAddrCity, newAddrPostal, newAddrNotes, newAddrPrimary, isDeliveryBusiness]);
 
   // ─── Submit order ─────────────────────────────────────────────────────────
   const handleSubmitOrder = useCallback(
@@ -519,6 +774,7 @@ export function TpvRapidoPage() {
       if (!paymentMethod) return;
 
       setSubmitting(true);
+      setRegisterLinkError(null);
       try {
         const items: DeliveryOrderItem[] = cart.map((ci) => ({
           id: uuidv4(),
@@ -528,33 +784,89 @@ export function TpvRapidoPage() {
           total: ci.catalogItem.unitPrice * ci.quantity,
           catalogItemId: ci.catalogItem._id,
           category: ci.catalogItem.category,
+          brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],
         }));
 
         const selectedAddr = selectedClient.addresses?.find((a) => a.id === selectedAddressId);
+
+        const promoNote = (() => {
+          if (promoMode === 'code' && appliedPromo) {
+            return `Promo (código): ${appliedPromo.code} (${appliedPromo.name}) · -${formatPrice(discountAmount)}`;
+          }
+          if (promoMode === 'client' && clientPromoSelected) {
+            return `Promo (cliente): ${clientPromoSelected.nombre} (${clientPromoSelected.tipo}) · -${formatPrice(discountAmount)}`;
+          }
+          return '';
+        })();
 
         const orderData: Partial<DeliveryOrder> = {
           clientId: selectedClient.id,
           customerName: selectedClient.name,
           customerPhone: `${selectedClient.phonePrefix || phonePrefix} ${selectedClient.phone}`,
           customerEmail: selectedClient.email || '',
-          customerAddress: selectedAddr?.street || selectedClient.address || '',
+          customerAddress: [selectedAddr?.street || selectedClient.address || '', selectedAddr?.city || selectedClient.city || '']
+            .map((s) => String(s || '').trim())
+            .filter(Boolean)
+            .join(', ') || '',
           deliveryType,
           channel: 'tpv',
           status,
           items,
-          totalAmount: cartTotal,
-          notes: orderNotes.trim(),
+          totalAmount: finalTotal,
+          notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
           observations: selectedCashierId
             ? `Caja atendida por: ${cashierOptions.find((c) => c.id === selectedCashierId)?.name || selectedCashierId}`
             : '',
           paymentMethod,
           paymentStatus: paymentMethod === 'efectivo' ? 'paid' : 'pending',
-          paidAmount: paymentMethod === 'efectivo' ? cartTotal : 0,
+          paidAmount: paymentMethod === 'efectivo' ? finalTotal : 0,
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
         };
 
         const created = await createDeliveryOrderRequest(userId, orderData);
+
+        // Link ticket to open cash register session (if any)
+        try {
+          const sessions = await listTpvRegisterSessionsRequest(userId);
+          const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
+          const open = (sessions || []).find((s) =>
+            s.status === 'open'
+            && (selectedCashierId ? s.workerId === selectedCashierId : true),
+          ) || (sessions || []).find((s) => s.status === 'open') || null;
+
+          if (open) {
+            const pm = (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta' || paymentMethod === 'bizum')
+              ? paymentMethod
+              : 'otro';
+            const tx: TpvRegisterTransaction = {
+              id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'sale',
+              paymentMethod: pm as any,
+              amount: Number(finalTotal || 0),
+              description: `TPV rápido · ${created.customerName || selectedClient.name}`,
+              orderId: created.id,
+              orderNumber: created.orderNumber,
+              channel: 'tpv',
+              date: new Date().toISOString(),
+              registeredBy: cashier?.name || user?.fullName || 'TPV',
+              linkedDeliveryOrderId: created._id,
+            };
+
+            const next: TpvRegisterSession = {
+              ...open,
+              transactions: [...(open.transactions || []), tx],
+              linkedOrderIds: Array.from(new Set([...(open.linkedOrderIds || []), created._id])),
+              updatedAt: new Date().toISOString(),
+            };
+            await updateTpvRegisterSessionRequest(userId, next);
+          } else {
+            setRegisterLinkError('No hay caja abierta: el ticket se guardó, pero no se registró en Caja.');
+          }
+        } catch {
+          setRegisterLinkError('El ticket se guardó, pero falló el registro en Caja.');
+        }
+
         setCreatedOrder(created);
         toast.success('Pedido creado correctamente');
       } catch (err: unknown) {
@@ -563,7 +875,7 @@ export function TpvRapidoPage() {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, cartTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -577,6 +889,7 @@ export function TpvRapidoPage() {
     clearResults();
     setShowCreateForm(false);
     setNewClientName('');
+    setNewClientPhone('');
     setNewClientStreet('');
     setNewClientNotes('');
     setNewClientPayment('');
@@ -591,6 +904,11 @@ export function TpvRapidoPage() {
     setCashGiven('');
     setOrderNotes('');
     setInitialStatus('nuevo');
+    setPromoCodeInput('');
+    setAppliedPromo(null);
+    setPromoMode('none');
+    setClientPromos([]);
+    setSelectedClientPromoId('');
     setCreatedOrder(null);
     setSelectedCashierId((prev) => prev || cashierOptions[0]?.id || '');
     setTimeout(() => phoneRef.current?.focus(), 150);
@@ -612,6 +930,11 @@ export function TpvRapidoPage() {
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 {createdOrder.customerName} · {formatPrice(createdOrder.totalAmount)}
               </p>
+              {registerLinkError && (
+                <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-semibold">
+                  {registerLinkError}
+                </p>
+              )}
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
                 {createdOrder.items.length} producto{createdOrder.items.length !== 1 ? 's' : ''} ·{' '}
                 {createdOrder.deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}
@@ -637,7 +960,7 @@ export function TpvRapidoPage() {
     );
   }
 
-  const digits = phoneInput.replace(/\D/g, '');
+  const clientSearchReady = phoneInput.trim().length >= 2;
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -647,26 +970,34 @@ export function TpvRapidoPage() {
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
         {currentStep === 'client' ? (
           <StepContainer step={1} title="Cliente" visible>
-            <div className="flex gap-2">
-              <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
-              <div className="flex-1 relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  ref={phoneRef}
-                  type="tel"
-                  value={phoneInput}
-                  onChange={(e) => {
-                    setPhoneInput(e.target.value);
-                    resetFlowFromClientStep();
-                    setShowCreateForm(false);
-                    setDuplicateWarning(false);
-                    setPhoneShake(false);
-                  }}
-                  placeholder="Teléfono del cliente..."
-                  className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
-                  autoComplete="off"
-                />
+            <div className="flex flex-col gap-1">
+              <label className={LABEL_CLASS}>Teléfono o nombre del cliente</label>
+              <div className="flex gap-2">
+                <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  <input
+                    ref={phoneRef}
+                    type="text"
+                    inputMode="search"
+                    value={phoneInput}
+                    onChange={(e) => {
+                      setPhoneInput(e.target.value);
+                      resetFlowFromClientStep();
+                      setShowCreateForm(false);
+                      setNewClientPhone('');
+                      setDuplicateWarning(false);
+                      setPhoneShake(false);
+                    }}
+                    placeholder="Ej. 612… o María García"
+                    className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
+                    autoComplete="off"
+                  />
+                </div>
               </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).
+              </p>
             </div>
 
             {isSearching && (
@@ -690,12 +1021,16 @@ export function TpvRapidoPage() {
             {!showCreateForm && (
               <div className="mt-3 flex items-center justify-between gap-2">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {(!isSearching && results.length === 0 && digits.length >= 6)
+                  {(!isSearching && results.length === 0 && clientSearchReady)
                     ? 'No se encontró ningún cliente'
                     : 'Si no aparece, puedes crear cliente manualmente'}
                 </p>
                 <button
-                  onClick={() => setShowCreateForm(true)}
+                  onClick={() => {
+                    const d = phoneInput.replace(/\D/g, '');
+                    setNewClientPhone(d.length >= 6 ? phoneInput.replace(/\s+/g, ' ').trim() : '');
+                    setShowCreateForm(true);
+                  }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-medium text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -719,12 +1054,25 @@ export function TpvRapidoPage() {
                 </div>
                 <div>
                   <label className={LABEL_CLASS}>Teléfono *</label>
-                  <input value={phoneInput} readOnly className={`${INPUT_CLASS} bg-gray-100 dark:bg-gray-700`} />
+                  <input
+                    value={newClientPhone}
+                    onChange={(e) => setNewClientPhone(e.target.value)}
+                    type="tel"
+                    inputMode="tel"
+                    className={`${INPUT_CLASS} font-mono`}
+                    placeholder="Solo números del móvil"
+                  />
                 </div>
                 <div>
                   <label className={LABEL_CLASS}>Calle *</label>
-                  <input value={newClientStreet} onChange={(e) => setNewClientStreet(e.target.value)} className={INPUT_CLASS} placeholder="Dirección completa" />
+                  <input value={newClientStreet} onChange={(e) => setNewClientStreet(e.target.value)} className={INPUT_CLASS} placeholder="Calle, número, piso…" />
                 </div>
+                {isDeliveryBusiness && (
+                  <div>
+                    <label className={LABEL_CLASS}>Ciudad *</label>
+                    <input value={newClientCity} onChange={(e) => setNewClientCity(e.target.value)} className={INPUT_CLASS} placeholder="Ciudad" />
+                  </div>
+                )}
                 <div>
                   <label className={LABEL_CLASS}>Observaciones</label>
                   <input value={newClientNotes} onChange={(e) => setNewClientNotes(e.target.value)} className={INPUT_CLASS} placeholder="Alergias, portal, piso..." />
@@ -740,7 +1088,15 @@ export function TpvRapidoPage() {
                   </select>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={() => setShowCreateForm(false)} className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCreateForm(false);
+                      setNewClientPhone('');
+                      setNewClientCity('');
+                    }}
+                    className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
                     Cancelar
                   </button>
                   <button onClick={handleCreateClient} disabled={creatingClient} className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50">
@@ -965,9 +1321,10 @@ export function TpvRapidoPage() {
 
             {selectedClient && habitualProducts.length > 0 && (
               <div className="mt-3 mb-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                  Pedido habitual
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-0.5">
+                  Suele pedir (historial)
                 </p>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Basado en pedidos anteriores de este cliente.</p>
                 <div className="flex flex-wrap gap-2">
                   {habitualProducts.map((item) => (
                     <button
@@ -978,6 +1335,34 @@ export function TpvRapidoPage() {
                       <Plus className="w-3 h-3" />
                       <span className="truncate max-w-[180px]">{item.name}</span>
                       <span className="text-[11px] opacity-80">x{clientProductScores[item._id] || 0}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {cart.length > 0 && crossSellProducts.length > 0 && (
+              <div className="mt-3 mb-2 rounded-xl border border-violet-200/80 dark:border-violet-800/80 bg-violet-50/90 dark:bg-violet-950/30 px-3 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300 mb-0.5 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Venta cruzada · suelen combinarlo
+                </p>
+                <p className="text-[10px] text-violet-600/90 dark:text-violet-400/90 mb-2">
+                  {selectedClient?.id
+                    ? 'Según tu histórico y el de otros pedidos recientes.'
+                    : 'Según pedidos recientes del negocio.'}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {crossSellProducts.map((item) => (
+                    <button
+                      key={`cross-${item._id}`}
+                      type="button"
+                      onClick={() => addToCart(item)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-gray-900 text-violet-900 dark:text-violet-100 text-xs font-medium hover:bg-violet-100/80 dark:hover:bg-violet-900/40 transition-colors shadow-sm"
+                    >
+                      <Plus className="w-3 h-3 shrink-0" />
+                      <span className="truncate max-w-[160px]">{item.name}</span>
+                      <span className="text-[11px] opacity-75 tabular-nums">{formatPrice(item.unitPrice)}</span>
                     </button>
                   ))}
                 </div>
@@ -1081,9 +1466,116 @@ export function TpvRapidoPage() {
                       </div>
                     ))}
                   </div>
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                    <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+                      Promoción
+                    </label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setPromoMode('none')}
+                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors ${
+                          promoMode === 'none'
+                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                        }`}
+                      >
+                        Ninguna
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPromoMode('code')}
+                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors ${
+                          promoMode === 'code'
+                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                        }`}
+                      >
+                        Código
+                      </button>
+                      <button
+                        type="button"
+                        disabled={clientPromos.length === 0}
+                        onClick={() => setPromoMode('client')}
+                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors disabled:opacity-50 ${
+                          promoMode === 'client'
+                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                        }`}
+                        title={clientPromos.length === 0 ? 'Este cliente no tiene promociones' : 'Usar promo del cliente'}
+                      >
+                        Cliente
+                      </button>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      {promoMode === 'client' ? (
+                        <select
+                          value={selectedClientPromoId}
+                          onChange={(e) => setSelectedClientPromoId(e.target.value)}
+                          className={`${INPUT_CLASS} h-10 py-2 min-w-0 flex-1`}
+                        >
+                          <option value="">Selecciona promo…</option>
+                          {clientPromos.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.nombre} ({String(p.tipo || '').toUpperCase()})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <>
+                          <input
+                            value={promoCodeInput}
+                            onChange={(e) => setPromoCodeInput(e.target.value)}
+                            className={`${INPUT_CLASS} uppercase h-10 py-2 min-w-0 flex-1`}
+                            placeholder="Ej. PROMO123"
+                            disabled={promoMode !== 'code'}
+                          />
+                          {appliedPromo ? (
+                            <button
+                              type="button"
+                              onClick={clearPromoCode}
+                              className="px-3 h-10 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold hover:bg-white/70 dark:hover:bg-gray-800 transition-colors shrink-0"
+                              title="Quitar código"
+                            >
+                              Quitar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={applyPromoCode}
+                              className="px-3 h-10 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50 shrink-0"
+                              disabled={promoMode !== 'code'}
+                            >
+                              Aplicar
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {promoMode === 'code' && appliedPromo && (
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2 font-semibold break-words">
+                        Aplicado: {appliedPromo.code}
+                      </p>
+                    )}
+                    {promoMode === 'client' && clientPromoSelected && (
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2 font-semibold break-words">
+                        Aplicado: {clientPromoSelected.nombre}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Subtotal</span>
+                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Descuento</span>
+                    <span className={`text-xs font-bold tabular-nums ${discountAmount > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                      -{formatPrice(discountAmount)}
+                    </span>
+                  </div>
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
                     <span className="font-bold text-gray-900 dark:text-gray-100">Total</span>
-                    <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
+                    <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(finalTotal)}</span>
                   </div>
                   <div className="flex justify-end mt-3">
                     <button
@@ -1133,7 +1625,7 @@ export function TpvRapidoPage() {
                     inputMode="decimal"
                     value={cashGiven}
                     onChange={(e) => setCashGiven(e.target.value)}
-                    placeholder={formatPrice(cartTotal)}
+                    placeholder={formatPrice(finalTotal)}
                     className={`${INPUT_CLASS} text-lg font-medium pr-8`}
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
@@ -1202,9 +1694,9 @@ export function TpvRapidoPage() {
                 {cartCount}
               </span>
             )}
-            {cartTotal > 0 && (
+            {finalTotal > 0 && (
               <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
-                {formatPrice(cartTotal)}
+                {formatPrice(finalTotal)}
               </span>
             )}
           </div>

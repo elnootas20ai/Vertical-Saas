@@ -7,7 +7,6 @@ import {
   Users,
   Kanban,
 } from 'lucide-react';
-
 const NAV_ITEMS = [
   { id: 'dashboard', path: '/saas/dashboard', icon: LayoutDashboard, label: 'Inicio' },
   { id: 'vehicles',  path: '/saas/vehicles',  icon: Car,             label: 'Vehículos' },

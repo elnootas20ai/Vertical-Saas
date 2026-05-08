@@ -5,11 +5,10 @@ import {
   Info, Trophy,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useApp, type Client, type ClientAddress, type PaymentMethod, type ClientCreatedFrom } from '../../context/AppContext';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
-import { createClientRequest } from '../../lib/crmApi';
 import { getDniOrNieError, getCifError } from '../../lib/dniCifValidator';
-import type { Client, ClientAddress, PaymentMethod, ClientCreatedFrom } from '../../context/AppContext';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -120,6 +119,7 @@ export function NuevoClienteModal({
   initialData, vincularA, perfil: perfilProp,
 }: NuevoClienteModalProps) {
   const { user } = useAuth();
+  const { addClient } = useApp();
   const userId = user?.user_id || '';
   const effectivePerfil: Perfil = perfilProp || (MANAGER_ROLES.includes(user?.role || '') ? 'gerente' : 'trabajador');
   const isGerente = effectivePerfil === 'gerente';
@@ -299,10 +299,13 @@ export function NuevoClienteModal({
         createdFrom: contexto as ClientCreatedFrom,
       };
 
-      const result = await createClientRequest(userId, clientData as Client);
+      const created = await addClient({
+        ...clientData,
+        phonePrefix: '+34',
+      } as Omit<Client, 'id' | 'createdAt'>);
 
-      if (result.client) {
-        onClientCreated(result.client);
+      if (created) {
+        onClientCreated(created);
         onClose();
       }
     } catch {

@@ -12,7 +12,7 @@ import { GuidedStepsPopup } from './GuidedStepsPopup';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
-import { Mail, X } from 'lucide-react';
+import { Mail, X, ArrowLeft } from 'lucide-react';
 import { EMAIL_SKIP_KEY } from '../../pages/auth/VerifyEmailPending';
 
 interface LayoutProps {
@@ -20,6 +20,30 @@ interface LayoutProps {
   title: string;
   subtitle?: string;
   noPadding?: boolean;
+  titleClassName?: string;
+  subtitleClassName?: string;
+}
+
+/** Navegación desde Centro Operativo (delivery): barra compacta para volver sin perder contexto */
+function DeliveryOpsReturnStrip() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fromOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
+  if (!fromOps || location.pathname === '/saas/delivery-ops') return null;
+
+  return (
+    <div className="mb-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 flex flex-wrap items-center gap-2 shadow-sm">
+      <button
+        type="button"
+        onClick={() => navigate('/saas/delivery-ops')}
+        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold hover:opacity-90 transition-opacity"
+      >
+        <ArrowLeft className="w-4 h-4 shrink-0" />
+        Volver al Centro Operativo
+      </button>
+      <span className="text-xs text-gray-500 dark:text-gray-400">Abriste esta pantalla desde Ops</span>
+    </div>
+  );
 }
 
 function UnverifiedEmailBanner() {
@@ -65,7 +89,7 @@ function UnverifiedEmailBanner() {
   );
 }
 
-export function Layout({ children, title, subtitle, noPadding }: LayoutProps) {
+export function Layout({ children, title, subtitle, noPadding, titleClassName, subtitleClassName }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
@@ -208,6 +232,8 @@ export function Layout({ children, title, subtitle, noPadding }: LayoutProps) {
         <Topbar
           title={title}
           subtitle={subtitle}
+          titleClassName={titleClassName}
+          subtitleClassName={subtitleClassName}
           onToggleSidebar={handleToggleSidebar}
           onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
         />
@@ -225,6 +251,7 @@ export function Layout({ children, title, subtitle, noPadding }: LayoutProps) {
         {/* Extra bottom padding on mobile so content clears the BottomNav */}
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
           <ErrorBoundary>
+            <DeliveryOpsReturnStrip />
             {children}
           </ErrorBoundary>
         </main>

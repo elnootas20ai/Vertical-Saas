@@ -49,6 +49,8 @@ export interface DeliveryOrderItem {
   notes?: string;
   catalogItemId?: string;
   category?: string;
+  /** Marca(s) deducidas desde el catálogo (para reporting interno). */
+  brandIds?: string[];
   extras?: string[];
   allergens?: string[];
   ingredients?: { name: string; quantity: string }[];
