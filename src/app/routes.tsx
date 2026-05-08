@@ -102,6 +102,7 @@ import { DeliveryCatalog } from './pages/saas/DeliveryCatalog';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
+import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { ChangelogPage } from './pages/saas/ChangelogPage';
 import { WorkOrderStatus } from './pages/public/WorkOrderStatus';
 import { WebStorefront } from './pages/public/WebStorefront';
@@ -490,8 +491,8 @@ export const router = createBrowserRouter([
           { path: 'delivery-kitchen', Component: DeliveryKitchen },
           { path: 'delivery-montaje', Component: DeliveryMontaje },
           { path: 'delivery-catalog', Component: DeliveryCatalog },
-          { path: 'vertical/delivery/tpv', Component: TpvRapidoPage },
-          { path: 'vertical/delivery/caja', Component: CajaPage },
+          { path: 'vertical/delivery/tpv', element: <RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal> },
+          { path: 'vertical/delivery/caja', element: <RequirePdvTerminal><CajaPage /></RequirePdvTerminal> },
           { path: 'delivery-crm', Component: DeliveryCrm },
           { path: 'delivery-crm/worker', Component: DeliveryCrmWorker },
           { path: 'configuracion', Component: ConfiguracionGeneral },

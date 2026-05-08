@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
@@ -176,25 +177,17 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
+  workerOptions: { id: string; name: string }[];
 }) {
-  const [workerName, setWorkerName] = useState(() => {
-    try {
-      return localStorage.getItem('vertial.tpvRapido.cashierName') || '';
-    } catch {
-      return '';
-    }
-  });
+  const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
-  const [manualTerminal, setManualTerminal] = useState('');
-  const [manualDatafon, setManualDatafon] = useState('');
-  const [manualPrinter, setManualPrinter] = useState('');
   const [counts, setCounts] = useState<CashDenominationCount>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>(() => (workerOptions.length === 1 ? workerOptions[0].id : ''));
   const total = calcDenominationTotal(counts);
   const hasCounted = total > 0 || Object.values(counts).some(v => v !== undefined && v > 0);
 
@@ -203,19 +196,29 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
   const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
 
-  const effectiveTerminalName = selectedTerminal ? (selectedTerminal.code || selectedTerminal.name) : manualTerminal;
-  const effectiveDatafon = selectedTerminal?.datafonName || manualDatafon;
-  const effectivePrinter = selectedTerminal?.printerName || manualPrinter;
+  const effectiveTerminalName = selectedTerminal ? (selectedTerminal.code || selectedTerminal.name) : '';
+  const effectiveDatafon = selectedTerminal?.datafonName || '';
+  const effectivePrinter = selectedTerminal?.printerName || '';
 
-  const canOpen = workerName.trim() && (selectedTerminal || manualTerminal.trim());
+  const effectiveWorkerName = useCallback(() => {
+    const w = workerOptions.find((x) => x.id === selectedWorkerId);
+    return (w?.name || '').trim();
+  }, [workerOptions, selectedWorkerId]);
+
+  const hasWorkers = workerOptions.length > 0;
+  const canOpen = hasWorkers && effectiveWorkerName() && !!selectedPdv && !!selectedTerminal;
 
   useEffect(() => {
-    if (workerName.trim()) return;
-    try {
-      const cached = localStorage.getItem('vertial.tpvRapido.cashierName') || '';
-      if (cached.trim()) setWorkerName(cached);
-    } catch { /* ignore */ }
-  }, [workerName]);
+    if (workerOptions.length === 0) return;
+    if (selectedWorkerId) return;
+    // Intenta seleccionar por nombre cacheado
+    const cached = (() => {
+      try { return localStorage.getItem('vertial.tpvRapido.cashierName') || ''; } catch { return ''; }
+    })().trim().toLowerCase();
+    if (!cached) return;
+    const match = workerOptions.find((w) => w.name.trim().toLowerCase() === cached);
+    if (match) setSelectedWorkerId(match.id);
+  }, [workerOptions, selectedWorkerId]);
 
   const handleSelectPdv = (pdvId: string) => {
     setSelectedPdvId(pdvId);
@@ -223,8 +226,9 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
   };
 
   const handleSubmit = () => {
+    const wName = effectiveWorkerName();
     onOpen({
-      workerName,
+      workerName: wName,
       pointOfSaleId: selectedPdv?._id || '',
       pointOfSaleName: selectedPdv?.name || '',
       terminalId: selectedTerminal?.id || '',
@@ -238,9 +242,25 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
   const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg" style={{ maxHeight: '92vh' }}>
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-3 sm:p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                if (window.history.length > 1) window.history.back();
+                else window.location.href = '/saas/delivery-ops';
+              } catch {
+                // ignore
+              }
+            }}
+            className="absolute right-3 top-3 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            aria-label="Cerrar"
+            title="Cerrar"
+          >
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
           <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Unlock className="w-8 h-8 text-emerald-600" />
           </div>
@@ -248,14 +268,30 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Selecciona punto de venta, terminal y cuenta el efectivo</p>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(92vh - 240px)' }}>
+        <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 pb-24">
           {/* Worker */}
           <div>
             <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Trabajador *</label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input className={`${inputCls} pl-10`} placeholder="Nombre del trabajador" value={workerName} onChange={e => setWorkerName(e.target.value)} autoFocus />
-            </div>
+            {hasWorkers ? (
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <select
+                  value={selectedWorkerId}
+                  onChange={(e) => setSelectedWorkerId(e.target.value)}
+                  className={`${inputCls} pl-10`}
+                  autoFocus
+                >
+                  <option value="">Selecciona…</option>
+                  {workerOptions.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                No se detecta ningún miembro en <span className="font-bold">Equipo</span>. No puedes abrir caja hasta conectar el equipo.
+              </div>
+            )}
           </div>
 
           {/* Point of Sale selection */}
@@ -272,64 +308,71 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
                   </button>
                 ))}
               </div>
+              <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Terminal, datáfono e impresora quedan ligados al PDV seleccionado.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors"
+                  title="Configurar PDV/terminales (PRO)"
+                >
+                  Multi-PDV (PRO)
+                </button>
+              </div>
+            </div>
+          )}
+          {!hasPdvs && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
+              <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
+                Para abrir caja necesitas configurar al menos 1 punto de venta y su terminal.
+              </p>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
+                  className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
+                >
+                  Configurar PDV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
+                  className="px-4 py-2 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-sm font-semibold"
+                >
+                  Activar multi-PDV (PRO)
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Terminal selection from PdV, or manual */}
-          {selectedPdv && availableTerminals.length > 0 ? (
+          {/* Terminal selection from PDV (required) */}
+          {selectedPdv ? (
             <div>
               <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><Monitor className="w-3 h-3 inline mr-1" />Terminal *</label>
-              <div className="grid grid-cols-2 gap-2">
-                {availableTerminals.map(t => (
-                  <button key={t.id} onClick={() => setSelectedTerminalId(t.id)}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${selectedTerminalId === t.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                    <div className="font-bold text-sm text-gray-900 dark:text-gray-100">{t.code || t.name}</div>
-                    {t.name && t.code && <div className="text-xs text-gray-500 dark:text-gray-400">{t.name}</div>}
-                    <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                      {t.datafonName && <span className="flex items-center gap-0.5"><Smartphone className="w-2.5 h-2.5" />{t.datafonName}</span>}
-                      {t.printerName && <span className="flex items-center gap-0.5"><Printer className="w-2.5 h-2.5" />{t.printerName}</span>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Terminal *</label>
-                <div className="relative">
-                  <Monitor className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input className={`${inputCls} pl-10`} placeholder="Caja 1" value={manualTerminal} onChange={e => setManualTerminal(e.target.value)} />
+              {availableTerminals.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {availableTerminals.map(t => (
+                    <button key={t.id} onClick={() => setSelectedTerminalId(t.id)}
+                      className={`p-3 rounded-xl border-2 text-left transition-all ${selectedTerminalId === t.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
+                      <div className="font-bold text-sm text-gray-900 dark:text-gray-100">{t.code || t.name}</div>
+                      {t.name && t.code && <div className="text-xs text-gray-500 dark:text-gray-400">{t.name}</div>}
+                      <div className="flex gap-2 mt-1 text-xs text-gray-400">
+                        {t.datafonName && <span className="flex items-center gap-0.5"><Smartphone className="w-2.5 h-2.5" />{t.datafonName}</span>}
+                        {t.printerName && <span className="flex items-center gap-0.5"><Printer className="w-2.5 h-2.5" />{t.printerName}</span>}
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Datáfono</label>
-                <div className="relative">
-                  <Smartphone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input className={`${inputCls} pl-10`} placeholder="Datáfono 1" value={manualDatafon} onChange={e => setManualDatafon(e.target.value)} />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Advanced options */}
-          {!selectedTerminal && (
-            <>
-              <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-                {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                Impresora y más opciones
-              </button>
-              {showAdvanced && (
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Impresora</label>
-                  <div className="relative">
-                    <Printer className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input className={`${inputCls} pl-10`} placeholder="Impresora tickets" value={manualPrinter} onChange={e => setManualPrinter(e.target.value)} />
-                  </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  Este PDV no tiene terminales activos. Configúralos en Ajustes.
                 </div>
               )}
-            </>
-          )}
+            </div>
+          ) : null}
 
           {/* Selected terminal info summary */}
           {selectedTerminal && (
@@ -350,10 +393,26 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
           </div>
         </div>
 
-        <div className="p-6 border-t border-gray-200 dark:border-gray-700">
-          <button onClick={handleSubmit}
+        <div className="p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white/95 dark:bg-gray-800/95 backdrop-blur sticky bottom-0">
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                if (window.history.length > 1) window.history.back();
+                else window.location.href = '/saas/delivery-ops';
+              } catch {
+                // ignore
+              }
+            }}
+            className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Volver
+          </button>
+          <button
+            onClick={handleSubmit}
             disabled={!canOpen || parentLoading}
-            className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}>
+            className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}
+          >
             <Unlock className="w-4 h-4" /> Abrir caja{selectedPdv ? ` — ${selectedPdv.name}` : ''} — {total.toFixed(2)}€ de fondo
           </button>
           {!hasCounted && canOpen && (
@@ -751,6 +810,7 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.user_id || user?.id || '';
+  const { currentBusiness } = useBusiness();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
@@ -758,6 +818,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [showClosing, setShowClosing] = useState(false);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
+  const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
 
   const activeSession = sessions.find(s => s.status === 'open') || null;
 
@@ -829,6 +890,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       });
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       setShowClosing(false);
+      setPostCloseSession(updated);
       toast.success(`Caja cerrada. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`);
     } catch {
       toast.error('Error al cerrar la caja');
@@ -922,8 +984,96 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     );
   }
 
+  if (!activeSession && postCloseSession) {
+    const expected = calcExpectedCash(postCloseSession);
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
+            <button
+              type="button"
+              onClick={() => {
+                // Salir sin forzar apertura; volvemos a la vista anterior.
+                try {
+                  if (window.history.length > 1) window.history.back();
+                  else window.location.href = '/saas/delivery-ops';
+                } catch {
+                  // ignore
+                }
+              }}
+              className="absolute right-3 top-3 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              aria-label="Cerrar"
+              title="Cerrar"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-8 h-8 text-red-600" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Caja cerrada</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              {postCloseSession.pointOfSaleName ? `${postCloseSession.pointOfSaleName} · ` : ''}{postCloseSession.terminalName}
+            </p>
+          </div>
+          <div className="p-6 space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Efectivo esperado</span>
+              <span className="font-semibold text-gray-900 dark:text-gray-100">{expected.toFixed(2)}€</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Efectivo contado</span>
+              <span className="font-semibold text-gray-900 dark:text-gray-100">{Number(postCloseSession.finalCashAmount || 0).toFixed(2)}€</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Diferencia</span>
+              <span className={`font-bold ${Number(postCloseSession.difference || 0) === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {(postCloseSession.difference || 0) >= 0 ? '+' : ''}{Number(postCloseSession.difference || 0).toFixed(2)}€
+              </span>
+            </div>
+          </div>
+          <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => setPostCloseSession(null)}
+              className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Abrir otra caja
+            </button>
+            <button
+              onClick={() => {
+                try { window.location.href = '/saas/vertical/delivery/caja'; } catch { /* ignore */ }
+              }}
+              className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+            >
+              Ir a Caja
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  if (window.history.length > 1) window.history.back();
+                  else window.location.href = '/saas/delivery-ops';
+                } catch { /* ignore */ }
+              }}
+              className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Volver
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!activeSession) {
-    return <OpeningScreen onOpen={handleOpen} loading={loading} pointsOfSale={pointsOfSale} />;
+    const members = (currentBusiness?.members || []).map((m: any) => ({
+      id: String(m.user_id || m.id || '').trim(),
+      name: String(m.fullName || m.email || 'Trabajador').trim(),
+    })).filter((m: any) => m.id && m.name);
+    const uniq = new Map<string, { id: string; name: string }>();
+    for (const m of members) uniq.set(m.id, m);
+    if (user?.id) uniq.set(String(user.id), { id: String(user.id), name: String(user.fullName || user.email || 'Gerente').trim() });
+    const workerOptions = Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+
+    return <OpeningScreen onOpen={handleOpen} loading={loading} pointsOfSale={pointsOfSale} workerOptions={workerOptions} />;
   }
 
   return (

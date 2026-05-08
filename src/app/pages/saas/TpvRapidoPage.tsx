@@ -946,7 +946,50 @@ function TpvRapidoPageInner() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <TpvFullscreenShell onBack={() => navigate('/saas/delivery-ops')}>
+    <TpvFullscreenShell
+      onBack={() => navigate('/saas/delivery-ops')}
+      topSlot={(
+        <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-1">
+            <button
+              type="button"
+              onClick={register.requestCashCount}
+              className="px-2.5 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-bold hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+              title="Arqueo"
+            >
+              Arqueo
+            </button>
+            <button
+              type="button"
+              onClick={register.requestIncident}
+              className="px-2.5 py-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+              title="Incidencia"
+            >
+              Incidencia
+            </button>
+            <button
+              type="button"
+              onClick={register.requestClose}
+              className="px-2.5 py-1.5 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-bold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+              title="Cerrar caja"
+            >
+              Cerrar
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/saas/vertical/delivery/caja')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors max-w-[55vw]"
+            title={`Caja: ${register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}${register.session.terminalName} · ${register.session.workerName}`}
+          >
+            <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            <span className="truncate">
+              Caja: {register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}{register.session.terminalName}
+            </span>
+          </button>
+        </div>
+      )}
+    >
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-28 px-2 md:px-4`}>
 
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
@@ -1724,11 +1767,19 @@ function StepContainer({ step, title, visible, children, wide = false }: { step:
   );
 }
 
-function TpvFullscreenShell({ children, onBack }: { children: ReactNode; onBack: () => void }) {
+function TpvFullscreenShell({
+  children,
+  onBack,
+  topSlot,
+}: {
+  children: ReactNode;
+  onBack: () => void;
+  topSlot?: ReactNode;
+}) {
   return (
     <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
       <div className="sticky top-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-        <div className="max-w-[1320px] mx-auto px-3 py-2.5">
+        <div className="max-w-[1320px] mx-auto px-3 py-2.5 flex items-center gap-2">
           <button
             onClick={onBack}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
@@ -1736,6 +1787,8 @@ function TpvFullscreenShell({ children, onBack }: { children: ReactNode; onBack:
             <ArrowLeft className="w-4 h-4" />
             Volver
           </button>
+          <div className="flex-1 min-w-0" />
+          {topSlot}
         </div>
       </div>
       <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>

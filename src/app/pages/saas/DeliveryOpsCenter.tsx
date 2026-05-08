@@ -94,7 +94,7 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
       ) : (
         <button
           type="button"
-          onClick={() => nav('/saas/settings/sales-points')}
+          onClick={() => nav('/saas/settings/centros-de-trabajo')}
           className="px-3 py-2 rounded-lg text-sm font-semibold border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm hover:opacity-95 transition-opacity"
           title="Activa multi-tienda (PRO)"
         >
