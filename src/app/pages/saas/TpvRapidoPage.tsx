@@ -11,10 +11,6 @@ import {
   listCatalogItemsRequest,
   listDeliveryOrdersRequest,
   createDeliveryOrderRequest,
-  listTpvRegisterSessionsRequest,
-  updateTpvRegisterSessionRequest,
-  type TpvRegisterSession,
-  type TpvRegisterTransaction,
   type CatalogItem,
   type DeliveryOrder,
   type DeliveryOrderItem,
@@ -26,6 +22,7 @@ import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
+import { TpvRegisterGate, useTpvRegister } from '../../components/saas/TpvRegisterGate';
 import {
   ArrowLeft,
   Search,
@@ -107,7 +104,16 @@ function formatPrice(n: number): string {
 }
 
 export function TpvRapidoPage() {
+  return (
+    <TpvRegisterGate>
+      <TpvRapidoPageInner />
+    </TpvRegisterGate>
+  );
+}
+
+function TpvRapidoPageInner() {
   const { user } = useAuth();
+  const register = useTpvRegister();
   const { addClient, clients } = useApp();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
@@ -180,7 +186,6 @@ export function TpvRapidoPage() {
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [registerLinkError, setRegisterLinkError] = useState<string | null>(null);
 
   const cashierOptions = useMemo(() => {
     const members = currentBusiness?.members || [];
@@ -209,6 +214,14 @@ export function TpvRapidoPage() {
       const manager = cashierOptions.find((c) => ['admin', 'owner', 'manager', 'gerente'].includes(c.role.toLowerCase()));
       setSelectedCashierId(manager?.id || cashierOptions[0].id);
     }
+  }, [cashierOptions, selectedCashierId]);
+
+  useEffect(() => {
+    try {
+      const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
+      const name = cashier?.name?.trim() || '';
+      if (name) localStorage.setItem('vertial.tpvRapido.cashierName', name);
+    } catch { /* ignore */ }
   }, [cashierOptions, selectedCashierId]);
 
   // ─── Load catalog ──────────────────────────────────────────────────────────
@@ -774,7 +787,6 @@ export function TpvRapidoPage() {
       if (!paymentMethod) return;
 
       setSubmitting(true);
-      setRegisterLinkError(null);
       try {
         const items: DeliveryOrderItem[] = cart.map((ci) => ({
           id: uuidv4(),
@@ -826,46 +838,21 @@ export function TpvRapidoPage() {
 
         const created = await createDeliveryOrderRequest(userId, orderData);
 
-        // Link ticket to open cash register session (if any)
-        try {
-          const sessions = await listTpvRegisterSessionsRequest(userId);
-          const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
-          const open = (sessions || []).find((s) =>
-            s.status === 'open'
-            && (selectedCashierId ? s.workerId === selectedCashierId : true),
-          ) || (sessions || []).find((s) => s.status === 'open') || null;
-
-          if (open) {
-            const pm = (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta' || paymentMethod === 'bizum')
-              ? paymentMethod
-              : 'otro';
-            const tx: TpvRegisterTransaction = {
-              id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              type: 'sale',
-              paymentMethod: pm as any,
-              amount: Number(finalTotal || 0),
-              description: `TPV rápido · ${created.customerName || selectedClient.name}`,
-              orderId: created.id,
-              orderNumber: created.orderNumber,
-              channel: 'tpv',
-              date: new Date().toISOString(),
-              registeredBy: cashier?.name || user?.fullName || 'TPV',
-              linkedDeliveryOrderId: created._id,
-            };
-
-            const next: TpvRegisterSession = {
-              ...open,
-              transactions: [...(open.transactions || []), tx],
-              linkedOrderIds: Array.from(new Set([...(open.linkedOrderIds || []), created._id])),
-              updatedAt: new Date().toISOString(),
-            };
-            await updateTpvRegisterSessionRequest(userId, next);
-          } else {
-            setRegisterLinkError('No hay caja abierta: el ticket se guardó, pero no se registró en Caja.');
-          }
-        } catch {
-          setRegisterLinkError('El ticket se guardó, pero falló el registro en Caja.');
-        }
+        const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
+        const pm = (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta' || paymentMethod === 'bizum')
+          ? paymentMethod
+          : 'otro';
+        await register.addTransaction({
+          type: 'sale',
+          paymentMethod: pm as any,
+          amount: Number(finalTotal || 0),
+          description: `TPV rápido · ${created.customerName || selectedClient.name}`,
+          orderId: created.id,
+          orderNumber: created.orderNumber,
+          channel: 'tpv',
+          registeredBy: cashier?.name || user?.fullName || 'TPV',
+          linkedDeliveryOrderId: created._id,
+        });
 
         setCreatedOrder(created);
         toast.success('Pedido creado correctamente');
@@ -875,7 +862,7 @@ export function TpvRapidoPage() {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected, register, user?.fullName],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -930,11 +917,6 @@ export function TpvRapidoPage() {
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 {createdOrder.customerName} · {formatPrice(createdOrder.totalAmount)}
               </p>
-              {registerLinkError && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-semibold">
-                  {registerLinkError}
-                </p>
-              )}
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
                 {createdOrder.items.length} producto{createdOrder.items.length !== 1 ? 's' : ''} ·{' '}
                 {createdOrder.deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}

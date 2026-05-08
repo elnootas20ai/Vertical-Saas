@@ -181,7 +181,13 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
   loading: boolean;
   pointsOfSale: PointOfSale[];
 }) {
-  const [workerName, setWorkerName] = useState('');
+  const [workerName, setWorkerName] = useState(() => {
+    try {
+      return localStorage.getItem('vertial.tpvRapido.cashierName') || '';
+    } catch {
+      return '';
+    }
+  });
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
   const [manualTerminal, setManualTerminal] = useState('');
@@ -202,6 +208,14 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale }: {
   const effectivePrinter = selectedTerminal?.printerName || manualPrinter;
 
   const canOpen = workerName.trim() && (selectedTerminal || manualTerminal.trim());
+
+  useEffect(() => {
+    if (workerName.trim()) return;
+    try {
+      const cached = localStorage.getItem('vertial.tpvRapido.cashierName') || '';
+      if (cached.trim()) setWorkerName(cached);
+    } catch { /* ignore */ }
+  }, [workerName]);
 
   const handleSelectPdv = (pdvId: string) => {
     setSelectedPdvId(pdvId);
