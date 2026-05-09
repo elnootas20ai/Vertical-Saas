@@ -709,6 +709,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     location.pathname === item.path ||
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
     (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
+    (item.id === 'salesPoints-settings' && location.pathname.startsWith('/saas/settings/centros-de-trabajo')) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
     (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
@@ -784,16 +785,20 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     path: `/saas/tpv/punto/${sp._id}`,
   }));
 
-  const salesPointsGroup: (SidebarGroup & { items: SidebarItem[] }) | null =
-    salesPointItems.length > 0
-      ? {
-          id: 'salesPoints',
-          label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
-          icon: <Building2 className="w-4 h-4 shrink-0" />,
-          itemIds: salesPointItems.map((i) => i.id),
-          items: salesPointItems,
-        }
-      : null;
+  const salesPointsSettingsItem: SidebarItem = {
+    id: 'salesPoints-settings',
+    label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
+    icon: <Building2 className="w-5 h-5" />,
+    path: '/saas/settings/centros-de-trabajo',
+  };
+
+  const salesPointsGroup: (SidebarGroup & { items: SidebarItem[] }) = {
+    id: 'salesPoints',
+    label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
+    icon: <Building2 className="w-4 h-4 shrink-0" />,
+    itemIds: [salesPointsSettingsItem.id, ...salesPointItems.map((i) => i.id)],
+    items: [salesPointsSettingsItem, ...salesPointItems],
+  };
 
   const groupedVisibleItems = (() => {
     const mapped = filteredGroups
@@ -804,11 +809,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
           .filter((item): item is SidebarItem => Boolean(item)),
       }))
       .filter((group) => group.items.length > 0);
-    if (salesPointsGroup) {
-      const [home, ...rest] = mapped;
-      return [home, salesPointsGroup, ...rest];
-    }
-    return mapped;
+    const [home, ...rest] = mapped;
+    return [home, salesPointsGroup, ...rest];
   })();
 
   const bottomItemIds = allowedBottom;

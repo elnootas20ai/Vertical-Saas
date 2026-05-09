@@ -201,11 +201,17 @@ function computeAlerts(biz: Business | null, subscription: { status: string }): 
   }
 
   if (['trial_expired', 'payment_failed', 'suspended'].includes(subscription.status)) {
+    const billingMsg =
+      subscription.status === 'payment_failed'
+        ? 'Error en el cobro del plan. Actualiza el método de pago.'
+        : subscription.status === 'suspended'
+          ? 'Cuenta suspendida por impago. Actualiza el método de pago para recuperar el acceso.'
+          : 'Periodo de prueba finalizado o plan sin activar. Elige un plan o renueva para continuar.';
     alerts.push({
       id: 'plan-expired',
       type: 'critical',
-      message: subscription.status === 'payment_failed' ? 'Error en el pago de tu plan' : 'Tu plan ha expirado',
-      action: 'Renovar plan',
+      message: billingMsg,
+      action: subscription.status === 'trial_expired' ? 'Elegir plan' : 'Ir a facturación',
       route: '/saas/settings/facturacion',
     });
   } else if (['trial_expiring', 'grace_period'].includes(subscription.status)) {
