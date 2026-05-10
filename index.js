@@ -2843,6 +2843,13 @@ setInterval(() => runAutoOrdersForAllUsers().catch(() => null), 2 * 3600000);
 // I-05: Backup automático de CouchDB con gzip + rotación
 startBackupScheduler();
 
+// Facturas proveedor por email: polling IMAP (SUPPLIER_INVOICE_IMAP_* y/o credenciales por cuenta en CouchDB)
+setTimeout(() => {
+  startSupplierInvoicePolling().catch((err) =>
+    logger.error({ tag: 'SINV_SCHED', err: err?.message }, 'Error iniciando polling facturas proveedor'),
+  );
+}, 22_000);
+
 // S-06: Subscription lifecycle — trial expiry, grace period, suspension + emails
 startSubscriptionLifecycle();
 

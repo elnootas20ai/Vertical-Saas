@@ -20,11 +20,42 @@ import {
   putDocument,
   couchRequest,
   getDocument,
+  findAccountByUserId,
 } from './couchdb.js';
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
 
 const fakeReq = { headers: {} };
+
+/** Credenciales IMAP guardadas en la cuenta (supplierInvoiceConfig); si no hay módulo habilitado o datos incompletos, {} y se usa solo .env */
+async function buildImapOverridesForUser(userId) {
+  if (!userId) return {};
+  try {
+    const account = await findAccountByUserId(fakeReq, userId);
+    const c = account?.supplierInvoiceConfig;
+    if (!c?.enabled) return {};
+    const host = String(c.imapHost || '').trim();
+    const user = String(c.imapUser || '').trim();
+    const pass = String(c.imapPassword || '').trim();
+    if (!host || !user || !pass) {
+      logger.warn(
+        { tag: 'SINV_PROC', userId },
+        'Facturas por email activadas en cuenta pero IMAP incompleto — se usarán variables SUPPLIER_INVOICE_IMAP_* si existen',
+      );
+      return {};
+    }
+    return {
+      host,
+      port: Number(c.imapPort || 993),
+      user,
+      pass,
+      tls: c.imapTls !== false,
+    };
+  } catch (err) {
+    logger.warn({ tag: 'SINV_PROC', userId, err: err.message }, 'No se pudo leer cuenta para IMAP');
+    return {};
+  }
+}
 
 // ─── OCR interno (reutiliza la misma lógica de /api/ocr/scan) ────────────────
 
@@ -418,17 +449,20 @@ async function emitRealtimeAlert(userId, { title, message, level, route, invoice
 
 // ─── Función principal ───────────────────────────────────────────────────────
 
-export async function processIncomingEmails(userId, imapOverrides = {}) {
+export async function processIncomingEmails(userId, imapOverrides) {
   const summary = { processed: 0, created: 0, alerts: 0, errors: 0, allAlerts: [] };
 
-  if (!isImapConfigured(imapOverrides)) {
-    logger.debug({ tag: 'SINV_PROC' }, 'IMAP no configurado, saltando procesamiento');
+  const resolvedImap =
+    imapOverrides !== undefined ? imapOverrides : await buildImapOverridesForUser(userId);
+
+  if (!isImapConfigured(resolvedImap)) {
+    logger.debug({ tag: 'SINV_PROC', userId }, 'IMAP no configurado (.env ni cuenta), saltando procesamiento');
     return summary;
   }
 
   let emails;
   try {
-    emails = await connectAndFetchNewEmails(imapOverrides);
+    emails = await connectAndFetchNewEmails(resolvedImap);
   } catch (err) {
     logger.error({ tag: 'SINV_PROC', err: err.message }, 'Error obteniendo emails');
     summary.errors++;

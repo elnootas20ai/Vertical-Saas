@@ -23,6 +23,31 @@ async function getActiveUserIds() {
   }
 }
 
+function accountImapReadyForPolling(cfg) {
+  if (!cfg?.enabled) return false;
+  const host = String(cfg.imapHost || '').trim();
+  const user = String(cfg.imapUser || '').trim();
+  const pass = String(cfg.imapPassword || '').trim();
+  return Boolean(host && user && pass);
+}
+
+async function anyAccountHasEnabledImap() {
+  const fakeReq = { headers: {} };
+  try {
+    await ensureDatabase(fakeReq, ACCOUNTS_DB);
+    const accounts = await getAllDocuments(fakeReq, ACCOUNTS_DB);
+    return accounts.some((a) => (
+      a
+      && a.type === 'account'
+      && !a.deletedAt
+      && a.active !== false
+      && accountImapReadyForPolling(a.supplierInvoiceConfig)
+    ));
+  } catch {
+    return false;
+  }
+}
+
 async function runPollCycle() {
   if (running) {
     logger.debug({ tag: 'SINV_SCHED' }, 'Ciclo anterior aún en ejecución, saltando');
@@ -54,15 +79,26 @@ async function runPollCycle() {
   }
 }
 
-export function startSupplierInvoicePolling() {
-  if (!isImapConfigured()) {
-    logger.info({ tag: 'SINV_SCHED' }, 'IMAP no configurado — polling de facturas proveedor desactivado');
-    return;
-  }
-
+export async function startSupplierInvoicePolling() {
   if (process.env.SUPPLIER_INVOICE_POLL_ENABLED === 'false') {
     logger.info({ tag: 'SINV_SCHED' }, 'Polling de facturas proveedor desactivado por variable de entorno');
     return;
+  }
+
+  let imapReady = isImapConfigured();
+  if (!imapReady) {
+    imapReady = await anyAccountHasEnabledImap();
+    if (!imapReady) {
+      logger.info(
+        { tag: 'SINV_SCHED' },
+        'IMAP no configurado en .env ni ninguna cuenta con facturas por email habilitadas — polling desactivado',
+      );
+      return;
+    }
+    logger.info(
+      { tag: 'SINV_SCHED' },
+      'Polling activo usando credenciales por cuenta (sin SUPPLIER_INVOICE_IMAP_* en entorno)',
+    );
   }
 
   logger.info({ tag: 'SINV_SCHED', intervalMs: POLL_INTERVAL_MS }, 'Iniciando polling de facturas proveedor por email');
