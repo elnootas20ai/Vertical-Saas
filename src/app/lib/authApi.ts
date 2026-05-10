@@ -405,17 +405,35 @@ async function request<T>(
     extraHeaders['Authorization'] = `Bearer ${_inMemoryToken}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
+  const url = `${API_BASE}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extraHeaders,
+        ...(init?.headers || {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    const hint =
+      API_BASE
+        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
+        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
+    throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+  }
 
-  const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T>;
+  const rawText = await response.text();
+  let payload = {} as ApiEnvelope<T>;
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText) as ApiEnvelope<T>;
+    } catch {
+      payload = { ok: false, error: rawText.slice(0, 300) } as ApiEnvelope<T>;
+    }
+  }
 
   if (response.status === 401) {
     if (payload.error && !payload.code) {
@@ -432,8 +450,18 @@ async function request<T>(
   }
 
   if (!response.ok || payload.ok === false) {
-    const errMsg = typeof payload.error === 'string' ? payload.error : (payload.error ? JSON.stringify(payload.error) : 'Error inesperado en la API');
-    throw new Error(errMsg);
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      throw new Error(payload.error);
+    }
+    const statusBit = `${response.status} ${response.statusText || ''}`.trim();
+    const bodyBit = rawText && typeof payload.error !== 'string'
+      ? rawText.replace(/\s+/g, ' ').trim().slice(0, 200)
+      : '';
+    throw new Error(
+      bodyBit
+        ? `${statusBit}: ${bodyBit}`
+        : `${statusBit}. La API no devolvió un mensaje de error (¿proxy o ruta /api incorrecta?).`,
+    );
   }
 
   return payload as ApiEnvelope<T>;
