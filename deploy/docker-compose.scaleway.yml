@@ -8,8 +8,10 @@ services:
     volumes:
       - couchdb_data:/opt/couchdb/data
       - couchdb_etc:/opt/couchdb/etc/local.d
+    # Solo localhost (más seguro, Fauxton vía SSH -L): "127.0.0.1:5984:5984"
+    # Acceso Fauxton desde Internet (abrir 5984 en firewall del proveedor + ufw si aplica):
     ports:
-      - "127.0.0.1:5984:5984"
+      - "5984:5984"
 
   app:
     build:

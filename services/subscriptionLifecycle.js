@@ -1,5 +1,4 @@
 import {
-  findAccountByUserId,
   saveAccount,
   getAllDocuments,
   ACCOUNTS_DB,
@@ -21,6 +20,42 @@ const GRACE_HOURS = 72;
 const APP_URL = (process.env.APP_URL || 'http://localhost:3005').replace(/\/+$/, '');
 const BILLING_URL = `${APP_URL}/saas/settings/facturacion`;
 
+/**
+ * SUBSCRIPTION_LIFECYCLE_EMAILS=false → no envía trial/gracia/suspensión/etc. (evita rebotes en staging).
+ * Por defecto: activo.
+ */
+function subscriptionLifecycleOutboundEnabled() {
+  const v = String(process.env.SUBSCRIPTION_LIFECYCLE_EMAILS ?? 'true').trim().toLowerCase();
+  return v !== 'false' && v !== '0' && v !== 'no';
+}
+
+/** Dominios que no reciben correo real en Internet (.local, localhost). */
+function isDeliverableSubscriptionEmail(email) {
+  const e = String(email ?? '').trim().toLowerCase();
+  const at = e.lastIndexOf('@');
+  if (at < 1) return false;
+  const domain = e.slice(at + 1);
+  if (!domain) return false;
+  if (domain === 'localhost' || domain.endsWith('.local')) return false;
+  return true;
+}
+
+/**
+ * @returns {Promise<boolean>} true si se ejecutó el envío
+ */
+async function sendSubscriptionLifecycleOutbound(email, userId, sendFn) {
+  if (!subscriptionLifecycleOutboundEnabled()) {
+    logger.debug({ tag: 'LIFECYCLE', email, userId }, 'Emails ciclo de vida desactivados (SUBSCRIPTION_LIFECYCLE_EMAILS)');
+    return false;
+  }
+  if (!isDeliverableSubscriptionEmail(email)) {
+    logger.info({ tag: 'LIFECYCLE', email, userId }, 'Email ciclo de vida omitido (dominio no entregable)');
+    return false;
+  }
+  await sendFn();
+  return true;
+}
+
 function daysBetween(dateA, dateB) {
   return (dateB.getTime() - dateA.getTime()) / 86400000;
 }
@@ -36,8 +71,9 @@ export async function sendWelcomeEmail(account) {
       account.fullName || account.firstName || '',
       TRIAL_DAYS,
     );
-    await sendEmail({ to: account.email, subject, html });
-    logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Welcome trial email sent');
+    const sent = await sendSubscriptionLifecycleOutbound(account.email, account.user_id, () =>
+      sendEmail({ to: account.email, subject, html }));
+    if (sent) logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Welcome trial email sent');
   } catch (err) {
     logger.error({ tag: 'LIFECYCLE', err: err?.message, userId: account.user_id }, 'Failed to send welcome email');
   }
@@ -56,8 +92,9 @@ export async function sendPaymentSuccessNotification(account) {
       planName,
       billingMode,
     );
-    await sendEmail({ to: account.email, subject, html });
-    logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Payment success email sent');
+    const sent = await sendSubscriptionLifecycleOutbound(account.email, account.user_id, () =>
+      sendEmail({ to: account.email, subject, html }));
+    if (sent) logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Payment success email sent');
   } catch (err) {
     logger.error({ tag: 'LIFECYCLE', err: err?.message, userId: account.user_id }, 'Failed to send payment success email');
   }
