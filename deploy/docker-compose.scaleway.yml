@@ -26,7 +26,11 @@ services:
       APP_URL: ${APP_URL}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
 
-      COUCHDB_URL: ${COUCHDB_URL}
+      # Couch vive en el servicio `couchdb` de esta misma red. NO uses aquí 127.0.0.1 ni la IP
+      # pública del VPS: dentro del contenedor `app` no apuntan a Couch. Para scripts en el host
+      # (npm run saas:bootstrap) sigue usando COUCHDB_URL=http://127.0.0.1:5984 en línea o en .env.
+      # Si Couch está fuera de Compose, define COUCHDB_URL_APP con esa URL.
+      COUCHDB_URL: ${COUCHDB_URL_APP:-http://couchdb:5984}
       COUCHDB_USER: ${COUCHDB_USER}
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
       COUCHDB_DB: ${COUCHDB_DB}

@@ -523,6 +523,7 @@ export async function login(req, res) {
       redirectTo,
     });
   } catch (error) {
+    console.error('[AUTH] login error:', error?.message || error);
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al iniciar sesión',
