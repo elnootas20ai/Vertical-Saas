@@ -196,6 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true, redirectTo: response.redirectTo };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error al iniciar sesión';
+      if (!message.includes('bloqueada')) {
+        console.warn('[auth/login]', message);
+      }
       if (message.includes('bloqueada')) {
         return { success: false, error: message, code: 'ACCOUNT_LOCKED' };
       }

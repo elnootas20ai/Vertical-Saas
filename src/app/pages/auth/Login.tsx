@@ -84,7 +84,9 @@ export function Login() {
       setLockInfo({ lockUntil: result.lockUntil });
       setErrors({ email: result.error || 'Cuenta bloqueada temporalmente' });
     } else {
-      setErrors({ email: result.error || t('auth.errors.loginError') });
+      const msg = (result.error ?? '').trim();
+      if (msg) console.warn('[auth/login]', msg);
+      setErrors({ email: msg || t('auth.errors.loginError') });
     }
   };
 

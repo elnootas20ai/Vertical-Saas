@@ -436,8 +436,8 @@ async function request<T>(
   }
 
   if (response.status === 401) {
-    if (payload.error && !payload.code) {
-      throw new Error(typeof payload.error === 'string' ? payload.error : JSON.stringify(payload.error));
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      throw new Error(payload.error.trim());
     }
     if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
       const refreshed = await tryRefreshToken();
@@ -450,8 +450,12 @@ async function request<T>(
   }
 
   if (!response.ok || payload.ok === false) {
-    if (typeof payload.error === 'string' && payload.error.trim()) {
-      throw new Error(payload.error);
+    const fromPayload =
+      (typeof payload.error === 'string' && payload.error.trim())
+      || (typeof payload.message === 'string' && payload.message.trim())
+      || '';
+    if (fromPayload) {
+      throw new Error(fromPayload);
     }
     const statusBit = `${response.status} ${response.statusText || ''}`.trim();
     const bodyBit = rawText && typeof payload.error !== 'string'
