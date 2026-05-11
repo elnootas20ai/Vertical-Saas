@@ -12,6 +12,33 @@ Este archivo solo lista **nombres** de variables, rutas y comandos. Los valores 
   El servicio `app` usa `env_file: ../.env` y fuerza `COUCHDB_URL` al hostname `couchdb` salvo que definas `COUCHDB_URL_APP`.
 - **CouchDB**: idealmente no expuesto a Internet; si abres el puerto para Fauxton, cierra firewall cuando puedas
 
+## GitHub Actions — push a `main` despliega el VPS (API + Docker)
+
+En el repo hay un workflow: **`.github/workflows/deploy-vps.yml`**. En cada **push a `main`** (o manualmente en *Actions → Deploy API (VPS) → Run workflow*), GitHub se conecta por **SSH** al servidor, hace `git pull` (reset duro a `origin/main`) y `docker compose … build` + `up -d`.
+
+### Secretos (GitHub → *Settings* → *Secrets and variables* → *Actions*)
+
+| Secreto | Ejemplo / notas |
+|--------|-------------------|
+| `VPS_HOST` | IP pública o `scw-xxx.fr-par.scw.cloud` |
+| `VPS_USER` | `root` o `ubuntu` |
+| `VPS_SSH_KEY` | Clave **privada** PEM (mejor una clave **solo para Actions**, no tu clave personal) |
+| `VPS_DEPLOY_PATH` | Ruta absoluta al repo en el VPS, ej. `/root/Vertical-SaaS` |
+
+Si SSH no usa el puerto 22, en el YAML del workflow puedes añadir `port: ${{ secrets.VPS_PORT }}` y crear el secreto `VPS_PORT`.
+
+### Una sola vez en el VPS
+
+1. Clonar el repo en `VPS_DEPLOY_PATH` y dejar el **`.env`** en la **raíz** del clon (no subido a Git).
+2. Poner la **clave pública** del par usado en `VPS_SSH_KEY` en `~/.ssh/authorized_keys` del usuario `VPS_USER`.
+3. Si el repo es **privado**, en GitHub → *Settings* → *Deploy keys* añade la **pública** del servidor (solo lectura) para que `git fetch` funcione; o clona con un remoto que ya autentique (según cómo lo montéis).
+
+### Front en Vercel (paralelo, sin tocar el VPS)
+
+- Conecta el **mismo repo** a Vercel; cada push puede buildar el front ahí.
+- Variables `VITE_*` y URL de API en el panel de Vercel.
+- Dominio del sitio → Vercel; subdominio **API** → IP del VPS (Nginx/Caddy delante del puerto 3000 si usáis HTTPS).
+
 ## Qué va en el servidor (runtime Node o contenedor `app`)
 
 Rellenar en `.env` en la raíz del repo (o en `deploy/local-values.env` si usáis plantilla) y, con Docker, pasarlo con `--env-file .env` al hacer `docker compose` para interpolar `couchdb` / secretos en el bloque `couchdb` del compose.
