@@ -38,7 +38,6 @@ export default defineConfig(({ mode }) => {
       watch: {
         ignored: [
           '**/.plugin-data/**',
-          '**/src/app/components/saved/**',
         ],
       },
       allowedHosts: [

@@ -46,6 +46,9 @@ Thumbs.db
 # Plugin data (agent persistence)
 .plugin-data/
 
+# Borradores / snapshots locales del canvas (no son parte del producto)
+src/app/components/saved/
+
 # Payment gateway keys (secrets)
 .gateway-keys.json
 
