@@ -1,5 +1,5 @@
 node_modules
-dist
+# dist debe poder copiarse en deploy/Dockerfile.prebuilt (build del front en tu PC)
 .git
 .cursor
 .env

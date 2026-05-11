@@ -29,7 +29,9 @@ services:
   app:
     build:
       context: ..
-      dockerfile: Dockerfile
+      # VPS con poco disco: usa Dockerfile.prebuilt (sin npm run build ni devDependencies).
+      # Requiere dist/ presente en el repo (git pull) o el build fallará.
+      dockerfile: deploy/Dockerfile.prebuilt
     restart: unless-stopped
     depends_on:
       - couchdb

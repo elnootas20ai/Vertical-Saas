@@ -41,6 +41,21 @@ Si sigue sin espacio para `git pull`, libera antes en pasos 2–3.
 git pull
 ```
 
+## 6. Deploy Docker sin quedarte sin disco (`ENOSPC` en `npm ci`)
+
+El repo usa **`deploy/Dockerfile.prebuilt`**: solo instala dependencias de **producción** (`npm ci --omit=dev`) y copia el **`dist/`** ya generado (no ejecuta Vite en el servidor).
+
+Antes en tu PC: `npm run build`, commit del `dist/` y `git push`. En el VPS: `git pull` y luego:
+
+```bash
+docker compose -f deploy/docker-compose.scaleway.yml --env-file .env build --no-cache
+docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d
+```
+
+Si falta `dist/` en el clone, el build fallará al copiar — es intencional.
+
+Opcional: instalar **buildx** si Compose avisa (`docker-buildx-plugin` en Ubuntu).
+
 ---
 
 **Ideas a medio plazo:** build del front en tu PC y subir solo `dist/` (rsync); en el VPS **no** ejecutar `npm ci` + `npm run build`; subir tamaño de disco en el proveedor si es muy justo.

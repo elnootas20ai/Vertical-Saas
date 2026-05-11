@@ -1,0 +1,32 @@
+# Imagen ligera para VPS con poco disco: NO ejecuta `npm run build` dentro de Docker.
+# Requisitos en el contexto de build (raíz del repo):
+#   - `dist/` ya generado (npm run build en tu PC y commit, o rsync al servidor antes del build).
+#   - Mismo árbol backend que el Dockerfile multietapa (sin etapa Vite).
+#
+# Instala solo dependencias de producción (--omit=dev): sin Vite, Vitest, Tailwind CLI, etc.
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY dist ./dist
+COPY public ./public
+COPY index.js index-huella.js ./
+COPY config ./config
+COPY controllers ./controllers
+COPY middleware ./middleware
+COPY routers ./routers
+COPY services ./services
+COPY models ./models
+COPY verticalConfigs ./verticalConfigs
+COPY shared ./shared
+COPY scripts ./scripts
+COPY docs ./docs
+COPY src/plugin ./src/plugin
+COPY plugin ./plugin
+
+EXPOSE 3000
+CMD ["node", "index.js"]
