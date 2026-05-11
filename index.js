@@ -230,6 +230,11 @@ app.use((req, res, next) => {
 // a través de AsyncLocalStorage para trazabilidad end-to-end en logs.
 app.use(correlationIdMiddleware);
 
+// Liveness mínima (Docker/proxy): sin CouchDB ni chequeos pesados — evita RST si /health tarda o falla.
+app.get('/live', (_req, res) => {
+  res.status(200).json({ ok: true, service: 'express-backend', time: new Date().toISOString() });
+});
+
 // B-02: Cabecera de versión de API en todas las respuestas.
 // El cliente puede leer X-API-Version para detectar la versión activa.
 app.use((req, res, next) => {
@@ -697,22 +702,32 @@ app.use((req, res, next) => {
 // I-03: Health check robusto — CouchDB, DBs individuales, memoria, disco,
 //        proceso (loadAvg), conexiones activas y latencia P50/P95/P99.
 app.get('/health', async (req, res) => {
-  const cfg        = getCouchConfigFromService(req);
-  const authHeader = buildCouchAuthHeader(req);
+  try {
+    const cfg        = getCouchConfigFromService(req);
+    const authHeader = buildCouchAuthHeader(req);
 
-  const result = await runHealthCheck({
-    baseUrl:       cfg.baseUrl,
-    authHeader,
-    activeSockets: activeSockets.size,
-  });
+    const result = await runHealthCheck({
+      baseUrl:       cfg.baseUrl,
+      authHeader,
+      activeSockets: activeSockets.size,
+    });
 
-  if (!result.ok) {
-    logger.error({ tag: 'HEALTH', requestId: req.requestId }, 'Health check crítico — servicio degradado');
-  } else if (result.degraded) {
-    logger.warn({ tag: 'HEALTH', requestId: req.requestId }, 'Health check con advertencias');
+    if (!result.ok) {
+      logger.error({ tag: 'HEALTH', requestId: req.requestId }, 'Health check crítico — servicio degradado');
+    } else if (result.degraded) {
+      logger.warn({ tag: 'HEALTH', requestId: req.requestId }, 'Health check con advertencias');
+    }
+
+    res.status(result.ok ? 200 : 503).json(result);
+  } catch (err) {
+    logger.error({ tag: 'HEALTH', requestId: req.requestId, err: err?.message }, 'Excepción en /health');
+    res.status(503).json({
+      ok: false,
+      service: 'express-backend',
+      error: err instanceof Error ? err.message : 'health_failed',
+      time: new Date().toISOString(),
+    });
   }
-
-  res.status(result.ok ? 200 : 503).json(result);
 });
 
 app.get('/metrics', (req, res) => {
@@ -2781,7 +2796,7 @@ app.use(errorHandler);
 const server = app.listen(PORT, () => {
   logger.info({ tag: 'BOOT', port: PORT, env: process.env.NODE_ENV || 'development' },
     `Backend Express escuchando en http://localhost:${PORT}`);
-  logger.info({ tag: 'BOOT' }, 'Endpoints: /health, /metrics, /api/stats');
+  logger.info({ tag: 'BOOT' }, 'Endpoints: /live, /health, /metrics, /api/stats');
 });
 
 server.on('connection', (socket) => {
