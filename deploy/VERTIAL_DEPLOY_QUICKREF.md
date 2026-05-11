@@ -2,25 +2,31 @@
 
 Este archivo solo lista **nombres** de variables, rutas y comandos. Los valores sensibles van en **`deploy/local-values.env`** (no se versiona; está en `.gitignore`).
 
-## Arquitectura típica (Scaleway + Nginx + PM2)
+## Arquitectura típica (Scaleway + Nginx)
 
 - **Público**: Nginx `443` → `https://vertialapp.com` / `https://www.vertialapp.com`
-- **Estáticos**: `/var/www/vertial/dist` (build Vite)
+- **Estáticos**: `/var/www/vertial/dist` (build Vite en CI o en tu PC; no hace falta `npm run build` en el VPS)
 - **API**: mismo dominio → `proxy_pass` a Node en `127.0.0.1:3000` (ruta `/api`)
-- **CouchDB**: solo localhost en el VPS (no exponer a internet)
+- **Backend + Couch en Docker** (recomendado): `deploy/docker-compose.scaleway.yml` — desde la raíz del repo:  
+  `docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d --build`  
+  El servicio `app` usa `env_file: ../.env` y fuerza `COUCHDB_URL` al hostname `couchdb` salvo que definas `COUCHDB_URL_APP`.
+- **CouchDB**: idealmente no expuesto a Internet; si abres el puerto para Fauxton, cierra firewall cuando puedas
 
-## Qué va en el servidor (runtime Node)
+## Qué va en el servidor (runtime Node o contenedor `app`)
 
-Rellenar en `deploy/local-values.env` y cargar en PM2 / systemd según tu setup:
+Rellenar en `.env` en la raíz del repo (o en `deploy/local-values.env` si usáis plantilla) y, con Docker, pasarlo con `--env-file .env` al hacer `docker compose` para interpolar `couchdb` / secretos en el bloque `couchdb` del compose.
+
+Variables habituales:
 
 - `NODE_ENV=production`
 - `PORT=3000` (debe coincidir con el `proxy_pass` de Nginx)
 - `APP_URL=https://vertialapp.com`
 - `ALLOWED_ORIGINS=https://vertialapp.com,https://www.vertialapp.com`
-- `COUCHDB_URL=http://127.0.0.1:5984` (o la URL interna que uses)
+- `COUCHDB_URL=http://127.0.0.1:5984` en el **host** (scripts, Fauxton); en el contenedor `app` Compose fuerza la URL interna a Couch salvo `COUCHDB_URL_APP`
 - `COUCHDB_USER`, `COUCHDB_PASSWORD`, `COUCHDB_DB`
 - `JWT_SECRET`, `JWT_REFRESH_SECRET`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (login Google en backend)
+- Opcional bootstrap: `SAAS_AUTO_BOOTSTRAP`, `SAAS_LOGIN_*`, `SAAS_BOOTSTRAP_FORCE_SYNC`
 - Opcional: `OPENAI_*`, email (`RESEND_*` / `SMTP_*`), `MONEI_*`, etc.
 
 ## Qué va en el **build** del frontend (solo variables `VITE_*`)
