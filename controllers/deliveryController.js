@@ -61,13 +61,17 @@ function assertUserScope(req, res, userId) {
   const paramId = String(userId || '').trim();
   if (!authId || !paramId) return true;
   // Allow exact match or "account:" prefix variants
-  const authNormalized = authId.startsWith('account:') ? authId.slice('account:'.length) : authId;
-  const paramNormalized = paramId.startsWith('account:') ? paramId.slice('account:'.length) : paramId;
-  if (authNormalized !== paramNormalized) {
-    res.status(403).json({ ok: false, error: 'Acceso denegado' });
-    return false;
-  }
-  return true;
+  const norm = (v) => (v.startsWith('account:') ? v.slice('account:'.length) : v);
+  const authNormalized = norm(authId);
+  const paramNormalized = norm(paramId);
+  if (authNormalized === paramNormalized) return true;
+  // El middleware multi-tenant del router puede haber reescrito :userId al
+  // owner del negocio. En ese caso `req.callerUserId` conserva el userId del
+  // JWT (el del team member que está autenticado): aceptamos esa coincidencia.
+  const callerId = String(req.callerUserId || '').trim();
+  if (callerId && authNormalized === norm(callerId)) return true;
+  res.status(403).json({ ok: false, error: 'Acceso denegado' });
+  return false;
 }
 
 function normalizeDuplicateValue(value) {
@@ -216,7 +220,18 @@ export async function listDeliveryOrders(req, res) {
     if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const orders = await listDeliveryOrdersByUser(req, userId);
+    let orders = await listDeliveryOrdersByUser(req, userId);
+    // Defensa en profundidad para workers: solo su PDV y solo el día de hoy.
+    // Las vistas operativas (cocina/montaje/reparto) trabajan con eso.
+    if (req.callerIsWorker) {
+      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      const today = new Date().toISOString().slice(0, 10);
+      orders = orders.filter((o) => {
+        if (workerSalesPoint && o.salesPointId && o.salesPointId !== workerSalesPoint) return false;
+        if (o.createdAt && o.createdAt.slice(0, 10) < today) return false;
+        return true;
+      });
+    }
     return res.json({ ok: true, orders: orders.map(sanitizeDeliveryOrder) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar pedidos delivery' });
@@ -511,7 +526,18 @@ export async function filterDeliveryOrders(req, res) {
     let orders = await listDeliveryOrdersByUser(req, userId);
     orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
 
-    const { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search } = req.query;
+    let { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search } = req.query;
+    // Si el caller es un worker invitado: limitamos lo que ve.
+    // - Si tiene PDV asignado en `employment.salesPointId`, forzamos ese PDV
+    //   aunque el query haya pedido otro (no debe poder espiar otras tiendas).
+    // - Ocultamos pedidos finalizados con histórico antiguo (no mostramos
+    //   historial completo): limitamos a la jornada actual salvo que el caller
+    //   sea operativo de cocina/reparto (que necesita ver pedidos del día).
+    if (req.callerIsWorker) {
+      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      if (workerSalesPoint) salesPointId = workerSalesPoint;
+      if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
+    }
     if (channel) orders = orders.filter((o) => o.channel === channel);
     if (salesPointId) orders = orders.filter((o) => o.salesPointId === salesPointId);
     if (status) orders = orders.filter((o) => o.status === status);
@@ -1550,6 +1576,13 @@ export async function getOpsCenter(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
+    // El Centro Operativo agrega KPIs, ingresos, todas las cajas y pedidos del
+    // negocio. No es para trabajadores: si el caller es un team member invitado
+    // devolvemos 403 sin filtrar nada. El frontend ya redirige antes, esto es
+    // defensa en profundidad.
+    if (req.callerIsWorker) {
+      return res.status(403).json({ ok: false, error: 'Sin acceso al centro operativo' });
+    }
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 

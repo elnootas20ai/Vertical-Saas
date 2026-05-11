@@ -3482,7 +3482,7 @@ export function Team() {
                 email: entry.email || '',
                 phone: '',
                 role: entry.role || 'employee',
-                landingPage: '/saas/dashboard',
+                landingPage: '/saas/worker',
                 position: entry.position || '',
                 contractType: '',
                 grossMonthlySalary: '',

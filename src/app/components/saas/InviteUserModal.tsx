@@ -82,12 +82,11 @@ const CONTRACT_TYPES = [
 ] as const;
 
 const LANDING_PAGES = [
-  { id: '/saas/dashboard', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
+  { id: '/saas/worker', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
   { id: '/saas/vehicles', icon: <Car className="w-3.5 h-3.5" /> },
   { id: '/saas/clients', icon: <Users className="w-3.5 h-3.5" /> },
   { id: '/saas/sales', icon: <TrendingUp className="w-3.5 h-3.5" /> },
   { id: '/saas/workshop', icon: <Wrench className="w-3.5 h-3.5" /> },
-  { id: '/saas/finance', icon: <DollarSign className="w-3.5 h-3.5" /> },
   { id: '/saas/documents', icon: <FileText className="w-3.5 h-3.5" /> },
   { id: '/saas/calendar', icon: <CalendarDays className="w-3.5 h-3.5" /> },
 ] as const;
@@ -380,7 +379,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   const [grossSalary, setGrossSalary] = useState('');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [landingPage, setLandingPage] = useState('/saas/dashboard');
+  const [landingPage, setLandingPage] = useState('/saas/worker');
 
   // UI
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -478,7 +477,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
     setPosition(''); setContractType(null); setGrossSalary(''); setWorkCenterId(null);
-    setRole(null); setLandingPage('/saas/dashboard');
+    setRole(null); setLandingPage('/saas/worker');
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
     setInviteResult(null); setCopiedField(null); setStep(1);

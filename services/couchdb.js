@@ -1639,6 +1639,31 @@ export async function findAccountByUserId(req, userId) {
   return getDocument(req, ACCOUNTS_DB, `account:${userId}`);
 }
 
+/**
+ * Resuelve el "dueño efectivo de los datos" para un userId.
+ *
+ * En este sistema cada negocio guarda sus documentos (pedidos, PDVs, catálogo,
+ * sesiones de TPV, etc.) bajo el `user_id` del propietario que hizo el alta.
+ * Cuando ese propietario invita a un team member, el invitado tiene su propio
+ * `user_id` distinto y `account.invitedBy` apunta al owner.
+ *
+ * Si no resolvemos esto, el invitado consulta con su userId y no encuentra nada
+ * (todos los datos están bajo el userId del owner). Esta función devuelve el
+ * userId correcto para usar en las queries de datos compartidos del negocio.
+ *
+ * @returns {Promise<{ ownerUserId: string, account: object|null, isInvited: boolean }>}
+ */
+export async function resolveDataOwnerUserId(req, userId) {
+  if (!userId) return { ownerUserId: userId, account: null, isInvited: false };
+  const account = await findAccountByUserId(req, userId);
+  if (!account) return { ownerUserId: userId, account: null, isInvited: false };
+  const invitedBy = String(account.invitedBy || '').trim();
+  if (invitedBy && invitedBy !== userId) {
+    return { ownerUserId: invitedBy, account, isInvited: true };
+  }
+  return { ownerUserId: userId, account, isInvited: false };
+}
+
 export async function listAccounts(req) {
   await ensureDatabase(req, ACCOUNTS_DB);
   const docs = await getAllDocuments(req, ACCOUNTS_DB);

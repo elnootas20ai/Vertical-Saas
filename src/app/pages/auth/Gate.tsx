@@ -84,8 +84,20 @@ export function Gate() {
   const showAncoveIntegration = currentBusiness?.businessType === 'carDealership';
 
   useEffect(() => {
-    if (user?.accountType === 'user' && !user?.linkedBusinessId) {
+    if (!user) return;
+    // Worker sin empresa enlazada → user-dashboard (espacio personal previo a aceptar invitación).
+    if (user.accountType === 'user' && !user.linkedBusinessId) {
       navigate('/saas/user-dashboard', { replace: true });
+      return;
+    }
+    // Worker invitado a una empresa → directo a su zona de trabajador.
+    const isWorker = Boolean(user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy);
+    if (isWorker) {
+      const ADMIN_ONLY_LANDINGS = new Set(['/saas/dashboard', '/saas/finance', '/saas/reports', '/saas/team', '/saas/billing']);
+      const target = user.landingPage && !ADMIN_ONLY_LANDINGS.has(user.landingPage)
+        ? user.landingPage
+        : '/saas/worker';
+      navigate(target, { replace: true });
     }
   }, [user, navigate]);
   const [showInviteModal, setShowInviteModal] = useState(false);

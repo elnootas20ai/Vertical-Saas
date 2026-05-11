@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { resolveDataOwnerUserId } from '../services/couchdb.js';
 import {
   listDeliveryOrders,
   createDeliveryOrder,
@@ -64,6 +65,38 @@ import {
 const invoiceUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const deliveryRouter = Router();
+
+/**
+ * Multi-tenant: si el `:userId` de la URL pertenece a un team member invitado,
+ * reescribimos el param al userId del propietario del negocio. Así todos los
+ * controladores aguas abajo operan contra los datos compartidos del negocio
+ * (pedidos, PDVs, catálogo, sesiones de TPV…) en vez de contra el "vacío" del
+ * worker. El caller original queda en `req.callerUserId`/`req.callerAccount`
+ * para que los controladores apliquen filtros por worker cuando corresponda
+ * (p.ej. su `employment.salesPointId`).
+ *
+ * Usamos `router.param` para que se ejecute en cualquier ruta con `:userId`
+ * independientemente de la posición (`/orders/:userId`, `/catalog/:userId`…).
+ */
+deliveryRouter.param('userId', async (req, res, next, rawUserId) => {
+  try {
+    if (!rawUserId) return next();
+    // Evitar resolver dos veces si ya pasó por aquí (rutas anidadas).
+    if (req.callerUserId) return next();
+    const { ownerUserId, account, isInvited } = await resolveDataOwnerUserId(req, rawUserId);
+    req.callerUserId = rawUserId;
+    req.callerAccount = account || null;
+    req.callerIsWorker = isInvited;
+    if (isInvited && ownerUserId && ownerUserId !== rawUserId) {
+      req.params.userId = ownerUserId;
+    }
+    return next();
+  } catch (err) {
+    // No bloqueamos: legacy fallback al userId tal cual.
+    console.error('[deliveryRouter] resolveDataOwnerUserId error:', err?.message || err);
+    return next();
+  }
+});
 
 deliveryRouter.get('/orders/:userId', listDeliveryOrders);
 deliveryRouter.get('/orders/:userId/filter', filterDeliveryOrders);

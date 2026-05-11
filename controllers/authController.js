@@ -833,7 +833,7 @@ export async function getBillingCard(req, res) {
 
 export async function inviteUser(req, res) {
   try {
-    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/dashboard', username: requestedUsername, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '' } = req.body || {};
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/worker', username: requestedUsername, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '' } = req.body || {};
 
     if (!name || !email) {
       return badRequest(res, 'Nombre y email son obligatorios');

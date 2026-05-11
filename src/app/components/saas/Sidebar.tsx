@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router';
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -62,7 +62,6 @@ import {
   GraduationCap,
   Bell,
   Briefcase,
-  ArrowLeftRight,
   Shield,
   Check,
   Plus,
@@ -182,7 +181,6 @@ const menuItemDefs = [
   { id: 'calendar',  navKey: 'calendar',  icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/calendar' },
   { id: 'chat',      navKey: 'chat',      icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/chat' },
   { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
-  { id: 'business-mode', navKey: 'businessMode', icon: <ArrowLeftRight className="w-5 h-5" />, path: '#' },
 
   // ── Clientes / CRM ──────────────────────────────────────────────────────────
   { id: 'quotes',     navKey: 'quotes',     icon: <ClipboardList className="w-5 h-5" />, path: '/saas/quotes' },
@@ -394,7 +392,6 @@ const workerMenuItemDefs = [
   { id: 'worker-position',      navKey: 'workerPosition',     icon: <Briefcase className="w-5 h-5" />,     path: '/saas/worker/position' },
   { id: 'worker-notifications', navKey: 'workerNotifications', icon: <Bell className="w-5 h-5" />,         path: '/saas/worker/notifications' },
   { id: 'worker-security',      navKey: 'workerSecurity',     icon: <Shield className="w-5 h-5" />,        path: '/saas/worker/security' },
-  { id: 'business-mode', navKey: 'businessMode', icon: <ArrowLeftRight className="w-5 h-5" />, path: '#' },
 ] as const;
 
 const WORKER_HOME_GROUP: SidebarGroup = {
@@ -511,12 +508,18 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
-  const [workerMode, setWorkerMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return window.localStorage.getItem('saas-worker-mode') === 'true';
-    }
-    return false;
-  });
+  // `workerMode` ya no es alternable por el usuario: lo derivamos de la cuenta.
+  // - Cuenta tipo 'user' o con `invitedBy` (team member invitado) → modo trabajador.
+  // - Resto (owner/gerente que se registró por el flujo normal) → modo gerente.
+  // Se mantiene espejado en localStorage por compatibilidad con código que aún lo lee.
+  const workerMode = useMemo<boolean>(() => {
+    if (!user) return false;
+    return user.accountType === 'user' || Boolean((user as { invitedBy?: string }).invitedBy);
+  }, [user]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('saas-worker-mode', String(workerMode));
+  }, [workerMode]);
   const SEEN_NEW_ITEMS_KEY = 'saas-sidebar-seen-new';
   const [seenNewItems, setSeenNewItems] = useState<Set<string>>(() => {
     if (typeof window !== 'undefined') {
@@ -563,21 +566,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
   }));
 
-  const toggleWorkerMode = () => {
-    setWorkerMode((prev) => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('saas-worker-mode', String(next));
-      }
-      if (next) {
-        navigate('/saas/worker');
-      } else {
-        navigate('/saas/dashboard');
-      }
-      return next;
-    });
-  };
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (companySelectorRef.current && !companySelectorRef.current.contains(event.target as Node)) {
@@ -594,9 +582,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const menuItems: SidebarItem[] = menuItemDefs.map(item => ({
     ...item,
-    label: item.id === 'business-mode'
-      ? (workerMode ? t('sidebar.workerMode') : t('sidebar.businessMode'))
-      : t(`nav.${item.navKey}`),
+    label: t(`nav.${item.navKey}`),
   }));
 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => ({
@@ -608,9 +594,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const workerMenuItems: SidebarItem[] = workerMenuItemDefs.map(item => ({
     ...item,
-    label: item.id === 'business-mode'
-      ? (workerMode ? t('sidebar.workerMode') : t('sidebar.businessMode'))
-      : t(`nav.${item.navKey}`),
+    label: t(`nav.${item.navKey}`),
   }));
 
   const workerGroups: SidebarGroup[] = workerSidebarGroupDefs.map(g => ({
@@ -624,7 +608,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     ...WORKER_HOME_GROUP,
     label: t('sidebar.groups.workerMain'),
   };
-  const currentProfileLabel = workerMode ? 'Trabajador' : 'Gerente';
 
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || 'UU';
 
@@ -649,10 +632,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const handleMenuItemClick = (item: SidebarItem) => {
     if (item.disabled) {
-      return;
-    }
-    if (item.id === 'business-mode') {
-      toggleWorkerMode();
       return;
     }
     if (item.isNew && !seenNewItems.has(item.id)) {
@@ -684,12 +663,58 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const visibleMenuItemsBase = menuItems;
 
   const permissionMap = user?.permissions || {};
+
+  // Items que SOLO pueden ver los dueños del negocio (owner/admin/manager).
+  // Sirve tanto para el filtro de sidebar como para no colar nada admin en modo worker.
+  const BUSINESS_OWNER_ONLY_IDS = new Set<string>([
+    'dashboard', 'reports', 'team', 'team-schedules', 'commissions', 'payroll',
+    'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation',
+    'supplier-billing', 'client-billing', 'costing', 'billing',
+    'suppliers', 'orders', 'purchase-orders', 'compras-stock',
+    'configuracion', 'settings', 'admin', 'gdpr',
+    'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
+    'delivery-ops', 'clockins', 'groups', 'web-config', 'web-orders',
+    'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
+    'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents',
+    'gym-classes', 'gym-memberships', 'gym-routines', 'gym-access',
+    'clinic-history', 'clinic-treatments', 'clinic-prescriptions',
+    'hotel-rooms',
+    'construction-ops', 'construction-projects', 'construction-budgets',
+    'construction-payments', 'construction-collections', 'construction-closure',
+    'academy-courses', 'academy-enrollments', 'academy-grades',
+    'realestate-properties', 'realestate-contracts', 'realestate-appraisals',
+    'lawyer-cases', 'lawyer-deadlines',
+    'nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-artists',
+    'events-management', 'events-catering', 'events-logistics',
+    'salon-services', 'salon-loyalty',
+    'butcher-hub', 'butcher-products', 'butcher-traceability',
+    'tobacco-regulatory',
+    'taxi-fleet', 'taxi-trips', 'taxi-shifts',
+    'pharmacy-guard',
+    'vet-history',
+    'spareparts-compatibility',
+    'carwash-services', 'carwash-memberships',
+    'scrapyard-deregistrations', 'scrapyard-environment',
+  ]);
+
+  const isWorker = Boolean(
+    user && (user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy),
+  );
+
   const visibleMenuItems = visibleMenuItemsBase.filter((item) => {
     if (!user) {
       return true;
     }
-    // Items base que siempre deben ser accesibles desde el menú
-    if (['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'business-mode', 'team'].includes(item.id)) {
+    // Worker: nunca ver items admin-only por mucho que se cuelen en el menú base.
+    if (isWorker && BUSINESS_OWNER_ONLY_IDS.has(item.id)) {
+      return false;
+    }
+    // Items siempre accesibles para el owner (entran sin permiso explícito).
+    if (!isWorker && ['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'team'].includes(item.id)) {
+      return true;
+    }
+    // Items operativos siempre visibles para todos (chat es transversal).
+    if (item.id === 'chat') {
       return true;
     }
     const permission = permissionMap[item.id]
@@ -699,7 +724,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       || (item.id === 'tpv-locales' ? permissionMap.tpv : undefined)
       || (item.id.startsWith('doc-') ? permissionMap.documents : undefined);
     if (!permission) {
-      return true;
+      // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).
+      return !isWorker;
     }
     return Boolean(permission.view);
   });
@@ -818,7 +844,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const workerById = new Map(workerMenuItems.map((item) => [item.id, item]));
   const ADMIN_ONLY_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
-  const WORKER_HIDDEN_ITEM_IDS = new Set(['delivery-ops']);
+  const WORKER_HIDDEN_ITEM_IDS = BUSINESS_OWNER_ONLY_IDS;
   const verticalGroupsForWorker = sidebarGroups
     .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
     .map((group) => ({
@@ -911,21 +937,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={toggleWorkerMode}
-              className={`rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
-                narrow ? 'p-2 flex-shrink-0' : 'px-2 py-2 flex-shrink-0 max-w-[96px]'
-              }`}
-              title={currentProfileLabel}
-            >
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-700 dark:text-gray-300 min-w-0">
-                <ArrowLeftRight className="w-3.5 h-3.5" />
-                {(isMobile || !collapsed) && (
-                  <span className="truncate">{currentProfileLabel}</span>
-                )}
-              </span>
-            </button>
           </div>
 
           {showCompanyDropdown && (

@@ -741,13 +741,25 @@ export function DeliveryOpsCenter() {
     [pedidosQueueCount],
   );
 
+  // Fecha LOCAL del navegador (YYYY-MM-DD). Evita depender de la zona horaria
+  // del servidor y garantiza que el panel muestre el día real del usuario.
+  const todayLocal = useCallback(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
+
   const load = useCallback(async () => {
     if (!authUserId) return;
     try {
-      const r = await getOpsCenterRequest(authUserId, filters);
+      // Si el usuario no ha forzado una fecha, mandamos siempre el "hoy" local.
+      const effectiveFilters = filters.date ? filters : { ...filters, date: todayLocal() };
+      const r = await getOpsCenterRequest(authUserId, effectiveFilters);
       setData(r); setLastUp(new Date());
     } catch (e) { console.error('ops-center error', e); } finally { setLoading(false); }
-  }, [authUserId, filters]);
+  }, [authUserId, filters, todayLocal]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -755,6 +767,18 @@ export function DeliveryOpsCenter() {
     poll.current = setInterval(load, 30000);
     return () => { if (poll.current) clearInterval(poll.current); };
   }, [load]);
+
+  // Refresco automático al cambiar de día. Vigila cada minuto y, si el día local
+  // cambia respecto al último cargado, dispara un `load()` inmediato para que
+  // el panel pase solo al día siguiente sin necesidad de recargar la página.
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (data?.date && data.date !== todayLocal()) {
+        load();
+      }
+    }, 60_000);
+    return () => clearInterval(tick);
+  }, [data?.date, load, todayLocal]);
 
   const handlers = useMemo(() => ({
     'delivery:order_created': () => load(),

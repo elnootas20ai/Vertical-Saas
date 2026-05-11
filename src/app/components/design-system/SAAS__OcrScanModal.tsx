@@ -1,11 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
+import { useCamera } from '../../hooks/useCamera';
 import {
   scanDocument, processOcr, approveProposal,
   DOC_TYPE_LABELS, DOC_TYPE_ICONS, DOC_TYPE_COLORS, MODULE_LABELS,
   type OcrResult, type OcrProposal, type OcrEntityMatch, type OcrScanMeta,
 } from '../../lib/ocrApi';
+
+const MAX_IMAGE_DIMENSION = 2000;
+const JPEG_QUALITY = 0.85;
 
 type Step = 'upload' | 'scanning' | 'processing' | 'result' | 'saving' | 'done' | 'duplicate' | 'error';
 
@@ -53,6 +57,58 @@ function WarningsList({ warnings }: { warnings: Array<{ code: string; field: str
   );
 }
 
+/**
+ * Reduce y recomprime una imagen para evitar picos de memoria en móvil.
+ * Las fotos de móvil son 4-12 MB JPEG; sin esto la WebView puede quedarse
+ * en negro / congelarse al pasarlas a base64.
+ * Devuelve { base64, mime } listos para enviar al OCR.
+ */
+async function downscaleImageToBase64(file: File): Promise<{ base64: string; mime: string }> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('No se pudo decodificar la imagen'));
+      el.src = url;
+    });
+
+    const maxSide = Math.max(img.naturalWidth, img.naturalHeight);
+    const scale = maxSide > MAX_IMAGE_DIMENSION ? MAX_IMAGE_DIMENSION / maxSide : 1;
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No se pudo crear canvas');
+    // Fondo blanco por si la imagen es PNG con transparencia (OpenAI Vision prefiere JPEG).
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    const base64 = dataUrl.split(',')[1] || '';
+    return { base64, mime: 'image/jpeg' };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Lectura simple a base64 sin procesar (para PDFs ya convertidos o casos donde
+ * el downscaling no aplique). Asíncrono para no bloquear el hilo principal.
+ */
+function fileToRawBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1] || '');
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function pdfFileToPngBase64(file: File): Promise<string> {
   // Usar el build "legacy" en navegador para evitar errores de bundling/transpilación.
   // @ts-expect-error pdfjs-dist exports differ by build
@@ -80,6 +136,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
   const [scanMeta, setScanMeta] = useState<OcrScanMeta | null>(null);
   const [proposal, setProposal] = useState<OcrProposal | null>(null);
@@ -93,37 +150,72 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
   const [showPreview, setShowPreview] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const base64Ref = useRef<string>('');
   const mimeRef = useRef<string>('');
+  const { takePhoto, isNative } = useCamera();
+
+  // Limpia el objectURL anterior cuando cambia (o al desmontar) para no
+  // dejar bitmaps colgando en memoria en móvil.
+  const setPreview = useCallback((url: string | null) => {
+    if (previewUrlRef.current && previewUrlRef.current !== url) {
+      try { URL.revokeObjectURL(previewUrlRef.current); } catch { /* noop */ }
+    }
+    previewUrlRef.current = url;
+    setPreviewUrl(url);
+  }, []);
 
   const reset = useCallback(() => {
-    setStep('upload'); setFile(null); setPreviewUrl(null);
+    setStep('upload'); setFile(null); setPreview(null);
+    setIsPreparing(false);
     setOcrResult(null); setScanMeta(null); setProposal(null);
     setEntityMatches([]); setValidation(null); setDestinationInfo(null);
     setPipelineStatus(''); setDuplicateInfo(null); setRouteResult(null);
     setError(null); setShowPreview(false);
     setOcrMode(defaultOcrMode || 'financial');
     base64Ref.current = ''; mimeRef.current = '';
-  }, [defaultOcrMode]);
+  }, [defaultOcrMode, setPreview]);
 
   const handleClose = () => { reset(); onClose(); };
 
-  // Auto-open camera input on open when requested.
-  // (Only when no file selected yet.)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Cleanup definitivo al desmontar.
+  useEffect(() => () => {
+    if (previewUrlRef.current) {
+      try { URL.revokeObjectURL(previewUrlRef.current); } catch { /* noop */ }
+      previewUrlRef.current = null;
+    }
+  }, []);
+
+  // Bug de WebView Android Chrome: tras volver del intent de cámara la app
+  // puede quedarse con un buffer en negro hasta que algo fuerce un repaint.
+  // Forzamos un reflow ligero al recuperar visibilidad.
   useEffect(() => {
     if (!isOpen) return;
-    if (!autoOpenCamera) return;
-    if (step !== 'upload') return;
-    if (file) return;
-    const t = setTimeout(() => cameraInputRef.current?.click(), 50);
-    return () => clearTimeout(t);
-  }, [isOpen, autoOpenCamera, step, file]);
+    const forceRepaint = () => {
+      if (document.visibilityState !== 'visible') return;
+      // Toggle de transform en el body para forzar composición/repaint.
+      const b = document.body;
+      const prev = b.style.transform;
+      b.style.transform = 'translateZ(0)';
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      b.offsetHeight;
+      b.style.transform = prev;
+    };
+    document.addEventListener('visibilitychange', forceRepaint);
+    window.addEventListener('pageshow', forceRepaint);
+    return () => {
+      document.removeEventListener('visibilitychange', forceRepaint);
+      window.removeEventListener('pageshow', forceRepaint);
+    };
+  }, [isOpen]);
 
-  const handleFileSelect = (selectedFile: File) => {
+  const handleFileSelect = useCallback(async (selectedFile: File) => {
+    setError(null);
     setFile(selectedFile);
+    setIsPreparing(true);
+    base64Ref.current = '';
+
     const name = (selectedFile.name || '').toLowerCase();
-    // Algunos navegadores/devices suben PDFs/fotos sin type. Inferimos por extensión.
     const inferred =
       name.endsWith('.pdf') ? 'application/pdf'
       : name.endsWith('.jpg') || name.endsWith('.jpeg') ? 'image/jpeg'
@@ -131,25 +223,73 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
       : name.endsWith('.webp') ? 'image/webp'
       : name.endsWith('.gif') ? 'image/gif'
       : '';
-    mimeRef.current = (selectedFile.type || inferred || 'application/octet-stream');
-    if (selectedFile.type.startsWith('image/')) {
-      setPreviewUrl(URL.createObjectURL(selectedFile));
-    } else {
-      setPreviewUrl(null);
+    const rawMime = (selectedFile.type || inferred || 'application/octet-stream');
+    mimeRef.current = rawMime;
+
+    try {
+      if (rawMime.startsWith('image/')) {
+        // Downscale ANTES de pasar a base64 para evitar picos de memoria.
+        const { base64, mime } = await downscaleImageToBase64(selectedFile);
+        base64Ref.current = base64;
+        mimeRef.current = mime;
+        // Preview con objectURL (revocable) en vez de la dataURL de 8-16 MB.
+        setPreview(URL.createObjectURL(selectedFile));
+      } else if (rawMime === 'application/pdf') {
+        // El PDF se convierte a PNG justo antes de escanear (lazy).
+        base64Ref.current = await fileToRawBase64(selectedFile);
+        setPreview(null);
+      } else {
+        base64Ref.current = await fileToRawBase64(selectedFile);
+        setPreview(null);
+      }
+    } catch (err: unknown) {
+      setError((err as Error).message || 'No se pudo preparar el archivo');
+    } finally {
+      setIsPreparing(false);
     }
-    const reader = new FileReader();
-    reader.onload = () => { base64Ref.current = (reader.result as string).split(',')[1] || ''; };
-    reader.readAsDataURL(selectedFile);
-  };
+  }, [setPreview]);
+
+  /**
+   * Abre la cámara. En app nativa (Capacitor) usa el plugin oficial — más
+   * fiable y sin el bug del WebView en negro. En web cae al input file.
+   */
+  const handleOpenCamera = useCallback(async () => {
+    if (isNative) {
+      const photo = await takePhoto({ source: 'camera', quality: 85 });
+      if (!photo?.dataUrl) return;
+      // Convertir la dataUrl a File para pasar por el mismo pipeline (downscaling, etc.).
+      try {
+        const fetched = await fetch(photo.dataUrl);
+        const blob = await fetched.blob();
+        const f = new File([blob], `camera-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
+        await handleFileSelect(f);
+      } catch {
+        setError('No se pudo procesar la foto');
+      }
+      return;
+    }
+    cameraInputRef.current?.click();
+  }, [isNative, takePhoto, handleFileSelect]);
+
+  // Auto-open camera input on open when requested.
+  // (Only when no file selected yet.)
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!autoOpenCamera) return;
+    if (step !== 'upload') return;
+    if (file) return;
+    const t = setTimeout(() => { void handleOpenCamera(); }, 50);
+    return () => clearTimeout(t);
+  }, [isOpen, autoOpenCamera, step, file, handleOpenCamera]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const dropped = e.dataTransfer.files[0];
-    if (dropped) handleFileSelect(dropped);
+    if (dropped) void handleFileSelect(dropped);
   };
 
   const startScan = async () => {
-    if (!file || !base64Ref.current) return;
+    if (!file || !base64Ref.current || isPreparing) return;
     setStep('scanning');
     setError(null);
 
@@ -165,6 +305,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
 
       // En local (Windows) la conversión de PDF en backend puede fallar.
       // Convertimos aquí el PDF a PNG para que el OCR siempre reciba imagen.
+      // (Las imágenes ya vienen downscaleadas desde handleFileSelect.)
       if (looksLikePdf) {
         base64Ref.current = await pdfFileToPngBase64(file);
         mimeRef.current = 'image/png';
@@ -281,8 +422,15 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
     : stepKeys.indexOf(step);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={handleClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-black/60 sm:backdrop-blur-sm overflow-y-auto"
+      onClick={handleClose}
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <div
+        className="bg-white dark:bg-gray-800 sm:rounded-2xl shadow-2xl w-full sm:max-w-3xl sm:mx-4 sm:max-h-[92vh] sm:overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
 
         <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -330,14 +478,14 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                 <input
                   ref={fileInputRef} type="file"
                   accept="image/jpeg,image/jpg,image/png,image/webp,image/gif,application/pdf"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) { void handleFileSelect(f); } e.target.value = ''; }}
                   className="hidden"
                 />
                 <input
                   ref={cameraInputRef} type="file"
                   accept="image/*"
                   capture="environment"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) { void handleFileSelect(f); } e.target.value = ''; }}
                   className="hidden"
                 />
                 {file ? (
@@ -358,7 +506,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                     <div className="text-xs text-gray-400 mt-2">JPG, PNG, WebP o PDF &bull; La IA lo clasificara automaticamente</div>
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+                      onClick={(e) => { e.stopPropagation(); void handleOpenCamera(); }}
                       className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
                     >
                       <ScanLine className="w-4 h-4" /> Usar cámara
@@ -382,8 +530,16 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                       Vehículo / Compraventa
                     </button>
                   </div>
-                  <button onClick={startScan} className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 text-white font-semibold rounded-xl transition-colors">
-                    <ScanLine className="w-5 h-5" /> Escanear con IA <ArrowRight className="w-4 h-4" />
+                  <button
+                    onClick={startScan}
+                    disabled={isPreparing || !base64Ref.current}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors"
+                  >
+                    {isPreparing ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> Preparando imagen…</>
+                    ) : (
+                      <><ScanLine className="w-5 h-5" /> Escanear con IA <ArrowRight className="w-4 h-4" /></>
+                    )}
                   </button>
                 </div>
               )}
