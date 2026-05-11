@@ -4,11 +4,14 @@
 #   docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d --build
 #
 # El bloque `env_file` del servicio `app` inyecta TODO el `.env` en el contenedor.
-# Las tres claves del bloque `environment` prevalecen sobre el archivo (Docker Compose):
+# Las claves del bloque `environment` prevalecen sobre el archivo (Docker Compose):
 #   - NODE_ENV / PORT: runtime fijo
 #   - COUCHDB_URL: dentro de la red Docker debe ser el hostname del servicio `couchdb`,
 #     no 127.0.0.1 ni la IP pública. En el host, para scripts (npm run saas:bootstrap) sigue
 #     usando en línea: COUCHDB_URL=http://127.0.0.1:5984 …
+#   - NODE_OPTIONS: debe ser seguro dentro del contenedor: los `--import` / `--require` del .env
+#     local (o rutas de depuración) no existen en la imagen y Pino 10 (workers) puede abortar
+#     el proceso al arrancar. Ajusta heap con NODE_MAX_OLD_SPACE_MB en `.env` si hace falta.
 # Si Couch está fuera de este Compose, pon en `.env`: COUCHDB_URL_APP=http://host:5984
 
 services:
@@ -18,6 +21,13 @@ services:
     environment:
       COUCHDB_USER: ${COUCHDB_USER}
       COUCHDB_PASSWORD: ${COUCHDB_PASSWORD}
+    # La imagen couchdb:3.4 no deja `curl` instalado; comprobar el puerto con bash (debian-slim).
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5984'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 25s
     volumes:
       - couchdb_data:/opt/couchdb/data
       - couchdb_etc:/opt/couchdb/etc/local.d
@@ -34,13 +44,27 @@ services:
       dockerfile: deploy/Dockerfile.prebuilt
     restart: unless-stopped
     depends_on:
-      - couchdb
+      couchdb:
+        condition: service_healthy
     env_file:
       - ../.env
     environment:
       NODE_ENV: production
       PORT: "3000"
       COUCHDB_URL: ${COUCHDB_URL_APP:-http://couchdb:5984}
+      NODE_OPTIONS: "--max-old-space-size=${NODE_MAX_OLD_SPACE_MB:-768}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
     ports:
       - "127.0.0.1:3000:3000"
 
