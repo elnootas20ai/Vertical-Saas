@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, createContext, useContext, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -15,6 +15,7 @@ import {
   type PointOfSale,
   type TerminalConfig,
 } from '../../lib/deliveryApi';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
@@ -809,8 +810,11 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 
 export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const userId = user?.user_id || user?.id || '';
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, isLoading: businessLoading } = useBusiness();
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
@@ -823,11 +827,11 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const activeSession = sessions.find(s => s.status === 'open') || null;
 
   const loadData = useCallback(async () => {
-    if (!userId) return;
+    if (!dataUserId) return;
     try {
       const [sessData, pdvData] = await Promise.all([
-        listTpvRegisterSessionsRequest(userId),
-        listPointsOfSaleRequest(userId),
+        listTpvRegisterSessionsRequest(dataUserId),
+        listPointsOfSaleRequest(dataUserId),
       ]);
       setSessions(sessData);
       setPointsOfSale(pdvData);
@@ -836,15 +840,21 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [dataUserId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (businessLoading || !dataUserId) {
+      setLoading(true);
+      return;
+    }
+    loadData();
+  }, [businessLoading, dataUserId, loadData]);
 
   const handleOpen = async (data: OpeningData) => {
-    if (!userId) return;
+    if (!dataUserId) return;
     const total = calcDenominationTotal(data.counts);
     try {
-      const created = await createTpvRegisterSessionRequest(userId, {
+      const created = await createTpvRegisterSessionRequest(dataUserId, {
         workerName: data.workerName,
         pointOfSaleId: data.pointOfSaleId,
         pointOfSaleName: data.pointOfSaleName,
@@ -870,13 +880,13 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   };
 
   const handleClose = async (counts: CashDenominationCount, notes: string) => {
-    if (!userId || !activeSession) return;
+    if (!dataUserId || !activeSession) return;
     const finalAmount = calcDenominationTotal(counts);
     const expected = calcExpectedCash(activeSession);
     const diff = finalAmount - expected;
     const summary = buildSummary(activeSession);
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, {
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
         ...activeSession,
         status: 'closed',
         closedAt: new Date().toISOString(),
@@ -898,7 +908,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   };
 
   const addTransaction = useCallback(async (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => {
-    if (!userId || !activeSession) return;
+    if (!dataUserId || !activeSession) return;
     const fullTx: TpvRegisterTransaction = { ...tx, id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, date: new Date().toISOString() };
     const updatedTxs = [...activeSession.transactions, fullTx];
     const salesByChannel: Record<string, number> = {};
@@ -910,15 +920,15 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       linkedOrderIds.push(fullTx.linkedDeliveryOrderId);
     }
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, { ...activeSession, transactions: updatedTxs, salesByChannel, linkedOrderIds });
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, { ...activeSession, transactions: updatedTxs, salesByChannel, linkedOrderIds });
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
     } catch {
       toast.error('Error al registrar operación');
     }
-  }, [userId, activeSession]);
+  }, [dataUserId, activeSession]);
 
   const performCashCount = useCallback(async (countedBy: string, denominations: CashDenominationCount, notes?: string) => {
-    if (!userId || !activeSession) return;
+    if (!dataUserId || !activeSession) return;
     const actualCash = calcDenominationTotal(denominations);
     const expectedCash = calcExpectedCash(activeSession);
     const difference = Number((actualCash - expectedCash).toFixed(2));
@@ -946,17 +956,17 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       });
     }
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, { ...activeSession, cashCounts: updatedCounts, incidents: updatedIncidents });
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, { ...activeSession, cashCounts: updatedCounts, incidents: updatedIncidents });
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       setShowCashCount(false);
       toast.success(`Arqueo registrado. Diferencia: ${difference >= 0 ? '+' : ''}${difference.toFixed(2)}€`);
     } catch {
       toast.error('Error al registrar arqueo');
     }
-  }, [userId, activeSession]);
+  }, [dataUserId, activeSession]);
 
   const addIncident = useCallback(async (incident: Omit<import('../../lib/deliveryApi').TpvIncident, 'id' | 'date'>) => {
-    if (!userId || !activeSession) return;
+    if (!dataUserId || !activeSession) return;
     const fullIncident = {
       ...incident,
       id: `inc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -964,14 +974,14 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     };
     const updatedIncidents = [...(activeSession.incidents || []), fullIncident];
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, { ...activeSession, incidents: updatedIncidents });
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, { ...activeSession, incidents: updatedIncidents });
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       setShowIncident(false);
       toast.success('Incidencia registrada');
     } catch {
       toast.error('Error al registrar incidencia');
     }
-  }, [userId, activeSession]);
+  }, [dataUserId, activeSession]);
 
   if (loading) {
     return (

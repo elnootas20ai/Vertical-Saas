@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listPointsOfSaleRequest, type PointOfSale } from '../../lib/deliveryApi';
 import { getBusinessHours, type BusinessHoursConfig } from '../../lib/settingsApi';
 
@@ -17,7 +19,11 @@ function hasValidBusinessHours(hours: BusinessHoursConfig | null): boolean {
 
 export function RequirePdvTerminal({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const userId = user?.user_id || user?.id || '';
+  const { currentBusiness, isLoading: businessLoading } = useBusiness();
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [pdvs, setPdvs] = useState<PointOfSale[] | null>(null);
@@ -25,27 +31,31 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     let cancelled = false;
-    if (!userId) return;
-    listPointsOfSaleRequest(userId)
+    if (businessLoading || !dataUserId) return;
+    setPdvs(null);
+    listPointsOfSaleRequest(dataUserId)
       .then((r) => { if (!cancelled) setPdvs(r || []); })
       .catch(() => { if (!cancelled) setPdvs([]); });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [businessLoading, dataUserId]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!userId) return;
-    getBusinessHours(userId)
+    if (businessLoading || !dataUserId) return;
+    setHours(null);
+    getBusinessHours(dataUserId)
       .then((h) => { if (!cancelled) setHours(h || null); })
       .catch(() => { if (!cancelled) setHours(null); });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [businessLoading, dataUserId]);
 
   const okPdv = useMemo(() => (pdvs ? hasActiveTerminal(pdvs) : true), [pdvs]);
   const okHours = useMemo(() => (hours ? hasValidBusinessHours(hours) : true), [hours]);
   const ok = okPdv && okHours;
 
   useEffect(() => {
+    if (businessLoading) return;
+    if (!dataUserId) return;
     if (pdvs === null) return;
     if (hours === null) return;
     if (ok) return;
@@ -60,9 +70,9 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
       toast.error('Antes de usar TPV/Caja, configura los horarios del negocio.');
       navigate('/saas/settings/horarios', { replace: true, state: { from } });
     }
-  }, [pdvs, hours, ok, okPdv, okHours, navigate, location.pathname, location.search]);
+  }, [businessLoading, dataUserId, pdvs, hours, ok, okPdv, okHours, navigate, location.pathname, location.search]);
 
-  if (pdvs === null || hours === null) return null;
+  if (businessLoading || pdvs === null || hours === null) return null;
   if (!ok) return null;
   return <>{children}</>;
 }
