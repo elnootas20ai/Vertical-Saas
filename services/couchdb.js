@@ -4738,13 +4738,13 @@ export function getCatalogDbName() {
 
 const DELIVERY_STATUS_MIGRATION = {
   pending: 'nuevo', preparing: 'nuevo', kitchen: 'cocina',
-  assembly: 'listo', delivery: 'listo', delivered: 'entregado',
+  assembly: 'listo', delivery: 'en_reparto', delivered: 'entregado',
 };
 
 function normalizeDeliveryOrderStatus(value) {
   const v = String(value || '');
   if (DELIVERY_STATUS_MIGRATION[v]) return DELIVERY_STATUS_MIGRATION[v];
-  const allowed = ['nuevo', 'cocina', 'listo', 'entregado', 'cancelled', 'incident'];
+  const allowed = ['nuevo', 'cocina', 'listo', 'en_reparto', 'entregado', 'cancelled', 'incident'];
   return allowed.includes(v) ? v : 'nuevo';
 }
 
@@ -4789,6 +4789,11 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
   let kitchenCompletedAt = String(data.kitchenCompletedAt || existing?.kitchenCompletedAt || '');
   let assemblyStartedAt = String(data.assemblyStartedAt || existing?.assemblyStartedAt || '');
   let assemblyCompletedAt = String(data.assemblyCompletedAt || existing?.assemblyCompletedAt || '');
+  // departedAt marca el momento en el que el repartidor sale con el pedido. Es
+  // la base para medir cuánto tarda el reparto (deliveredAt - departedAt).
+  // Cuando llegue una transición a 'en_reparto' lo fijamos automáticamente, así
+  // el cliente no tiene que enviarlo manualmente.
+  let departedAt = String(data.departedAt || existing?.departedAt || '');
 
   if (statusChanged) {
     if (newStatus === 'cocina' && !kitchenStartedAt) kitchenStartedAt = now;
@@ -4796,7 +4801,17 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
       if (!kitchenCompletedAt) kitchenCompletedAt = now;
       if (!assemblyStartedAt) assemblyStartedAt = now;
     }
-    if (newStatus === 'entregado' && !assemblyCompletedAt) assemblyCompletedAt = now;
+    if (newStatus === 'en_reparto') {
+      if (!assemblyCompletedAt) assemblyCompletedAt = now;
+      if (!departedAt) departedAt = now;
+    }
+    if (newStatus === 'entregado') {
+      if (!assemblyCompletedAt) assemblyCompletedAt = now;
+      // Si se marca como entregado sin haber pasado por 'en_reparto' (p. ej.
+      // recogida en local), fijamos también departedAt = now para que las
+      // métricas de duración de reparto sean coherentes (en estos casos será 0).
+      if (!departedAt) departedAt = now;
+    }
   }
 
   const stageHistory = Array.isArray(data.stageHistory)
@@ -4856,6 +4871,7 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     deliveredAt: newStatus === 'entregado' && !existing?.deliveredAt
       ? now
       : String(data.deliveredAt || existing?.deliveredAt || ''),
+    departedAt,
     kitchenStartedAt,
     kitchenCompletedAt,
     assemblyStartedAt,

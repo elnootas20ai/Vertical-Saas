@@ -562,9 +562,13 @@ export interface AppContextType {
   addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'status'>) => Promise<Lead | void>;
   updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
+  /** Recarga leads desde el backend (útil tras importaciones masivas/SSE). */
+  refreshLeads: () => Promise<void>;
   addClient: (client: Omit<Client, 'id' | 'createdAt'>) => Promise<Client | void>;
   updateClient: (id: string, updates: Partial<Client>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
+  /** Recarga clientes desde el backend (útil tras importaciones masivas/SSE). */
+  refreshClients: () => Promise<void>;
   createNotification: (notification: {
     level?: NotificationLevel;
     category?: string;
@@ -626,7 +630,9 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       updateVehicle: async () => {},
       deleteVehicle: async () => {},
       addLead: async () => undefined, updateLead: async () => {}, deleteLead: async () => {},
+      refreshLeads: async () => {},
       addClient: async () => undefined, updateClient: async () => {}, deleteClient: async () => {},
+      refreshClients: async () => {},
       createNotification: async () => null,
       markNotificationAsRead: async () => {},
       markAllNotificationsAsRead: async () => {},
@@ -1915,12 +1921,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     token: sseToken,
   });
 
+  const refreshClients = async () => {
+    if (!authUser?.user_id) return;
+    try {
+      const fresh = await listClientsRequest(authUser.user_id);
+      setClients(fresh);
+    } catch {
+      // Silenciado: la lista actual permanece como fallback.
+    }
+  };
+
+  const refreshLeads = async () => {
+    if (!authUser?.user_id) return;
+    try {
+      const fresh = await listLeadsRequest(authUser.user_id);
+      setLeads(fresh);
+    } catch {
+      // Silenciado: la lista actual permanece como fallback.
+    }
+  };
+
   const value: AppContextType = {
     vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
     addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
-    addLead, updateLead, deleteLead,
-    addClient, updateClient, deleteClient,
+    addLead, updateLead, deleteLead, refreshLeads,
+    addClient, updateClient, deleteClient, refreshClients,
     createNotification, markNotificationAsRead, markAllNotificationsAsRead,
     addSale, updateSale, deleteSale,
     addDocument, updateDocument, deleteDocument,

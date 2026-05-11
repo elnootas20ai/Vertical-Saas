@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
@@ -17,6 +17,16 @@ function hasValidBusinessHours(hours: BusinessHoursConfig | null): boolean {
   return days.some((d) => d && d.open && typeof d.from === 'string' && typeof d.to === 'string' && d.from.trim() && d.to.trim() && d.from !== d.to);
 }
 
+/**
+ * Antes este componente forzaba la redirección a Ajustes si faltaba PDV u
+ * horarios. Eso bloqueaba el primer acceso a TPV Rápido/Caja en cuentas
+ * nuevas, generando la sensación de "no va": el usuario clica y se ve
+ * expulsado a una pantalla de configuración.
+ *
+ * Ahora se comporta como guard suave: deja pasar siempre y muestra un banner
+ * de aviso si falta algo. `TpvRegisterGate` ya ofrece una `OpeningScreen`
+ * que maneja el caso "sin PDV" con un CTA claro para configurar.
+ */
 export function RequirePdvTerminal({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { currentBusiness, isLoading: businessLoading } = useBusiness();
@@ -25,9 +35,9 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
     [user, currentBusiness],
   );
   const navigate = useNavigate();
-  const location = useLocation();
   const [pdvs, setPdvs] = useState<PointOfSale[] | null>(null);
   const [hours, setHours] = useState<BusinessHoursConfig | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,31 +59,45 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
     return () => { cancelled = true; };
   }, [businessLoading, dataUserId]);
 
-  const okPdv = useMemo(() => (pdvs ? hasActiveTerminal(pdvs) : true), [pdvs]);
-  const okHours = useMemo(() => (hours ? hasValidBusinessHours(hours) : true), [hours]);
-  const ok = okPdv && okHours;
+  const okPdv = pdvs ? hasActiveTerminal(pdvs) : true;
+  const okHours = hours ? hasValidBusinessHours(hours) : true;
+  const missing = !okHours; // PDV ya lo gestiona TpvRegisterGate; solo avisamos por horarios.
 
-  useEffect(() => {
-    if (businessLoading) return;
-    if (!dataUserId) return;
-    if (pdvs === null) return;
-    if (hours === null) return;
-    if (ok) return;
+  if (businessLoading) return null;
 
-    const from = `${location.pathname}${location.search}`;
-    if (!okPdv) {
-      toast.error('Antes de usar TPV/Caja, configura un PDV con al menos 1 terminal activo.');
-      navigate('/saas/settings/centros-de-trabajo', { replace: true, state: { from } });
-      return;
-    }
-    if (!okHours) {
-      toast.error('Antes de usar TPV/Caja, configura los horarios del negocio.');
-      navigate('/saas/settings/horarios', { replace: true, state: { from } });
-    }
-  }, [businessLoading, dataUserId, pdvs, hours, ok, okPdv, okHours, navigate, location.pathname, location.search]);
-
-  if (businessLoading || pdvs === null || hours === null) return null;
-  if (!ok) return null;
-  return <>{children}</>;
+  return (
+    <>
+      {missing && !bannerDismissed && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 px-4 py-2 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200 min-w-0">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
+              Configura los horarios del negocio para que las métricas y alertas funcionen al 100 %.
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate('/saas/settings/horarios')}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors"
+            >
+              Configurar <ArrowRight className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setBannerDismissed(true)}
+              className="p-1 rounded-md text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              aria-label="Cerrar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Variables expuestas para futura telemetría/UX; los gates downstream gestionan PDV. */}
+      <span className="hidden" data-okpdv={okPdv ? '1' : '0'} />
+      {children}
+    </>
+  );
 }
 

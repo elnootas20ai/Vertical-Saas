@@ -175,7 +175,7 @@ type SectionId = 'profile' | 'company' | 'salesPointsSection' | 'billing' | 'con
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ className?: string }>; tabs: TabId[] }[] = [
   { id: 'profile', label: 'Mi perfil', icon: UserCircle2, tabs: ['users', 'security', 'apariencia'] },
   { id: 'company', label: 'Empresa', icon: Building2, tabs: ['businesses', 'roles', 'marca', 'brands'] },
-  { id: 'salesPointsSection', label: 'Centros de trabajo', icon: Building2, tabs: ['salesPoints', 'horarios'] },
+  { id: 'salesPointsSection', label: 'Centros de trabajo', icon: Building2, tabs: ['salesPoints'] },
   { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
   { id: 'config', label: 'Configuración', icon: SettingsIcon, tabs: ['templates', 'integrations', 'pipeline', 'emails', 'datos'] },
   { id: 'alerts', label: 'Alertas', icon: Bell, tabs: ['alertas'] },

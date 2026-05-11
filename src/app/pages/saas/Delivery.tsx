@@ -54,7 +54,8 @@ import {
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; badgeClass: string }> = {
   nuevo: { label: 'Nuevo', badgeClass: 'bg-amber-100 text-amber-700 border-amber-200' },
   cocina: { label: 'En cocina', badgeClass: 'bg-orange-100 text-orange-700 border-orange-200' },
-  listo: { label: 'Listo', badgeClass: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  listo: { label: 'Montaje', badgeClass: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+  en_reparto: { label: 'En reparto', badgeClass: 'bg-cyan-100 text-cyan-700 border-cyan-200' },
   entregado: { label: 'Entregado', badgeClass: 'bg-green-100 text-green-700 border-green-200' },
   cancelled: { label: 'Cancelado', badgeClass: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700' },
   incident: { label: 'Incidencia', badgeClass: 'bg-red-100 text-red-700 border-red-200' },
@@ -72,10 +73,10 @@ const CHANNEL_LABELS: Record<string, string> = { direct: 'Directo', phone: 'Tel√
 const DELIVERY_MAIN_TAB_IDS = new Set(['orders', 'history']);
 
 const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
-  nuevo: 'cocina', cocina: 'listo', listo: 'entregado',
+  nuevo: 'cocina', cocina: 'listo', listo: 'en_reparto', en_reparto: 'entregado',
 };
 const NEXT_STATUS_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
-  nuevo: 'A cocina', cocina: 'Marcar listo', listo: 'Entregado',
+  nuevo: 'A cocina', cocina: 'Marcar listo', listo: 'Salida repartidor', en_reparto: 'Entregado',
 };
 
 function formatDateES(dateStr: string) {

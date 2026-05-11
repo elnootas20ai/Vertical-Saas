@@ -80,8 +80,13 @@ export function DeliveryReparto() {
   useEffect(() => { if (!uid) return; const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [uid, load]);
 
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+  // "Listos para salir": status 'listo' sin departedAt todavía. Mantengo el
+  // fallback de !departedAt para no romper pedidos antiguos en los que la
+  // transición 'en_reparto' aún no existía.
   const ready = useMemo(() => orders.filter(o => o.status === 'listo' && !o.departedAt), [orders]);
-  const route = useMemo(() => orders.filter(o => o.status === 'listo' && o.departedAt && !o.deliveredAt), [orders]);
+  // "En ruta": el repartidor ya salió. Aceptamos tanto el nuevo estado
+  // 'en_reparto' como pedidos antiguos en 'listo' con departedAt.
+  const route = useMemo(() => orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt), [orders]);
   const done = useMemo(() => orders.filter(o => o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today), [orders, today]);
   const cash = useMemo(() => done.filter(o => !o.paymentCollected && (o.paymentMethod === 'efectivo' || !o.paymentMethod)).reduce((s, o) => s + (o.totalAmount || 0), 0), [done]);
   const actDrv = useMemo(() => drivers.filter(d => d.active && d.status === 'active'), [drivers]);
@@ -138,14 +143,17 @@ export function DeliveryReparto() {
     if (!myDrvId) return [];
     const m = orders.filter(o => o.driverId === myDrvId);
     if (wTab === 'pending') return m.filter(o => o.status === 'listo' && !o.departedAt);
-    if (wTab === 'route') return m.filter(o => o.status === 'listo' && o.departedAt && !o.deliveredAt);
+    if (wTab === 'route') return m.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt);
     return m.filter(o => o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today);
   }, [orders, myDrvId, wTab, today]);
 
   const startRoute = async (o: DeliveryOrder) => {
     try {
       const now = new Date().toISOString();
-      const u = await updateDeliveryOrderRequest(uid, { ...o, departedAt: now, stageHistory: [...(o.stageHistory || []), { status: o.status, date: now, user: user?.fullName || '', notes: 'Inició ruta' }] } as DeliveryOrder);
+      // Pasamos formalmente el estado a 'en_reparto'. El backend además fijará
+      // departedAt automáticamente, pero lo enviamos también para que la UI
+      // refleje el cambio sin esperar al refresh.
+      const u = await updateDeliveryOrderRequest(uid, { ...o, status: 'en_reparto', departedAt: now, stageHistory: [...(o.stageHistory || []), { status: 'en_reparto', date: now, user: user?.fullName || '', notes: 'Inició ruta' }] } as DeliveryOrder);
       setOrders(p => p.map(x => x._id === u._id ? u : x)); toast.success('Ruta iniciada');
     } catch { toast.error('Error al iniciar ruta'); }
   };
@@ -272,7 +280,7 @@ export function DeliveryReparto() {
               </div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">{drivers.filter(d => d.active).map(d => {
-              const st = getSt(d._id); const dOrd = orders.filter(o => o.driverId === d._id && o.status === 'listo'); const exp = expDrv === d._id;
+              const st = getSt(d._id); const dOrd = orders.filter(o => o.driverId === d._id && (o.status === 'listo' || o.status === 'en_reparto')); const exp = expDrv === d._id;
               return (<div key={d._id} className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <div className="p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50" onClick={() => setExpDrv(exp ? null : d._id)}>
                   <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-700 dark:text-gray-300 shrink-0">{initials(d.name)}</div>
@@ -307,7 +315,7 @@ export function DeliveryReparto() {
             <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700"><User className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" /><p className="font-semibold">Sin perfil de repartidor</p><p className="text-sm mt-1">Contacta con tu gerente</p></div>
           ) : (<>
             <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
-              {([['pending', 'Pendientes', orders.filter(o => o.driverId === myDrvId && o.status === 'listo' && !o.departedAt).length], ['route', 'En ruta', orders.filter(o => o.driverId === myDrvId && o.status === 'listo' && o.departedAt && !o.deliveredAt).length], ['done', 'Entregados', orders.filter(o => o.driverId === myDrvId && o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today).length]] as [string, string, number][]).map(([k, lb, ct]) => (
+              {([['pending', 'Pendientes', orders.filter(o => o.driverId === myDrvId && o.status === 'listo' && !o.departedAt).length], ['route', 'En ruta', orders.filter(o => o.driverId === myDrvId && (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt).length], ['done', 'Entregados', orders.filter(o => o.driverId === myDrvId && o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today).length]] as [string, string, number][]).map(([k, lb, ct]) => (
                 <button key={k} onClick={() => setWTab(k as any)} className={`flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${wTab === k ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}>{lb}{ct > 0 && <span className="ml-1 px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 rounded-full text-xs">{ct}</span>}</button>
               ))}
             </div>
@@ -360,7 +368,9 @@ function OCard({ o, drivers, onAssign, onRoute, onDone, onPaid, mgr }: {
   o: DeliveryOrder; drivers: Driver[]; onAssign?: () => void; onRoute: () => void; onDone: () => void; onPaid: () => void; mgr: boolean;
 }) {
   const isR = o.status === 'listo' && !o.departedAt;
-  const isRt = o.status === 'listo' && !!o.departedAt && !o.deliveredAt;
+  // En ruta = estado 'en_reparto' o, por compatibilidad, 'listo' con departedAt
+  // y sin deliveredAt (pedidos creados antes de añadir el estado intermedio).
+  const isRt = (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt;
   const isD = o.status === 'entregado';
   const np = isD && !o.paymentCollected && (o.paymentMethod === 'efectivo' || !o.paymentMethod);
   const drv = drivers.find(d => d._id === o.driverId);

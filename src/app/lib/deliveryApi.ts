@@ -34,7 +34,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type DeliveryOrderStatus = 'nuevo' | 'cocina' | 'listo' | 'entregado' | 'cancelled' | 'incident';
+export type DeliveryOrderStatus = 'nuevo' | 'cocina' | 'listo' | 'en_reparto' | 'entregado' | 'cancelled' | 'incident';
 
 export type DeliveryType = 'domicilio' | 'recogida' | 'sala';
 export type PaymentStatus = 'pending' | 'paid' | 'partial' | 'refunded';

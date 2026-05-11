@@ -34,11 +34,12 @@ import { ClientsPage } from './ClientsPage';
 import { PromotionsPage } from './PromotionsPage';
 
 const STATUS_CFG: Record<string, { label: string; bg: string; border: string; text: string; icon: typeof Clock }> = {
-  nuevo:     { label: 'Nuevos',      bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-800',   text: 'text-amber-700 dark:text-amber-400',   icon: Clock },
-  cocina:    { label: 'En cocina',   bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-200 dark:border-orange-800', text: 'text-orange-700 dark:text-orange-400', icon: ChefHat },
-  listo:     { label: 'Listos',      bg: 'bg-indigo-50 dark:bg-indigo-950/30', border: 'border-indigo-200 dark:border-indigo-800', text: 'text-indigo-700 dark:text-indigo-400', icon: Package },
-  entregado: { label: 'Entregados',  bg: 'bg-green-50 dark:bg-green-950/30',   border: 'border-green-200 dark:border-green-800',   text: 'text-green-700 dark:text-green-400',   icon: CheckCircle2 },
-  incident:  { label: 'Incidencias', bg: 'bg-red-50 dark:bg-red-950/30',       border: 'border-red-200 dark:border-red-800',       text: 'text-red-700 dark:text-red-400',       icon: AlertTriangle },
+  nuevo:      { label: 'Nuevos',      bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-800',   text: 'text-amber-700 dark:text-amber-400',   icon: Clock },
+  cocina:     { label: 'En cocina',   bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-orange-200 dark:border-orange-800', text: 'text-orange-700 dark:text-orange-400', icon: ChefHat },
+  listo:      { label: 'Montaje',     bg: 'bg-indigo-50 dark:bg-indigo-950/30', border: 'border-indigo-200 dark:border-indigo-800', text: 'text-indigo-700 dark:text-indigo-400', icon: Package },
+  en_reparto: { label: 'En reparto',  bg: 'bg-cyan-50 dark:bg-cyan-950/30',     border: 'border-cyan-200 dark:border-cyan-800',     text: 'text-cyan-700 dark:text-cyan-400',     icon: Truck },
+  entregado:  { label: 'Entregados',  bg: 'bg-green-50 dark:bg-green-950/30',   border: 'border-green-200 dark:border-green-800',   text: 'text-green-700 dark:text-green-400',   icon: CheckCircle2 },
+  incident:   { label: 'Incidencias', bg: 'bg-red-50 dark:bg-red-950/30',       border: 'border-red-200 dark:border-red-800',       text: 'text-red-700 dark:text-red-400',       icon: AlertTriangle },
 };
 
 const CH_LABELS: Record<string, string> = {
@@ -149,9 +150,9 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
 function Pipeline({ byStatus, active, onFilter }: {
   byStatus: Record<string, number>; active: string | null; onFilter: (s: string | null) => void;
 }) {
-  const phases = ['nuevo', 'cocina', 'listo', 'entregado', 'incident'] as const;
+  const phases = ['nuevo', 'cocina', 'listo', 'en_reparto', 'entregado', 'incident'] as const;
   return (
-    <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+    <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
       {phases.map(s => {
         const c = STATUS_CFG[s]; if (!c) return null;
         const Icon = c.icon; const on = active === s;
@@ -427,6 +428,8 @@ function KitchenW({ ks, orders, onAdv }: {
 /* ── Assembly Widget ─────────────────────────────────────────────────────── */
 
 function AssemblyW({ orders, onAdv }: { orders: DeliveryOrder[]; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void }) {
+  // En montaje: pedidos en estado 'listo' pendientes de salir hacia entrega.
+  // No incluimos 'en_reparto' porque ese ya está saliendo / fuera del local.
   const list = orders.filter(o => o.status === 'listo' && !o.assignedDriver && o.deliveryType !== 'sala').slice(0, 5);
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
@@ -471,7 +474,9 @@ function RepartoW({ ds, orders, cfg, onAdv }: {
   cfg: DeliveryConfig | null; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
 }) {
   if (!cfg?.hasOwnDelivery && !cfg?.hasPlatformDelivery) return null;
-  const list = orders.filter(o => o.status === 'listo' && o.assignedDriver).slice(0, 5);
+  // En reparto: pedidos ya marcados 'en_reparto' o, por compatibilidad,
+  // 'listo' con repartidor asignado (flujo antiguo previo al estado intermedio).
+  const list = orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && o.assignedDriver))).slice(0, 5);
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
@@ -712,7 +717,7 @@ export function DeliveryOpsCenter() {
   /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
   const pedidosQueueCount = useMemo(() => {
     if (!data?.activeOrders) return 0;
-    return data.activeOrders.filter((o) => o.status === 'nuevo' || o.status === 'cocina' || o.status === 'listo').length;
+    return data.activeOrders.filter((o) => o.status === 'nuevo' || o.status === 'cocina' || o.status === 'listo' || o.status === 'en_reparto').length;
   }, [data?.activeOrders]);
 
   const quickNav = useCallback(

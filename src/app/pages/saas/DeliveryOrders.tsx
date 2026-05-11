@@ -39,12 +39,13 @@ import { GenericImportModal, type ImportFieldDef } from '../../components/saas/G
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; badge: string; icon: typeof Clock }> = {
-  nuevo:     { label: 'Nuevo',      badge: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock },
-  cocina:    { label: 'Cocina',     badge: 'bg-orange-100 text-orange-700 border-orange-200', icon: ChefHat },
-  listo:     { label: 'Listo',      badge: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
-  entregado: { label: 'Entregado',  badge: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
-  cancelled: { label: 'Cancelado',  badge: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-700 dark:text-gray-400', icon: XCircle },
-  incident:  { label: 'Incidencia', badge: 'bg-red-100 text-red-700 border-red-200',         icon: AlertTriangle },
+  nuevo:      { label: 'Nuevo',      badge: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock },
+  cocina:     { label: 'Cocina',     badge: 'bg-orange-100 text-orange-700 border-orange-200', icon: ChefHat },
+  listo:      { label: 'Montaje',    badge: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
+  en_reparto: { label: 'En reparto', badge: 'bg-cyan-100 text-cyan-700 border-cyan-200',       icon: Truck },
+  entregado:  { label: 'Entregado',  badge: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
+  cancelled:  { label: 'Cancelado',  badge: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-700 dark:text-gray-400', icon: XCircle },
+  incident:   { label: 'Incidencia', badge: 'bg-red-100 text-red-700 border-red-200',         icon: AlertTriangle },
 };
 
 const CHANNEL_CONFIG: Record<string, { label: string; badge: string }> = {
@@ -69,8 +70,11 @@ const PAYMENT_LABELS: Record<string, string> = {
   online: 'Online', plataforma: 'Plataforma',
 };
 
+// Flujo: nuevo → cocina → listo (montaje) → en_reparto → entregado.
+// El paso intermedio "en_reparto" nos permite medir cuánto tarda el repartidor
+// (deliveredAt - departedAt) y mostrar al gerente qué pedidos están de camino.
 const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
-  nuevo: 'cocina', cocina: 'listo', listo: 'entregado',
+  nuevo: 'cocina', cocina: 'listo', listo: 'en_reparto', en_reparto: 'entregado',
 };
 
 function extractBrandIds(order: DeliveryOrder): string[] {
@@ -213,7 +217,12 @@ export function DeliveryOrders() {
       const extras: Partial<DeliveryOrder> = {};
       if (next === 'cocina') extras.kitchenStartedAt = now;
       if (next === 'listo') { extras.kitchenCompletedAt = now; extras.assemblyStartedAt = now; }
-      if (next === 'entregado') { extras.assemblyCompletedAt = now; extras.deliveredAt = now; }
+      // En reparto: cerramos montaje y marcamos la salida del repartidor.
+      if (next === 'en_reparto') { extras.assemblyCompletedAt = now; extras.departedAt = now; }
+      // Entregado: solo marcamos la llegada. assemblyCompletedAt y departedAt
+      // ya están fijados desde "en_reparto"; el backend también los garantiza
+      // si por cualquier motivo se salta el paso intermedio (recogida en local).
+      if (next === 'entregado') { extras.deliveredAt = now; }
       const updated = await updateDeliveryOrderRequest(userId, {
         ...order, ...extras, status: next,
         stageHistory: [...(order.stageHistory || []), { status: next, date: now, user: user.fullName || 'Sistema' }],
@@ -300,12 +309,13 @@ export function DeliveryOrders() {
   // ─── KPIs ────────────────────────────────────────────────────────────────
 
   const kpis = useMemo(() => ({
-    nuevo:     filtered.filter((o) => o.status === 'nuevo').length,
-    cocina:    filtered.filter((o) => o.status === 'cocina').length,
-    listo:     filtered.filter((o) => o.status === 'listo').length,
-    entregado: filtered.filter((o) => o.status === 'entregado').length,
-    cancelled: filtered.filter((o) => o.status === 'cancelled').length,
-    total:     filtered.length,
+    nuevo:      filtered.filter((o) => o.status === 'nuevo').length,
+    cocina:     filtered.filter((o) => o.status === 'cocina').length,
+    listo:      filtered.filter((o) => o.status === 'listo').length,
+    en_reparto: filtered.filter((o) => o.status === 'en_reparto').length,
+    entregado:  filtered.filter((o) => o.status === 'entregado').length,
+    cancelled:  filtered.filter((o) => o.status === 'cancelled').length,
+    total:      filtered.length,
   }), [filtered]);
 
   // ─── Alerts ──────────────────────────────────────────────────────────────
@@ -344,14 +354,15 @@ export function DeliveryOrders() {
         <DeliveryAlertsBar alerts={alerts} onDismiss={(id) => setDismissedAlerts((prev) => new Set(prev).add(id))} />
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           {([
-            { key: 'nuevo',     label: 'Nuevos',     color: 'amber',  icon: Clock },
-            { key: 'cocina',    label: 'En cocina',  color: 'orange', icon: ChefHat },
-            { key: 'listo',     label: 'Listos',     color: 'indigo', icon: Package },
-            { key: 'entregado', label: 'Entregados', color: 'green',  icon: CheckCircle2 },
-            { key: 'cancelled', label: 'Cancelados', color: 'gray',   icon: XCircle },
-            { key: 'total',     label: 'Total',      color: 'blue',   icon: ShoppingBag },
+            { key: 'nuevo',      label: 'Nuevos',     color: 'amber',  icon: Clock },
+            { key: 'cocina',     label: 'En cocina',  color: 'orange', icon: ChefHat },
+            { key: 'listo',      label: 'En montaje', color: 'indigo', icon: Package },
+            { key: 'en_reparto', label: 'En reparto', color: 'cyan',   icon: Truck },
+            { key: 'entregado',  label: 'Entregados', color: 'green',  icon: CheckCircle2 },
+            { key: 'cancelled',  label: 'Cancelados', color: 'gray',   icon: XCircle },
+            { key: 'total',      label: 'Total',      color: 'blue',   icon: ShoppingBag },
           ] as const).map(({ key, label, color, icon: Icon }) => (
             <button key={key} onClick={() => key !== 'total' ? setFilters((f) => ({ ...EMPTY_FILTERS, status: key === 'total' ? '' : key })) : setFilters(EMPTY_FILTERS)}
               className={`p-4 bg-${color}-50 dark:bg-${color}-900/20 border-2 border-${color}-200 dark:border-${color}-800 rounded-xl text-left hover:shadow-md transition-shadow`}>

@@ -6,6 +6,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useApp } from '../../context/AppContext';
 import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
@@ -840,6 +841,7 @@ function CreateItemModal({
 export function CatalogPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const { createNotification } = useApp();
   const navigate = useNavigate();
   const { config: verticalConfig, businessType, isLoading: vcLoading } = useVerticalCatalog();
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
@@ -1123,6 +1125,35 @@ export function CatalogPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  /**
+   * Dispara una notificación "Stock bajo" cuando un artículo cruza el umbral
+   * de stock mínimo. Sólo notifica en la transición (antes >, ahora <=) o en
+   * creaciones que nacen ya bajo mínimo. Así evitamos spam si el usuario edita
+   * un artículo que ya estaba en stock bajo.
+   */
+  const maybeNotifyLowStock = (previous: CatalogItem | null, next: CatalogItem) => {
+    const min = Number((next as any).minStock ?? 0);
+    const current = Number((next as any).stockQuantity ?? 0);
+    if (!Number.isFinite(min) || min <= 0) return;
+    if (!Number.isFinite(current)) return;
+    const wasLow = previous
+      ? Number((previous as any).stockQuantity ?? 0) <= Number((previous as any).minStock ?? 0)
+      : false;
+    const isLow = current <= min;
+    if (!isLow) return;
+    if (previous && wasLow) return;
+    void createNotification({
+      level: 'warning',
+      category: 'inventory',
+      title: 'Stock bajo',
+      message: `${next.name} está a ${current} ${next.unit || 'ud'} (mínimo ${min}). Considera reponer.`,
+      entityId: next._id,
+      entityType: 'catalog_item',
+      route: '/saas/catalog',
+      metadata: { stockQuantity: current, minStock: min, sku: next.sku },
+    }).catch((error) => { console.error('Error creating low-stock notification:', error); });
+  };
+
   const handleCreateItem = async (data: Partial<CatalogItem>) => {
     if (!user?.id) {
       toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
@@ -1150,10 +1181,12 @@ export function CatalogPage() {
         const updated = await updateCatalogItemRequest(user.id, { ...editingItem, ...data } as CatalogItem);
         setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
         toast.success('Elemento actualizado');
+        maybeNotifyLowStock(editingItem as CatalogItem, updated);
       } else {
         const created = await createCatalogItemRequest(user.id, { ...data, module: 'catalog' } as any);
         setCatalogItems(prev => [created, ...prev]);
         toast.success('Elemento creado');
+        maybeNotifyLowStock(null, created);
       }
       setShowCreateItem(false);
       setEditingItem(null);

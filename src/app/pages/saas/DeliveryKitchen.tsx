@@ -48,12 +48,13 @@ import {
 // ─── Status config adapted to new Spanish statuses ───────────────────────────
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  nuevo:     { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   icon: <Clock className="w-4 h-4" /> },
-  cocina:    { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', icon: <ChefHat className="w-4 h-4" /> },
-  listo:     { label: 'Listo',      color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   icon: <CheckCircle2 className="w-4 h-4" /> },
-  entregado: { label: 'Entregado',  color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: <Truck className="w-4 h-4" /> },
-  cancelled: { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     icon: <X className="w-4 h-4" /> },
-  incident:  { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       icon: <AlertTriangle className="w-4 h-4" /> },
+  nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',     icon: <Clock className="w-4 h-4" /> },
+  cocina:     { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200',   icon: <ChefHat className="w-4 h-4" /> },
+  listo:      { label: 'Montaje',    color: 'text-indigo-700',  bg: 'bg-indigo-50 border-indigo-200',   icon: <Package className="w-4 h-4" /> },
+  en_reparto: { label: 'En reparto', color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',       icon: <Truck className="w-4 h-4" /> },
+  entregado:  { label: 'Entregado',  color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', icon: <CheckCircle2 className="w-4 h-4" /> },
+  cancelled:  { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',       icon: <X className="w-4 h-4" /> },
+  incident:   { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',         icon: <AlertTriangle className="w-4 h-4" /> },
 };
 
 const KITCHEN_STATUSES: DeliveryOrderStatus[] = ['nuevo', 'cocina'];

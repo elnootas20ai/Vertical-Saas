@@ -1484,7 +1484,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) 
   const threshold = config.delayThresholdMinutes || 30;
   const kitchenMax = config.kitchenSaturationThreshold || 10;
 
-  const activeStatuses = ['nuevo', 'cocina', 'listo'];
+  const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
   for (const o of orders) {
     if (!activeStatuses.includes(o.status)) continue;
     const mins = minutesSince(o.createdAt);
@@ -1583,10 +1583,10 @@ export async function getOpsCenter(req, res) {
 
     const orders = dayOrders.map(sanitizeDeliveryOrder);
 
-    const activeStatuses = ['nuevo', 'cocina', 'listo', 'incident'];
+    const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto', 'incident'];
     const activeOrders = orders.filter(o => activeStatuses.includes(o.status));
 
-    const byStatus = { nuevo: 0, cocina: 0, listo: 0, entregado: 0, cancelled: 0, incident: 0 };
+    const byStatus = { nuevo: 0, cocina: 0, listo: 0, en_reparto: 0, entregado: 0, cancelled: 0, incident: 0 };
     for (const o of orders) { if (byStatus[o.status] !== undefined) byStatus[o.status]++; }
 
     const delivered = orders.filter(o => o.status === 'entregado');
@@ -1621,7 +1621,10 @@ export async function getOpsCenter(req, res) {
     const kitchenAvgWait = inKitchen.length > 0
       ? inKitchen.reduce((s, o) => s + minutesSince(o.createdAt), 0) / inKitchen.length : 0;
 
-    const inDelivery = orders.filter(o => o.status === 'listo' && o.deliveryType === 'domicilio' && o.assignedDriver);
+    // "Pedidos en reparto" para el ops center: ahora vienen marcados con el
+    // estado intermedio 'en_reparto'. Mantenemos la rama 'listo' con repartidor
+    // por compatibilidad con pedidos anteriores al cambio.
+    const inDelivery = orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.assignedDriver)) && o.deliveryType === 'domicilio');
     const drivers = new Set(inDelivery.map(o => o.assignedDriver).filter(Boolean));
 
     const revenueByChannel = {};

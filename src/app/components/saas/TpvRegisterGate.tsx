@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useMemo, createContext, useContext, t
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useApp } from '../../context/AppContext';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
   updateTpvRegisterSessionRequest,
   listPointsOfSaleRequest,
+  createPointOfSaleRequest,
   type TpvRegisterSession,
   type TpvRegisterTransaction,
   type CashDenominationCount,
@@ -178,11 +180,13 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions, onCreateDefaultPdv, creatingDefaultPdv }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
   workerOptions: { id: string; name: string }[];
+  onCreateDefaultPdv: () => void;
+  creatingDefaultPdv: boolean;
 }) {
   const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
@@ -212,7 +216,12 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   useEffect(() => {
     if (workerOptions.length === 0) return;
     if (selectedWorkerId) return;
-    // Intenta seleccionar por nombre cacheado
+    // 1) Si solo hay un trabajador (típico cuenta nueva: el propio gerente), lo seleccionamos.
+    if (workerOptions.length === 1) {
+      setSelectedWorkerId(workerOptions[0].id);
+      return;
+    }
+    // 2) Si hay varios, intentamos por nombre cacheado.
     const cached = (() => {
       try { return localStorage.getItem('vertial.tpvRapido.cashierName') || ''; } catch { return ''; }
     })().trim().toLowerCase();
@@ -220,6 +229,24 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     const match = workerOptions.find((w) => w.name.trim().toLowerCase() === cached);
     if (match) setSelectedWorkerId(match.id);
   }, [workerOptions, selectedWorkerId]);
+
+  // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
+  useEffect(() => {
+    if (selectedPdvId) return;
+    const activePdvs = pointsOfSale.filter((p) => p.active);
+    if (activePdvs.length === 1) {
+      setSelectedPdvId(activePdvs[0]._id);
+    }
+  }, [pointsOfSale, selectedPdvId]);
+
+  // Autoseleccionar el único terminal activo del PDV elegido.
+  useEffect(() => {
+    if (!selectedPdv) return;
+    if (selectedTerminalId) return;
+    if (availableTerminals.length === 1) {
+      setSelectedTerminalId(availableTerminals[0].id);
+    }
+  }, [selectedPdv, selectedTerminalId, availableTerminals]);
 
   const handleSelectPdv = (pdvId: string) => {
     setSelectedPdvId(pdvId);
@@ -328,22 +355,30 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
             <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
               <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
               <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
-                Para abrir caja necesitas configurar al menos 1 punto de venta y su terminal.
+                Para abrir caja necesitas al menos 1 punto de venta con su terminal. Puedes crear uno básico ahora y personalizarlo más tarde desde Ajustes.
               </p>
               <div className="mt-3 flex gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={onCreateDefaultPdv}
+                  disabled={creatingDefaultPdv}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                >
+                  {creatingDefaultPdv ? 'Creando…' : 'Crear PDV por defecto'}
+                </button>
                 <button
                   type="button"
                   onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
                   className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
                 >
-                  Configurar PDV
+                  Configurar manualmente
                 </button>
                 <button
                   type="button"
                   onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
                   className="px-4 py-2 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-sm font-semibold"
                 >
-                  Activar multi-PDV (PRO)
+                  Multi-PDV (PRO)
                 </button>
               </div>
             </div>
@@ -386,9 +421,15 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
 
           {/* Cash count */}
           <div className="pt-2">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2 gap-2">
               <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
-              {hasCounted && <span className="text-xs font-bold text-emerald-600">Contado: {total.toFixed(2)}€</span>}
+              {hasCounted ? (
+                <span className="text-xs font-bold text-emerald-600">Contado: {total.toFixed(2)}€</span>
+              ) : canOpen ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md">
+                  <AlertTriangle className="w-3 h-3" /> Cuenta el efectivo antes de abrir
+                </span>
+              ) : null}
             </div>
             <CashCountGrid counts={counts} onChange={setCounts} />
           </div>
@@ -416,9 +457,6 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
           >
             <Unlock className="w-4 h-4" /> Abrir caja{selectedPdv ? ` — ${selectedPdv.name}` : ''} — {total.toFixed(2)}€ de fondo
           </button>
-          {!hasCounted && canOpen && (
-            <p className="text-xs text-amber-600 mt-2 text-center flex items-center justify-center gap-1"><AlertTriangle className="w-3 h-3" /> Cuenta el efectivo antes de abrir</p>
-          )}
         </div>
       </div>
     </div>
@@ -811,6 +849,7 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { currentBusiness, isLoading: businessLoading } = useBusiness();
+  const { createNotification } = useApp();
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
@@ -819,6 +858,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [creatingDefaultPdv, setCreatingDefaultPdv] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
@@ -850,6 +890,44 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     loadData();
   }, [businessLoading, dataUserId, loadData]);
 
+  /**
+   * Crea un PDV mínimo viable + 1 terminal activo para que el usuario pueda
+   * empezar a usar TPV sin pasar por Ajustes. Pensado sobre todo para cuentas
+   * nuevas en testing/onboarding. Se puede editar o sustituir desde
+   * Ajustes → Centros de trabajo.
+   */
+  const handleCreateDefaultPdv = useCallback(async () => {
+    if (!dataUserId || creatingDefaultPdv) return;
+    setCreatingDefaultPdv(true);
+    try {
+      const terminalId = `term-${Date.now().toString(36)}`;
+      const defaultTerminal: TerminalConfig = {
+        id: terminalId,
+        code: 'TPV-1',
+        name: 'Terminal principal',
+        datafonName: '',
+        printerName: '',
+        scaleDeviceId: '',
+        scaleName: '',
+        active: true,
+      };
+      const businessName = currentBusiness?.name?.trim() || 'Local principal';
+      const created = await createPointOfSaleRequest(dataUserId, {
+        name: businessName,
+        code: 'PDV-1',
+        address: '',
+        active: true,
+        terminals: [defaultTerminal],
+      });
+      setPointsOfSale((prev) => [created, ...prev]);
+      toast.success('PDV creado. Ya puedes abrir caja.');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el PDV por defecto');
+    } finally {
+      setCreatingDefaultPdv(false);
+    }
+  }, [dataUserId, creatingDefaultPdv, currentBusiness?.name]);
+
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
     const total = calcDenominationTotal(data.counts);
@@ -874,6 +952,19 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       } as Partial<TpvRegisterSession>);
       setSessions(prev => [created, ...prev]);
       toast.success(`Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`);
+      // Aviso para el campanario de notificaciones. Útil para auditoría y para que
+      // un encargado vea aperturas desde el móvil. Si la llamada al backend falla
+      // simplemente se ignora: el toast ya confirmó visualmente la apertura.
+      void createNotification({
+        level: 'success',
+        category: 'tpv',
+        title: 'Caja abierta',
+        message: `${data.workerName} abrió ${data.pointOfSaleName || 'la caja'}${data.terminalName ? ` (${data.terminalName})` : ''} con ${total.toFixed(2)}€ de fondo`,
+        entityId: created.id,
+        entityType: 'tpv_session',
+        route: '/saas/tpv',
+        metadata: { initialCashAmount: total, pointOfSaleId: data.pointOfSaleId, terminalId: data.terminalId },
+      }).catch((error) => { console.error('Error creating tpv open notification:', error); });
     } catch {
       toast.error('Error al abrir la caja');
     }
@@ -1083,7 +1174,16 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     if (user?.id) uniq.set(String(user.id), { id: String(user.id), name: String(user.fullName || user.email || 'Gerente').trim() });
     const workerOptions = Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
-    return <OpeningScreen onOpen={handleOpen} loading={loading} pointsOfSale={pointsOfSale} workerOptions={workerOptions} />;
+    return (
+      <OpeningScreen
+        onOpen={handleOpen}
+        loading={loading}
+        pointsOfSale={pointsOfSale}
+        workerOptions={workerOptions}
+        onCreateDefaultPdv={handleCreateDefaultPdv}
+        creatingDefaultPdv={creatingDefaultPdv}
+      />
+    );
   }
 
   return (

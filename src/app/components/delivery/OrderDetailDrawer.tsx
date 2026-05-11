@@ -7,12 +7,13 @@ import {
 import type { DeliveryOrder, DeliveryOrderStatus } from '../../lib/deliveryApi';
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; icon: typeof Clock }> = {
-  nuevo:     { label: 'Nuevo',     color: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock },
-  cocina:    { label: 'Cocina',    color: 'bg-orange-100 text-orange-700 border-orange-200', icon: ChefHat },
-  listo:     { label: 'Listo',     color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
-  entregado: { label: 'Entregado', color: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
-  cancelled: { label: 'Cancelado', color: 'bg-gray-100 text-gray-500 border-gray-200',      icon: X },
-  incident:  { label: 'Incidencia', color: 'bg-red-100 text-red-700 border-red-200',        icon: AlertTriangle },
+  nuevo:      { label: 'Nuevo',      color: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock },
+  cocina:     { label: 'Cocina',     color: 'bg-orange-100 text-orange-700 border-orange-200', icon: ChefHat },
+  listo:      { label: 'Montaje',    color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
+  en_reparto: { label: 'En reparto', color: 'bg-cyan-100 text-cyan-700 border-cyan-200',       icon: Truck },
+  entregado:  { label: 'Entregado',  color: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
+  cancelled:  { label: 'Cancelado',  color: 'bg-gray-100 text-gray-500 border-gray-200',      icon: X },
+  incident:   { label: 'Incidencia', color: 'bg-red-100 text-red-700 border-red-200',         icon: AlertTriangle },
 };
 
 const CHANNEL_CONFIG: Record<string, { label: string; color: string }> = {
@@ -31,11 +32,15 @@ const PAYMENT_LABELS: Record<string, string> = {
   online: 'Online', plataforma: 'Plataforma', '': 'Sin definir',
 };
 
+// Debe coincidir con NEXT_STATUS en DeliveryOrders.tsx: cocina → montaje → reparto → entregado.
 const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
-  nuevo: 'cocina', cocina: 'listo', listo: 'entregado',
+  nuevo: 'cocina', cocina: 'listo', listo: 'en_reparto', en_reparto: 'entregado',
 };
 const NEXT_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
-  nuevo: 'Enviar a Cocina', cocina: 'Marcar Listo', listo: 'Marcar Entregado',
+  nuevo: 'Enviar a Cocina',
+  cocina: 'Marcar Listo (Montaje)',
+  listo: 'Salida del repartidor',
+  en_reparto: 'Marcar Entregado',
 };
 
 function timeSince(dateStr: string): string {

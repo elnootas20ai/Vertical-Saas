@@ -17,8 +17,6 @@ import {
   type ContractInfo,
 } from '../../../lib/workCentersApi';
 import { AddButtonDropdown } from '../AddButtonDropdown';
-import { AIAddModal, type AIFieldDef } from '../AIAddModal';
-import { GenericImportModal, type ImportFieldDef } from '../GenericImportModal';
 import {
   Search,
   X,
@@ -505,28 +503,6 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
   );
 }
 
-// ── AI & Import field definitions ─────────────────────────────────────────────
-
-const WC_AI_FIELDS: AIFieldDef[] = [
-  { key: 'name', label: 'Nombre' },
-  { key: 'centerType', label: 'Tipo (oficina/punto_de_venta/almacen/custom)' },
-  { key: 'ownership', label: 'Régimen (propiedad/alquiler)' },
-  { key: 'address', label: 'Dirección' },
-  { key: 'phone', label: 'Teléfono' },
-  { key: 'email', label: 'Email' },
-  { key: 'notes', label: 'Notas' },
-];
-
-const WC_IMPORT_FIELDS: ImportFieldDef[] = [
-  { key: 'name', label: 'Nombre', required: true, example: 'Oficina Central' },
-  { key: 'centerType', label: 'Tipo', example: 'oficina' },
-  { key: 'ownership', label: 'Régimen', example: 'propiedad' },
-  { key: 'address', label: 'Dirección', example: 'Calle Mayor 5' },
-  { key: 'phone', label: 'Teléfono', example: '600123456' },
-  { key: 'email', label: 'Email', example: 'oficina@empresa.com' },
-  { key: 'notes', label: 'Notas', example: '' },
-];
-
 // ── Tab principal ─────────────────────────────────────────────────────────────
 
 export function SalesPointsTab() {
@@ -539,8 +515,6 @@ export function SalesPointsTab() {
   const [search, setSearch] = useState('');
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
   const [filterType, setFilterType] = useState<WorkCenterType | 'all'>('all');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<WorkCenter | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
@@ -601,54 +575,6 @@ export function SalesPointsTab() {
       toast.error('Error al guardar');
       throw new Error('save failed');
     }
-  };
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!resolvedUserId) return;
-    let created = 0;
-    for (const entry of entries) {
-      try {
-        const ct = String(entry.centerType || 'punto_de_venta');
-        const ow = String(entry.ownership || 'propiedad');
-        const wc = await createWorkCenter(resolvedUserId, {
-          name: String(entry.name || ''),
-          centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
-          ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
-          active: true,
-          address: String(entry.address || ''),
-          phone: String(entry.phone || ''),
-          email: String(entry.email || ''),
-          notes: String(entry.notes || ''),
-        });
-        setWorkCenters(prev => [...prev, wc].sort((a, b) => a.name.localeCompare(b.name, 'es')));
-        created++;
-      } catch { /* skip */ }
-    }
-    if (created > 0) toast.success(`${created} centro(s) de trabajo creado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    if (!resolvedUserId) return;
-    let created = 0;
-    for (const entry of entries) {
-      try {
-        const ct = entry.centerType || 'punto_de_venta';
-        const ow = entry.ownership || 'propiedad';
-        const wc = await createWorkCenter(resolvedUserId, {
-          name: entry.name || '',
-          centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(ct) ? ct : 'punto_de_venta') as WorkCenterType,
-          ownership: (ow === 'alquiler' ? 'alquiler' : 'propiedad') as OwnershipType,
-          active: true,
-          address: entry.address || '',
-          phone: entry.phone || '',
-          email: entry.email || '',
-          notes: entry.notes || '',
-        });
-        setWorkCenters(prev => [...prev, wc].sort((a, b) => a.name.localeCompare(b.name, 'es')));
-        created++;
-      } catch { /* skip */ }
-    }
-    if (created > 0) toast.success(`${created} centro(s) de trabajo importado(s)`);
   };
 
   const handleToggleActive = async (wc: WorkCenter) => {
@@ -802,8 +728,6 @@ export function SalesPointsTab() {
         <AddButtonDropdown
           label="Nuevo centro"
           onQuickAdd={() => { setEditingItem(null); setShowModal(true); }}
-          onAIAdd={() => setShowAIModal(true)}
-          onImport={() => setShowImportModal(true)}
           quickAddLabel="Alta rápida"
           quickAddDesc="Formulario de centro de trabajo"
         />
@@ -1013,22 +937,6 @@ export function SalesPointsTab() {
         </div>
       )}
 
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="workCenters"
-        moduleLabel="Centros de trabajo"
-        fields={WC_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Centros de trabajo"
-        fields={WC_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </div>
   );
 }

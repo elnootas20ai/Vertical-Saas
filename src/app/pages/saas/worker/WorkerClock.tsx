@@ -20,6 +20,7 @@ import {
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
+import { useApp } from '../../../context/AppContext';
 import {
   type ClockinRecord,
   type GeoLocation,
@@ -114,6 +115,7 @@ export function WorkerClock() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const { createNotification } = useApp();
   const businessId = currentBusiness?.business_id || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
@@ -199,6 +201,20 @@ export function WorkerClock() {
         device_type: isMobile ? 'mobile' : 'desktop',
       });
       setRecord(rec);
+      // Notificación para el campanario: visibilidad inmediata del fichaje al
+      // resto del equipo / encargados. Si falla la creación se ignora porque la
+      // UI ya refleja el cambio de estado del trabajador.
+      const displayTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+      void createNotification({
+        level: 'success',
+        category: 'clockin',
+        title: 'Fichaje realizado',
+        message: `${memberName || 'El trabajador'} ha fichado entrada a las ${displayTime}`,
+        entityId: memberId,
+        entityType: 'team',
+        route: `/saas/team/${encodeURIComponent(memberId)}`,
+        metadata: { device: isMobile ? 'mobile' : 'desktop', hasGeo: Boolean(geo) },
+      }).catch((error) => { console.error('Error creating clockin notification:', error); });
     } catch (e: any) {
       setError(e.message || 'Error al fichar entrada');
     } finally {

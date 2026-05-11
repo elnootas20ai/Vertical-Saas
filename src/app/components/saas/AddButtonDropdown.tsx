@@ -12,8 +12,15 @@ export interface AddButtonOption {
 interface AddButtonDropdownProps {
   label?: string;
   onQuickAdd: () => void;
-  onAIAdd: () => void;
-  onImport: () => void;
+  /**
+   * Si se omite, la opción "Crear con IA" no se muestra en el desplegable.
+   * Útil para módulos en los que el alta IA no aporta valor (p. ej. centros de trabajo).
+   */
+  onAIAdd?: () => void;
+  /**
+   * Si se omite, la opción "Importar" no se muestra en el desplegable.
+   */
+  onImport?: () => void;
   quickAddLabel?: string;
   quickAddDesc?: string;
   aiAddLabel?: string;
@@ -49,34 +56,51 @@ export function AddButtonDropdown({
       icon: <Zap className="w-4 h-4 text-amber-500" />,
       action: () => { onQuickAdd(); setOpen(false); },
     },
-    {
+  ];
+  if (onAIAdd) {
+    options.push({
       id: 'ai',
       label: aiAddLabel,
       description: aiAddDesc,
       icon: <Sparkles className="w-4 h-4 text-violet-500" />,
       action: () => { onAIAdd(); setOpen(false); },
-    },
-    {
+    });
+  }
+  if (onImport) {
+    options.push({
       id: 'import',
       label: 'Importar',
       description: 'Carga datos desde archivo CSV/Excel',
       icon: <Upload className="w-4 h-4 text-blue-500" />,
       action: () => { onImport(); setOpen(false); },
-    },
-  ];
+    });
+  }
+
+  // Si solo queda la opción de alta rápida (sin IA ni importar), el desplegable
+  // sobra: el botón dispara directamente la acción. Evita un menú con un único
+  // item, que confunde más de lo que ayuda.
+  const onlyQuick = options.length === 1;
 
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
-        onClick={() => setOpen(v => !v)}
+        onClick={() => {
+          if (onlyQuick) {
+            onQuickAdd();
+            return;
+          }
+          setOpen(v => !v);
+        }}
         className="flex items-center gap-1.5 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium transition-colors"
       >
         <Plus className="w-4 h-4" />
         <span className="hidden sm:inline">{label}</span>
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+        {!onlyQuick && (
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+        )}
       </button>
 
-      {open && (
+      {open && !onlyQuick && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden z-20">

@@ -144,7 +144,7 @@ function generateClientTemplate() {
 
 export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizardProps) {
   useModalClose(isOpen, onClose);
-  const { addLead, addClient, leads: existingLeads, clients: existingClients } = useApp();
+  const { addLead, addClient, refreshClients, refreshLeads, leads: existingLeads, clients: existingClients } = useApp();
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -315,6 +315,8 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           const result = await bulkCreateLeadsRequest(user.user_id, leadsToCreate);
           created = result.length;
           failed = leadsToCreate.length - created;
+          // Refrescar el store global para que la lista de leads incluya los nuevos sin recargar.
+          await refreshLeads();
         } else {
           for (const l of leadsToCreate) {
             await addLead(l);
@@ -323,6 +325,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
         }
       } else {
         const clientsToCreate: Client[] = mappedRows
+          // Backend solo exige nombre y teléfono; email es deseable pero no obligatorio para no bloquear filas válidas.
           .filter((row) => row.name && row.phone)
           .map((row) => ({
             id: `client-${uuidv4()}`,
@@ -354,6 +357,8 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           const result = await bulkCreateClientsRequest(user.user_id, clientsToCreate);
           created = result.length;
           failed = clientsToCreate.length - created;
+          // Refrescar el store global para que la lista de clientes incluya los nuevos sin recargar.
+          await refreshClients();
         } else {
           for (const c of clientsToCreate) {
             await addClient(c);
