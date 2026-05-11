@@ -153,6 +153,7 @@ import {
   ACCOUNTS_DESIGN_VIEWS,
   NOTIFICATIONS_DESIGN_VIEWS,
   getCouchConfig as getCouchConfigFromService,
+  waitForCouchDbReady,
   getWorkshopDbName,
   getFinanceDbName,
   getClockinsDbName,
@@ -2809,6 +2810,24 @@ server.on('connection', (socket) => {
 // ─── D-01/D-02: Inicialización de índices y design docs ──────────────────────
 async function initializeCouchDB() {
   const initReq = null;
+  try {
+    const { attempts } = await waitForCouchDbReady(initReq);
+    if (attempts > 1) {
+      logger.info({ tag: 'INIT', attempts }, 'CouchDB disponible tras reintentos');
+    }
+  } catch (err) {
+    const { baseUrl } = getCouchConfigFromService(initReq);
+    logger.warn(
+      {
+        tag: 'INIT',
+        err: err instanceof Error ? err.message : String(err),
+        couch: baseUrl || 'unset',
+      },
+      'CouchDB no alcanzable: omitiendo índices y design docs en este arranque. Local: docker compose -f deploy/docker-compose.couch-local.yml --env-file .env up -d',
+    );
+    return;
+  }
+
   const dbs = [VEHICLES_DB, ACCOUNTS_DB, NOTIFICATIONS_DB];
   for (const db of dbs) {
     await setupDatabaseIndexes(initReq, db).catch((err) =>

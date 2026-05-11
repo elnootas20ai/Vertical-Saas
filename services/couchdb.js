@@ -111,6 +111,37 @@ export async function couchRequest(req, pathname, init = {}) {
   return response;
 }
 
+/**
+ * Espera hasta que CouchDB en COUCHDB_URL responda (Docker suele arrancar después del proceso Node).
+ * Variable de entorno: COUCH_WAIT_ATTEMPTS (default 15), COUCH_WAIT_MS (default 2000).
+ * 401/403 cuentan como “vivo” (el servidor HTTP respondió).
+ */
+export async function waitForCouchDbReady(req, options = {}) {
+  const maxAttempts = Math.max(1, Number(options.maxAttempts ?? process.env.COUCH_WAIT_ATTEMPTS ?? 15));
+  const delayMs = Math.max(100, Number(options.delayMs ?? process.env.COUCH_WAIT_MS ?? 2000));
+  const cfg = getCouchConfig(req);
+  if (!cfg.baseUrl) {
+    throw new Error('COUCHDB_URL no configurado');
+  }
+
+  let lastMessage = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await couchRequest(req, '/', { method: 'GET' });
+      if (response.ok || response.status === 401 || response.status === 403) {
+        return { attempts: attempt };
+      }
+      lastMessage = `HTTP ${response.status}`;
+    } catch (err) {
+      lastMessage = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error(lastMessage || 'sin respuesta');
+}
+
 export async function ensureDatabase(req, dbName) {
   const encodedDbName = encodeURIComponent(dbName);
   const response = await couchRequest(req, `/${encodedDbName}`, { method: 'PUT' });

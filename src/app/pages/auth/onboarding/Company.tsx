@@ -31,11 +31,17 @@ export function Company() {
 
   const handleContinue = (e: React.FormEvent) => {
     e.preventDefault();
+    // Validación blanda: el aviso de dígito de control se muestra de forma
+    // visual pero no bloquea el avance del onboarding. El dato puede
+    // corregirse después desde Ajustes; bloquear aquí frustra pruebas con
+    // valores ficticios y typos sin aportar valor (el backend revalida).
     if (formData.taxId) {
-      const err = getNifOrCifError(formData.taxId);
-      if (err) { setTaxIdError(err); return; }
+      setTaxIdError(getNifOrCifError(formData.taxId));
     }
-    updateData('companyProfile', formData);
+    const payload = data.businessType === 'delivery'
+      ? { ...formData, isAncovePartner: false, ancoveMemberNumber: '' }
+      : formData;
+    updateData('companyProfile', payload);
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/structure');
   };
@@ -97,10 +103,11 @@ export function Company() {
               <ACCESO__Input
                 label="CIF/NIF *"
                 type="text"
-                placeholder="CIF o NIF de la empresa"
+                placeholder="Ej: B12345674 o 12345678Z"
                 value={formData.taxId}
                 onChange={handleTaxIdChange}
                 error={taxIdError ?? undefined}
+                helperText={taxIdError ? undefined : 'Si no coincide el dígito de control podrás corregirlo más tarde en Ajustes.'}
                 autoComplete="off"
                 required
               />
@@ -151,29 +158,31 @@ export function Company() {
               />
             </div>
 
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-              <ACCESO__Checkbox
-                label="Soy socio ANCOVE"
-                checked={formData.isAncovePartner}
-                onChange={(e) => setFormData({ ...formData, isAncovePartner: e.target.checked })}
-              />
-              
-              {formData.isAncovePartner && (
-                <div className="mt-4 ml-8 space-y-3">
-                  <ACCESO__Input
-                    label="Número de socio ANCOVE"
-                    type="text"
-                    placeholder="Número de socio"
-                    icon={<Award className="w-5 h-5" />}
-                    value={formData.ancoveMemberNumber}
-                    onChange={(e) => setFormData({ ...formData, ancoveMemberNumber: e.target.value })}
-                  />
-                  <p className="text-sm text-gray-600 dark:text-gray-400 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    ✨ Activaremos configuración y ventajas ANCOVE cuando esté validado.
-                  </p>
-                </div>
-              )}
-            </div>
+            {data.businessType !== 'delivery' && (
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <ACCESO__Checkbox
+                  label="Soy socio ANCOVE"
+                  checked={formData.isAncovePartner}
+                  onChange={(e) => setFormData({ ...formData, isAncovePartner: e.target.checked })}
+                />
+
+                {formData.isAncovePartner && (
+                  <div className="mt-4 ml-8 space-y-3">
+                    <ACCESO__Input
+                      label="Número de socio ANCOVE"
+                      type="text"
+                      placeholder="Número de socio"
+                      icon={<Award className="w-5 h-5" />}
+                      value={formData.ancoveMemberNumber}
+                      onChange={(e) => setFormData({ ...formData, ancoveMemberNumber: e.target.value })}
+                    />
+                    <p className="text-sm text-gray-600 dark:text-gray-400 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      ✨ Activaremos configuración y ventajas ANCOVE cuando esté validado.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </form>
         </div>
       </div>

@@ -1,0 +1,29 @@
+# CouchDB solo para desarrollo local (API Node en el host con COUCHDB_URL=http://127.0.0.1:5984).
+#
+# Raíz del repo:
+#   docker compose -f deploy/docker-compose.couch-local.yml --env-file .env up -d
+#
+# Credenciales: COUCHDB_USER / COUCHDB_PASSWORD en .env (valores por defecto solo si faltan).
+
+services:
+  couchdb:
+    image: couchdb:3.4
+    restart: unless-stopped
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER:-admin}
+      COUCHDB_PASSWORD: ${COUCHDB_PASSWORD:-admin}
+    ports:
+      - "127.0.0.1:5984:5984"
+    volumes:
+      - vertial_couch_local:/opt/couchdb/data
+      - vertial_couch_local_etc:/opt/couchdb/etc/local.d
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/5984'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 25s
+
+volumes:
+  vertial_couch_local:
+  vertial_couch_local_etc:
