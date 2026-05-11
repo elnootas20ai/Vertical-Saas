@@ -93,25 +93,30 @@ export function Login() {
   const handleGoogleCredential = useCallback(async (credential: string) => {
     setIsSubmitting(true);
     setErrors({});
-    const result = await googleLogin(credential);
-    setIsSubmitting(false);
+    try {
+      const result = await googleLogin(credential);
 
-    if (result.success) {
-      navigate(result.redirectTo || '/saas/dashboard');
-      return;
+      if (result.success) {
+        navigate(result.redirectTo || '/saas/dashboard');
+        return;
+      }
+
+      if (result.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && result.googleUser) {
+        navigate('/auth/register', {
+          state: {
+            googleUser: result.googleUser,
+            googleCredential: credential,
+          },
+        });
+        return;
+      }
+
+      const msg = (result.error || t('auth.errors.googleError')).trim();
+      if (msg) console.warn('[auth/google-login]', msg);
+      setErrors({ email: msg || t('auth.errors.googleError') });
+    } finally {
+      setIsSubmitting(false);
     }
-
-    if (result.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && result.googleUser) {
-      navigate('/auth/register', {
-        state: {
-          googleUser: result.googleUser,
-          googleCredential: credential,
-        },
-      });
-      return;
-    }
-
-    setErrors({ email: result.error || t('auth.errors.googleError') });
   }, [googleLogin, navigate, t]);
 
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
@@ -133,7 +138,7 @@ export function Login() {
       setGoogleTimedOut(true);
     }, 8000);
     return () => window.clearTimeout(timeout);
-  }, [googleReady]);
+  }, [googleReady, googleClientConfigured]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
@@ -241,7 +246,21 @@ export function Login() {
             </div>
 
             <div className="flex justify-center w-full">
-              <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
+              {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
+                <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                  <svg className="w-5 h-5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  <span>{t('auth.googleLogin')}…</span>
+                </div>
+              ) : !googleReady && googleTimedOut ? (
+                <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-3 px-4 text-sm text-amber-800 text-center">
+                  Google (script) no cargó a tiempo. Revisa bloqueadores, CSP o red; puedes usar email y contraseña.
+                </div>
+              ) : (
+                <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm flex justify-center" />
+              )}
             </div>
             {!googleClientConfigured && (
               <div className="w-full py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
@@ -249,24 +268,6 @@ export function Login() {
                 <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
                 <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
                 <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
-              </div>
-            )}
-            {googleClientConfigured && !googleReady && !googleTimedOut && (
-              <button
-                type="button"
-                disabled
-                className="w-full py-3 px-4 border-2 border-gray-200 rounded-lg font-medium flex items-center justify-center gap-2 text-gray-400 cursor-not-allowed"
-              >
-                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                {t('auth.googleLogin')}
-              </button>
-            )}
-            {googleClientConfigured && !googleReady && googleTimedOut && (
-              <div className="w-full py-3 px-4 border-2 border-amber-200 bg-amber-50 rounded-lg text-sm text-amber-700 text-center">
-                Google no disponible temporalmente. Puedes iniciar sesión con email y contraseña.
               </div>
             )}
           </form>

@@ -75,6 +75,7 @@ export function Register() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [referralInfo, setReferralInfo] = useState<{ valid: boolean; name?: string } | null>(null);
   const [validatingReferral, setValidatingReferral] = useState(false);
+  const [googleTimedOut, setGoogleTimedOut] = useState(false);
   const referralTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkReferralCode = useCallback((code: string) => {
@@ -108,27 +109,30 @@ export function Register() {
   const handleGoogleCredential = useCallback(async (credential: string) => {
     setIsSubmitting(true);
     setErrors({});
-    const result = await googleLogin(credential);
-    setIsSubmitting(false);
+    try {
+      const result = await googleLogin(credential);
 
-    if (result.success) {
-      navigate(result.redirectTo || '/auth/onboarding/business-type');
-      return;
+      if (result.success) {
+        navigate(result.redirectTo || '/auth/onboarding/business-type');
+        return;
+      }
+
+      if (result.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && result.googleUser) {
+        setGoogleCredential(credential);
+        setGoogleAvatar(result.googleUser.avatar || '');
+        setFormData((prev) => ({
+          ...prev,
+          firstName: result.googleUser!.firstName || prev.firstName,
+          lastName: result.googleUser!.lastName || prev.lastName,
+          email: result.googleUser!.email || prev.email,
+        }));
+        return;
+      }
+
+      setErrors({ email: result.error || 'Error al registrarse con Google' });
+    } finally {
+      setIsSubmitting(false);
     }
-
-    if (result.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && result.googleUser) {
-      setGoogleCredential(credential);
-      setGoogleAvatar(result.googleUser.avatar || '');
-      setFormData((prev) => ({
-        ...prev,
-        firstName: result.googleUser!.firstName || prev.firstName,
-        lastName: result.googleUser!.lastName || prev.lastName,
-        email: result.googleUser!.email || prev.email,
-      }));
-      return;
-    }
-
-    setErrors({ email: result.error || 'Error al registrarse con Google' });
   }, [googleLogin, navigate]);
 
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
@@ -140,6 +144,15 @@ export function Register() {
       renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signup_with' });
     }
   }, [googleReady, renderButton, isGoogleFlow, resolvedTheme]);
+
+  useEffect(() => {
+    if (googleReady || !googleClientConfigured || isGoogleFlow) {
+      setGoogleTimedOut(false);
+      return;
+    }
+    const t = window.setTimeout(() => setGoogleTimedOut(true), 8000);
+    return () => window.clearTimeout(t);
+  }, [googleReady, isGoogleFlow, googleClientConfigured]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -468,7 +481,18 @@ export function Register() {
                 </div>
 
                 <div className="flex justify-center w-full">
-                  <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm" />
+                  {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
+                    <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                      <span className="inline-block w-5 h-5 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
+                      <span>Cargando Google…</span>
+                    </div>
+                  ) : !googleReady && googleTimedOut ? (
+                    <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-3 px-4 text-sm text-amber-800 text-center">
+                      Google no cargó a tiempo. Revisa red o bloqueadores; puedes registrarte con email.
+                    </div>
+                  ) : (
+                    <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm flex justify-center" />
+                  )}
                 </div>
                 {!googleClientConfigured && (
                   <div className="w-full py-2 px-3 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">

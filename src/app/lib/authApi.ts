@@ -501,30 +501,72 @@ export interface GoogleLoginResult {
   accessToken?: string;
 }
 
+const GOOGLE_LOGIN_FETCH_MS = 30_000;
+
 export async function googleLoginRequest(credential: string): Promise<GoogleLoginResult> {
   const extraHeaders: Record<string, string> = {};
   if (_inMemoryToken) {
     extraHeaders['Authorization'] = `Bearer ${_inMemoryToken}`;
   }
 
-  const response = await fetch(`${API_BASE}/api/auth/google-login`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-    },
-    body: JSON.stringify({ credential }),
-  });
+  const url = `${API_BASE}/api/auth/google-login`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extraHeaders,
+      },
+      body: JSON.stringify({ credential }),
+      signal: AbortSignal.timeout(GOOGLE_LOGIN_FETCH_MS),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return {
+        ok: false,
+        error:
+          'La API tardó demasiado en responder (Google). Suele indicar backend caído, 502 en Nginx o red; revisa /health y los logs del servidor.',
+      };
+    }
+    const hint =
+      API_BASE
+        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
+        : `No se pudo conectar con ${url}. Revisa VITE_API_URL / mismo origen y el proxy.`;
+    return {
+      ok: false,
+      error: err instanceof Error ? `${hint} (${err.message})` : hint,
+    };
+  }
 
-  const payload = (await response.json().catch(() => ({}))) as GoogleLoginResult;
+  const rawText = await response.text();
+  let payload = {} as GoogleLoginResult;
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText) as GoogleLoginResult;
+    } catch {
+      payload = {
+        ok: false,
+        error: rawText.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Respuesta no JSON del servidor (¿502 HTML de Nginx?)',
+      };
+    }
+  }
 
   if (response.status === 404 && payload.code === 'GOOGLE_ACCOUNT_NOT_FOUND') {
     return payload;
   }
 
   if (!response.ok || payload.ok === false) {
-    return { ok: false, error: payload.error || 'Error al acceder con Google' };
+    return {
+      ok: false,
+      error:
+        (typeof payload.error === 'string' && payload.error.trim())
+        || (typeof payload.message === 'string' && payload.message.trim())
+        || `${response.status} ${response.statusText || ''}`.trim()
+        || 'Error al acceder con Google',
+    };
   }
 
   if (payload.accessToken) {
