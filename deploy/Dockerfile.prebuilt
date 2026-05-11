@@ -25,7 +25,6 @@ COPY verticalConfigs ./verticalConfigs
 COPY shared ./shared
 COPY scripts ./scripts
 COPY docs ./docs
-COPY src/plugin ./src/plugin
 COPY plugin ./plugin
 
 EXPOSE 3000

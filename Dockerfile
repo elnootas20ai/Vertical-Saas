@@ -29,7 +29,6 @@ COPY --from=build /app/verticalConfigs ./verticalConfigs
 COPY --from=build /app/shared ./shared
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/docs ./docs
-COPY --from=build /app/src/plugin ./src/plugin
 COPY --from=build /app/plugin ./plugin
 EXPOSE 3000
 CMD ["node", "index.js"]
