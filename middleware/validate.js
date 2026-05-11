@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+/** Zod v4 expone `issues`; APIs antiguas usaban `errors`. */
+function zodIssues(zodError) {
+  const raw = zodError?.issues ?? zodError?.errors;
+  return Array.isArray(raw) ? raw : [];
+}
+
 /**
  * Middleware genérico de validación con Zod.
  * Valida req.body contra el schema proporcionado.
@@ -9,8 +15,8 @@ export function validate(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      const errors = result.error.errors.map((e) => ({
-        field: e.path.join('.'),
+      const errors = zodIssues(result.error).map((e) => ({
+        field: Array.isArray(e.path) ? e.path.join('.') : '',
         message: e.message,
       }));
       return res.status(400).json({ ok: false, error: 'Datos de entrada inválidos', errors });
@@ -27,8 +33,8 @@ export function validateParams(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.params);
     if (!result.success) {
-      const errors = result.error.errors.map((e) => ({
-        field: e.path.join('.'),
+      const errors = zodIssues(result.error).map((e) => ({
+        field: Array.isArray(e.path) ? e.path.join('.') : '',
         message: e.message,
       }));
       return res.status(400).json({ ok: false, error: 'Parámetros de ruta inválidos', errors });
