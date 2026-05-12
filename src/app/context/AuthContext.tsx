@@ -7,13 +7,17 @@ import {
   type GoogleUserProfile,
   type RegisterPayload,
   type RoleDefinition,
+  type TeamInvitation,
   acceptInviteRequest,
+  acceptInvitationRequest,
   clearAuthTokens,
   deleteUserRequest,
   getBillingCardRequest,
   getUserActivityRequest,
   googleLoginRequest,
   inviteUserRequest,
+  listBusinessInvitationsRequest,
+  listMyInvitationsRequest,
   listRolesRequest,
   listSessionsRequest,
   listUsersRequest,
@@ -22,9 +26,12 @@ import {
   logoutRequest,
   posSwitchUserRequest,
   recoverPasswordRequest,
+  rejectInvitationRequest,
+  resendInvitationRequest,
   resendVerificationEmailRequest,
   resetPasswordRequest,
   resetUserPasswordRequest,
+  revokeInvitationRequest,
   revokeSessionRequest,
   revokeOtherSessionsRequest,
   registerRequest,
@@ -81,12 +88,12 @@ interface AuthContextType {
   acceptInvite: (
     token: string,
     email: string,
-    newPassword: string,
-  ) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
+    newPassword?: string,
+  ) => Promise<{ success: boolean; redirectTo?: string; isExistingUser?: boolean; error?: string }>;
   inviteUser: (data: {
-    name: string;
+    name?: string;
     email: string;
-    role: string;
+    role?: string;
     phone?: string;
     businessId?: string;
     permissions?: User['permissions'];
@@ -95,7 +102,21 @@ interface AuthContextType {
     contractType?: string;
     grossMonthlySalary?: string;
     workCenterId?: string;
-  }) => Promise<{ success: boolean; user?: User; generatedPassword?: string; emailSent?: boolean; error?: string }>;
+    message?: string;
+  }) => Promise<{
+    success: boolean;
+    invitation?: TeamInvitation;
+    isExistingUser?: boolean;
+    inviteExpiresAt?: string;
+    companyCode?: string;
+    error?: string;
+  }>;
+  listMyInvitations: () => Promise<TeamInvitation[]>;
+  listBusinessInvitations: (businessId: string, includeAll?: boolean) => Promise<TeamInvitation[]>;
+  acceptInvitation: (invitationId: string) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
+  rejectInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
+  resendInvitation: (invitationId: string) => Promise<{ success: boolean; inviteExpiresAt?: string; error?: string }>;
+  revokeInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
   updateUser: (userId: string, data: Partial<User>) => Promise<{ success: boolean; user?: User; error?: string }>;
   deleteUser: (userId: string) => Promise<{ success: boolean; error?: string }>;
   resetUserPassword: (userId: string) => Promise<{ success: boolean; generatedPassword?: string; error?: string }>;
@@ -366,15 +387,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const acceptInvite = async (
     token: string,
     email: string,
-    newPassword: string,
-  ): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
+    newPassword?: string,
+  ): Promise<{ success: boolean; redirectTo?: string; isExistingUser?: boolean; error?: string }> => {
     try {
       const response = await acceptInviteRequest(token, email, newPassword);
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
       }
       setSessionUser(response.user);
-      return { success: true, redirectTo: response.redirectTo || '/saas/dashboard' };
+      return {
+        success: true,
+        redirectTo: response.redirectTo || '/saas/dashboard',
+        isExistingUser: Boolean(response.isExistingUser),
+      };
     } catch (error) {
       return {
         success: false,
@@ -384,9 +409,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const inviteUser = async (data: {
-    name: string;
+    name?: string;
     email: string;
-    role: string;
+    role?: string;
     phone?: string;
     businessId?: string;
     permissions?: User['permissions'];
@@ -395,7 +420,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     contractType?: string;
     grossMonthlySalary?: string;
     workCenterId?: string;
-  }): Promise<{ success: boolean; user?: User; generatedPassword?: string; emailSent?: boolean; error?: string }> => {
+    message?: string;
+  }) => {
     try {
       const response = await inviteUserRequest({
         ...data,
@@ -404,15 +430,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return {
         success: true,
-        user: response.user,
-        generatedPassword: response.generatedPassword,
-        emailSent: response.emailSent,
+        invitation: response.invitation,
+        isExistingUser: Boolean(response.isExistingUser),
+        inviteExpiresAt: response.inviteExpiresAt,
+        companyCode: response.companyCode,
       };
     } catch (error) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Error al invitar usuario',
       };
+    }
+  };
+
+  const listMyInvitations = async (): Promise<TeamInvitation[]> => {
+    try {
+      const response = await listMyInvitationsRequest();
+      return response.invitations || [];
+    } catch {
+      return [];
+    }
+  };
+
+  const listBusinessInvitations = async (businessId: string, includeAll = false): Promise<TeamInvitation[]> => {
+    try {
+      const response = await listBusinessInvitationsRequest(businessId, includeAll);
+      return response.invitations || [];
+    } catch {
+      return [];
+    }
+  };
+
+  const acceptInvitation = async (invitationId: string) => {
+    try {
+      const response = await acceptInvitationRequest(invitationId);
+      if (response.user) {
+        setSessionUser(response.user);
+      }
+      return { success: true, redirectTo: response.redirectTo };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Error al aceptar la invitación' };
+    }
+  };
+
+  const rejectInvitation = async (invitationId: string) => {
+    try {
+      await rejectInvitationRequest(invitationId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Error al rechazar la invitación' };
+    }
+  };
+
+  const resendInvitation = async (invitationId: string) => {
+    try {
+      const response = await resendInvitationRequest(invitationId);
+      return { success: true, inviteExpiresAt: response.invitation?.expiresAt };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Error al renovar la invitación' };
+    }
+  };
+
+  const revokeInvitation = async (invitationId: string) => {
+    try {
+      await revokeInvitationRequest(invitationId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Error al revocar la invitación' };
     }
   };
 
@@ -630,6 +714,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         listUsers,
         listRoles,
         inviteUser,
+        listMyInvitations,
+        listBusinessInvitations,
+        acceptInvitation,
+        rejectInvitation,
+        resendInvitation,
+        revokeInvitation,
         updateUser,
         deleteUser,
         resetUserPassword,

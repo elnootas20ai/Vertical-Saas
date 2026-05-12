@@ -16,6 +16,8 @@ import type { Business } from '../../lib/businessApi';
 interface InviteResult {
   generatedPassword?: string;
   emailSent?: boolean;
+  isExistingUser?: boolean;
+  inviteExpiresAt?: string;
 }
 
 export interface InviteUserPayload {
@@ -511,12 +513,14 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                 <CheckCircle2 className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
               </div>
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">
-                {t('team.inviteModal.successTitle', 'Invitacion enviada')}
+                {inviteResult?.isExistingUser
+                  ? 'Invitación enviada al usuario existente'
+                  : 'Invitación creada'}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">
-                {inviteResult?.emailSent
-                  ? 'Se ha enviado un correo con las credenciales de acceso.'
-                  : 'El usuario ha sido creado. Comparte las credenciales manualmente.'}
+                {inviteResult?.isExistingUser
+                  ? 'Este email ya tiene cuenta en Vertial. Verá tu invitación la próxima vez que inicie sesión y podrá aceptarla desde dentro de la app.'
+                  : 'Cuando esta persona se registre en Vertial con este email, verá tu invitación y podrá unirse al equipo en un clic.'}
               </p>
 
               {/* Summary card */}
@@ -610,22 +614,16 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                 </div>
               </div>
 
-              {/* Email status */}
-              {inviteResult?.emailSent ? (
-                <div className="w-full flex items-start gap-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3 mb-5">
-                  <Mail className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed text-left">
-                    Se ha enviado un correo a <strong>{email.trim()}</strong> con las credenciales y un enlace para completar su perfil.
-                  </p>
-                </div>
-              ) : (
-                <div className="w-full flex items-start gap-2.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl px-4 py-3 mb-5">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed text-left">
-                    No se pudo enviar el correo automaticamente. Comparte las credenciales de arriba directamente con el trabajador.
-                  </p>
-                </div>
-              )}
+              {/* Estado de la invitación (in-app) */}
+              <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
+                <Mail className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed text-left">
+                  La invitación queda registrada para <strong>{email.trim()}</strong>.
+                  {inviteResult?.inviteExpiresAt
+                    ? ` Caduca el ${new Date(inviteResult.inviteExpiresAt).toLocaleDateString()}.`
+                    : ''}
+                </p>
+              </div>
 
               {/* Actions */}
               <div className="w-full flex items-center gap-3">

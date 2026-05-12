@@ -9,6 +9,7 @@ import {
   buildCardDocument,
   buildActivityRecord,
   buildJoinRequestDocument,
+  buildTeamInvitationDocument,
   ensureDatabase,
   extractIp,
   findAccountByEmail,
@@ -20,14 +21,18 @@ import {
   findCardByUserId,
   findBusinessById,
   findBusinessByCompanyCode,
+  findPendingInvitationForEmailAndBusiness,
+  findTeamInvitationById,
   findTeamMemberByUsername,
   findPendingJoinRequest,
   hashPassword,
   incrementFailedLoginAttempts,
   isAccountLocked,
   listAllBusinesses,
+  listInvitationsByBusiness,
   listJoinRequestsByBusiness,
   listJoinRequestsByUser,
+  listPendingInvitationsByEmail,
   logAccountActivity,
   listAccounts,
   normalizePermissionMatrix,
@@ -46,6 +51,7 @@ import {
   saveJoinRequest,
   saveSession,
   saveResetToken,
+  saveTeamInvitation,
   findJoinRequestById,
   softDeleteDocument,
   verifyPassword,
@@ -246,7 +252,17 @@ export async function register(req, res) {
       cooldownMs: 0,
     }).catch(() => null);
 
-    const redirectTo = isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type';
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones pendientes en register:', invErr?.message);
+    }
+
+    const redirectTo = pendingInvitationsCount > 0
+      ? '/saas/invitations'
+      : (isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type');
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
     return res.status(201).json({
@@ -255,6 +271,7 @@ export async function register(req, res) {
       accessToken,
       refreshToken,
       redirectTo,
+      pendingInvitationsCount,
     });
   } catch (error) {
     return res.status(500).json({
@@ -515,12 +532,22 @@ export async function login(req, res) {
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
     const isUserAccount = savedAccount.accountType === 'user';
     const redirectTo = isUserAccount ? '/saas/worker' : '/auth/gate';
+
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones pendientes en login:', invErr?.message);
+    }
+
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
       accessToken,
       refreshToken,
       redirectTo,
+      pendingInvitationsCount,
     });
   } catch (error) {
     console.error('[AUTH] login error:', error?.message || error);
@@ -611,6 +638,21 @@ export async function updateProfile(req, res) {
       paymentSummary,
       subscription,
     } = req.body || {};
+
+    if (email !== undefined) {
+      const normalizedIncomingEmail = String(email).trim().toLowerCase();
+      const currentEmail = String(account.email || '').toLowerCase();
+      if (normalizedIncomingEmail && normalizedIncomingEmail !== currentEmail) {
+        const collision = await findAccountByEmail(req, normalizedIncomingEmail);
+        if (collision && collision.user_id !== account.user_id) {
+          return res.status(409).json({
+            ok: false,
+            code: 'EMAIL_TAKEN',
+            error: 'Ya existe otra cuenta con ese email.',
+          });
+        }
+      }
+    }
 
     const normalizedFullName = fullName !== undefined ? String(fullName).trim() : '';
     const derivedNames =
@@ -833,17 +875,13 @@ export async function getBillingCard(req, res) {
 
 export async function inviteUser(req, res) {
   try {
-    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/worker', username: requestedUsername, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '' } = req.body || {};
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/worker', position = '', contractType = '', grossMonthlySalary = '', workCenterId = '', message = '' } = req.body || {};
 
-    if (!name || !email) {
-      return badRequest(res, 'Nombre y email son obligatorios');
+    if (!email) {
+      return badRequest(res, 'El email es obligatorio');
     }
 
     await ensureDatabase(req, ACCOUNTS_DB);
-    const existingAccount = await findAccountByEmail(req, email);
-    if (existingAccount) {
-      return res.status(409).json({ ok: false, error: 'Ya existe una cuenta con ese email' });
-    }
 
     // Validar que la empresa existe si se proporciona businessId
     let business = null;
@@ -854,61 +892,269 @@ export async function inviteUser(req, res) {
       }
     }
 
-    const generatedPassword = generateTemporaryPassword();
-    const { firstName, lastName } = splitFullName(name);
+    const existingAccount = await findAccountByEmail(req, email);
     const resolvedCompanyName = business?.name || companyName;
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    const baseUsername = requestedUsername
-      ? String(requestedUsername).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
-      : (String(firstName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'user');
-    let candidateUsername = baseUsername;
-    if (business) {
-      let counter = 1;
-      while (await findTeamMemberByUsername(req, business.business_id, candidateUsername)) {
-        candidateUsername = `${baseUsername}${counter}`;
-        counter++;
+    // Bloqueos previos (válidos tanto si la cuenta existe como si no).
+    if (existingAccount && business) {
+      const isOwnerOfThis = business.owner_user_id === existingAccount.user_id;
+      const isAlreadyMember = Array.isArray(business.members)
+        && business.members.some((m) => m.user_id === existingAccount.user_id);
+      if (isOwnerOfThis || isAlreadyMember) {
+        return res.status(409).json({
+          ok: false,
+          code: 'ALREADY_MEMBER',
+          error: 'Este usuario ya forma parte del equipo de esta empresa.',
+        });
       }
     }
 
-    const account = buildAccountDocument({
-      firstName,
-      lastName,
-      email,
-      phone,
-      password: generatedPassword,
-      role,
-      permissions,
-      status: 'pending',
-      inviteStatus: 'pending',
-      invitedBy,
-      companyName: resolvedCompanyName,
-      onboardingCompleted: false,
-      onboardingData: {
-        source: 'team-invite',
-        businessId: businessId || undefined,
-      },
-      landingPage: landingPage || '/saas/dashboard',
-      linkedBusinessId: businessId || '',
-      username: candidateUsername,
-      employment: {
+    if (existingAccount) {
+      try {
+        const allBusinesses = await listAllBusinesses(req);
+        const ownsOtherBusiness = allBusinesses.find(
+          (b) => b.owner_user_id === existingAccount.user_id && b.business_id !== (business?.business_id || ''),
+        );
+        if (ownsOtherBusiness) {
+          return res.status(409).json({
+            ok: false,
+            code: 'OWNER_OF_OTHER_BUSINESS',
+            error: `Este usuario administra otra empresa (${ownsOtherBusiness.name || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`,
+          });
+        }
+      } catch (lookupErr) {
+        console.error('[AUTH] Error comprobando empresas del invitado:', lookupErr?.message);
+      }
+    }
+
+    // ¿Ya hay una invitación pendiente igual? La reutilizamos en lugar de crear duplicados.
+    let existingInvitation = null;
+    if (business?.business_id) {
+      existingInvitation = await findPendingInvitationForEmailAndBusiness(req, normalizedEmail, business.business_id);
+    }
+
+    const invitationDoc = existingInvitation
+      ? { ...existingInvitation, updatedAt: new Date().toISOString() }
+      : buildTeamInvitationDocument({
+        email: normalizedEmail,
+        fullName: name,
+        businessId: business?.business_id || '',
+        businessName: resolvedCompanyName,
+        role,
+        permissions: normalizePermissionMatrix(permissions, role || 'Usuario'),
+        landingPage,
+        employment: {
+          position,
+          contractType,
+          salary: grossMonthlySalary,
+          salesPointId: workCenterId,
+        },
+        invitedBy,
+        invitedByName: req.authUser?.email || '',
+        message,
+      });
+
+    // Si la invitación ya existía pero algún dato ha cambiado, actualizamos.
+    if (existingInvitation) {
+      invitationDoc.fullName = String(name || existingInvitation.fullName || '').trim();
+      invitationDoc.role = role || existingInvitation.role || 'Usuario';
+      invitationDoc.permissions = normalizePermissionMatrix(permissions, invitationDoc.role);
+      invitationDoc.landingPage = landingPage || existingInvitation.landingPage;
+      invitationDoc.employment = {
         position,
         contractType,
         salary: grossMonthlySalary,
         salesPointId: workCenterId,
+      };
+      invitationDoc.message = String(message || existingInvitation.message || '').trim();
+      invitationDoc.businessName = resolvedCompanyName || existingInvitation.businessName;
+    }
+
+    const savedInvitation = await saveTeamInvitation(req, invitationDoc);
+
+    await logAccountActivity(req, {
+      actorUserId: invitedBy,
+      actorName: invitedBy,
+      targetUserId: existingAccount?.user_id || '',
+      type: 'team',
+      action: existingInvitation ? 'Invitación actualizada' : 'Invitación creada',
+      entityId: savedInvitation.invitation_id,
+      entityLabel: savedInvitation.fullName || savedInvitation.email,
+      metadata: {
+        email: savedInvitation.email,
+        role: savedInvitation.role,
+        businessId: business?.business_id || '',
+        companyName: resolvedCompanyName,
+        existingUser: Boolean(existingAccount),
       },
     });
-    const savedAccount = await saveAccount(req, account);
 
-    // Añadir el usuario como miembro de la empresa
-    if (business) {
-      const members = Array.isArray(business.members) ? business.members : [];
-      const now = new Date().toISOString();
+    return res.status(existingInvitation ? 200 : 201).json({
+      ok: true,
+      invitation: savedInvitation,
+      isExistingUser: Boolean(existingAccount),
+      companyCode: business?.companyCode || '',
+      inviteExpiresAt: savedInvitation.expiresAt,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al invitar usuario',
+    });
+  }
+}
+
+// A-04b: Reenviar invitación — genera nuevo token y vuelve a mandar el email.
+export async function resendInvite(req, res) {
+  try {
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const isExistingUser = Boolean(account.pendingTeamInvite);
+    const isPendingNew = account.inviteStatus === 'pending' || account.status === 'pending';
+    if (!isExistingUser && !isPendingNew) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Este usuario no tiene una invitación pendiente que reenviar.',
+      });
+    }
+
+    const businessId = account.pendingTeamInvite?.businessId || account.linkedBusinessId || '';
+    const business = businessId ? await findBusinessById(req, businessId) : null;
+    const role = account.pendingTeamInvite?.role || account.role || 'Usuario';
+    const companyName = account.pendingTeamInvite?.businessName || business?.name || account.companyName || '';
+
+    const rawInviteToken = crypto.randomBytes(32).toString('hex');
+    const refreshedAccount = await saveInviteToken(req, account, rawInviteToken);
+
+    let emailSent = false;
+    try {
+      const { subject, html } = buildInvitationEmail({
+        name: refreshedAccount.fullName,
+        email: refreshedAccount.email,
+        inviteToken: rawInviteToken,
+        invitedBy: req.authUser?.userId || refreshedAccount.invitedBy || '',
+        role,
+        companyName,
+        isExistingUser,
+      });
+      await sendEmail({ to: refreshedAccount.email, subject, html });
+      emailSent = true;
+    } catch (emailErr) {
+      console.error('[AUTH] Error reenviando email de invitación:', emailErr?.message);
+    }
+
+    await logAccountActivity(req, {
+      actorUserId: req.authUser?.userId || account.user_id,
+      actorName: '',
+      targetUserId: account.user_id,
+      type: 'team',
+      action: 'Invitación reenviada',
+      entityId: account.user_id,
+      entityLabel: account.fullName,
+      metadata: { email: account.email, businessId, isExistingUser },
+    });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(refreshedAccount),
+      emailSent,
+      isExistingUser,
+      inviteExpiresAt: refreshedAccount.inviteExpiresAt,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al reenviar la invitación',
+    });
+  }
+}
+
+// ─── Team invitations (in-app) ──────────────────────────────────────────────
+
+async function loadAuthAccount(req) {
+  const userId = req.authUser?.userId;
+  if (!userId) return null;
+  return findAccountByUserId(req, userId);
+}
+
+function sanitizeInvitation(inv) {
+  if (!inv) return null;
+  return {
+    invitationId: inv.invitation_id,
+    email: inv.email,
+    fullName: inv.fullName,
+    businessId: inv.business_id,
+    businessName: inv.businessName,
+    role: inv.role,
+    permissions: inv.permissions || null,
+    landingPage: inv.landingPage || '/saas/worker',
+    employment: inv.employment || null,
+    invitedBy: inv.invitedBy,
+    invitedByName: inv.invitedByName,
+    message: inv.message || '',
+    status: inv.status,
+    expiresAt: inv.expiresAt,
+    createdAt: inv.createdAt,
+    updatedAt: inv.updatedAt,
+  };
+}
+
+export async function listMyInvitations(req, res) {
+  try {
+    const account = await loadAuthAccount(req);
+    if (!account) return res.status(401).json({ ok: false, error: 'No autenticado' });
+    const invitations = await listPendingInvitationsByEmail(req, account.email);
+    return res.json({ ok: true, invitations: invitations.map(sanitizeInvitation) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al listar invitaciones',
+    });
+  }
+}
+
+export async function acceptInvitation(req, res) {
+  try {
+    const account = await loadAuthAccount(req);
+    if (!account) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const invitationId = req.params.invitationId;
+    const invitation = await findTeamInvitationById(req, invitationId);
+    if (!invitation || invitation.type !== 'team_invitation' || invitation.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+    }
+    if (invitation.status !== 'pending') {
+      return res.status(409).json({ ok: false, code: 'INVITATION_NOT_PENDING', error: 'Esta invitación ya no está activa.' });
+    }
+    if (invitation.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now()) {
+      return res.status(410).json({ ok: false, code: 'INVITATION_EXPIRED', error: 'La invitación ha caducado.' });
+    }
+    if (invitation.email !== String(account.email).trim().toLowerCase()) {
+      return res.status(403).json({ ok: false, error: 'Esta invitación no es para tu cuenta.' });
+    }
+
+    const business = invitation.business_id ? await findBusinessById(req, invitation.business_id) : null;
+    if (!business) {
+      return res.status(404).json({ ok: false, error: 'La empresa que envió la invitación ya no existe.' });
+    }
+
+    const isOwner = business.owner_user_id === account.user_id;
+    const members = Array.isArray(business.members) ? business.members : [];
+    const isAlreadyMember = members.some((m) => m.user_id === account.user_id);
+    const now = new Date().toISOString();
+
+    if (!isOwner && !isAlreadyMember) {
       const newMember = {
-        user_id: savedAccount.user_id,
-        fullName: savedAccount.fullName,
-        email: savedAccount.email,
-        role: role || 'Usuario',
-        permissions: normalizePermissionMatrix(permissions, role || 'Usuario'),
+        user_id: account.user_id,
+        fullName: account.fullName,
+        email: account.email,
+        role: invitation.role || 'Usuario',
+        permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
         joinedAt: now,
       };
       await saveBusiness(req, {
@@ -918,55 +1164,173 @@ export async function inviteUser(req, res) {
       });
     }
 
-    // A-04: Generar token de invitación y enviar email al invitado
-    const rawInviteToken = crypto.randomBytes(32).toString('hex');
-    await saveInviteToken(req, savedAccount, rawInviteToken);
-
-    let emailSent = false;
-    try {
-      const { subject, html } = buildInvitationEmail({
-        name: savedAccount.fullName,
-        email: savedAccount.email,
-        inviteToken: rawInviteToken,
-        temporaryPassword: generatedPassword,
-        invitedBy,
-        role,
-        companyName: resolvedCompanyName,
-      });
-      await sendEmail({ to: savedAccount.email, subject, html });
-      emailSent = true;
-    } catch (emailErr) {
-      console.error('[AUTH] Error enviando email de invitación:', emailErr?.message);
-    }
-
-    await logAccountActivity(req, {
-      actorUserId: invitedBy,
-      actorName: invitedBy,
-      targetUserId: savedAccount.user_id,
-      type: 'team',
-      action: 'Invitación enviada',
-      entityId: savedAccount.user_id,
-      entityLabel: savedAccount.fullName,
-      metadata: {
-        email: savedAccount.email,
-        role: savedAccount.role,
-        businessId: businessId || undefined,
-        companyName: resolvedCompanyName,
-      },
+    const updatedAccount = await saveAccount(req, {
+      ...account,
+      linkedBusinessId: account.linkedBusinessId || business.business_id,
+      role: account.role && account.role !== 'Usuario' ? account.role : (invitation.role || 'Usuario'),
+      permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
+      landingPage: invitation.landingPage || account.landingPage || '/saas/worker',
+      pendingTeamInvite: null,
+      inviteStatus: 'accepted',
+      updatedAt: now,
     });
 
-    return res.status(201).json({
+    const savedInvitation = await saveTeamInvitation(req, {
+      ...invitation,
+      status: 'accepted',
+      acceptedBy: account.user_id,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: account.user_id,
+      actorName: account.fullName,
+      targetUserId: account.user_id,
+      type: 'team',
+      action: 'Invitación aceptada',
+      entityId: savedInvitation.invitation_id,
+      entityLabel: savedInvitation.businessName,
+      metadata: { businessId: business.business_id, role: invitation.role },
+    });
+
+    return res.json({
       ok: true,
-      user: sanitizeAccount(savedAccount),
-      generatedPassword,
-      generatedUsername: candidateUsername,
-      companyCode: business?.companyCode || '',
-      emailSent,
+      invitation: sanitizeInvitation(savedInvitation),
+      user: sanitizeAccount(updatedAccount),
+      redirectTo: updatedAccount.landingPage || '/saas/worker',
     });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al invitar usuario',
+      error: error instanceof Error ? error.message : 'Error al aceptar la invitación',
+    });
+  }
+}
+
+export async function rejectInvitation(req, res) {
+  try {
+    const account = await loadAuthAccount(req);
+    if (!account) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const invitationId = req.params.invitationId;
+    const invitation = await findTeamInvitationById(req, invitationId);
+    if (!invitation || invitation.type !== 'team_invitation' || invitation.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+    }
+    if (invitation.email !== String(account.email).trim().toLowerCase()) {
+      return res.status(403).json({ ok: false, error: 'Esta invitación no es para tu cuenta.' });
+    }
+    if (invitation.status !== 'pending') {
+      return res.status(409).json({ ok: false, error: 'Esta invitación ya no está activa.' });
+    }
+
+    const now = new Date().toISOString();
+    const saved = await saveTeamInvitation(req, {
+      ...invitation,
+      status: 'rejected',
+      rejectedAt: now,
+      updatedAt: now,
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: account.user_id,
+      actorName: account.fullName,
+      targetUserId: account.user_id,
+      type: 'team',
+      action: 'Invitación rechazada',
+      entityId: saved.invitation_id,
+      entityLabel: saved.businessName,
+      metadata: { businessId: invitation.business_id },
+    });
+
+    return res.json({ ok: true, invitation: sanitizeInvitation(saved) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al rechazar la invitación',
+    });
+  }
+}
+
+export async function listBusinessInvitations(req, res) {
+  try {
+    const businessId = req.params.businessId;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const includeAll = String(req.query.includeAll || '').toLowerCase() === 'true';
+    const invitations = await listInvitationsByBusiness(req, businessId, { includeAll });
+    return res.json({ ok: true, invitations: invitations.map(sanitizeInvitation) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al listar invitaciones',
+    });
+  }
+}
+
+export async function revokeInvitation(req, res) {
+  try {
+    const invitationId = req.params.invitationId;
+    const invitation = await findTeamInvitationById(req, invitationId);
+    if (!invitation || invitation.type !== 'team_invitation' || invitation.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+    }
+    if (invitation.status !== 'pending') {
+      return res.status(409).json({ ok: false, error: 'Solo se pueden revocar invitaciones pendientes.' });
+    }
+
+    const now = new Date().toISOString();
+    const saved = await saveTeamInvitation(req, {
+      ...invitation,
+      status: 'revoked',
+      revokedAt: now,
+      updatedAt: now,
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: req.authUser?.userId || '',
+      actorName: '',
+      targetUserId: '',
+      type: 'team',
+      action: 'Invitación revocada',
+      entityId: saved.invitation_id,
+      entityLabel: saved.email,
+      metadata: { businessId: invitation.business_id },
+    });
+
+    return res.json({ ok: true, invitation: sanitizeInvitation(saved) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al revocar la invitación',
+    });
+  }
+}
+
+export async function resendInvitation(req, res) {
+  try {
+    const invitationId = req.params.invitationId;
+    const invitation = await findTeamInvitationById(req, invitationId);
+    if (!invitation || invitation.type !== 'team_invitation' || invitation.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+    }
+    if (invitation.status !== 'pending') {
+      return res.status(409).json({ ok: false, error: 'Solo se pueden renovar invitaciones pendientes.' });
+    }
+
+    const now = new Date();
+    const newExpires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const saved = await saveTeamInvitation(req, {
+      ...invitation,
+      expiresAt: newExpires,
+      updatedAt: now.toISOString(),
+    });
+
+    return res.json({ ok: true, invitation: sanitizeInvitation(saved) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al renovar la invitación',
     });
   }
 }
@@ -1026,6 +1390,26 @@ export async function deleteUser(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    // Limpiar el usuario de business.members[] del negocio al que esté vinculado,
+    // y también de cualquier otro negocio donde aparezca por seguridad.
+    try {
+      const allBusinesses = await listAllBusinesses(req);
+      for (const business of allBusinesses) {
+        if (business.owner_user_id === account.user_id) continue; // No tocamos owners
+        const members = Array.isArray(business.members) ? business.members : [];
+        const filtered = members.filter((m) => m && m.user_id !== account.user_id);
+        if (filtered.length !== members.length) {
+          await saveBusiness(req, {
+            ...business,
+            members: filtered,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (cleanupErr) {
+      console.error('[AUTH] Error limpiando business.members al borrar usuario:', cleanupErr?.message);
     }
 
     await softDeleteDocument(req, ACCOUNTS_DB, account._id);
@@ -1569,17 +1953,15 @@ export async function saveOnboarding(req, res) {
   }
 }
 
-// A-04: Aceptar invitación — el usuario invitado establece su contraseña con el token recibido por email
+// A-04: Aceptar invitación — distingue dos flujos:
+//  · Usuario nuevo (cuenta creada como `pending`): debe fijar contraseña.
+//  · Usuario ya registrado (tiene `pendingTeamInvite`): solo le añadimos al equipo.
 export async function acceptInvite(req, res) {
   try {
     const { token, email, newPassword } = req.body || {};
 
-    if (!token || !email || !newPassword) {
-      return badRequest(res, 'Token, email y nueva contraseña son obligatorios');
-    }
-
-    if (String(newPassword).length < 8) {
-      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
+    if (!token || !email) {
+      return badRequest(res, 'Token y email son obligatorios');
     }
 
     const account = await findAccountByInviteToken(req, String(token));
@@ -1587,32 +1969,94 @@ export async function acceptInvite(req, res) {
       return res.status(400).json({ ok: false, error: 'Enlace de invitación inválido o expirado' });
     }
 
-    const isTeamInvite = account.onboardingData?.source === 'team-invite';
+    const teamInvite = account.pendingTeamInvite || null;
+    const isExistingUser = Boolean(teamInvite);
 
-    const savedAccount = await saveAccount(req, {
+    if (!isExistingUser) {
+      if (!newPassword) {
+        return badRequest(res, 'La nueva contraseña es obligatoria para activar la cuenta');
+      }
+      if (String(newPassword).length < 8) {
+        return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
+      }
+    }
+
+    const isTeamInvite = isExistingUser || account.onboardingData?.source === 'team-invite';
+    const now = new Date().toISOString();
+
+    let savedBusiness = null;
+    if (isExistingUser && teamInvite?.businessId) {
+      try {
+        const business = await findBusinessById(req, teamInvite.businessId);
+        if (business) {
+          const members = Array.isArray(business.members) ? business.members : [];
+          const alreadyMember = members.some((m) => m.user_id === account.user_id);
+          if (!alreadyMember) {
+            savedBusiness = await saveBusiness(req, {
+              ...business,
+              members: [
+                ...members,
+                {
+                  user_id: account.user_id,
+                  fullName: account.fullName,
+                  email: account.email,
+                  role: teamInvite.role || 'Usuario',
+                  permissions: teamInvite.permissions || normalizePermissionMatrix(undefined, teamInvite.role || 'Usuario'),
+                  joinedAt: now,
+                },
+              ],
+              updatedAt: now,
+            });
+          } else {
+            savedBusiness = business;
+          }
+        }
+      } catch (memberErr) {
+        console.error('[AUTH] Error añadiendo a business.members al aceptar invitación:', memberErr?.message);
+      }
+    }
+
+    const updatedAccountDoc = {
       ...account,
-      passwordHash: hashPassword(newPassword),
       inviteStatus: 'accepted',
       status: 'active',
       emailVerified: true,
       inviteTokenHash: null,
       inviteExpiresAt: null,
+      pendingTeamInvite: null,
       onboardingCompleted: isTeamInvite,
-      updatedAt: new Date().toISOString(),
-    });
+      updatedAt: now,
+    };
+
+    if (!isExistingUser) {
+      updatedAccountDoc.passwordHash = hashPassword(newPassword);
+    } else if (teamInvite) {
+      // Reflect the invite's chosen role/landing/employment in the account so the UI lo coja.
+      if (teamInvite.role) updatedAccountDoc.role = teamInvite.role;
+      if (teamInvite.permissions) updatedAccountDoc.permissions = teamInvite.permissions;
+      if (teamInvite.landingPage) updatedAccountDoc.landingPage = teamInvite.landingPage;
+      if (teamInvite.employment) updatedAccountDoc.employment = teamInvite.employment;
+      if (teamInvite.businessId) updatedAccountDoc.linkedBusinessId = teamInvite.businessId;
+      if (teamInvite.businessName) updatedAccountDoc.companyName = teamInvite.businessName;
+    }
+
+    const savedAccount = await saveAccount(req, updatedAccountDoc);
 
     await logAccountActivity(req, {
       actorUserId: savedAccount.user_id,
       actorName: savedAccount.fullName,
       targetUserId: savedAccount.user_id,
       type: 'team',
-      action: 'Invitación aceptada',
+      action: isExistingUser ? 'Invitación aceptada (usuario existente)' : 'Invitación aceptada',
       entityId: savedAccount.user_id,
       entityLabel: savedAccount.fullName,
+      metadata: isExistingUser
+        ? { businessId: teamInvite?.businessId || '', businessName: teamInvite?.businessName || '' }
+        : {},
     });
 
     const redirectTo = isTeamInvite
-      ? (savedAccount.landingPage || '/saas/dashboard')
+      ? (teamInvite?.landingPage || savedAccount.landingPage || '/saas/dashboard')
       : '/auth/onboarding/business-type';
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
@@ -1622,6 +2066,10 @@ export async function acceptInvite(req, res) {
       accessToken,
       refreshToken,
       redirectTo,
+      isExistingUser,
+      joinedBusiness: savedBusiness
+        ? { business_id: savedBusiness.business_id, name: savedBusiness.name || '' }
+        : null,
     });
   } catch (error) {
     return res.status(500).json({

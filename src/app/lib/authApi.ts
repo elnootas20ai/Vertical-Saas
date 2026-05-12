@@ -223,6 +223,25 @@ export interface JoinRequest {
   updatedAt: string;
 }
 
+export interface TeamInvitation {
+  invitationId: string;
+  email: string;
+  fullName: string;
+  businessId: string;
+  businessName: string;
+  role: string;
+  permissions: AccountPermissionMatrix | null;
+  landingPage: string;
+  employment: Partial<EmploymentInfo> | null;
+  invitedBy: string;
+  invitedByName: string;
+  message: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'revoked';
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BusinessSearchResult {
   business_id: string;
   name: string;
@@ -271,6 +290,12 @@ interface ApiEnvelope<T> {
   onboardingCompleted?: boolean;
   onboardingData?: Record<string, unknown>;
   googleUser?: GoogleUserProfile;
+  invitation?: TeamInvitation;
+  invitations?: TeamInvitation[];
+  isExistingUser?: boolean;
+  inviteExpiresAt?: string;
+  pendingInvitationsCount?: number;
+  companyCode?: string;
 }
 
 // ── Configuración base de la API ──────────────────────────────────────────────
@@ -681,9 +706,9 @@ export async function getBillingCardRequest(userId: string) {
 }
 
 export async function inviteUserRequest(data: {
-  name: string;
+  name?: string;
   email: string;
-  role: string;
+  role?: string;
   phone?: string;
   invitedBy?: string;
   companyName?: string;
@@ -694,6 +719,7 @@ export async function inviteUserRequest(data: {
   contractType?: string;
   grossMonthlySalary?: string;
   workCenterId?: string;
+  message?: string;
 }) {
   return request<AuthUser>('/api/auth/invite', {
     method: 'POST',
@@ -701,10 +727,45 @@ export async function inviteUserRequest(data: {
   });
 }
 
-export async function acceptInviteRequest(token: string, email: string, newPassword: string) {
+export async function listMyInvitationsRequest() {
+  return request<AuthUser>('/api/auth/invitations/mine');
+}
+
+export async function acceptInvitationRequest(invitationId: string) {
+  return request<AuthUser>(`/api/auth/invitations/${encodeURIComponent(invitationId)}/accept`, {
+    method: 'POST',
+  });
+}
+
+export async function rejectInvitationRequest(invitationId: string) {
+  return request<AuthUser>(`/api/auth/invitations/${encodeURIComponent(invitationId)}/reject`, {
+    method: 'POST',
+  });
+}
+
+export async function resendInvitationRequest(invitationId: string) {
+  return request<AuthUser>(`/api/auth/invitations/${encodeURIComponent(invitationId)}/resend`, {
+    method: 'POST',
+  });
+}
+
+export async function revokeInvitationRequest(invitationId: string) {
+  return request<AuthUser>(`/api/auth/invitations/${encodeURIComponent(invitationId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listBusinessInvitationsRequest(businessId: string, includeAll = false) {
+  const qs = includeAll ? '?includeAll=true' : '';
+  return request<AuthUser>(`/api/auth/businesses/${encodeURIComponent(businessId)}/invitations${qs}`);
+}
+
+export async function acceptInviteRequest(token: string, email: string, newPassword?: string) {
+  const body: Record<string, string> = { token, email };
+  if (newPassword) body.newPassword = newPassword;
   const result = await request<AuthUser>('/api/auth/accept-invite', {
     method: 'POST',
-    body: JSON.stringify({ token, email, newPassword }),
+    body: JSON.stringify(body),
   });
   if (result.accessToken) {
     cacheAccessToken(result.accessToken);

@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { useHasProAccess } from '../../../hooks/useHasProAccess';
+import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
 import {
   listWorkCenters,
   createWorkCenter,
@@ -21,6 +23,7 @@ import {
   Search,
   X,
   Trash2,
+  Lock,
   Edit3,
   MapPin,
   ToggleLeft,
@@ -38,6 +41,17 @@ import {
   ArrowRight,
   AlertTriangle,
 } from 'lucide-react';
+
+const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
+
+function notifyWorkCentersChanged() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(WORK_CENTERS_CHANGED_EVENT));
+  } catch {
+    // Older browsers without CustomEvent constructor; safe to ignore.
+  }
+}
 
 const CENTER_TYPE_ICONS: Record<WorkCenterType, React.ReactNode> = {
   oficina: <Building2 className="w-4 h-4" />,
@@ -60,9 +74,10 @@ interface WorkCenterModalProps {
   onClose: () => void;
   onSave: (data: Partial<WorkCenter>) => Promise<void>;
   editItem?: WorkCenter | null;
+  forcePointOfSale?: boolean;
 }
 
-function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalProps) {
+function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale = false }: WorkCenterModalProps) {
   const navigate = useNavigate();
   useModalClose(isOpen, onClose);
   const [form, setForm] = useState({
@@ -168,8 +183,8 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
       await onSave({
         ...editItem,
         name: form.name.trim(),
-        centerType: form.centerType,
-        customTypeName: form.centerType === 'custom' ? form.customTypeName.trim() : undefined,
+        centerType: forcePointOfSale ? 'punto_de_venta' : form.centerType,
+        customTypeName: !forcePointOfSale && form.centerType === 'custom' ? form.customTypeName.trim() : undefined,
         ownership: form.ownership,
         contract,
         purchasePrice: form.ownership === 'propiedad' && form.purchasePrice ? Number(form.purchasePrice) : undefined,
@@ -187,6 +202,8 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
         active: form.active,
       });
       onClose();
+    } catch {
+      // onSave already shows the specific error/toast.
     } finally {
       setSaving(false);
     }
@@ -236,6 +253,11 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
             <>
               <div>
                 <label className={labelClass}>Tipo de centro *</label>
+                {forcePointOfSale && (
+                  <p className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/20 dark:text-indigo-300">
+                    Este flujo crea un Punto de venta para poder operar delivery y TPV.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { type: 'oficina' as WorkCenterType, desc: 'Oficinas, despachos' },
@@ -246,11 +268,16 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
                     <button
                       key={ct}
                       type="button"
-                      onClick={() => setForm(f => ({ ...f, centerType: ct }))}
+                      onClick={() => {
+                        if (forcePointOfSale) return;
+                        setForm(f => ({ ...f, centerType: ct }));
+                      }}
+                      disabled={forcePointOfSale && ct !== 'punto_de_venta'}
                       className={`flex items-center gap-2.5 p-3 rounded-xl border-2 text-left transition-all text-sm ${
                         form.centerType === ct
                           ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-700'
                           : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
+                      } ${forcePointOfSale && ct !== 'punto_de_venta' ? 'opacity-40 cursor-not-allowed hover:border-gray-200 dark:hover:border-gray-700' : ''
                       }`}
                     >
                       <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${CENTER_TYPE_COLORS[ct]}`}>
@@ -507,10 +534,16 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
 
 export function SalesPointsTab() {
   const { user } = useAuth();
+  const hasProAccess = useHasProAccess();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showProAccessModal, setShowProAccessModal] = useState(false);
+  const [proAccessReason, setProAccessReason] = useState<'pro' | 'pdv-extra'>('pro');
+  const [forceCreatePdv, setForceCreatePdv] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkCenter | null>(null);
   const [search, setSearch] = useState('');
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
@@ -535,21 +568,105 @@ export function SalesPointsTab() {
     loadData();
   }, [loadData]);
 
+  const pointOfSaleCount = useMemo(
+    () => workCenters.filter((wc) => wc.centerType === 'punto_de_venta').length,
+    [workCenters],
+  );
+  const pointOfSaleAccess = usePointOfSaleAccess(pointOfSaleCount);
+  const canCreateWorkCenter = hasProAccess || pointOfSaleCount === 0;
+  const forceFirstCenterAsPdv = !hasProAccess && !editingItem && pointOfSaleCount === 0;
+
+  const primaryPdvId = useMemo(() => {
+    const pdvs = workCenters.filter((wc) => wc.centerType === 'punto_de_venta');
+    if (pdvs.length === 0) return null;
+    const sorted = [...pdvs].sort((a, b) => {
+      const ta = new Date(a.createdAt || 0).getTime();
+      const tb = new Date(b.createdAt || 0).getTime();
+      if (ta !== tb) return ta - tb;
+      return a._id.localeCompare(b._id);
+    });
+    return sorted[0]._id;
+  }, [workCenters]);
+
+  const isPrimaryPdv = useCallback(
+    (wc: WorkCenter) => wc._id === primaryPdvId,
+    [primaryPdvId],
+  );
+
+  const requestCreateWorkCenter = (forcePdv = false) => {
+    setEditingItem(null);
+    setForceCreatePdv(forcePdv);
+    if (!canCreateWorkCenter) {
+      setProAccessReason('pro');
+      setShowProAccessModal(true);
+      return;
+    }
+    if (forcePdv && !pointOfSaleAccess.canCreatePointOfSale) {
+      setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
+      setShowProAccessModal(true);
+      return;
+    }
+    setShowModal(true);
+  };
+
+  useEffect(() => {
+    if (loading) return;
+    if (searchParams.get('action') !== 'new-pdv') return;
+    requestCreateWorkCenter(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    setSearchParams(next, { replace: true });
+  }, [loading, searchParams, setSearchParams, pointOfSaleAccess.canCreatePointOfSale]);
+
+  const goToProAccess = () => {
+    if (resolvedUserId) {
+      try {
+        localStorage.setItem(
+          `billing_selection_${resolvedUserId}`,
+          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
+        );
+      } catch {
+        // Ignore storage failures; billing still opens.
+      }
+    }
+    setShowProAccessModal(false);
+    setForceCreatePdv(false);
+    navigate('/saas/settings/facturacion');
+  };
+
   const handleSave = async (data: Partial<WorkCenter>) => {
     if (!resolvedUserId) {
       toast.error('No hay usuario autenticado para guardar este centro.');
       return;
     }
+    const requestedCenterType: WorkCenterType = (pointOfSaleCount === 0 || forceCreatePdv)
+      ? 'punto_de_venta'
+      : data.centerType || 'punto_de_venta';
+    if (!editingItem && !canCreateWorkCenter) {
+      setProAccessReason('pro');
+      setShowProAccessModal(true);
+      toast.error('Necesitas PRO para crear otro centro de trabajo.');
+      throw new Error('pro required');
+    }
+    if (!editingItem && requestedCenterType === 'punto_de_venta' && !pointOfSaleAccess.canCreatePointOfSale) {
+      setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
+      setShowProAccessModal(true);
+      toast.error(pointOfSaleAccess.needsPointOfSaleAddon
+        ? 'Tu plan PRO incluye 2 PDV. Añade un PDV extra para crear otro.'
+        : 'Necesitas PRO para crear un segundo PDV.');
+      throw new Error('pdv limit required');
+    }
     try {
       if (editingItem) {
         const updated = await updateWorkCenter({ ...editingItem, ...data } as WorkCenter);
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
+        notifyWorkCentersChanged();
         toast.success(`"${updated.name}" actualizado`);
       } else {
         const created = await createWorkCenter(resolvedUserId, {
           name: data.name!,
-          centerType: data.centerType || 'punto_de_venta',
-          customTypeName: data.customTypeName,
+          centerType: requestedCenterType,
+          customTypeName: requestedCenterType === 'custom' ? data.customTypeName : undefined,
           ownership: data.ownership || 'propiedad',
           contract: data.contract,
           purchasePrice: data.purchasePrice,
@@ -567,10 +684,12 @@ export function SalesPointsTab() {
           notes: data.notes,
         });
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
+        notifyWorkCentersChanged();
         toast.success(`"${created.name}" creado`);
       }
       setShowModal(false);
       setEditingItem(null);
+      setForceCreatePdv(false);
     } catch {
       toast.error('Error al guardar');
       throw new Error('save failed');
@@ -579,9 +698,14 @@ export function SalesPointsTab() {
 
   const handleToggleActive = async (wc: WorkCenter) => {
     if (!resolvedUserId) return;
+    if (wc.active && isPrimaryPdv(wc)) {
+      toast.error('No se puede desactivar el PDV principal. Necesitas al menos un PDV activo para operar.');
+      return;
+    }
     try {
       const updated = await updateWorkCenter({ ...wc, active: !wc.active });
       setWorkCenters(prev => prev.map(s => s._id === updated._id ? updated : s));
+      notifyWorkCentersChanged();
       toast.success(`"${wc.name}" marcado como ${!wc.active ? 'activo' : 'inactivo'}`);
     } catch {
       toast.error('Error al actualizar');
@@ -589,6 +713,10 @@ export function SalesPointsTab() {
   };
 
   const openDeleteDialog = (wc: WorkCenter) => {
+    if (isPrimaryPdv(wc)) {
+      toast.error('El PDV principal de tu cuenta no se puede eliminar.');
+      return;
+    }
     setDeleteTarget(wc);
     setDeleteConfirmName('');
     setDeleteAcknowledge(false);
@@ -596,6 +724,11 @@ export function SalesPointsTab() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    if (isPrimaryPdv(deleteTarget)) {
+      toast.error('El PDV principal de tu cuenta no se puede eliminar.');
+      setDeleteTarget(null);
+      return;
+    }
     if (deleteConfirmName.trim().toLowerCase() !== deleteTarget.name.trim().toLowerCase()) {
       toast.error(`Escribe el nombre exacto (${deleteTarget.name}) para continuar.`);
       return;
@@ -607,6 +740,7 @@ export function SalesPointsTab() {
     try {
       await deleteWorkCenter(deleteTarget._id);
       setWorkCenters(prev => prev.filter(s => s._id !== deleteTarget._id));
+      notifyWorkCentersChanged();
       toast.success(`"${deleteTarget.name}" eliminado`);
       setDeleteTarget(null);
     } catch {
@@ -727,7 +861,7 @@ export function SalesPointsTab() {
         </div>
         <AddButtonDropdown
           label="Nuevo centro"
-          onQuickAdd={() => { setEditingItem(null); setShowModal(true); }}
+          onQuickAdd={() => requestCreateWorkCenter(false)}
           quickAddLabel="Alta rápida"
           quickAddDesc="Formulario de centro de trabajo"
         />
@@ -752,7 +886,7 @@ export function SalesPointsTab() {
           </p>
           {workCenters.length === 0 && (
             <button
-              onClick={() => { setEditingItem(null); setShowModal(true); }}
+              onClick={() => requestCreateWorkCenter(false)}
               className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
             >
               + Nuevo centro de trabajo
@@ -761,8 +895,10 @@ export function SalesPointsTab() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(wc => (
-            <div key={wc._id} className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-5 transition-all hover:shadow-md ${wc.active ? 'border-gray-200 dark:border-gray-700' : 'border-dashed border-gray-200 dark:border-gray-700 opacity-70'}`}>
+          {filtered.map(wc => {
+            const primary = isPrimaryPdv(wc);
+            return (
+            <div key={wc._id} className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-5 transition-all hover:shadow-md ${primary ? 'border-indigo-300 dark:border-indigo-700 ring-1 ring-indigo-100 dark:ring-indigo-900/40' : (wc.active ? 'border-gray-200 dark:border-gray-700' : 'border-dashed border-gray-200 dark:border-gray-700 opacity-70')}`}>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${CENTER_TYPE_COLORS[wc.centerType]}`}>
@@ -777,17 +913,26 @@ export function SalesPointsTab() {
                       <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${wc.ownership === 'propiedad' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'}`}>
                         {OWNERSHIP_LABELS[wc.ownership]}
                       </span>
+                      {primary && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="PDV principal de la cuenta, no se puede eliminar">
+                          <Lock className="w-2.5 h-2.5" />
+                          Principal
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
                 <button
                   onClick={() => handleToggleActive(wc)}
-                  className={`flex-shrink-0 ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                    wc.active
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200'
-                      : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200'
+                  disabled={primary && wc.active}
+                  className={`flex-shrink-0 ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-colors ${
+                    primary && wc.active
+                      ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 opacity-70 cursor-not-allowed'
+                      : wc.active
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200 cursor-pointer'
+                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 cursor-pointer'
                   }`}
-                  title={wc.active ? 'Clic para desactivar' : 'Clic para activar'}
+                  title={primary && wc.active ? 'El PDV principal debe permanecer activo' : (wc.active ? 'Clic para desactivar' : 'Clic para activar')}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full ${wc.active ? 'bg-green-500' : 'bg-gray-400'}`} />
                   {wc.active ? 'Activo' : 'Inactivo'}
@@ -855,16 +1000,26 @@ export function SalesPointsTab() {
                   <Edit3 className="w-3.5 h-3.5" />
                   Editar
                 </button>
-                <button
-                  onClick={() => openDeleteDialog(wc)}
-                  className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                  title="Eliminar"
-                >
-                  <Trash2 className="w-4 h-4 text-red-500" />
-                </button>
+                {primary ? (
+                  <span
+                    className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                    title="El PDV principal de la cuenta no se puede eliminar"
+                  >
+                    <Lock className="w-4 h-4" />
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => openDeleteDialog(wc)}
+                    className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    title="Eliminar"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </button>
+                )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -877,10 +1032,53 @@ export function SalesPointsTab() {
 
       <WorkCenterModal
         isOpen={showModal}
-        onClose={() => { setShowModal(false); setEditingItem(null); }}
+        onClose={() => { setShowModal(false); setEditingItem(null); setForceCreatePdv(false); }}
         onSave={handleSave}
         editItem={editingItem}
+        forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv}
       />
+
+      {showProAccessModal && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => { setShowProAccessModal(false); setForceCreatePdv(false); }}>
+          <div className="w-full max-w-lg rounded-2xl border-2 border-violet-200 bg-white p-5 shadow-2xl dark:border-violet-900 dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-violet-100 p-2 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                  {proAccessReason === 'pdv-extra' ? 'Añadir otro PDV requiere ampliación' : 'Multi-centro requiere PRO'}
+                </h4>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {proAccessReason === 'pdv-extra'
+                    ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} puntos de venta. Para crear un PDV adicional necesitas contratar una ampliación.`
+                    : `El plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} centro de trabajo. Tanto Básico como Normal solo permiten 1 PDV; para crear otra tienda, almacén u oficina necesitas activar PRO.`}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 dark:border-violet-900 dark:bg-violet-950/20 dark:text-violet-200">
+              Ya tienes {pointOfSaleCount} PDV configurado{pointOfSaleCount !== 1 ? 's' : ''}. Tu plan {pointOfSaleAccess.planLabel} incluye {pointOfSaleAccess.includedPointOfSaleLimit}.
+            </div>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowProAccessModal(false); setForceCreatePdv(false); }}
+                className="flex-1 rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={goToProAccess}
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
+              >
+                {proAccessReason === 'pdv-extra' ? 'Añadir ampliación' : 'Solicitar PRO'}
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteTarget && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => setDeleteTarget(null)}>

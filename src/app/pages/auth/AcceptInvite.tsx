@@ -7,6 +7,8 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 
+type FlowMode = 'new-user' | 'existing-user';
+
 export function AcceptInvite() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -14,8 +16,11 @@ export function AcceptInvite() {
 
   const token = searchParams.get('token') || '';
   const email = searchParams.get('email') || '';
-  const { t } = useTranslation();
+  const hintMode = (searchParams.get('mode') || '').toLowerCase();
+  const initialMode: FlowMode = hintMode === 'existing' ? 'existing-user' : 'new-user';
+  useTranslation();
 
+  const [mode, setMode] = useState<FlowMode>(initialMode);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,6 +33,26 @@ export function AcceptInvite() {
       setError('El enlace de invitación es inválido o ha expirado. Solicita una nueva invitación a tu administrador.');
     }
   }, [token, email]);
+
+  const handleAcceptAsExistingUser = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const result = await acceptInvite(token, email);
+      if (result.success) {
+        setSuccess(true);
+        if (result.redirectTo) setRedirectTo(result.redirectTo);
+      } else if (result.error?.toLowerCase().includes('contraseña')) {
+        // Backend nos dice que necesita contraseña: la cuenta no es existente realmente.
+        setMode('new-user');
+        setError('Tu cuenta aún no está activa. Crea una contraseña para entrar.');
+      } else {
+        setError(result.error || 'No se pudo aceptar la invitación');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,6 +84,8 @@ export function AcceptInvite() {
     }
   };
 
+  const isExistingUserFlow = mode === 'existing-user';
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
       <div className="w-full max-w-md">
@@ -71,10 +98,12 @@ export function AcceptInvite() {
               <UserPlus className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Aceptar invitación
+              {isExistingUserFlow ? 'Unirte al equipo' : 'Aceptar invitación'}
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Crea tu contraseña para acceder a la empresa
+              {isExistingUserFlow
+                ? 'Ya tienes cuenta en Vertial. Confirma la invitación para entrar en el nuevo equipo.'
+                : 'Crea tu contraseña para acceder a la empresa'}
             </p>
           </div>
 
@@ -84,10 +113,12 @@ export function AcceptInvite() {
                 <CheckCircle className="w-8 h-8 text-green-600" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                Cuenta creada correctamente
+                {isExistingUserFlow ? 'Te has unido al equipo' : 'Cuenta creada correctamente'}
               </h3>
               <p className="text-gray-600 dark:text-gray-400 mb-6">
-                Tu cuenta ha sido activada. Ahora puedes acceder al panel de la empresa.
+                {isExistingUserFlow
+                  ? 'Ya puedes acceder al panel de la empresa que te ha invitado.'
+                  : 'Tu cuenta ha sido activada. Ahora puedes acceder al panel de la empresa.'}
               </p>
               <ACCESO__Button
                 variant="primary"
@@ -99,7 +130,7 @@ export function AcceptInvite() {
               </ACCESO__Button>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="space-y-6">
               {(!token || !email) ? (
                 <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
                   <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
@@ -108,8 +139,57 @@ export function AcceptInvite() {
                     Contacta con tu administrador para recibir una nueva invitación.
                   </p>
                 </div>
-              ) : (
+              ) : isExistingUserFlow ? (
                 <>
+                  {email && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800 rounded-xl px-4 py-3">
+                      <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                        Te uniremos con tu cuenta actual <strong className="text-emerald-900 dark:text-emerald-100">{email}</strong>.
+                      </p>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-700">{error}</p>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-4 py-3">
+                    No tienes que crear ninguna contraseña nueva. Tu cuenta seguirá igual y solo añadiremos el nuevo equipo.
+                  </p>
+
+                  <ACCESO__Button
+                    variant="primary"
+                    fullWidth
+                    size="lg"
+                    disabled={loading}
+                    onClick={handleAcceptAsExistingUser}
+                  >
+                    {loading ? (
+                      <span className="flex items-center gap-2 justify-center">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Aceptando…
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2 justify-center">
+                        <UserPlus className="w-4 h-4" />
+                        Unirme al equipo
+                      </span>
+                    )}
+                  </ACCESO__Button>
+
+                  <button
+                    type="button"
+                    className="w-full text-xs text-gray-500 dark:text-gray-400 underline"
+                    onClick={() => setMode('new-user')}
+                  >
+                    Soy un usuario nuevo, necesito crear contraseña
+                  </button>
+                </>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-6">
                   {email && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl px-4 py-3">
                       <p className="text-sm text-blue-700 dark:text-blue-300">
@@ -168,9 +248,19 @@ export function AcceptInvite() {
                       </span>
                     )}
                   </ACCESO__Button>
-                </>
+
+                  {hintMode !== 'new' && (
+                    <button
+                      type="button"
+                      className="w-full text-xs text-gray-500 dark:text-gray-400 underline"
+                      onClick={() => setMode('existing-user')}
+                    >
+                      Ya tengo cuenta en Vertial con este email
+                    </button>
+                  )}
+                </form>
               )}
-            </form>
+            </div>
           )}
         </div>
 

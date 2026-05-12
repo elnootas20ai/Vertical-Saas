@@ -395,7 +395,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
     ],
     delivery: [
       { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/delivery-catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     cleaning: [
       { label: 'Centro Operativo', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/cleaning-hub', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },

@@ -108,6 +108,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
+    itemType: 'product' as CatalogItem['itemType'],
     name: '',
     description: '',
     category: '',
@@ -127,6 +128,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
   useEffect(() => {
     if (editItem) {
       setForm({
+        itemType: editItem.itemType || 'product',
         name: editItem.name,
         description: editItem.description,
         category: editItem.category,
@@ -144,7 +146,7 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
       });
     } else {
       setForm({
-        name: '', description: '', category: '', unit: 'ud',
+        itemType: 'product', name: '', description: '', category: '', unit: 'ud',
         brandIdsCsv: '',
         unitPrice: '', costPrice: '', stockQuantity: '', minStock: '',
         image: '', allergens: [], notes: '', webVisible: true, available: true,
@@ -177,10 +179,11 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
         description: form.description,
         category: form.category,
         brandIds: parsedBrandIds,
+        itemType: form.itemType,
         unitPrice: Number(form.unitPrice) || 0,
         costPrice: Number(form.costPrice) || 0,
-        stockQuantity: Number(form.stockQuantity) || 0,
-        minStock: Number(form.minStock) || 0,
+        stockQuantity: form.itemType === 'service' ? 0 : Number(form.stockQuantity) || 0,
+        minStock: form.itemType === 'service' ? 0 : Number(form.minStock) || 0,
         unit: form.unit,
         image: form.image,
         allergens: form.allergens,
@@ -294,6 +297,30 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
                 <p className="text-sm text-blue-800 dark:text-blue-300">Introduce el nombre y descripción del producto que aparecerá en el catálogo y en la web.</p>
               </div>
               <div>
+                <label className={labelClass}>Tipo de elemento</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
+                    { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
+                    { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
+                      className={`rounded-xl border-2 p-3 text-left transition-colors ${
+                        form.itemType === option.value
+                          ? 'border-gray-900 dark:border-gray-100 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      <div className="text-sm font-bold">{option.label}</div>
+                      <div className={`mt-1 text-xs ${form.itemType === option.value ? 'text-white/75 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>{option.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
                 <label className={labelClass}>Nombre del producto *</label>
                 <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus />
               </div>
@@ -371,19 +398,25 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl mb-2">
                 <Archive className="w-6 h-6 text-amber-600 shrink-0" />
-                <p className="text-sm text-amber-800 dark:text-amber-300">Configura las cantidades de inventario y la alerta de stock mínimo.</p>
+                <p className="text-sm text-amber-800 dark:text-amber-300">
+                  {form.itemType === 'service'
+                    ? 'Los servicios no gestionan stock. Puedes continuar sin cantidades.'
+                    : 'Configura las cantidades de inventario y la alerta de stock mínimo.'}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass}>Stock actual</label>
-                  <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={e => setForm(f => ({ ...f, stockQuantity: e.target.value }))} autoFocus />
+              {form.itemType !== 'service' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Stock actual</label>
+                    <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={e => setForm(f => ({ ...f, stockQuantity: e.target.value }))} autoFocus />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Stock mínimo (alerta)</label>
+                    <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={e => setForm(f => ({ ...f, minStock: e.target.value }))} />
+                  </div>
                 </div>
-                <div>
-                  <label className={labelClass}>Stock mínimo (alerta)</label>
-                  <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={e => setForm(f => ({ ...f, minStock: e.target.value }))} />
-                </div>
-              </div>
-              {Number(form.stockQuantity) > 0 && Number(form.minStock) > 0 && (
+              )}
+              {form.itemType !== 'service' && Number(form.stockQuantity) > 0 && Number(form.minStock) > 0 && (
                 <div className={`p-4 rounded-xl border-2 ${Number(form.stockQuantity) <= Number(form.minStock) ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
                   <div className="flex items-center gap-2">
                     {Number(form.stockQuantity) <= Number(form.minStock) ? (
@@ -1164,7 +1197,7 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export function DeliveryCatalog() {
+export function CatalogPage() {
   const { user } = useAuth();
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -1177,6 +1210,7 @@ export function DeliveryCatalog() {
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [searchCatalog, setSearchCatalog] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterType, setFilterType] = useState<CatalogItem['itemType'] | 'all'>('all');
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
   type CatalogDeleteOp =
@@ -1206,6 +1240,7 @@ export function DeliveryCatalog() {
 
   const MODULE_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre' },
+    { key: 'itemType', label: 'Tipo (product/service/combo)' },
     { key: 'category', label: 'Categoría' },
     { key: 'price', label: 'Precio' },
     { key: 'description', label: 'Descripción' },
@@ -1215,6 +1250,7 @@ export function DeliveryCatalog() {
   const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'name', label: 'Nombre', required: true, example: '' },
     { key: 'sku', label: 'SKU', example: 'SKU-001' },
+    { key: 'itemType', label: 'Tipo', example: 'product' },
     { key: 'category', label: 'Categoría', example: '' },
     { key: 'price', label: 'Precio', example: '' },
     { key: 'description', label: 'Descripción', example: '' },
@@ -1228,6 +1264,9 @@ export function DeliveryCatalog() {
       .map((entry) => ({
         name: String(entry.name || '').trim(),
         category: String(entry.category || '').trim(),
+        itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
+          ? String(entry.itemType).trim() as CatalogItem['itemType']
+          : 'product',
         unitPrice: Number(String(entry.price ?? entry.unitPrice ?? '').replace(',', '.')) || 0,
         description: String(entry.description || '').trim(),
         allergens: String(entry.allergens || '')
@@ -1277,6 +1316,9 @@ export function DeliveryCatalog() {
         return {
           name,
           category: String(entry.category || '').trim(),
+          itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
+            ? String(entry.itemType).trim() as CatalogItem['itemType']
+            : 'product',
           description: String(entry.description || '').trim(),
           unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
           costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
@@ -1638,6 +1680,7 @@ export function DeliveryCatalog() {
   const filteredCatalog = useMemo(() => {
     return catalogItems.filter(item => {
       if (filterCategory !== 'all' && item.category !== filterCategory) return false;
+      if (filterType !== 'all' && (item.itemType || 'product') !== filterType) return false;
       if (searchCatalog) {
         const q = searchCatalog.toLowerCase();
         return (
@@ -1649,13 +1692,21 @@ export function DeliveryCatalog() {
       }
       return true;
     });
-  }, [catalogItems, searchCatalog, filterCategory]);
+  }, [catalogItems, searchCatalog, filterCategory, filterType]);
 
   const catalogKpis = useMemo(() => ({
     totalItems: catalogItems.length,
-    lowStock: catalogItems.filter(i => i.active && i.stockQuantity <= i.minStock).length,
+    products: catalogItems.filter(i => (i.itemType || 'product') === 'product').length,
+    services: catalogItems.filter(i => i.itemType === 'service').length,
+    combos: catalogItems.filter(i => i.itemType === 'combo').length,
+    lowStock: catalogItems.filter(i => i.active && (i.itemType || 'product') === 'product' && Number(i.minStock || 0) > 0 && Number(i.stockQuantity || 0) <= Number(i.minStock || 0)).length,
     categories: new Set(catalogItems.map(i => i.category).filter(Boolean)).size,
-    inventoryValue: catalogItems.reduce((s, i) => s + (i.stockQuantity * i.costPrice), 0),
+    inventoryValue: catalogItems.reduce((s, i) => {
+      if (!i.active || (i.itemType || 'product') !== 'product') return s;
+      const quantity = Math.max(0, Number(i.stockQuantity || 0));
+      const cost = Number(i.costPrice || 0);
+      return s + quantity * cost;
+    }, 0),
   }), [catalogItems]);
 
   const supplierKpis = useMemo(() => ({
@@ -1710,6 +1761,16 @@ export function DeliveryCatalog() {
               onChange={e => setSearchCatalog(e.target.value)}
             />
           </div>
+          <select
+            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
+            value={filterType}
+            onChange={e => setFilterType(e.target.value as CatalogItem['itemType'] | 'all')}
+          >
+            <option value="all">Todos los tipos</option>
+            <option value="product">Productos ({catalogKpis.products})</option>
+            <option value="service">Servicios ({catalogKpis.services})</option>
+            <option value="combo">Combos ({catalogKpis.combos})</option>
+          </select>
           <select
             className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
             value={filterCategory}
@@ -1770,6 +1831,7 @@ export function DeliveryCatalog() {
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Categoría</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Precio</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Stock</th>
@@ -1781,7 +1843,14 @@ export function DeliveryCatalog() {
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
               {filteredCatalog.map(item => {
-                const isLowStock = item.stockQuantity <= item.minStock;
+                const itemType = item.itemType || 'product';
+                const isLowStock = itemType === 'product' && item.stockQuantity <= item.minStock;
+                const typeBadgeClass = itemType === 'service'
+                  ? 'bg-purple-100 text-purple-700 border-purple-200'
+                  : itemType === 'combo'
+                    ? 'bg-amber-100 text-amber-700 border-amber-200'
+                    : 'bg-blue-100 text-blue-700 border-blue-200';
+                const typeLabel = itemType === 'service' ? 'Servicio' : itemType === 'combo' ? 'Combo' : 'Producto';
                 return (
                   <tr key={item._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <td className="px-4 py-3">
@@ -1802,6 +1871,11 @@ export function DeliveryCatalog() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
+                      <span className={`px-2 py-1 text-xs font-semibold rounded-lg border ${typeBadgeClass}`}>
+                        {typeLabel}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
                       {item.category ? (
                         <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-lg">
                           {item.category}
@@ -1813,9 +1887,13 @@ export function DeliveryCatalog() {
                       <div className="text-xs text-gray-500 dark:text-gray-400">Coste: {item.costPrice.toFixed(2)}€</div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                        {item.stockQuantity} {item.unit}
-                      </div>
+                      {itemType === 'service' ? (
+                        <span className="text-sm text-gray-400">No aplica</span>
+                      ) : (
+                        <div className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
+                          {item.stockQuantity} {item.unit}
+                        </div>
+                      )}
                       {isLowStock && (
                         <div className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
                           <AlertTriangle className="w-3 h-3" /> Min: {item.minStock}
@@ -1895,13 +1973,14 @@ export function DeliveryCatalog() {
   // ── Tab: Artículos (Stock) ──────────────────────────────────────────────────
 
   const renderStockTab = () => {
-    const sortedByStock = [...catalogItems].sort((a, b) => {
+    const stockItems = catalogItems.filter(i => (i.itemType || 'product') === 'product');
+    const sortedByStock = [...stockItems].sort((a, b) => {
       const aLow = a.stockQuantity <= a.minStock ? 0 : 1;
       const bLow = b.stockQuantity <= b.minStock ? 0 : 1;
       return aLow - bLow || a.stockQuantity - b.stockQuantity;
     });
 
-    const lowStockItems = catalogItems.filter(i => i.active && i.stockQuantity <= i.minStock);
+    const lowStockItems = stockItems.filter(i => i.active && Number(i.minStock || 0) > 0 && i.stockQuantity <= i.minStock);
 
     return (
       <div className="space-y-5">

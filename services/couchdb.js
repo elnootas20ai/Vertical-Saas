@@ -9074,6 +9074,109 @@ export async function findPendingJoinRequest(req, userId, businessId) {
   ) || null;
 }
 
+// ─── Team Invitations: invitaciones por email (incluso sin cuenta) ──────────
+//
+// Cuando el admin invita a un email, se guarda un `team_invitation` en esta
+// colección. No requiere que exista una cuenta de Vertial: cuando el usuario
+// se registre (o entre, si ya tiene cuenta) con ese email, podrá ver la
+// invitación en su dashboard y aceptarla/rechazarla in-app.
+export const TEAM_INVITATIONS_DB = 'team_invitations';
+
+export function normalizeEmailForLookup(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+export function buildTeamInvitationDocument({
+  email,
+  fullName = '',
+  businessId,
+  businessName = '',
+  role = 'Usuario',
+  permissions = null,
+  landingPage = '/saas/worker',
+  employment = null,
+  invitedBy = '',
+  invitedByName = '',
+  message = '',
+  expiresInDays = 30,
+}) {
+  const invitationId = uuidv4();
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + Math.max(1, expiresInDays) * 24 * 60 * 60 * 1000).toISOString();
+  return {
+    _id: `team_invitation:${invitationId}`,
+    type: 'team_invitation',
+    invitation_id: invitationId,
+    email: normalizeEmailForLookup(email),
+    fullName: String(fullName || '').trim(),
+    business_id: String(businessId || '').trim(),
+    businessName: String(businessName || '').trim(),
+    role: String(role || 'Usuario').trim() || 'Usuario',
+    permissions: permissions || null,
+    landingPage: String(landingPage || '/saas/worker'),
+    employment: employment || null,
+    invitedBy: String(invitedBy || '').trim(),
+    invitedByName: String(invitedByName || '').trim(),
+    message: String(message || '').trim(),
+    status: 'pending', // pending | accepted | rejected | revoked
+    acceptedBy: '',
+    acceptedAt: '',
+    rejectedAt: '',
+    revokedAt: '',
+    expiresAt,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function saveTeamInvitation(req, doc) {
+  if (!doc?._id) throw new Error('Documento de invitación inválido');
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  const result = await putDocument(req, TEAM_INVITATIONS_DB, doc._id, doc);
+  return { ...doc, _rev: result.rev };
+}
+
+export async function findTeamInvitationById(req, invitationId) {
+  if (!invitationId) return null;
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  return getDocument(req, TEAM_INVITATIONS_DB, `team_invitation:${invitationId}`);
+}
+
+function isInvitationActive(d) {
+  if (!d || d.type !== 'team_invitation' || d.deletedAt) return false;
+  if (d.status !== 'pending') return false;
+  if (d.expiresAt && new Date(d.expiresAt).getTime() < Date.now()) return false;
+  return true;
+}
+
+export async function listPendingInvitationsByEmail(req, email) {
+  const normalized = normalizeEmailForLookup(email);
+  if (!normalized) return [];
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
+  return docs.filter((d) => isInvitationActive(d) && d.email === normalized);
+}
+
+export async function listInvitationsByBusiness(req, businessId, { includeAll = false } = {}) {
+  if (!businessId) return [];
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
+  return docs.filter((d) => {
+    if (!d || d.type !== 'team_invitation' || d.deletedAt) return false;
+    if (d.business_id !== businessId) return false;
+    if (includeAll) return true;
+    return isInvitationActive(d);
+  });
+}
+
+export async function findPendingInvitationForEmailAndBusiness(req, email, businessId) {
+  const normalized = normalizeEmailForLookup(email);
+  if (!normalized || !businessId) return null;
+  await ensureDatabase(req, TEAM_INVITATIONS_DB);
+  const docs = await getAllDocuments(req, TEAM_INVITATIONS_DB);
+  return docs.find((d) => isInvitationActive(d) && d.email === normalized && d.business_id === businessId) || null;
+}
+
 export async function listAllBusinesses(req) {
   await ensureDatabase(req, BUSINESSES_DB);
   const docs = await getAllDocuments(req, BUSINESSES_DB);

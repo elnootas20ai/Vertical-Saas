@@ -83,7 +83,7 @@ export const updatePasswordSchema = z.object({
 });
 
 export const inviteUserSchema = z.object({
-  name: z.string().min(1, 'El nombre es obligatorio').max(200).trim(),
+  name: z.string().max(200).trim().optional().default(''),
   email: z.string().email('Email inválido').max(254).trim().toLowerCase(),
   role: z.string().min(1).max(100).trim().optional().default('Usuario'),
   phone: z.string().max(30).trim().optional().default(''),
@@ -91,12 +91,12 @@ export const inviteUserSchema = z.object({
   companyName: z.string().max(200).trim().optional().default(''),
   businessId: z.string().max(100).trim().optional().default(''),
   permissions: z.record(z.unknown()).optional(),
-  landingPage: z.string().max(200).trim().optional().default('/saas/dashboard'),
-  username: z.string().max(50).trim().toLowerCase().optional(),
+  landingPage: z.string().max(200).trim().optional().default('/saas/worker'),
   position: z.string().max(200).trim().optional().default(''),
   contractType: z.string().max(100).trim().optional().default(''),
   grossMonthlySalary: z.string().max(50).trim().optional().default(''),
   workCenterId: z.string().max(100).trim().optional().default(''),
+  message: z.string().max(500).trim().optional().default(''),
 });
 
 export const saveBillingCardSchema = z.object({
@@ -119,11 +119,26 @@ export const userIdParamSchema = z.object({
   userId: z.string().min(1, 'userId obligatorio').max(100),
 });
 
+export const invitationIdParamSchema = z.object({
+  invitationId: z.string().min(1, 'invitationId obligatorio').max(100),
+});
+
+export const businessIdParamSchema = z.object({
+  businessId: z.string().min(1, 'businessId obligatorio').max(100),
+});
+
 // A-04: Aceptar invitación de miembro
+// newPassword es opcional: si la cuenta ya existe (invitación a usuario registrado), no hace falta.
 export const acceptInviteSchema = z.object({
   token: z.string().min(1, 'Token obligatorio').max(128),
   email: z.string().email('Email inválido').max(254).trim().toLowerCase(),
-  newPassword: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(128),
+  newPassword: z
+    .string()
+    .max(128)
+    .optional()
+    .refine((v) => v === undefined || v === '' || v.length >= 8, {
+      message: 'La contraseña debe tener al menos 8 caracteres',
+    }),
 });
 
 export const joinRequestSchema = z.object({

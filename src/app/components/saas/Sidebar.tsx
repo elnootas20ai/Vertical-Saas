@@ -124,6 +124,7 @@ import {
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuth } from '../../context/AuthContext';
+import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { ActivationChecklist } from './ActivationChecklist';
@@ -242,13 +243,9 @@ const menuItemDefs = [
   { id: 'sala',             navKey: 'sala',             icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/sala' },
   { id: 'tpv-locales',      navKey: 'tpvLocales',      icon: <Store className="w-5 h-5" />,    path: '/saas/tpv/locales' },
   { id: 'delivery',         navKey: 'delivery',        icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery' },
-  { id: 'delivery-kitchen', navKey: 'deliveryKitchen', icon: <ChefHat className="w-5 h-5" />, path: '/saas/delivery-kitchen' },
-  { id: 'delivery-montaje', navKey: 'deliveryMontaje', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/delivery-montaje' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
   { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/delivery-ops?panel=clients' },
-  { id: 'delivery-catalog', navKey: 'deliveryCatalog', icon: <BookOpen className="w-5 h-5" />, path: '/saas/delivery-catalog' },
-  { id: 'delivery-reparto', navKey: 'deliveryReparto', icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery-reparto' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
   { id: 'web-config',       navKey: 'webConfig',       icon: <Globe className="w-5 h-5" />,    path: '/saas/web-config' },
 
@@ -413,7 +410,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'delivery-kitchen', 'delivery-montaje', 'delivery-catalog', 'delivery-reparto', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'caja', 'web-orders', 'web-config'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -498,7 +495,15 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const location = useLocation();
   const { logout, user } = useAuth();
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
+  const { subscription, setDevSubscriptionPlan } = useApp();
   const { t } = useTranslation();
+  const canUseDevPlanSwitcher = userCanUseDevPlanOverride(user);
+  const currentDevPlan: 'basic' | 'normal' | 'pro' = (() => {
+    const id = (subscription.selectedPlanId || '').toLowerCase();
+    if (id === 'pro') return 'pro';
+    if (id === 'normal') return 'normal';
+    return 'basic';
+  })();
 
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
   const allowedGroups = VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership;
@@ -556,6 +561,13 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   useEffect(() => {
     loadSalesPoints();
+  }, [loadSalesPoints]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { void loadSalesPoints(); };
+    window.addEventListener('work-centers:changed', handler);
+    return () => window.removeEventListener('work-centers:changed', handler);
   }, [loadSalesPoints]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
@@ -743,9 +755,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id === 'tpv' && location.pathname === '/saas/tpv') ||
     (item.id === 'tpv-locales' && location.pathname === '/saas/tpv/locales') ||
     (item.id === 'delivery' && location.pathname === '/saas/delivery') ||
-    (item.id === 'delivery-kitchen' && location.pathname.startsWith('/saas/delivery-kitchen')) ||
-    (item.id === 'delivery-montaje' && location.pathname.startsWith('/saas/delivery-montaje')) ||
-    (item.id === 'delivery-catalog' && location.pathname.startsWith('/saas/delivery-catalog')) ||
     (item.id === 'delivery-clients'
       && (location.pathname.startsWith('/saas/clients')
         || (location.pathname.startsWith('/saas/delivery-ops') && new URLSearchParams(location.search).get('panel') === 'clients'))) ||
@@ -807,7 +816,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const salesPointItems: SidebarItem[] = salesPoints.map((sp) => ({
     id: `sp-${sp._id}`,
     label: sp.name,
-    icon: <Store className="w-5 h-5" />,
+    icon: <Store className="w-3.5 h-3.5" />,
     path: `/saas/tpv/punto/${sp._id}`,
   }));
 
@@ -1088,6 +1097,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                       const isCalendar = item.id === 'calendar';
                       /** Marca visual en sidebar: zona Ops ya trabajada / hub principal */
                       const isDeliveryOpsHub = item.id === 'delivery-ops';
+                      const isSalesPointSubItem = item.id.startsWith('sp-');
                       const itemDimmed = !dimmed && searchNorm && !itemMatchesSearch(item);
                       const calendarV2 = CALENDAR_V2_VISUAL && isCalendar;
                       return (
@@ -1095,20 +1105,30 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                           key={item.id}
                           type="button"
                           onClick={() => handleMenuItemClick(item)}
-                          className={`relative w-full flex items-center gap-3 py-2.5 transition-all last:rounded-b-xl ${
-                            !isMobile && collapsed ? 'justify-center px-0' : 'px-4'
+                          className={`relative w-full flex items-center transition-all last:rounded-b-xl ${
+                            isSalesPointSubItem ? 'gap-2 py-1.5' : 'gap-3 py-2.5'
+                          } ${
+                            !isMobile && collapsed
+                              ? 'justify-center px-0'
+                              : isSalesPointSubItem
+                                ? 'pl-10 pr-4'
+                                : 'px-4'
                           } ${
                             isActive
                               ? isDeliveryOpsHub
                                 ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-900 dark:text-teal-100 border-l-2 border-teal-600'
                                 : (isCalendar
                                   ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-900 dark:text-violet-200 border-l-2 border-violet-600'
-                                  : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600')
+                                  : isSalesPointSubItem
+                                    ? 'bg-amber-50/70 dark:bg-amber-900/15 text-amber-800 dark:text-amber-200'
+                                    : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600')
                               : (calendarV2
                                 ? 'bg-violet-50/60 dark:bg-violet-900/10 text-gray-900 dark:text-gray-100 border-l-2 border-violet-300/70 dark:border-violet-700/40 hover:bg-violet-50 dark:hover:bg-violet-900/15'
                                 : isDeliveryOpsHub
                                   ? 'text-gray-800 dark:text-gray-100 border-l-2 border-teal-400/55 dark:border-teal-500/45 bg-teal-50/45 dark:bg-teal-950/25 hover:bg-teal-50/80 dark:hover:bg-teal-950/35'
-                                  : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40')
+                                  : isSalesPointSubItem
+                                    ? 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-700/40'
+                                    : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40')
                           } ${item.disabled ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''} ${
                             itemDimmed ? 'opacity-30' : ''
                           }`}
@@ -1120,12 +1140,12 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                               ? isDeliveryOpsHub
                                 ? 'text-teal-600 dark:text-teal-400'
                                 : (isCalendar ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600')
-                              : (calendarV2 ? 'text-violet-600/80 dark:text-violet-400/90' : isDeliveryOpsHub ? 'text-teal-600 dark:text-teal-400' : 'text-gray-500 dark:text-gray-400')
+                              : (calendarV2 ? 'text-violet-600/80 dark:text-violet-400/90' : isDeliveryOpsHub ? 'text-teal-600 dark:text-teal-400' : isSalesPointSubItem ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400')
                           }>
                             {item.icon}
                           </span>
                           {(isMobile || !collapsed) && (
-                            <span className="font-medium flex-1 text-left">{item.label}</span>
+                            <span className={`flex-1 text-left ${isSalesPointSubItem ? 'text-[12px] font-normal truncate' : 'font-medium'}`}>{item.label}</span>
                           )}
                           {(isMobile || !collapsed) && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0 animate-pulse">
@@ -1191,6 +1211,50 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
             </>
           );
         })()}
+
+        {!workerMode && canUseDevPlanSwitcher && (isMobile || !collapsed) && (
+          <div className={`mb-3 rounded-xl border border-dashed border-violet-300 bg-violet-50/60 px-3 py-2 dark:border-violet-700 dark:bg-violet-950/20 ${narrow ? 'mx-0.5' : 'mx-2'}`}>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">Plan (dev)</span>
+              <span className="text-[10px] text-violet-600/80 dark:text-violet-400/80">uriel@admin.com</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {(['basic', 'normal', 'pro'] as const).map((p) => {
+                const isCurrent = currentDevPlan === p;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setDevSubscriptionPlan(p)}
+                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-colors capitalize ${
+                      isCurrent
+                        ? p === 'pro'
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : p === 'normal'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-slate-700 text-white shadow-sm'
+                        : 'bg-white text-gray-600 hover:bg-violet-100 border border-violet-200 dark:bg-gray-900 dark:text-gray-300 dark:border-violet-800 dark:hover:bg-violet-900/30'
+                    }`}
+                    title={`Cambiar plan a ${p}`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-violet-700/70 dark:text-violet-300/70">
+              <span className="truncate" title={user?.email}>{user?.email}</span>
+              <span className="font-semibold uppercase">{subscription.planName || 'Basic'}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDevSubscriptionPlan(null)}
+              className="mt-1.5 w-full text-[10px] text-violet-600/80 dark:text-violet-400/80 hover:text-violet-800 dark:hover:text-violet-200 underline-offset-2 hover:underline"
+            >
+              Reset (usar plan real)
+            </button>
+          </div>
+        )}
 
         {!workerMode && bottomVisibleItems.length > 0 && (
           <div

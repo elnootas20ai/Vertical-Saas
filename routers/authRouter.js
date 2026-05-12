@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   acceptInvite,
+  acceptInvitation,
   createJoinRequest,
   deleteUser,
   exportMyData,
@@ -12,6 +13,8 @@ import {
   googleLogin,
   inviteUser,
   listAllActivities,
+  listBusinessInvitations,
+  listMyInvitations,
   listRoles,
   listSessions,
   listUsers,
@@ -22,10 +25,14 @@ import {
   recoverPassword,
   refreshToken,
   register,
+  rejectInvitation,
+  resendInvitation,
+  resendInvite,
   resendVerificationEmail,
   resetPasswordWithToken,
   resetUserPassword,
   reviewJoinRequest,
+  revokeInvitation,
   revokeOtherSessionsEndpoint,
   revokeSessionEndpoint,
   saveOnboarding,
@@ -42,8 +49,10 @@ import {
   validate,
   validateParams,
   acceptInviteSchema,
+  businessIdParamSchema,
   googleLoginSchema,
   inviteUserSchema,
+  invitationIdParamSchema,
   joinRequestSchema,
   joinRequestActionSchema,
   loginSchema,
@@ -86,6 +95,7 @@ authRouter.get('/roles', requireAuth, listRoles);
 authRouter.put('/profile/:userId', requireAuth, validateParams(userIdParamSchema), updateProfile);
 authRouter.put('/profile/:userId/password', requireAuth, validateParams(userIdParamSchema), validate(updatePasswordSchema), updatePassword);
 authRouter.put('/profile/:userId/reset-password', requireAuth, validateParams(userIdParamSchema), resetUserPassword);
+authRouter.post('/profile/:userId/resend-invite', requireAuth, validateParams(userIdParamSchema), resendInvite);
 authRouter.get('/profile/:userId/card', requireAuth, validateParams(userIdParamSchema), getBillingCard);
 authRouter.put('/profile/:userId/card', requireAuth, validateParams(userIdParamSchema), validate(saveBillingCardSchema), saveBillingCard);
 authRouter.get('/profile/:userId/activity', requireAuth, validateParams(userIdParamSchema), getUserActivity);
@@ -107,5 +117,13 @@ authRouter.get('/join-requests/mine', requireAuth, getMyJoinRequests);
 authRouter.get('/join-requests/business/:businessId', requireAuth, getBusinessJoinRequests);
 authRouter.put('/join-requests/:requestId', requireAuth, validate(joinRequestActionSchema), reviewJoinRequest);
 authRouter.get('/businesses/search', requireAuth, searchBusinesses);
+
+// Team invitations (in-app): invitar por email, aceptar/rechazar dentro de Vertial.
+authRouter.get('/invitations/mine', requireAuth, listMyInvitations);
+authRouter.post('/invitations/:invitationId/accept', requireAuth, validateParams(invitationIdParamSchema), acceptInvitation);
+authRouter.post('/invitations/:invitationId/reject', requireAuth, validateParams(invitationIdParamSchema), rejectInvitation);
+authRouter.post('/invitations/:invitationId/resend', requireAuth, validateParams(invitationIdParamSchema), resendInvitation);
+authRouter.delete('/invitations/:invitationId', requireAuth, validateParams(invitationIdParamSchema), revokeInvitation);
+authRouter.get('/businesses/:businessId/invitations', requireAuth, validateParams(businessIdParamSchema), listBusinessInvitations);
 
 export { authRouter };

@@ -526,16 +526,41 @@ export function buildSuspensionEmail(email, name, billingUrl) {
 }
 
 // A-04: Email de invitación de miembro del equipo
-export function buildInvitationEmail({ name, email, inviteToken, temporaryPassword, invitedBy, role = 'Usuario', companyName = '' }) {
+export function buildInvitationEmail({ name, email, inviteToken, temporaryPassword, invitedBy, role = 'Usuario', companyName = '', isExistingUser = false }) {
   const baseUrl = getAppBaseUrl();
   const acceptUrl = `${baseUrl}/auth/accept-invite?token=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`;
   const loginUrl = `${baseUrl}/auth/login`;
   const inviterDisplay = invitedBy ? `<strong>${invitedBy}</strong>` : 'un administrador';
   const companyDisplay = companyName ? ` de <strong>${companyName}</strong>` : '';
   const subjectCompany = companyName ? ` · ${companyName}` : '';
+  const subjectPrefix = isExistingUser
+    ? `Únete al equipo${subjectCompany}`
+    : `Te han invitado a unirte a Vertial${subjectCompany}`;
+
+  const credentialsBlock = isExistingUser
+    ? `
+          <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:20px;margin:0 0 20px;">
+            <p style="margin:0 0 4px;color:#065f46;font-size:14px;font-weight:700;">Ya tienes cuenta en Vertial</p>
+            <p style="margin:0;color:#047857;font-size:13px;">Acepta la invitación con tu cuenta actual (<strong>${email}</strong>) y este equipo se añadirá automáticamente. No tienes que crear ninguna contraseña nueva.</p>
+          </div>`
+    : `
+          <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:20px;margin:0 0 20px;">
+            <p style="margin:0 0 8px;color:#92400e;font-size:14px;font-weight:700;">Tus credenciales de acceso:</p>
+            <table cellpadding="0" cellspacing="0" style="width:100%;">
+              <tr>
+                <td style="padding:4px 0;color:#78350f;font-size:13px;font-weight:600;width:80px;">Email:</td>
+                <td style="padding:4px 0;color:#451a03;font-size:13px;font-family:monospace;">${email}</td>
+              </tr>
+              <tr>
+                <td style="padding:4px 0;color:#78350f;font-size:13px;font-weight:600;width:80px;">Contraseña:</td>
+                <td style="padding:4px 0;color:#451a03;font-size:13px;font-family:monospace;">${temporaryPassword || '(la defines al aceptar)'}</td>
+              </tr>
+            </table>
+            <p style="margin:10px 0 0;color:#a16207;font-size:12px;">Te recomendamos cambiar la contraseña después de tu primer acceso.</p>
+          </div>`;
 
   return {
-    subject: `Te han invitado a unirte a Vertial${subjectCompany}`,
+    subject: subjectPrefix,
     html: `
 <!DOCTYPE html>
 <html lang="es">
@@ -559,22 +584,11 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
             <p style="margin:4px 0 0;color:#0c4a6e;font-size:13px;">Accederás directamente a esta empresa una vez aceptes la invitación.</p>
           </div>
           ` : ''}
-          <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:20px;margin:0 0 20px;">
-            <p style="margin:0 0 8px;color:#92400e;font-size:14px;font-weight:700;">Tus credenciales de acceso:</p>
-            <table cellpadding="0" cellspacing="0" style="width:100%;">
-              <tr>
-                <td style="padding:4px 0;color:#78350f;font-size:13px;font-weight:600;width:80px;">Email:</td>
-                <td style="padding:4px 0;color:#451a03;font-size:13px;font-family:monospace;">${email}</td>
-              </tr>
-              <tr>
-                <td style="padding:4px 0;color:#78350f;font-size:13px;font-weight:600;width:80px;">Contraseña:</td>
-                <td style="padding:4px 0;color:#451a03;font-size:13px;font-family:monospace;">${temporaryPassword || '(definida por tu administrador)'}</td>
-              </tr>
-            </table>
-            <p style="margin:10px 0 0;color:#a16207;font-size:12px;">Te recomendamos cambiar la contraseña después de tu primer acceso.</p>
-          </div>
+          ${credentialsBlock}
           <p style="color:#555;margin:0 0 24px;line-height:1.6;">
-            Puedes acceder de dos formas: con el botón de abajo para aceptar la invitación, o directamente iniciando sesión con tus credenciales.
+            ${isExistingUser
+              ? 'Haz clic en "Aceptar invitación" e inicia sesión con tu cuenta de Vertial para entrar en el nuevo equipo.'
+              : 'Puedes acceder de dos formas: con el botón de abajo para aceptar la invitación, o directamente iniciando sesión con tus credenciales.'}
           </p>
           <table cellpadding="0" cellspacing="0" style="margin:0 0 12px;"><tr><td>
             <a href="${acceptUrl}"

@@ -552,6 +552,7 @@ export interface AppContextType {
   locations: Location[];
   user: User | null;
   subscription: Subscription;
+  setDevSubscriptionPlan: (plan: 'basic' | 'normal' | 'pro' | null) => void;
   canAccessFeature: () => boolean;
   canPerformCriticalAction: () => boolean;
   getAccessRestrictionMessage: () => string | null;
@@ -622,6 +623,7 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
     const defaultCtx: AppContextType = {
       vehicles: [], isLoadingVehicles: true, isLoadingClients: true, parkingZones: [], leads: [], clients: [], notifications: [], sales: [], documents: [], locations: [], user: null,
       subscription: { status: 'trial_active', planName: 'Basic', cancelAtPeriodEnd: false },
+      setDevSubscriptionPlan: () => {},
       canAccessFeature: () => true,
       canPerformCriticalAction: () => true,
       getAccessRestrictionMessage: () => null,
@@ -697,6 +699,56 @@ function deserializeNotification(notification: NotificationRecord): AppNotificat
     entityId: notification.entityId || '',
     entityType: notification.entityType || '',
     updatedAt: notification.updatedAt || notification.createdAt,
+  };
+}
+
+export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
+
+type DevPlan = 'basic' | 'normal' | 'pro';
+
+/**
+ * Mantén la lista de cuentas con acceso al switcher dev de plan acotada.
+ * El plan switcher es una herramienta de desarrollo para probar gates PRO sin pagar.
+ */
+const DEV_PLAN_OVERRIDE_EMAILS = new Set([
+  'uriel@admin.com',
+]);
+
+function normalizeEmail(email?: string | null): string {
+  return (email || '').trim().toLowerCase();
+}
+
+export function userCanUseDevPlanOverride(authUser?: { email?: string; role?: string } | null): boolean {
+  if (!authUser) return false;
+  if (authUser.role === 'Superadmin') return true;
+  return DEV_PLAN_OVERRIDE_EMAILS.has(normalizeEmail(authUser.email));
+}
+
+const DEV_PLAN_DEFINITIONS: Record<DevPlan, { planName: string; selectedPlanId: string }> = {
+  basic: { planName: 'Básico', selectedPlanId: 'basic' },
+  normal: { planName: 'Normal', selectedPlanId: 'normal' },
+  pro: { planName: 'Pro', selectedPlanId: 'pro' },
+};
+
+export function readDevPlanOverride(): DevPlan | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(DEV_PLAN_OVERRIDE_KEY);
+    return raw === 'basic' || raw === 'normal' || raw === 'pro' ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyDevPlanOverride(sub: Subscription): Subscription {
+  const override = readDevPlanOverride();
+  if (!override) return sub;
+  const def = DEV_PLAN_DEFINITIONS[override];
+  return {
+    ...sub,
+    status: 'subscription_active',
+    planName: def.planName,
+    selectedPlanId: def.selectedPlanId,
   };
 }
 
@@ -942,7 +994,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       email: authUser.email,
       role: authUser.role,
     });
-    setSubscription(deserializeSubscription(authUser.subscription));
+    const baseSubscription = deserializeSubscription(authUser.subscription);
+    const canUseDevPlanOverride = userCanUseDevPlanOverride(authUser);
+    setSubscription(canUseDevPlanOverride ? applyDevPlanOverride(baseSubscription) : baseSubscription);
+    if (!canUseDevPlanOverride && typeof window !== 'undefined') {
+      try { window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY); } catch { /* ignore */ }
+    }
+  }, [authUser]);
+
+  const setDevSubscriptionPlan = useCallback((plan: DevPlan | null) => {
+    if (!userCanUseDevPlanOverride(authUser)) {
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        if (plan) window.localStorage.setItem(DEV_PLAN_OVERRIDE_KEY, plan);
+        else window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
+      } catch {
+        // Storage may be unavailable (private mode); we still update state below.
+      }
+    }
+    if (!plan) {
+      setSubscription(deserializeSubscription(authUser?.subscription));
+      return;
+    }
+    const def = DEV_PLAN_DEFINITIONS[plan];
+    setSubscription((prev) => ({
+      ...prev,
+      status: 'subscription_active',
+      planName: def.planName,
+      selectedPlanId: def.selectedPlanId,
+    }));
   }, [authUser]);
 
   useEffect(() => {
@@ -1943,6 +2025,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value: AppContextType = {
     vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
+    setDevSubscriptionPlan,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
     addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,

@@ -43,6 +43,7 @@ import { CallDetail } from './pages/saas/CallDetail';
 import { Ancove } from './pages/saas/Ancove';
 import { Team } from './pages/saas/Team';
 import { TeamMemberDetail } from './pages/saas/TeamMemberDetail';
+import { Invitations } from './pages/saas/Invitations';
 import { Finance } from './pages/saas/Finance';
 import { AdminPanel } from './pages/saas/AdminPanel';
 import { Settings } from './pages/saas/Settings';
@@ -98,7 +99,7 @@ import { DeliveryCrm } from './pages/saas/DeliveryCrm';
 import { DeliveryCrmWorker } from './pages/saas/DeliveryCrmWorker';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
-import { DeliveryCatalog } from './pages/saas/DeliveryCatalog';
+import { CatalogPage } from './pages/saas/DeliveryCatalog';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
@@ -127,7 +128,6 @@ import { CleaningIncidents } from './pages/saas/CleaningIncidents';
 // CleaningReports removed (duplicate of Reports)
 import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
 import { Chat } from './pages/saas/Chat';
-import { CatalogPage } from './pages/saas/CatalogPage';
 import { SupplierBillingPage } from './pages/saas/SupplierBillingPage';
 import { ClientBillingPage } from './pages/saas/ClientBillingPage';
 import { CostingPage } from './pages/saas/CostingPage';
@@ -447,6 +447,7 @@ export const router = createBrowserRouter([
           { path: 'ancove', element: <RequireWorkerPermission permission="ancove"><Ancove /></RequireWorkerPermission> },
           { path: 'team', element: <RequireBusinessOwner><Team /></RequireBusinessOwner> },
           { path: 'team/:userId', element: <RequireBusinessOwner><TeamMemberDetail /></RequireBusinessOwner> },
+          { path: 'invitations', Component: Invitations },
           { path: 'equipo', element: <Navigate to="/saas/team" replace /> },
           { path: 'equipo/:userId', Component: EquipoRedirect },
           { path: 'clockins', element: <RequireBusinessOwner><Clockins /></RequireBusinessOwner> },
@@ -492,7 +493,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/delivery/reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
           { path: 'delivery-kitchen', element: <RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission> },
           { path: 'delivery-montaje', element: <RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission> },
-          { path: 'delivery-catalog', element: <RequireWorkerPermission permission="delivery"><DeliveryCatalog /></RequireWorkerPermission> },
+          { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
           { path: 'vertical/delivery/tpv', element: <RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal> },
           { path: 'vertical/delivery/caja', element: <RequirePdvTerminal><CajaPage /></RequirePdvTerminal> },
           { path: 'delivery-crm', Component: DeliveryCrm },

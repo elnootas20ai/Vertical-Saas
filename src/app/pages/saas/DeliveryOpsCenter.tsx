@@ -6,6 +6,7 @@ import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
+import { useHasProAccess } from '../../hooks/useHasProAccess';
 import { getAuthHeaders } from '../../lib/authApi';
 import { Delivery } from './Delivery';
 import {
@@ -74,6 +75,7 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
 }) {
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
+  const hasProAccess = useHasProAccess();
   const ac = [filters.salesPointId, filters.channel, filters.timeSlot].filter(Boolean).length;
   const sel = 'px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
 
@@ -96,10 +98,14 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
         <button
           type="button"
           onClick={() => nav('/saas/settings/centros-de-trabajo')}
-          className="px-3 py-2 rounded-lg text-sm font-semibold border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm hover:opacity-95 transition-opacity"
-          title="Activa multi-tienda (PRO)"
+          className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-opacity ${
+            hasProAccess
+              ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+              : 'border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm hover:opacity-95'
+          }`}
+          title={hasProAccess ? 'Añadir/gestionar tiendas' : 'Activa multi-tienda (PRO)'}
         >
-          Multi-tienda (PRO)
+          {hasProAccess ? 'Añadir tienda' : 'Multi-tienda (PRO)'}
         </button>
       )}
       <select className={sel} value={filters.channel || ''} onChange={e => onChange({ ...filters, channel: e.target.value || undefined })}>
@@ -312,7 +318,7 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueC
     { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
     { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: cfg?.hasPhysicalTables === true },
     { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true },
-    { l: 'Catálogo', i: BookOpen, r: '/saas/delivery-catalog', b: null, v: true },
+    { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
     { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },
   ];

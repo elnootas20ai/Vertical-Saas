@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, createContext, useContext, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
+import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
@@ -22,7 +24,7 @@ import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
-  MapPin, Store,
+  MapPin, Store, Plus,
 } from 'lucide-react';
 
 // ─── Denomination config (EUR) ──────────────────────────────────────────────
@@ -188,6 +190,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   onCreateDefaultPdv: () => void;
   creatingDefaultPdv: boolean;
 }) {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
@@ -197,6 +201,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   const hasCounted = total > 0 || Object.values(counts).some(v => v !== undefined && v > 0);
 
   const hasPdvs = pointsOfSale.length > 0;
+  const pointOfSaleAccess = usePointOfSaleAccess(pointsOfSale.length);
   const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId);
   const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
@@ -269,183 +274,236 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
 
   const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
 
+  const goBack = () => {
+    try {
+      if (window.history.length > 1) window.history.back();
+      else navigate('/saas/delivery-ops');
+    } catch {
+      // ignore
+    }
+  };
+
+  const goToPdvBilling = () => {
+    const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
+    if (resolvedUserId) {
+      try {
+        localStorage.setItem(
+          `billing_selection_${resolvedUserId}`,
+          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
+        );
+      } catch {
+        // Billing still opens if localStorage is not available.
+      }
+    }
+    navigate('/saas/settings/facturacion');
+  };
+
+  const handlePointOfSaleAction = () => {
+    if (pointOfSaleAccess.canCreatePointOfSale) {
+      navigate('/saas/settings/centros-de-trabajo?action=new-pdv');
+      return;
+    }
+    goToPdvBilling();
+  };
+
+  const pointOfSaleActionLabel = pointOfSaleAccess.canCreatePointOfSale
+    ? 'Nuevo PDV'
+    : pointOfSaleAccess.needsPointOfSaleAddon
+      ? 'Añadir PDV extra'
+      : 'Multi-PDV (PRO)';
+  const pointOfSaleActionTitle = pointOfSaleAccess.canCreatePointOfSale
+    ? `Crear un nuevo punto de venta (${pointsOfSale.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
+    : pointOfSaleAccess.needsPointOfSaleAddon
+      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Añade un extra para crear otro.`
+      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
+    <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-3 sm:p-4 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl mx-auto flex-1 min-h-0 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="px-5 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 relative">
+          <div className="w-11 h-11 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0">
+            <Unlock className="w-5 h-5 text-emerald-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            {selectedPdv ? (
+              <>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate">
+                  <Store className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span className="truncate">{selectedPdv.name}</span>
+                </h1>
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
+                  Apertura de caja
+                  {selectedPdv.code ? ` · ${selectedPdv.code}` : ''}
+                  {selectedTerminal ? ` · Terminal ${selectedTerminal.code || selectedTerminal.name}` : ''}
+                </p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">Apertura de caja</h1>
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Selecciona punto de venta, terminal y cuenta el efectivo</p>
+              </>
+            )}
+          </div>
+          {hasCounted && (
+            <span className="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
+              Contado: {total.toFixed(2)}€
+            </span>
+          )}
           <button
             type="button"
-            onClick={() => {
-              try {
-                if (window.history.length > 1) window.history.back();
-                else window.location.href = '/saas/delivery-ops';
-              } catch {
-                // ignore
-              }
-            }}
-            className="absolute right-3 top-3 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            onClick={goBack}
+            className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
             aria-label="Cerrar"
             title="Cerrar"
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
-          <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Unlock className="w-8 h-8 text-emerald-600" />
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Apertura de caja</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Selecciona punto de venta, terminal y cuenta el efectivo</p>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0 pb-24">
-          {/* Worker */}
-          <div>
-            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Trabajador *</label>
-            {hasWorkers ? (
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <select
-                  value={selectedWorkerId}
-                  onChange={(e) => setSelectedWorkerId(e.target.value)}
-                  className={`${inputCls} pl-10`}
-                  autoFocus
-                >
-                  <option value="">Selecciona…</option>
-                  {workerOptions.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
+        {/* Body: 2 columns on lg+ */}
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden">
+          {/* Left panel: who + where */}
+          <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-5 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
+            {/* Worker */}
+            <div>
+              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Trabajador *</label>
+              {hasWorkers ? (
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <select
+                    value={selectedWorkerId}
+                    onChange={(e) => setSelectedWorkerId(e.target.value)}
+                    className={`${inputCls} pl-10`}
+                    autoFocus
+                  >
+                    <option value="">Selecciona…</option>
+                    {workerOptions.map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  No se detecta ningún miembro en <span className="font-bold">Equipo</span>. No puedes abrir caja hasta conectar el equipo.
+                </div>
+              )}
+            </div>
+
+            {/* Point of Sale selection */}
+            {hasPdvs && (
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><MapPin className="w-3 h-3 inline mr-1" />Punto de venta *</label>
+                  <button
+                    type="button"
+                    onClick={handlePointOfSaleAction}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold border transition-colors inline-flex items-center gap-1 ${
+                      pointOfSaleAccess.canCreatePointOfSale
+                        ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
+                        : 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30'
+                    }`}
+                    title={pointOfSaleActionTitle}
+                  >
+                    {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3 h-3" />}
+                    {pointOfSaleActionLabel}
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                  {pointsOfSale.filter(p => p.active).map(pdv => (
+                    <button key={pdv._id} onClick={() => handleSelectPdv(pdv._id)}
+                      className={`p-2.5 rounded-xl border-2 text-left transition-all ${selectedPdvId === pdv._id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
+                      <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate"><Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" /><span className="truncate">{pdv.name}</span></div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{pdv.code} · {pdv.terminals.filter(t => t.active).length} TPV{pdv.terminals.length !== 1 ? 's' : ''}</div>
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
-            ) : (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-                No se detecta ningún miembro en <span className="font-bold">Equipo</span>. No puedes abrir caja hasta conectar el equipo.
+            )}
+
+            {!hasPdvs && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
+                <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
+                  Para abrir caja necesitas al menos 1 punto de venta con su terminal. Puedes crear uno básico ahora y personalizarlo más tarde desde Ajustes.
+                </p>
+                <div className="mt-3 flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={onCreateDefaultPdv}
+                    disabled={creatingDefaultPdv}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                  >
+                    {creatingDefaultPdv ? 'Creando…' : 'Crear PDV por defecto'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/saas/settings/centros-de-trabajo')}
+                    className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
+                  >
+                    Configurar manualmente
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Terminal selection from PDV (required) */}
+            {selectedPdv ? (
+              <div>
+                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><Monitor className="w-3 h-3 inline mr-1" />Terminal *</label>
+                {availableTerminals.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {availableTerminals.map(t => (
+                      <button key={t.id} onClick={() => setSelectedTerminalId(t.id)}
+                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${selectedTerminalId === t.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
+                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{t.code || t.name}</div>
+                        {t.name && t.code && <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{t.name}</div>}
+                        <div className="flex gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
+                          {t.datafonName && <span className="flex items-center gap-0.5"><Smartphone className="w-2.5 h-2.5" />{t.datafonName}</span>}
+                          {t.printerName && <span className="flex items-center gap-0.5"><Printer className="w-2.5 h-2.5" />{t.printerName}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                    Este PDV no tiene terminales activos. Configúralos en Ajustes.
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* Selected terminal info summary */}
+            {selectedTerminal && (
+              <div className="flex gap-2 flex-wrap text-xs">
+                <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 rounded-lg font-medium flex items-center gap-1"><Monitor className="w-3 h-3" />{selectedTerminal.code || selectedTerminal.name}</span>
+                {effectiveDatafon && <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium flex items-center gap-1"><Smartphone className="w-3 h-3" />{effectiveDatafon}</span>}
+                {effectivePrinter && <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium flex items-center gap-1"><Printer className="w-3 h-3" />{effectivePrinter}</span>}
               </div>
             )}
           </div>
 
-          {/* Point of Sale selection */}
-          {hasPdvs && (
-            <div>
-              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><MapPin className="w-3 h-3 inline mr-1" />Punto de venta</label>
-              <div className="grid grid-cols-2 gap-2">
-                {pointsOfSale.filter(p => p.active).map(pdv => (
-                  <button key={pdv._id} onClick={() => handleSelectPdv(pdv._id)}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${selectedPdvId === pdv._id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                    <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5"><Store className="w-3.5 h-3.5 text-emerald-600" />{pdv.name}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{pdv.code} · {pdv.terminals.filter(t => t.active).length} TPV{pdv.terminals.length !== 1 ? 's' : ''}</div>
-                    {pdv.address && <div className="text-xs text-gray-400 mt-0.5 truncate">{pdv.address}</div>}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Terminal, datáfono e impresora quedan ligados al PDV seleccionado.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors"
-                  title="Configurar PDV/terminales (PRO)"
-                >
-                  Multi-PDV (PRO)
-                </button>
-              </div>
-            </div>
-          )}
-          {!hasPdvs && (
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
-              <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
-              <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
-                Para abrir caja necesitas al menos 1 punto de venta con su terminal. Puedes crear uno básico ahora y personalizarlo más tarde desde Ajustes.
-              </p>
-              <div className="mt-3 flex gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={onCreateDefaultPdv}
-                  disabled={creatingDefaultPdv}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
-                >
-                  {creatingDefaultPdv ? 'Creando…' : 'Crear PDV por defecto'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
-                  className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
-                >
-                  Configurar manualmente
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { try { window.location.href = '/saas/settings/centros-de-trabajo'; } catch { /* ignore */ } }}
-                  className="px-4 py-2 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-sm font-semibold"
-                >
-                  Multi-PDV (PRO)
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Terminal selection from PDV (required) */}
-          {selectedPdv ? (
-            <div>
-              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><Monitor className="w-3 h-3 inline mr-1" />Terminal *</label>
-              {availableTerminals.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {availableTerminals.map(t => (
-                    <button key={t.id} onClick={() => setSelectedTerminalId(t.id)}
-                      className={`p-3 rounded-xl border-2 text-left transition-all ${selectedTerminalId === t.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                      <div className="font-bold text-sm text-gray-900 dark:text-gray-100">{t.code || t.name}</div>
-                      {t.name && t.code && <div className="text-xs text-gray-500 dark:text-gray-400">{t.name}</div>}
-                      <div className="flex gap-2 mt-1 text-xs text-gray-400">
-                        {t.datafonName && <span className="flex items-center gap-0.5"><Smartphone className="w-2.5 h-2.5" />{t.datafonName}</span>}
-                        {t.printerName && <span className="flex items-center gap-0.5"><Printer className="w-2.5 h-2.5" />{t.printerName}</span>}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-                  Este PDV no tiene terminales activos. Configúralos en Ajustes.
-                </div>
+          {/* Right panel: cash count */}
+          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
+              {!hasCounted && canOpen && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md">
+                  <AlertTriangle className="w-3 h-3" /> Cuenta antes de abrir
+                </span>
               )}
             </div>
-          ) : null}
-
-          {/* Selected terminal info summary */}
-          {selectedTerminal && (
-            <div className="flex gap-2 flex-wrap text-xs">
-              <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 rounded-lg font-medium flex items-center gap-1"><Monitor className="w-3 h-3" />{selectedTerminal.code || selectedTerminal.name}</span>
-              {effectiveDatafon && <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium flex items-center gap-1"><Smartphone className="w-3 h-3" />{effectiveDatafon}</span>}
-              {effectivePrinter && <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium flex items-center gap-1"><Printer className="w-3 h-3" />{effectivePrinter}</span>}
+            <div className="flex-1 min-h-0">
+              <CashCountGrid counts={counts} onChange={setCounts} />
             </div>
-          )}
-
-          {/* Cash count */}
-          <div className="pt-2">
-            <div className="flex items-center justify-between mb-2 gap-2">
-              <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
-              {hasCounted ? (
-                <span className="text-xs font-bold text-emerald-600">Contado: {total.toFixed(2)}€</span>
-              ) : canOpen ? (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md">
-                  <AlertTriangle className="w-3 h-3" /> Cuenta el efectivo antes de abrir
-                </span>
-              ) : null}
-            </div>
-            <CashCountGrid counts={counts} onChange={setCounts} />
           </div>
         </div>
 
-        <div className="p-4 sm:p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white/95 dark:bg-gray-800/95 backdrop-blur sticky bottom-0">
+        {/* Footer */}
+        <div className="px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
           <button
             type="button"
-            onClick={() => {
-              try {
-                if (window.history.length > 1) window.history.back();
-                else window.location.href = '/saas/delivery-ops';
-              } catch {
-                // ignore
-              }
-            }}
+            onClick={goBack}
             className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Volver
@@ -665,66 +723,98 @@ function CashCountModal({ session, onConfirm, onCancel }: {
   const hasCounted = countedTotal > 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: '92vh' }}>
-        <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Calculator className="w-5 h-5 text-blue-500" /> Arqueo intermedio</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {new Date().toLocaleTimeString('es-ES', { timeStyle: 'short' })}</p>
-            </div>
-            <button onClick={onCancel} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex p-3 sm:p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl mx-auto my-auto h-[calc(100svh-1.5rem)] sm:h-[calc(100svh-2rem)] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="px-5 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3">
+          <div className="w-11 h-11 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center shrink-0">
+            <Calculator className="w-5 h-5 text-blue-600" />
           </div>
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
-          <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl flex justify-between items-center">
-            <span className="text-sm text-gray-500">Efectivo esperado</span>
-            <span className="text-lg font-bold text-gray-900 dark:text-gray-100">{expected.toFixed(2)}€</span>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">Arqueo intermedio</h2>
+            <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">{session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {new Date().toLocaleTimeString('es-ES', { timeStyle: 'short' })}</p>
           </div>
-
-          <CashCountGrid counts={counts} onChange={setCounts} />
-
           {hasCounted && (
-            <div className={`p-4 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{countedTotal.toFixed(2)}€ contado − {expected.toFixed(2)}€ esperado</div>
-                </div>
-                <div className={`text-2xl font-bold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                  {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
-                </div>
-              </div>
-              {diff === 0 && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> La caja cuadra perfectamente</p>}
-              {diff !== 0 && <p className="text-xs mt-1 flex items-center gap-1 text-gray-500"><AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Sobrante de efectivo' : 'Falta efectivo en la caja'}</p>}
-            </div>
+            <span className={`hidden sm:inline-flex px-3 py-1.5 rounded-lg border text-xs font-bold ${diff === 0 ? 'bg-green-50 border-green-200 text-green-700 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' : diff > 0 ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400' : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/30 dark:border-red-800 dark:text-red-400'}`}>
+              Diferencia: {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+            </span>
           )}
-
-          <div>
-            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notas</label>
-            <textarea rows={2} className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
-              placeholder="Observaciones del arqueo..." value={notes} onChange={e => setNotes(e.target.value)} />
-          </div>
-
-          {session.cashCounts.length > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Arqueos anteriores</h4>
-              <div className="space-y-1.5">
-                {session.cashCounts.map(cc => (
-                  <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <span className="text-gray-600 dark:text-gray-400">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
-                    <span className={`font-semibold ${cc.difference === 0 ? 'text-green-600' : cc.difference > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                      {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <button onClick={onCancel} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl shrink-0" aria-label="Cerrar"><X className="w-5 h-5 text-gray-500" /></button>
         </div>
 
-        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+        {/* Body: 2 columns on lg+ */}
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden">
+          {/* Left panel: summary + notes + history */}
+          <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-4 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
+            {/* Expected vs counted */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
+                <div className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Efectivo esperado</div>
+                <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{expected.toFixed(2)}€</div>
+              </div>
+              <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
+                <div className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">Contado ahora</div>
+                <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{countedTotal.toFixed(2)}€</div>
+              </div>
+            </div>
+
+            {hasCounted && (
+              <div className={`p-4 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{countedTotal.toFixed(2)}€ contado − {expected.toFixed(2)}€ esperado</div>
+                  </div>
+                  <div className={`text-2xl font-bold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                  </div>
+                </div>
+                {diff === 0 && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> La caja cuadra perfectamente</p>}
+                {diff !== 0 && <p className="text-xs mt-1 flex items-center gap-1 text-gray-500"><AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Sobrante de efectivo' : 'Falta efectivo en la caja'}</p>}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notas</label>
+              <textarea rows={3} className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
+                placeholder="Observaciones del arqueo..." value={notes} onChange={e => setNotes(e.target.value)} />
+            </div>
+
+            {session.cashCounts.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Arqueos anteriores</h4>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {session.cashCounts.map(cc => (
+                    <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                      <span className="text-gray-600 dark:text-gray-400 truncate">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
+                      <span className={`font-semibold shrink-0 ml-2 ${cc.difference === 0 ? 'text-green-600' : cc.difference > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                        {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Right panel: cash count */}
+          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
+              {!hasCounted && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md">
+                  <AlertTriangle className="w-3 h-3" /> Cuenta antes de registrar
+                </span>
+              )}
+            </div>
+            <div className="flex-1 min-h-0">
+              <CashCountGrid counts={counts} onChange={setCounts} />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
           <button onClick={onCancel} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancelar</button>
           <button onClick={() => onConfirm(counts, notes)} disabled={!hasCounted}
             className={`flex-1 py-3 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${hasCounted ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}>
@@ -847,6 +937,7 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 // ─── Main Gate Component ────────────────────────────────────────────────────
 
 export function TpvRegisterGate({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness, isLoading: businessLoading } = useBusiness();
   const { createNotification } = useApp();
@@ -890,43 +981,31 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     loadData();
   }, [businessLoading, dataUserId, loadData]);
 
-  /**
-   * Crea un PDV mínimo viable + 1 terminal activo para que el usuario pueda
-   * empezar a usar TPV sin pasar por Ajustes. Pensado sobre todo para cuentas
-   * nuevas en testing/onboarding. Se puede editar o sustituir desde
-   * Ajustes → Centros de trabajo.
-   */
   const handleCreateDefaultPdv = useCallback(async () => {
     if (!dataUserId || creatingDefaultPdv) return;
     setCreatingDefaultPdv(true);
     try {
-      const terminalId = `term-${Date.now().toString(36)}`;
-      const defaultTerminal: TerminalConfig = {
-        id: terminalId,
-        code: 'TPV-1',
-        name: 'Terminal principal',
-        datafonName: '',
-        printerName: '',
-        scaleDeviceId: '',
-        scaleName: '',
+      const defaultTerminal: Partial<TerminalConfig> = {
+        code: 'TPV-01',
+        name: 'TPV principal',
         active: true,
+        type: 'pos',
+        peripherals: { receiptPrinter: true, cashDrawer: true, paymentDatafono: true },
       };
-      const businessName = currentBusiness?.name?.trim() || 'Local principal';
       const created = await createPointOfSaleRequest(dataUserId, {
-        name: businessName,
-        code: 'PDV-1',
-        address: '',
+        name: currentBusiness?.companyName || 'PDV principal',
+        code: 'PDV-01',
         active: true,
-        terminals: [defaultTerminal],
-      });
-      setPointsOfSale((prev) => [created, ...prev]);
-      toast.success('PDV creado. Ya puedes abrir caja.');
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo crear el PDV por defecto');
+        terminals: [defaultTerminal as TerminalConfig],
+      } as Partial<PointOfSale>);
+      setPointsOfSale(prev => [created, ...prev]);
+      toast.success('PDV por defecto creado. Ya puedes abrir la caja.');
+    } catch {
+      toast.error('No se pudo crear el PDV por defecto. Ve a Ajustes para configurarlo manualmente.');
     } finally {
       setCreatingDefaultPdv(false);
     }
-  }, [dataUserId, creatingDefaultPdv, currentBusiness?.name]);
+  }, [dataUserId, creatingDefaultPdv, currentBusiness]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
@@ -1097,7 +1176,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
                 // Salir sin forzar apertura; volvemos a la vista anterior.
                 try {
                   if (window.history.length > 1) window.history.back();
-                  else window.location.href = '/saas/delivery-ops';
+                  else navigate('/saas/delivery-ops');
                 } catch {
                   // ignore
                 }
@@ -1140,9 +1219,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               Abrir otra caja
             </button>
             <button
-              onClick={() => {
-                try { window.location.href = '/saas/vertical/delivery/caja'; } catch { /* ignore */ }
-              }}
+              onClick={() => navigate('/saas/vertical/delivery/caja')}
               className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
             >
               Ir a Caja
@@ -1151,7 +1228,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               onClick={() => {
                 try {
                   if (window.history.length > 1) window.history.back();
-                  else window.location.href = '/saas/delivery-ops';
+                  else navigate('/saas/delivery-ops');
                 } catch { /* ignore */ }
               }}
               className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"

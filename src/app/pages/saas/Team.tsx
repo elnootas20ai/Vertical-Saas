@@ -75,6 +75,7 @@ import type {
   EmploymentInfo,
   EmploymentSkill,
   RoleDefinition,
+  TeamInvitation,
 } from '../../lib/authApi';
 import { getUserActivityRequest } from '../../lib/authApi';
 import {
@@ -2674,7 +2675,15 @@ export function Team() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, listUsers, listRoles, inviteUser } = useAuth();
+  const {
+    user,
+    listUsers,
+    listRoles,
+    inviteUser,
+    listBusinessInvitations,
+    resendInvitation,
+    revokeInvitation,
+  } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
   const { clients: contextClients, leads: contextLeads } = useApp();
   const [searchParams] = useSearchParams();
@@ -2695,6 +2704,7 @@ export function Team() {
   ];
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [members, setMembers] = useState<AuthUser[]>([]);
+  const [pendingInvitations, setPendingInvitations] = useState<TeamInvitation[]>([]);
   const [baseRoles, setBaseRoles] = useState<RoleDefinition[]>([]);
   const [customRoles, setCustomRoles] = useState<RoleDefinition[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -2724,8 +2734,18 @@ export function Team() {
     }
   };
 
+  const loadPendingInvitations = async () => {
+    if (!currentBusiness?.business_id) {
+      setPendingInvitations([]);
+      return;
+    }
+    const list = await listBusinessInvitations(currentBusiness.business_id, false);
+    setPendingInvitations(list);
+  };
+
   useEffect(() => {
     void loadDirectory();
+    void loadPendingInvitations();
     if (user?.user_id) {
       listWorkCenters(user.user_id).then(setWorkCentersData).catch(() => {});
     }
@@ -2889,12 +2909,19 @@ export function Team() {
       throw new Error(result.error || 'No se pudo invitar al usuario.');
     }
 
-    setPageMessage({ text: `${name} (${email}) añadido al equipo. Aparecerá con estado "Pendiente".`, type: 'success' });
-    await loadDirectory(result.user?.user_id || null);
+    const isExistingUser = Boolean(result.isExistingUser);
+    setPageMessage({
+      text: isExistingUser
+        ? `${name || email} ya tiene cuenta en Vertial. Verá tu invitación la próxima vez que inicie sesión.`
+        : `Invitación creada para ${email}. Cuando se registre en Vertial verá tu invitación pendiente.`,
+      type: 'success',
+    });
+    await loadDirectory(null);
+    await loadPendingInvitations();
 
     return {
-      generatedPassword: result.generatedPassword,
-      emailSent: result.emailSent,
+      isExistingUser,
+      inviteExpiresAt: result.inviteExpiresAt,
     };
   };
 
@@ -3127,6 +3154,72 @@ export function Team() {
             type={pageMessage.type}
             onClose={() => setPageMessage(null)}
           />
+        )}
+
+        {activeTab === 'members' && pendingInvitations.length > 0 && (
+          <div className="rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-50/60 dark:bg-violet-900/20 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-sm font-bold text-violet-800 dark:text-violet-200">Invitaciones pendientes</p>
+                <p className="text-xs text-violet-700/80 dark:text-violet-300/80">Verán tu invitación cuando entren en Vertial con su email.</p>
+              </div>
+              <span className="rounded-full bg-violet-600 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                {pendingInvitations.length}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {pendingInvitations.map((inv) => (
+                <div
+                  key={inv.invitationId}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-800 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {inv.fullName || inv.email}
+                    </p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {inv.email} · {inv.role}
+                      {inv.expiresAt
+                        ? ` · caduca el ${new Date(inv.expiresAt).toLocaleDateString()}`
+                        : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await resendInvitation(inv.invitationId);
+                        if (res.success) {
+                          toast.success('Invitación renovada por 30 días más.');
+                          await loadPendingInvitations();
+                        } else {
+                          toast.error(res.error || 'No se pudo renovar la invitación.');
+                        }
+                      }}
+                      className="rounded-lg border border-violet-200 dark:border-violet-800 px-2.5 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40"
+                    >
+                      Renovar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await revokeInvitation(inv.invitationId);
+                        if (res.success) {
+                          toast.success('Invitación revocada.');
+                          await loadPendingInvitations();
+                        } else {
+                          toast.error(res.error || 'No se pudo revocar la invitación.');
+                        }
+                      }}
+                      className="rounded-lg border border-red-200 dark:border-red-800 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                    >
+                      Revocar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {activeTab === 'members' && (

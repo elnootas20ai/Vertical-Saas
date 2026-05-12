@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { SubscriptionBanner } from './SubscriptionBanner';
+import { PendingInvitationsBanner } from './PendingInvitationsBanner';
 import { BottomNav } from './BottomNav';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
@@ -229,6 +230,7 @@ export function Layout({ children, title, subtitle, noPadding, titleClassName, s
       <div className={`transition-all duration-300 ${desktopMargin}`}>
         <SubscriptionBanner />
         <UnverifiedEmailBanner />
+        <PendingInvitationsBanner />
         <Topbar
           title={title}
           subtitle={subtitle}
