@@ -67,3 +67,4 @@ La arquitectura está orientada a producto SaaS modular:
 - **Render por rol/sección** en layout central.
 - **Dominio separado por carpetas** dentro de `components`.
 - **Sistema visual global** en `styles`.
+- **Documentación viva** para orientar cambios pequeños sin afectar producción.
