@@ -24,8 +24,9 @@ En el repo hay un workflow: **`.github/workflows/deploy-vps.yml`**. En cada **pu
 | `VPS_USER` | `root` o `ubuntu` |
 | `VPS_SSH_KEY` | Clave **privada** PEM (mejor una clave **solo para Actions**, no tu clave personal) |
 | `VPS_DEPLOY_PATH` | Ruta absoluta al repo en el VPS, ej. `/root/Vertical-SaaS` |
+| `VPS_PORT` | (Opcional) solo si SSH **no** usa el puerto 22 |
 
-Si SSH no usa el puerto 22, en el YAML del workflow puedes añadir `port: ${{ secrets.VPS_PORT }}` y crear el secreto `VPS_PORT`.
+Si el job **Deploy API (VPS)** falla en unos segundos en el paso SSH (no llega a `docker compose`), casi nunca es el build: suele ser **clave/host/usuario/puerto**. El workflow normaliza **CRLF** en la clave y prueba login antes de desplegar; revisa el log del paso *Preparar clave SSH…* para el `::error::` concreto.
 
 ### Una sola vez en el VPS
 

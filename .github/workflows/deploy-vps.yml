@@ -3,6 +3,7 @@
 # Una vez en el VPS: repo clonado, .env en la raíz, clave pública en authorized_keys.
 # GitHub → Settings → Secrets and variables → Actions:
 #   VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_DEPLOY_PATH
+# Opcionales: VPS_PORT (si SSH no es 22)
 # (Clave SSH dedicada solo para Actions; no uses tu clave personal.)
 
 name: Deploy API (VPS)
@@ -41,12 +42,43 @@ jobs:
           if [ "$missing" != 0 ]; then exit 1; fi
           echo "OK: los cuatro secretos tienen contenido."
 
+      # Falla en ~1s en appleboy = casi nunca es Docker/git: suele ser clave (CRLF al pegar en el
+      # secreto), usuario/host/puerto o firewall. Normalizamos CRLF y reutilizamos el mismo
+      # archivo para appleboy (key_path).
+      - name: Preparar clave SSH (sin CRLF) y comprobar login
+        id: ssh_prep
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+        run: |
+          set -euo pipefail
+          KEYFILE="$RUNNER_TEMP/gh_vps_deploy_key"
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$KEYFILE"
+          chmod 600 "$KEYFILE"
+          echo "key_path=$KEYFILE" >> "$GITHUB_OUTPUT"
+          echo ">>> Validando lectura de la clave (ssh-keygen -y)…"
+          if ! ssh-keygen -y -f "$KEYFILE" >/dev/null 2>&1; then
+            echo "::error::No se pudo leer VPS_SSH_KEY. Revisa: clave completa (BEGIN/END), sin caracteres extra; si está cifrada, genera otra clave **sin** passphrase solo para GitHub Actions."
+            exit 1
+          fi
+          echo ">>> Probando SSH a ${VPS_USER}@${VPS_HOST} puerto ${VPS_PORT} (BatchMode, timeout 25s)..."
+          if ! ssh -o BatchMode=yes -o ConnectTimeout=25 -o StrictHostKeyChecking=accept-new \
+              -p "${VPS_PORT}" -i "$KEYFILE" \
+              "${VPS_USER}@${VPS_HOST}" 'echo gh-deploy-ssh-ok'; then
+            echo "::error::No se pudo autenticar por SSH. Revisa: VPS_USER/VPS_HOST; secreto opcional VPS_PORT si SSH no es 22; la pública del par en authorized_keys del usuario; firewall del VPS hacia rangos de GitHub Actions."
+            exit 1
+          fi
+          echo "OK: SSH llega al servidor y acepta la clave."
+
       - name: SSH — git pull + Docker Compose
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          key_path: ${{ steps.ssh_prep.outputs.key_path }}
+          port: ${{ secrets.VPS_PORT || '22' }}
           command_timeout: 40m
           debug: true
           script_stop: true
