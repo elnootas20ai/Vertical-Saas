@@ -22,7 +22,8 @@ En el repo hay un workflow: **`.github/workflows/deploy-vps.yml`**. En cada **pu
 |--------|-------------------|
 | `VPS_HOST` | IP pública o `scw-xxx.fr-par.scw.cloud` |
 | `VPS_USER` | `root` o `ubuntu` |
-| `VPS_SSH_KEY` | Clave **privada** PEM (mejor una clave **solo para Actions**, no tu clave personal) |
+| `VPS_SSH_KEY` | Clave **privada** multilínea (`BEGIN`…`END`), o usa en su lugar `VPS_SSH_KEY_B64` |
+| `VPS_SSH_KEY_B64` | (Opcional) misma privada codificada en **Base64 en una sola línea**; en Windows evita problemas al pegar en GitHub |
 | `VPS_DEPLOY_PATH` | Ruta absoluta al repo en el VPS, ej. `/root/Vertical-SaaS` |
 | `VPS_PORT` | (Opcional) solo si SSH **no** usa el puerto 22 |
 
@@ -31,7 +32,7 @@ Si el job **Deploy API (VPS)** falla en unos segundos en el paso SSH (no llega a
 ### Una sola vez en el VPS
 
 1. Clonar el repo en `VPS_DEPLOY_PATH` y dejar el **`.env`** en la **raíz** del clon (no subido a Git).
-2. Poner la **clave pública** del par usado en `VPS_SSH_KEY` en `~/.ssh/authorized_keys` del usuario `VPS_USER`.
+2. Poner la **clave pública** del par (el de `VPS_SSH_KEY` o `VPS_SSH_KEY_B64`) en `~/.ssh/authorized_keys` del usuario `VPS_USER`.
 3. Si el repo es **privado**, en GitHub → *Settings* → *Deploy keys* añade la **pública** del servidor (solo lectura) para que `git fetch` funcione; o clona con un remoto que ya autentique (según cómo lo montéis).
 
 ### Front en Vercel (paralelo, sin tocar el VPS)
