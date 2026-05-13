@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
@@ -30,7 +31,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiTarget = devApiProxyTarget(env);
 
+  let appVersion = '0.0.0'
+  try {
+    const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+      version?: string
+    }
+    if (typeof pkg?.version === 'string') appVersion = pkg.version
+  } catch {
+    /* ignore */
+  }
+
   return {
+    define: {
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+    },
     server: {
       hmr: true,
       host: '0.0.0.0',

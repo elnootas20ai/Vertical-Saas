@@ -1310,6 +1310,14 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
       {/* User section */}
       <div className="shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
+        {(isMobile || !collapsed) && import.meta.env.VITE_APP_VERSION ? (
+          <p
+            className="mb-2 text-center text-[10px] text-gray-400 dark:text-gray-600 tabular-nums"
+            title="Versión del build (package.json al compilar)"
+          >
+            v{import.meta.env.VITE_APP_VERSION}
+          </p>
+        ) : null}
         <div className="relative">
           {!isMobile && collapsed ? (
             <button
