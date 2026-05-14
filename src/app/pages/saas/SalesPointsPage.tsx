@@ -18,6 +18,11 @@ import {
   type ContractInfo,
 } from '../../lib/workCentersApi';
 import {
+  formatMoneyAsYouType,
+  parseSpanishMoneyInput,
+  moneyNumberToDisplay,
+} from '../../lib/workCenterMoneyInput';
+import {
   Plus,
   Search,
   X,
@@ -118,8 +123,8 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
         cadastralReference: editItem.cadastralReference || '',
         contractStartDate: editItem.contract?.startDate || '',
         contractEndDate: editItem.contract?.endDate || '',
-        monthlyPrice: editItem.contract?.monthlyPrice ? String(editItem.contract.monthlyPrice) : '',
-        deposit: editItem.contract?.deposit ? String(editItem.contract.deposit) : '',
+        monthlyPrice: moneyNumberToDisplay(editItem.contract?.monthlyPrice, true),
+        deposit: moneyNumberToDisplay(editItem.contract?.deposit, false),
         landlord: editItem.contract?.landlord || '',
         landlordPhone: editItem.contract?.landlordPhone || '',
         landlordEmail: editItem.contract?.landlordEmail || '',
@@ -147,8 +152,8 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
       const contract: ContractInfo | undefined = form.ownership === 'alquiler' ? {
         startDate: form.contractStartDate || undefined,
         endDate: form.contractEndDate || undefined,
-        monthlyPrice: form.monthlyPrice ? Number(form.monthlyPrice) : undefined,
-        deposit: form.deposit ? Number(form.deposit) : undefined,
+        monthlyPrice: String(form.monthlyPrice ?? '').trim() ? parseSpanishMoneyInput(form.monthlyPrice) : undefined,
+        deposit: String(form.deposit ?? '').trim() ? parseSpanishMoneyInput(form.deposit) : undefined,
         landlord: form.landlord.trim() || undefined,
         landlordPhone: form.landlordPhone.trim() || undefined,
         landlordEmail: form.landlordEmail.trim() || undefined,
@@ -305,8 +310,30 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
                 <div><label className={labelClass}>Fin contrato</label><input type="date" className={inputClass} value={form.contractEndDate} onChange={e => setForm(f => ({ ...f, contractEndDate: e.target.value }))} /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className={labelClass}>Precio mensual (€)</label><input type="number" className={inputClass} placeholder="1200" value={form.monthlyPrice} onChange={e => setForm(f => ({ ...f, monthlyPrice: e.target.value }))} /></div>
-                <div><label className={labelClass}>Fianza (€)</label><input type="number" className={inputClass} placeholder="2400" value={form.deposit} onChange={e => setForm(f => ({ ...f, deposit: e.target.value }))} /></div>
+                <div>
+                  <label className={labelClass}>Precio mensual (€)</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className={inputClass}
+                    placeholder="1.200 o 1.200,50"
+                    value={form.monthlyPrice}
+                    onChange={(e) => setForm((f) => ({ ...f, monthlyPrice: formatMoneyAsYouType(e.target.value, true) }))}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Fianza (€)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className={inputClass}
+                    placeholder="2.400"
+                    value={form.deposit}
+                    onChange={(e) => setForm((f) => ({ ...f, deposit: formatMoneyAsYouType(e.target.value, false) }))}
+                  />
+                </div>
               </div>
               <div><label className={labelClass}>Arrendador</label><input className={inputClass} placeholder="Nombre del arrendador" value={form.landlord} onChange={e => setForm(f => ({ ...f, landlord: e.target.value }))} /></div>
               <div className="grid grid-cols-2 gap-4">

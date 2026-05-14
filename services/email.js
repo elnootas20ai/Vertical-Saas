@@ -10,6 +10,22 @@ function getFromAddress() {
   return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'noreply@vertialapp.com';
 }
 
+/** Reply-To por defecto (p. ej. buzón “notas”); si sendEmail recibe replyTo explícito, gana ese. */
+function resolveReplyTo(explicitReplyTo) {
+  const ex = explicitReplyTo ? String(explicitReplyTo).trim() : '';
+  if (ex) return ex;
+  return String(process.env.EMAIL_REPLY_TO || '').trim();
+}
+
+/** Buzón de contacto visible en plantillas (Reply-To a veces no se muestra claro en Gmail). */
+function getSupportMailto() {
+  return (
+    String(process.env.EMAIL_REPLY_TO || '').trim()
+    || String(process.env.DEFAULT_CONTACT_EMAIL || '').trim()
+    || ''
+  );
+}
+
 /** Keys reales de Resend empiezan por re_; evita activar Resend con placeholders tipo CAMBIAR_… */
 function hasUsableResendKey() {
   const k = String(process.env.RESEND_API_KEY || '').trim();
@@ -59,14 +75,23 @@ async function sendViaSMTP(to, subject, html, replyTo) {
   await transporter.sendMail(mail);
 }
 
-export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert }) {
+export async function sendEmail({
+  to,
+  subject,
+  html,
+  replyTo,
+  _skipAdminAlert,
+  /** Si true, falla en lugar de ignorar silenciosamente cuando no hay proveedor usable (p. ej. recuperación de contraseña). */
+  requireDelivery = false,
+}) {
+  const effectiveReplyTo = resolveReplyTo(replyTo);
   const provider = (process.env.EMAIL_PROVIDER || '').toLowerCase().trim();
 
   // Si defines EMAIL_PROVIDER=smtp, SIEMPRE usa SMTP (evita que un RESEND_API_KEY viejo/placeholder bloquee Gmail).
   if (provider === 'smtp') {
     if (process.env.SMTP_HOST && process.env.SMTP_USER) {
       try {
-        await sendViaSMTP(to, subject, html, replyTo);
+        await sendViaSMTP(to, subject, html, effectiveReplyTo);
       } catch (err) {
         logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
         if (!_skipAdminAlert) {
@@ -79,19 +104,30 @@ export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert })
         }
         throw err;
       }
+      logger.info({ tag: 'EMAIL_SMTP', to, subject }, 'Email enviado por SMTP');
       return;
     }
     logger.warn({ tag: 'EMAIL', to, subject }, 'EMAIL_PROVIDER=smtp pero faltan SMTP_HOST o SMTP_USER');
+    if (requireDelivery) {
+      throw new Error(
+        'No se pudo enviar el correo: tienes EMAIL_PROVIDER=smtp pero faltan SMTP_HOST o SMTP_USER en el .env del servidor.',
+      );
+    }
     return;
   }
 
   if (provider === 'resend') {
     if (!hasUsableResendKey()) {
       logger.warn({ tag: 'EMAIL', to, subject }, 'EMAIL_PROVIDER=resend pero RESEND_API_KEY no válida');
+      if (requireDelivery) {
+        throw new Error(
+          'No se pudo enviar el correo: EMAIL_PROVIDER=resend requiere RESEND_API_KEY válida (clave que empiece por re_).',
+        );
+      }
       return;
     }
     try {
-      await sendViaResend(to, subject, html, replyTo);
+      await sendViaResend(to, subject, html, effectiveReplyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
       if (!_skipAdminAlert) {
@@ -110,7 +146,7 @@ export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert })
   // Sin EMAIL_PROVIDER: Resend solo si la key parece real; si no, SMTP.
   if (hasUsableResendKey()) {
     try {
-      await sendViaResend(to, subject, html, replyTo);
+      await sendViaResend(to, subject, html, effectiveReplyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_RESEND', to, subject, err: err?.message }, 'Fallo envío Resend');
       if (!_skipAdminAlert) {
@@ -128,7 +164,7 @@ export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert })
 
   if (process.env.SMTP_HOST && process.env.SMTP_USER) {
     try {
-      await sendViaSMTP(to, subject, html, replyTo);
+      await sendViaSMTP(to, subject, html, effectiveReplyTo);
     } catch (err) {
       logger.error({ tag: 'EMAIL_SMTP', to, subject, err: err?.message }, 'Fallo envío SMTP');
       if (!_skipAdminAlert) {
@@ -141,11 +177,17 @@ export async function sendEmail({ to, subject, html, replyTo, _skipAdminAlert })
       }
       throw err;
     }
+    logger.info({ tag: 'EMAIL_SMTP', to, subject }, 'Email enviado por SMTP (fallback sin EMAIL_PROVIDER)');
     return;
   }
 
   logger.warn({ tag: 'EMAIL_DEV', to, subject }, 'Email no enviado: sin proveedor (RESEND_API_KEY, SMTP o EMAIL_PROVIDER).');
   logger.debug({ tag: 'EMAIL_DEV', html }, 'Contenido HTML del email simulado');
+  if (requireDelivery) {
+    throw new Error(
+      'No se pudo enviar el correo: no hay proveedor configurado. Define EMAIL_PROVIDER=smtp con SMTP_HOST, SMTP_USER y SMTP_PASS (contraseña de aplicación Gmail), o una RESEND_API_KEY válida.',
+    );
+  }
 }
 
 function escapeHtml(s) {
@@ -220,7 +262,7 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
 
 export function buildEmailVerificationEmail(email, token) {
   const baseUrl = getAppBaseUrl();
-  const verifyUrl = `${baseUrl}/auth/verify-email?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+  const verifyUrl = `${baseUrl}/auth/verify-email-pending?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
 
   return {
     subject: 'Verifica tu email · Vertial',
@@ -773,6 +815,14 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
 export function buildPasswordResetEmail(email, token) {
   const baseUrl = getAppBaseUrl();
   const resetUrl = `${baseUrl}/auth/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+  const support = getSupportMailto();
+  const supportBlock = support
+    ? `<p style="color:#555;font-size:13px;margin:20px 0 0;line-height:1.5;">
+            ¿Dudas o no fuiste tú? Escríbenos a
+            <a href="mailto:${encodeURIComponent(support)}" style="color:#111;font-weight:600;">${escapeHtml(support)}</a>
+            (también configurado como respuesta preferida de este mensaje).
+          </p>`
+    : '';
 
   return {
     subject: 'Recuperar contraseña · Vertial',
@@ -802,6 +852,7 @@ export function buildPasswordResetEmail(email, token) {
           <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
             Este enlace expira en <strong>1 hora</strong>. Si no solicitaste este cambio, puedes ignorar este email.
           </p>
+          ${supportBlock}
           <p style="color:#aaa;font-size:12px;margin:16px 0 0;">
             O copia y pega esta URL en tu navegador:<br>
             <span style="color:#555;word-break:break-all;">${resetUrl}</span>

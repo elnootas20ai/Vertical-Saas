@@ -7,7 +7,7 @@ import { ACCESO__AddressAutocomplete } from '../../../components/design-system/A
 import { ACCESO__Checkbox } from '../../../components/design-system/ACCESO__Checkbox';
 import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
 import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
-import { getNifOrCifError } from '../../../lib/dniCifValidator';
+import { getNifOrCifError, getNifOrCifErrorWhileTyping } from '../../../lib/dniCifValidator';
 
 const STEP_INDEX = 1;
 
@@ -26,7 +26,20 @@ export function Company() {
   const handleTaxIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const upper = e.target.value.toUpperCase();
     setFormData({ ...formData, taxId: upper });
-    setTaxIdError(upper ? getNifOrCifError(upper) : null);
+    setTaxIdError(upper ? getNifOrCifErrorWhileTyping(upper) : null);
+  };
+
+  const handleTaxIdBlur = () => {
+    const v = formData.taxId.trim().toUpperCase();
+    if (!v) {
+      setTaxIdError(null);
+      return;
+    }
+    if (v.length < 9) {
+      setTaxIdError(null);
+      return;
+    }
+    setTaxIdError(getNifOrCifError(v));
   };
 
   const handleContinue = (e: React.FormEvent) => {
@@ -35,8 +48,10 @@ export function Company() {
     // visual pero no bloquea el avance del onboarding. El dato puede
     // corregirse después desde Ajustes; bloquear aquí frustra pruebas con
     // valores ficticios y typos sin aportar valor (el backend revalida).
-    if (formData.taxId) {
-      setTaxIdError(getNifOrCifError(formData.taxId));
+    if (formData.taxId.trim().length >= 9) {
+      setTaxIdError(getNifOrCifError(formData.taxId.trim().toUpperCase()));
+    } else {
+      setTaxIdError(null);
     }
     const payload = data.businessType === 'delivery'
       ? { ...formData, isAncovePartner: false, ancoveMemberNumber: '' }
@@ -106,8 +121,15 @@ export function Company() {
                 placeholder="Ej: B12345674 o 12345678Z"
                 value={formData.taxId}
                 onChange={handleTaxIdChange}
+                onBlur={handleTaxIdBlur}
+                maxLength={14}
+                inputMode="text"
                 error={taxIdError ?? undefined}
-                helperText={taxIdError ? undefined : 'Si no coincide el dígito de control podrás corregirlo más tarde en Ajustes.'}
+                helperText={
+                  taxIdError
+                    ? undefined
+                    : '9 caracteres (DNI/NIE/CIF). El aviso de control solo aparece al terminar o al salir del campo.'
+                }
                 autoComplete="off"
                 required
               />
@@ -133,6 +155,7 @@ export function Company() {
                   ...prev,
                   address: place.address,
                   ...(place.province ? { province: place.province } : {}),
+                  ...(place.city ? { city: place.city } : {}),
                 }))
               }
             />

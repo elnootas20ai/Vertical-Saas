@@ -26,9 +26,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface CreateSubscriptionResponse {
   ok: boolean;
-  redirectUrl: string;
-  subscriptionId: string;
-  paymentId: string;
+  /** Vacío o null cuando no hay pasarela (p. ej. SKIP_MONEI_SUBSCRIPTION en servidor). */
+  redirectUrl?: string | null;
+  subscriptionId?: string;
+  paymentId?: string | null;
+  /** El backend activó el plan sin MONEI (solo entornos de prueba). */
+  skippedMonei?: boolean;
 }
 
 export interface SubscriptionStatusResponse {

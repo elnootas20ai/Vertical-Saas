@@ -913,7 +913,11 @@ export function buildDefaultEmploymentInfo(overrides = {}) {
 }
 
 export function buildDefaultPermissionMatrix(role = 'Usuario') {
-  const allEnabled = role === 'Admin' || role === 'Gerente';
+  const allEnabled =
+    role === 'Admin'
+    || role === 'Gerente'
+    || role === 'Administrador'
+    || role === 'Encargado';
   const base = TEAM_PERMISSION_KEYS.reduce((acc, key) => {
     acc[key] = { view: allEnabled, edit: allEnabled };
     return acc;
@@ -928,6 +932,9 @@ export function buildDefaultPermissionMatrix(role = 'Usuario') {
     Administración: ['clients', 'documents', 'finance', 'ancove'],
     Taller: ['vehicles'],
     Usuario: ['vehicles', 'clients'],
+    'Mostrador / Atención': ['clients', 'sales', 'delivery', 'cash_register', 'documents'],
+    Cocina: ['delivery', 'documents'],
+    Reparto: ['delivery', 'fleet'],
   };
 
   const readWriteModules = presets[role] || [];
@@ -1567,6 +1574,8 @@ export function sanitizeAccount(account) {
     id: account._id,
     user_id: account.user_id,
     email: account.email,
+    /** Solo true para la cuenta de desarrollo autorizada (UI plan simulado). */
+    devPlanSwitcher: normalizeEmail(account.email) === 'uriel@admin.com',
     firstName: account.firstName || '',
     lastName: account.lastName || '',
     fullName: account.fullName || `${account.firstName || ''} ${account.lastName || ''}`.trim(),

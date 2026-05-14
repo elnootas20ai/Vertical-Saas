@@ -11,6 +11,7 @@ import {
   Building2,
   Calendar,
   Camera,
+  Clock,
   Car,
   CarTaxiFront,
   Check,
@@ -32,6 +33,7 @@ import {
   KeyRound,
   LayoutGrid,
   List,
+  Mail,
   MapPin,
   Monitor,
   Moon,
@@ -105,6 +107,7 @@ import {
   listBillingInvoices,
   type BillingInvoice,
 } from '../../lib/billingApi';
+import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import {
   listBrandsRequest,
   createBrandRequest,
@@ -136,7 +139,26 @@ import {
   type NumberingRule,
 } from '../../lib/numberingApi';
 
-type TabId = 'users' | 'roles' | 'locations' | 'templates' | 'integrations' | 'billing' | 'businesses' | 'numbering' | 'security' | 'marca' | 'brands' | 'pipeline' | 'emails' | 'horarios' | 'datos' | 'alertas' | 'apariencia' | 'salesPoints';
+type TabId =
+  | 'users'
+  | 'accountSecurity'
+  | 'devices'
+  | 'roles'
+  | 'locations'
+  | 'templates'
+  | 'integrations'
+  | 'billing'
+  | 'businesses'
+  | 'numbering'
+  | 'marca'
+  | 'brands'
+  | 'pipeline'
+  | 'emails'
+  | 'horarios'
+  | 'datos'
+  | 'alertas'
+  | 'apariencia'
+  | 'salesPoints';
 
 const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] = [
   { id: 'users', slug: 'usuarios', i18nKey: 'settings.tabs.users' },
@@ -147,7 +169,8 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'integrations', slug: 'integraciones', i18nKey: 'settings.tabs.integrations' },
   { id: 'billing', slug: 'facturacion', i18nKey: 'settings.tabs.billing' },
   { id: 'numbering', slug: 'numeracion', label: 'Numeración' },
-  { id: 'security', slug: 'mis-dispositivos', label: 'Mis dispositivos' },
+  { id: 'accountSecurity', slug: 'seguridad', label: 'Seguridad' },
+  { id: 'devices', slug: 'mis-dispositivos', label: 'Mis dispositivos' },
   { id: 'marca', slug: 'marca', label: 'Marca' },
   { id: 'brands', slug: 'marcas-comerciales', label: 'Marcas comerciales' },
   { id: 'pipeline', slug: 'pipeline', label: 'Pipeline' },
@@ -162,6 +185,8 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
 const SLUG_TO_TAB: Record<string, TabId> = {
   ...Object.fromEntries(TAB_KEYS.map((t) => [t.slug, t.id])),
   'puntos-de-venta': 'salesPoints',
+  /** URL antigua: antes «security» era solo sesiones; ahora es «devices». */
+  security: 'devices',
 } as Record<string, TabId>;
 
 const TAB_TO_SLUG: Record<TabId, string> = Object.fromEntries(
@@ -173,7 +198,7 @@ const DEFAULT_TAB: TabId = 'users';
 type SectionId = 'profile' | 'company' | 'salesPointsSection' | 'billing' | 'config' | 'alerts';
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ className?: string }>; tabs: TabId[] }[] = [
-  { id: 'profile', label: 'Mi perfil', icon: UserCircle2, tabs: ['users', 'security', 'apariencia'] },
+  { id: 'profile', label: 'Mi perfil', icon: UserCircle2, tabs: ['users', 'accountSecurity', 'devices', 'apariencia'] },
   { id: 'company', label: 'Empresa', icon: Building2, tabs: ['businesses', 'roles', 'marca', 'brands'] },
   { id: 'salesPointsSection', label: 'Centros de trabajo', icon: Building2, tabs: ['salesPoints'] },
   { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
@@ -184,6 +209,10 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
 const TAB_TO_SECTION: Record<TabId, SectionId> = Object.fromEntries(
   SECTIONS.flatMap((section) => section.tabs.map((tabId) => [tabId, section.id])),
 ) as Record<TabId, SectionId>;
+
+/** Misma clave que `VerifyEmailPending`: cooldown compartido del reenvío entre pantallas. */
+const EMAIL_VERIFY_RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
+const EMAIL_VERIFY_RESEND_COOLDOWN_SEC = 60;
 
 const inputClassName =
   'w-full rounded-xl border-2 border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-900 dark:text-gray-100 outline-none transition-colors focus:border-blue-500';
@@ -264,7 +293,7 @@ function formatInputDate(value?: Date | string | null) {
 
 function TabBilling() {
   const { subscription } = useApp();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, refreshCurrentUser } = useAuth();
   const billingSelectionStorageKey = useMemo(
     () => (user?.user_id ? `billing_selection_${user.user_id}` : null),
     [user?.user_id],
@@ -314,6 +343,9 @@ function TabBilling() {
     Math.round(plan.monthlyPrice * 12 * ANNUAL_DISCOUNT);
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) || plans[0];
+  const activeSubscriptionPlanId = subscription.selectedPlanId || 'basic';
+  /** Permite ir a pasarela aunque ya haya suscripción, si el usuario eligió otro plan (pruebas / futuro upgrade). */
+  const wantsDifferentPlanThanSubscription = selectedPlanId !== activeSubscriptionPlanId;
 
   const statusConfig: Record<string, { label: string; dot: string; badgeBg: string; badgeText: string }> = {
     trial_active: { label: 'Periodo de prueba', dot: 'bg-blue-500', badgeBg: 'bg-blue-50', badgeText: 'text-blue-700' },
@@ -416,15 +448,67 @@ function TabBilling() {
     const paymentId = params.get('payment_id');
 
     if (subComplete === 'true' && subId) {
+      const seenKey = `vertial.moneiConfirmHandled.${subId}`;
+      try {
+        if (sessionStorage.getItem(seenKey)) return;
+        sessionStorage.setItem(seenKey, '1');
+      } catch {
+        /* ignore */
+      }
       setBillingFeedback('Verificando suscripción con MONEI...');
       confirmMoneiSubscription(subId, paymentId || undefined)
         .then((result) => {
           if (result.ok) {
-            setBillingFeedback('Suscripción activada correctamente. Tienes 14 días de prueba gratis.');
+            setBillingFeedback('Suscripción activada correctamente.');
             setMoneiStatus(String(result.moneiSubscription?.status || 'ACTIVE'));
+            void refreshCurrentUser();
+            // TODO(pagos): sustituir por factura emitida desde webhook / backend al cobro real.
+            if (user?.user_id) {
+              let mode: 'monthly' | 'annual' = 'monthly';
+              let pid = subscription.selectedPlanId || 'basic';
+              try {
+                const rawSel = billingSelectionStorageKey ? localStorage.getItem(billingSelectionStorageKey) : null;
+                if (rawSel) {
+                  const j = JSON.parse(rawSel) as { billingMode?: string; selectedPlanId?: string };
+                  if (j.billingMode === 'annual' || j.billingMode === 'monthly') mode = j.billingMode;
+                  if (j.selectedPlanId) pid = j.selectedPlanId;
+                }
+              } catch {
+                /* ignore */
+              }
+              const planRow = DEFAULT_PLANS.find((p) => p.id === pid) || DEFAULT_PLANS[0];
+              const charge =
+                mode === 'annual'
+                  ? Math.round(planRow.monthlyPrice * 12 * (1 - DEFAULT_ANNUAL_DISCOUNT))
+                  : planRow.monthlyPrice;
+              void createBillingInvoice({
+                userId: user.user_id,
+                number: buildInvoiceNumber(),
+                description: `Suscripción ${planRow.name} (${mode}) — pago confirmado (MONEI)`,
+                amount: charge,
+                date: formatInputDate(new Date()),
+                dueDate: formatInputDate(new Date()),
+                status: 'paid',
+                planId: planRow.id,
+                planName: planRow.name,
+              })
+                .then((inv) => setInvoices((prev) => [inv, ...prev]))
+                .catch(() => {});
+            }
+          } else {
+            try {
+              sessionStorage.removeItem(seenKey);
+            } catch {
+              /* ignore */
+            }
           }
         })
         .catch((err) => {
+          try {
+            sessionStorage.removeItem(seenKey);
+          } catch {
+            /* ignore */
+          }
           setBillingFeedback(err instanceof Error ? err.message : 'Error al confirmar la suscripción.');
         })
         .finally(() => {
@@ -466,17 +550,61 @@ function TabBilling() {
     setIsPaying(true);
     setBillingFeedback(null);
 
+    const plan = plans.find((p) => p.id === selectedPlanId) || plans[0];
+    const chargeAmount = billingMode === 'annual' ? getAnnualTotal(plan) : getEffectivePrice(plan);
+
+    const recordPaidSubscriptionInvoice = async (description: string) => {
+      try {
+        const invoice = await createBillingInvoice({
+          userId: user.user_id,
+          number: buildInvoiceNumber(),
+          description,
+          amount: chargeAmount,
+          date: formatInputDate(new Date()),
+          dueDate: formatInputDate(new Date()),
+          status: 'paid',
+          planId: plan.id,
+          planName: plan.name,
+        });
+        setInvoices((prev) => [invoice, ...prev]);
+      } catch {
+        /* no bloquear el flujo de cobro / pruebas */
+      }
+    };
+
     try {
       const result = await createMoneiSubscription(selectedPlanId, billingMode);
 
       if (result.ok && result.redirectUrl) {
         setBillingFeedback('Redirigiendo a la página de pago de MONEI...');
         window.location.href = result.redirectUrl;
-      } else {
-        setBillingFeedback('No se pudo crear la suscripción.');
+        return;
+      }
+
+      if (result.ok) {
+        if (result.skippedMonei) {
+          setBillingFeedback('Plan activado en tu cuenta (modo sin MONEI en el servidor).');
+        } else {
+          setBillingFeedback(
+            'Modo prueba: la pasarela no devolvió URL de cobro. Simulación completada; al integrar MONEI aquí irás al pago real.',
+          );
+        }
+        setMoneiStatus(result.skippedMonei ? 'ACTIVE' : 'TRIALING');
+        void refreshCurrentUser();
+        await recordPaidSubscriptionInvoice(
+          `Suscripción ${plan.name} (${billingMode === 'annual' ? 'anual' : 'mensual'})${result.skippedMonei ? ' — activación local (sin MONEI)' : ' — cobro automático (simulación hasta pasarela)'}`,
+        );
+        return;
       }
     } catch (error) {
-      setBillingFeedback(error instanceof Error ? error.message : 'No se pudo procesar la suscripción.');
+      const base = error instanceof Error ? error.message : 'No se pudo procesar la suscripción.';
+      setBillingFeedback(
+        `${base} Modo prueba: simulando cobro y factura automática hasta que el sistema de pagos esté conectado.`,
+      );
+      setMoneiStatus('TRIALING');
+      await recordPaidSubscriptionInvoice(
+        `Suscripción ${plan.name} (${billingMode === 'annual' ? 'anual' : 'mensual'}) — cobro automático (simulación tras error de API)`,
+      );
     } finally {
       setIsPaying(false);
     }
@@ -744,7 +872,9 @@ function TabBilling() {
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Suscripción con MONEI</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Ciclo: <span className="font-medium text-gray-700 dark:text-gray-300">{billingMode === 'annual' ? 'Anual (−20%)' : 'Mensual'}</span>
-              {' · '}14 días de prueba gratis
+              {wantsDifferentPlanThanSubscription && (moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING') ? (
+                <> · <span className="text-amber-700 dark:text-amber-300 font-medium">Plan distinto al contratado: puedes ir a pagar el cambio (pruebas)</span></>
+              ) : null}
             </p>
           </div>
           {moneiStatus && (
@@ -776,8 +906,12 @@ function TabBilling() {
           <div className="flex-1">
             <p className="text-sm font-bold text-blue-900 dark:text-blue-100">Pago seguro con MONEI</p>
             <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
-              Al suscribirte, serás redirigido a la página segura de MONEI para introducir tu tarjeta.
-              Los primeros 14 días son gratis. Después se cobrará {billingMode === 'annual' ? getAnnualTotal(selectedPlan) : getEffectivePrice(selectedPlan)}€/{billingMode === 'annual' ? 'año' : 'mes'} automáticamente.
+              Al pagar, serás redirigido a la página segura de MONEI para introducir tu tarjeta (cuando la pasarela esté activa).
+              El importe del plan seleccionado será{' '}
+              <span className="font-semibold">
+                {billingMode === 'annual' ? `${getAnnualTotal(selectedPlan)}€/año` : `${getEffectivePrice(selectedPlan)}€/mes`}
+              </span>
+              . Las facturas se generan automáticamente al confirmar el cobro.
             </p>
           </div>
         </div>
@@ -819,37 +953,54 @@ function TabBilling() {
             <button
               type="button"
               onClick={() => void handlePaySubscription()}
-              disabled={isLoadingBilling || isPaying || (moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING')}
+              disabled={
+                isLoadingBilling ||
+                isPaying ||
+                ((moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING') && !wantsDifferentPlanThanSubscription)
+              }
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CreditCard className="w-4 h-4" />
               {isPaying
                 ? 'Redirigiendo a MONEI...'
                 : moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING'
-                ? 'Suscripción activa'
-                : `Suscribirse · 14 días gratis`
-              }
+                  ? wantsDifferentPlanThanSubscription
+                    ? 'Ir a pagar plan seleccionado'
+                    : 'Suscripción activa'
+                  : 'Ir a pagar'}
             </button>
           </div>
         </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Historial de facturas</p>
-          <button
-            type="button"
-            onClick={() => setIsInvoiceDialogOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors hover:border-gray-300 dark:hover:border-gray-600"
-          >
-            <Plus className="w-4 h-4" />
-            Añadir factura
-          </button>
+        <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Historial de facturas</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
+              Las facturas de suscripción se crean <span className="font-medium text-gray-700 dark:text-gray-300">automáticamente al pagar</span>
+              (pasarela o modo prueba). Más adelante el backend / webhooks MONEI sustituirán la generación local.
+            </p>
+          </div>
+          <details className="group rounded-xl border border-dashed border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 sm:max-w-xs shrink-0">
+            <summary className="cursor-pointer font-semibold text-gray-700 dark:text-gray-300 list-none flex items-center justify-between gap-2">
+              <span>Factura manual (solo pruebas)</span>
+              <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180 shrink-0" />
+            </summary>
+            <button
+              type="button"
+              onClick={() => setIsInvoiceDialogOpen(true)}
+              className="mt-2 w-full inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors hover:border-gray-300 dark:hover:border-gray-600"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Añadir factura a mano
+            </button>
+          </details>
         </div>
         <div className="divide-y divide-gray-50">
           {invoices.length === 0 && (
             <div className="px-6 py-8 text-sm text-gray-500 dark:text-gray-400">
-              No hay facturas todavía. Usa `Añadir factura` o realiza un pago para crear la primera en CouchDB `invoice`.
+              No hay facturas todavía. Tras un pago (o una simulación desde «Ir a pagar») aparecerá aquí la primera en CouchDB `invoice`.
             </div>
           )}
           {invoices.map((invoice) => (
@@ -2748,6 +2899,298 @@ function TabNumbering() {
   );
 }
 
+// ─── Tab Seguridad (contraseña + verificación de email) ───────────────────────
+
+function TabAccountSecurity() {
+  const { user, updatePassword, resendVerificationEmail, refreshCurrentUser } = useAuth();
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<'idle' | 'loading' | 'sent' | 'error'>('idle');
+  const [resendError, setResendError] = useState('');
+  const [countdown, setCountdown] = useState(0);
+  const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const targetEmail = user?.email || '';
+
+  const startCountdown = useCallback((seconds: number) => {
+    setCountdown(seconds);
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, []);
+
+  useEffect(() => {
+    const storedAt = localStorage.getItem(EMAIL_VERIFY_RESEND_COOLDOWN_KEY);
+    if (storedAt) {
+      const elapsed = Math.floor((Date.now() - Number(storedAt)) / 1000);
+      const remaining = EMAIL_VERIFY_RESEND_COOLDOWN_SEC - elapsed;
+      if (remaining > 0) {
+        setResendState('sent');
+        startCountdown(remaining);
+      } else {
+        localStorage.removeItem(EMAIL_VERIFY_RESEND_COOLDOWN_KEY);
+      }
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [startCountdown]);
+
+  useEffect(() => {
+    if (!user?.user_id || user.emailVerified) return;
+    const tick = () => {
+      void refreshCurrentUser();
+    };
+    const id = window.setInterval(tick, 4000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    tick();
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [user?.user_id, user?.emailVerified, refreshCurrentUser]);
+
+  const handleResend = async () => {
+    if (!targetEmail || countdown > 0) return;
+    setResendState('loading');
+    setResendError('');
+    const result = await resendVerificationEmail(targetEmail);
+    if (result.success) {
+      setResendState('sent');
+      localStorage.setItem(EMAIL_VERIFY_RESEND_COOLDOWN_KEY, String(Date.now()));
+      startCountdown(EMAIL_VERIFY_RESEND_COOLDOWN_SEC);
+    } else {
+      setResendState('error');
+      const retryMatch = result.error?.match(/esperar (\d+) segundos/);
+      if (retryMatch) {
+        const secs = Number(retryMatch[1]);
+        startCountdown(secs);
+        localStorage.setItem(
+          EMAIL_VERIFY_RESEND_COOLDOWN_KEY,
+          String(Date.now() - (EMAIL_VERIFY_RESEND_COOLDOWN_SEC - secs) * 1000),
+        );
+      }
+      setResendError(result.error || 'Error al reenviar el email');
+    }
+  };
+
+  const handlePasswordSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPasswordMessage(null);
+
+    if (passwordForm.newPassword.length < 8) {
+      setPasswordMessage('La nueva contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordMessage('La confirmación de la contraseña no coincide.');
+      return;
+    }
+
+    const result = await updatePassword(passwordForm.currentPassword, passwordForm.newPassword);
+    setPasswordMessage(
+      result.success
+        ? 'Contraseña actualizada. Ya puedes entrar con la nueva contraseña.'
+        : result.error || 'No se pudo actualizar la contraseña.',
+    );
+
+    if (result.success) {
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    }
+  };
+
+  const handleCheckVerified = () => {
+    void refreshCurrentUser();
+  };
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-xl bg-slate-100 dark:bg-gray-800">
+          <Shield className="w-5 h-5 text-slate-700 dark:text-gray-200" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Seguridad</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Verificación del correo y contraseña de acceso.
+          </p>
+        </div>
+      </div>
+
+      {/* Verificación de email */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="p-2 rounded-xl bg-violet-50 dark:bg-violet-900/25">
+            <Mail className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-gray-900 dark:text-gray-100">Correo de la cuenta</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Confirma que controlas este email; es necesario para recuperar acceso y avisos importantes.
+            </p>
+          </div>
+        </div>
+
+        {user?.emailVerified ? (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-4 py-3 flex items-center gap-2 text-sm text-emerald-800 dark:text-emerald-200">
+            <CheckCircle className="w-4 h-4 shrink-0" />
+            <span>
+              <strong className="font-semibold">Verificado.</strong> {targetEmail}
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Tu cuenta usa <strong className="text-gray-900 dark:text-gray-100">{targetEmail || 'tu email'}</strong>.
+              Abre el enlace que te enviamos (válido 24 h) o pide uno nuevo.
+            </p>
+            <ul className="text-xs text-gray-500 dark:text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Revisa spam o correo no deseado.</li>
+              <li>Si ya hiciste clic en el enlace en otra pestaña, usa «Comprobar estado» o espera unos segundos.</li>
+            </ul>
+
+            {resendState === 'sent' && countdown > 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-xl text-green-800 dark:text-green-200 text-sm">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span>
+                    Enlace enviado a <strong>{targetEmail}</strong>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Clock className="w-4 h-4" />
+                  Podrás reenviar en {countdown}s
+                </div>
+              </div>
+            ) : resendState === 'sent' && countdown <= 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-xl text-green-800 dark:text-green-200 text-sm">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  <span>Último envío completado.</span>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void handleResend()}
+                disabled={resendState === 'loading' || !targetEmail || countdown > 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-sm font-semibold transition-colors disabled:opacity-50"
+              >
+                {resendState === 'loading' ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Enviando...
+                  </>
+                ) : countdown > 0 ? (
+                  <>
+                    <Clock className="w-4 h-4" />
+                    Reenvío en {countdown}s
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    Reenviar enlace de verificación
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={handleCheckVerified}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+              >
+                Comprobar estado
+              </button>
+            </div>
+            {resendState === 'error' && resendError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{resendError}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Contraseña */}
+      <form onSubmit={handlePasswordSubmit} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-6">
+          <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+            <KeyRound className="w-5 h-5 text-gray-500 dark:text-gray-400" />
+            Cambiar contraseña
+          </h3>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+            La nueva contraseña será la que uses al iniciar sesión en la aplicación.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Contraseña actual</label>
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(event) => setPasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))}
+                className={`${inputClassName} pl-10`}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Nueva contraseña</label>
+            <input
+              type="password"
+              value={passwordForm.newPassword}
+              onChange={(event) => setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))}
+              className={inputClassName}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Repetir nueva contraseña</label>
+            <input
+              type="password"
+              value={passwordForm.confirmPassword}
+              onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
+              className={inputClassName}
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 p-4 text-sm text-blue-800 dark:text-blue-200">
+          Tras guardar, el inicio de sesión usará exclusivamente la nueva contraseña.
+        </div>
+
+        <div className="mt-6 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm text-gray-500 dark:text-gray-400">{passwordMessage || 'Mínimo 8 caracteres.'}</div>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors"
+          >
+            <KeyRound className="w-4 h-4" />
+            Guardar contraseña
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ─── S-07: Tab Mis Dispositivos (sesiones activas) ────────────────────────────
 
 function DeviceIcon({ device }: { device: string }) {
@@ -2756,7 +3199,7 @@ function DeviceIcon({ device }: { device: string }) {
   return <Monitor className="w-5 h-5 text-gray-500 dark:text-gray-400" />;
 }
 
-function TabSecurity() {
+function TabDevices() {
   const { listSessions, revokeSession, revokeOtherSessions } = useAuth();
   const [sessions, setSessions] = useState<ActiveSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3078,18 +3521,28 @@ export function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
   const { tab: tabSlug } = useParams<{ tab?: string }>();
-  const { user, updatePassword, updateProfile, listRoles, listUsers } = useAuth();
+  const { user, updateProfile, listRoles, listUsers } = useAuth();
   const { parkingZones, addParkingZone } = useApp();
   const { templates, upsertTemplate, duplicateTemplate } = useDocumentTemplates();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, reloadBusinesses } = useBusiness();
   const activeTab: TabId = (tabSlug && SLUG_TO_TAB[tabSlug]) || DEFAULT_TAB;
   const setActiveTab = useCallback((id: TabId) => navigate(`/saas/settings/${TAB_TO_SLUG[id]}`), [navigate]);
+
+  const teamStats = useMemo(() => {
+    const members = currentBusiness?.members;
+    if (!members?.length) return { total: 0, invitedJoined: 0 };
+    const ownerId = String(currentBusiness?.owner_user_id || '').trim();
+    const total = members.length;
+    const invitedJoined = ownerId
+      ? members.filter((m) => String(m.user_id || '').trim() && String(m.user_id).trim() !== ownerId).length
+      : Math.max(0, total - 1);
+    return { total, invitedJoined };
+  }, [currentBusiness?.members, currentBusiness?.owner_user_id]);
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [baseRoles, setBaseRoles] = useState<RoleDefinition[]>([]);
   const [customRoles, setCustomRoles] = useState<RoleDefinition[]>([]);
   const [isLoadingDirectory, setIsLoadingDirectory] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
-  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const [roleMessage, setRoleMessage] = useState<string | null>(null);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
@@ -3100,11 +3553,6 @@ export function Settings() {
     lastName: '',
     phone: '',
     avatar: '',
-  });
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
   });
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
   const [templateForm, setTemplateForm] = useState<DocumentTemplate>(() => createEmptyDocumentTemplate());
@@ -3145,6 +3593,11 @@ export function Settings() {
   useEffect(() => {
     void loadDirectory();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    void reloadBusinesses();
+  }, [activeTab, reloadBusinesses]);
 
   const currentRoleStyles = useMemo(() => roleStyles(user?.role || 'Admin'), [user?.role]);
   const roles = useMemo(() => mergeRoleCatalog(baseRoles, customRoles, users), [baseRoles, customRoles, users]);
@@ -3244,30 +3697,6 @@ export function Settings() {
     }
   };
 
-  const handlePasswordSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setPasswordMessage(null);
-
-    if (passwordForm.newPassword.length < 8) {
-      setPasswordMessage('La nueva contraseña debe tener al menos 8 caracteres.');
-      return;
-    }
-
-    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setPasswordMessage('La confirmación de la contraseña no coincide.');
-      return;
-    }
-
-    const result = await updatePassword(passwordForm.currentPassword, passwordForm.newPassword);
-    setPasswordMessage(
-      result.success ? 'Contraseña actualizada. Ya puedes entrar con la nueva contraseña.' : result.error || 'No se pudo actualizar la contraseña.',
-    );
-
-    if (result.success) {
-      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-    }
-  };
-
   const openCreateRoleModal = () => {
     setSelectedRoleForEdit(null);
     setRoleMessage(null);
@@ -3362,6 +3791,15 @@ export function Settings() {
                     {currentSection.tabs.map((tabId) => {
                       const tab = TAB_KEYS.find((tk) => tk.id === tabId);
                       if (!tab) return null;
+                      const defaultLabel = tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id);
+                      const usersTabMeta =
+                        tab.id === 'users' && currentBusiness
+                          ? `${teamStats.total} ${teamStats.total === 1 ? 'miembro' : 'miembros'} en el equipo${
+                              teamStats.invitedJoined > 0
+                                ? ` · ${teamStats.invitedJoined} invitación${teamStats.invitedJoined !== 1 ? 'es' : ''} aceptada${teamStats.invitedJoined !== 1 ? 's' : ''}`
+                                : ''
+                            }`
+                          : null;
                       return (
                         <button
                           key={tab.id}
@@ -3371,9 +3809,18 @@ export function Settings() {
                             activeTab === tab.id
                               ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-300'
                               : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
-                          }`}
+                          } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[9.5rem]' : ''}`}
                         >
-                          {tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id)}
+                          {tab.id === 'users' && usersTabMeta ? (
+                            <span className="flex flex-col items-start gap-0.5 leading-tight">
+                              <span>{t('settings.tabs.users')}</span>
+                              <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400 normal-case">
+                                {usersTabMeta}
+                              </span>
+                            </span>
+                          ) : (
+                            defaultLabel
+                          )}
                         </button>
                       );
                     })}
@@ -3384,7 +3831,7 @@ export function Settings() {
           </div>
         </section>
 
-        {user?.role === 'Admin' && (
+        {isVertialSuperAdminEmail(user?.email) && (
           <div className="rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55">
             <button
               type="button"
@@ -3408,9 +3855,37 @@ export function Settings() {
         )}
 
         {activeTab === 'users' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
-              <form onSubmit={handleProfileSubmit} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+          <div className="space-y-6 max-w-3xl">
+            {currentBusiness && (
+              <div className="rounded-2xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/70 dark:bg-emerald-950/30 px-4 py-3 sm:px-5 sm:py-4">
+                <p className="text-sm font-bold text-emerald-950 dark:text-emerald-100">
+                  Equipo · {currentBusiness.name}
+                </p>
+                <p className="mt-1 text-xs text-emerald-900/90 dark:text-emerald-200/90 leading-relaxed">
+                  Hay <span className="font-semibold">{teamStats.total}</span>{' '}
+                  {teamStats.total === 1 ? 'persona con acceso' : 'personas con acceso'} al negocio (datos de miembros aceptados).
+                  {teamStats.invitedJoined > 0 ? (
+                    <>
+                      {' '}
+                      De ellas, <span className="font-semibold">{teamStats.invitedJoined}</span>{' '}
+                      {teamStats.invitedJoined === 1 ? 'entró por invitación' : 'entraron por invitación'} (trabajador
+                      {teamStats.invitedJoined !== 1 ? 'es' : ''} invitado
+                      {teamStats.invitedJoined !== 1 ? 's' : ''}).
+                    </>
+                  ) : (
+                    <> Invita desde Equipo para que acepten y aparezcan aquí.</>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/team')}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                >
+                  Ir a Equipo e invitaciones
+                </button>
+              </div>
+            )}
+            <form onSubmit={handleProfileSubmit} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div>
                     <h3 className="font-bold text-gray-900 dark:text-gray-100">{t('settings.myUser')}</h3>
@@ -3478,61 +3953,10 @@ export function Settings() {
                   </button>
                 </div>
               </form>
-
-              <form onSubmit={handlePasswordSubmit} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-                <div className="mb-6">
-                  <h3 className="font-bold text-gray-900 dark:text-gray-100">Cambiar contraseña</h3>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">La nueva contraseña será la que uses al iniciar sesión en la aplicación.</p>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Contraseña actual</label>
-                    <div className="relative">
-                      <KeyRound className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="password"
-                        value={passwordForm.currentPassword}
-                        onChange={(event) => setPasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))}
-                        className={`${inputClassName} pl-10`}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Nueva contraseña</label>
-                    <input
-                      type="password"
-                      value={passwordForm.newPassword}
-                      onChange={(event) => setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))}
-                      className={inputClassName}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Repetir nueva contraseña</label>
-                    <input
-                      type="password"
-                      value={passwordForm.confirmPassword}
-                      onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))}
-                      className={inputClassName}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
-                  Tras guardar, el inicio de sesión usará exclusivamente la nueva contraseña.
-                </div>
-
-                <div className="mt-6 flex items-center justify-between gap-3">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">{passwordMessage || 'Mínimo 8 caracteres.'}</div>
-                  <button type="submit" className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors">
-                    <KeyRound className="w-4 h-4" />
-                    Guardar contraseña
-                  </button>
-                </div>
-              </form>
-            </div>
           </div>
         )}
+
+        {activeTab === 'accountSecurity' && <TabAccountSecurity />}
 
         {activeTab === 'roles' && (
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
@@ -4001,7 +4425,7 @@ export function Settings() {
 
         {activeTab === 'numbering' && <TabNumbering />}
 
-        {activeTab === 'security' && <TabSecurity />}
+        {activeTab === 'devices' && <TabDevices />}
 
         {activeTab === 'marca' && currentBusiness && (
           <BrandingTab businessId={currentBusiness.business_id} businessName={currentBusiness.name} />

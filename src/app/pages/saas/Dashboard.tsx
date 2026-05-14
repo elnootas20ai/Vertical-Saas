@@ -45,6 +45,7 @@ import {
   DollarSign, Wallet, AlertCircle, UserCheck, BarChart3, Briefcase,
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
+  LayoutGrid,
 } from 'lucide-react';
 import { DocumentAlertsWidget } from '../../components/saas/DocumentAlertsWidget';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
@@ -371,6 +372,20 @@ interface QuickAccessItem {
 }
 
 function getQuickAccessItems(vertical: string): QuickAccessItem[] {
+  /** Delivery: solo enlaces del vertical (sin taller, vehículos ni CRM compraventa genérico). */
+  if (vertical === 'delivery') {
+    return [
+      { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Centro ops', icon: <LayoutGrid className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
+      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'CRM delivery', icon: <Users className="w-5 h-5" />, route: '/saas/delivery-crm', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
+      { label: 'Equipo', icon: <UserCheck className="w-5 h-5" />, route: '/saas/team', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
+      { label: 'Finanzas', icon: <Wallet className="w-5 h-5" />, route: '/saas/finance', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+      { label: 'Documentos', icon: <FileText className="w-5 h-5" />, route: '/saas/documents', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
+      { label: 'Calendario', icon: <Calendar className="w-5 h-5" />, route: '/saas/calendar', color: 'text-sky-600', bg: 'bg-sky-50 dark:bg-sky-950/40' },
+    ];
+  }
+
   const common: QuickAccessItem[] = [
     { label: 'CRM / Clientes', icon: <Users className="w-5 h-5" />, route: '/saas/clients', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
     { label: 'Equipo', icon: <UserCheck className="w-5 h-5" />, route: '/saas/team', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
@@ -392,10 +407,6 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
     workshop: [
       { label: 'Taller', icon: <Wrench className="w-5 h-5" />, route: '/saas/workshop', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
       { label: 'Recambios', icon: <Package className="w-5 h-5" />, route: '/saas/parts', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-    ],
-    delivery: [
-      { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     cleaning: [
       { label: 'Centro Operativo', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/cleaning-hub', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
@@ -762,6 +773,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   const activeWorkers    = sk?.activeWorkers ?? 0;
   const totalClockinsToday = sk?.totalClockinsToday ?? 0;
   const openIncidents    = sk?.openIncidents ?? 0;
+  const pendingDeliveriesKpi = sk?.pendingDeliveries ?? 0;
   const stockCount       = sk?.stockCount ?? vehicles.filter(v => v.status === 'listo').length;
   const oportunidades    = sk?.oportunidades ?? leads.filter(l => l.status !== 'won' && l.status !== 'lost').length;
   const cobrosCount      = sk?.cobrosCount ?? sales.filter(s => s.status === 'pending').length;
@@ -947,14 +959,30 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   loading={serverLoading}
                 />
                 <KPICard
-                  title="Stock crítico"
-                  value={String(criticalStock)}
-                  sub={criticalStock > 0 ? 'Productos bajo mínimo' : 'Todo en orden'}
-                  icon={<Boxes className="w-4 h-4" />}
-                  iconBg={criticalStock > 0 ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-gray-100 dark:bg-gray-700'}
-                  iconColor={criticalStock > 0 ? 'text-amber-600' : 'text-gray-400'}
-                  trend={criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined}
-                  onClick={() => navigate('/saas/catalog')}
+                  title={vertical === 'delivery' ? 'Pedidos activos' : 'Stock crítico'}
+                  value={vertical === 'delivery' ? String(pendingDeliveriesKpi) : String(criticalStock)}
+                  sub={
+                    vertical === 'delivery'
+                      ? (pendingDeliveriesKpi > 0 ? 'En cocina / reparto' : 'Sin pedidos en curso')
+                      : (criticalStock > 0 ? 'Productos bajo mínimo' : 'Todo en orden')
+                  }
+                  icon={vertical === 'delivery' ? <Truck className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
+                  iconBg={
+                    vertical === 'delivery'
+                      ? (pendingDeliveriesKpi > 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-gray-100 dark:bg-gray-700')
+                      : (criticalStock > 0 ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-gray-100 dark:bg-gray-700')
+                  }
+                  iconColor={
+                    vertical === 'delivery'
+                      ? (pendingDeliveriesKpi > 0 ? 'text-cyan-600' : 'text-gray-400')
+                      : (criticalStock > 0 ? 'text-amber-600' : 'text-gray-400')
+                  }
+                  trend={
+                    vertical === 'delivery'
+                      ? (pendingDeliveriesKpi > 0 ? { value: `${pendingDeliveriesKpi} en curso`, up: true } : undefined)
+                      : (criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined)
+                  }
+                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery' : '/saas/catalog')}
                   loading={serverLoading}
                 />
                 <KPICard
@@ -976,7 +1004,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
                   iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
                   trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                  onClick={() => navigate('/saas/workshop')}
+                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-ops' : '/saas/workshop')}
                   loading={serverLoading}
                 />
               </div>
@@ -1261,7 +1289,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                       {overallConversion}% conversión
                     </span>
                   </div>
-                  <button onClick={() => navigate('/saas/delivery-crm')}
+                  <button onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm')}
                     className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
                     Ver CRM <ArrowRight className="w-3.5 h-3.5" />
                   </button>
@@ -1274,7 +1302,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                     </div>
                     <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin leads aún</p>
                     <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los leads aparecerán aquí</p>
-                    <button onClick={() => navigate('/saas/delivery-crm')}
+                    <button onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm')}
                       className="mt-4 px-4 py-2 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold transition-colors">
                       Ir al CRM
                     </button>
@@ -1516,8 +1544,12 @@ function OperativeBlock({
   const navigate = useNavigate();
 
   const items = useMemo(() => {
+    const crmRoute = vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm';
+    const crmTitle = vertical === 'delivery' ? 'CRM delivery' : 'Oportunidades CRM';
+    const crmSub = vertical === 'delivery' ? 'Seguimiento pedidos' : 'Leads activos';
+
     const base = [
-      { title: 'Oportunidades CRM', value: String(oportunidades), sub: 'Leads activos', icon: <ShoppingCart className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vertical/compraventa/crm' },
+      { title: crmTitle, value: String(oportunidades), sub: crmSub, icon: <ShoppingCart className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: crmRoute },
       { title: 'Pagos pendientes', value: String(cobrosCount), sub: 'Por cobrar', icon: <CreditCard className="w-4 h-4" />, bg: cobrosCount > 0 ? 'bg-red-50 dark:bg-red-950/30' : 'bg-gray-50 dark:bg-gray-800', text: cobrosCount > 0 ? 'text-red-600' : 'text-gray-500', route: '/saas/finance' },
       { title: 'Equipo hoy', value: String(activeWorkers), sub: 'Fichados', icon: <UserCheck className="w-4 h-4" />, bg: 'bg-violet-50 dark:bg-violet-950/30', text: 'text-violet-600', route: '/saas/clockins' },
     ];

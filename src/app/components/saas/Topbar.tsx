@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Search, Menu, HelpCircle, User, Sun, Moon, Globe, Check, Command } from 'lucide-react';
+import { Bell, Search, Menu, HelpCircle, User, Sun, Moon, Globe, Check, Command, Store } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
 import { SAAS__NotificationsDrawer } from '../design-system/SAAS__NotificationsDrawer';
 import { SAAS__ProfileModal } from '../design-system/SAAS__ProfileModal';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
@@ -60,12 +62,20 @@ export function Topbar({
   ] as const;
   const unreadCount = notifications.filter((notification) => !notification.read).length;
 
+  const activeStore = useActiveStoreScope();
+  /** Si solo miramos `pointsOfSale.length`, al acabar la carga con lista vacía el bloque desaparece (~2s). Mantenerlo con preferencia guardada o mientras carga. */
+  const hasSavedStorePreference = Boolean(activeStore.activePreferenceRaw?.trim());
+  const showStoreStrip =
+    activeStore.loading ||
+    activeStore.pointsOfSale.length > 0 ||
+    hasSavedStorePreference;
+
   return (
     <>
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-3 md:px-5 py-3 md:py-4 sticky top-0 z-30">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2 md:gap-3">
           {/* Left: Hamburger + Title */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <button
               onClick={onToggleSidebar}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
@@ -83,7 +93,7 @@ export function Topbar({
               </h1>
               {subtitle && (
                 <p
-                  className={`text-xs md:text-sm truncate hidden sm:block ${
+                  className={`text-xs md:text-sm text-balance block mt-0.5 leading-snug line-clamp-2 ${
                     subtitleClassName ?? 'text-gray-500 dark:text-gray-400'
                   }`}
                 >
@@ -95,6 +105,76 @@ export function Topbar({
 
           {/* Right: Actions */}
           <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
+            {showStoreStrip && (
+              <div className="flex items-center gap-2 min-w-0 max-w-[40vw] sm:max-w-[13rem] md:max-w-[15rem] mr-0.5 md:mr-1 border-r border-gray-200 dark:border-gray-700 pr-2 md:pr-3">
+                <Store
+                  className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0 hidden sm:block"
+                  aria-hidden
+                />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 leading-none">
+                    Tienda
+                  </span>
+                  {activeStore.pointsOfSale.length > 1 ? (
+                    <>
+                      <label className="sr-only" htmlFor="vertial-active-store-select">
+                        Tienda activa
+                      </label>
+                      <select
+                        id="vertial-active-store-select"
+                        className="mt-1 w-full text-xs md:text-sm border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 truncate"
+                        value={activeStore.activeSalesPointId || ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v) activeStore.setActiveSalesPoint(v);
+                        }}
+                        title="Tienda / PDV activo (misma selección que en el menú lateral)"
+                        disabled={activeStore.loading}
+                      >
+                        {!activeStore.activeSalesPointId && (
+                          <option value="">Elige tienda…</option>
+                        )}
+                        {activeStore.pointsOfSale.map((p) => (
+                          <option key={p._id} value={p._id}>
+                            {pointOfSaleDisplayLabel(p)}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : (
+                    <span className="mt-1 flex flex-col gap-0.5 min-w-0">
+                      <span
+                        className="text-xs md:text-sm font-semibold text-gray-900 dark:text-gray-100 truncate"
+                        title={
+                          activeStore.displayLabelForActive ||
+                          (activeStore.loading ? 'Cargando…' : 'Tienda / PDV')
+                        }
+                      >
+                        {activeStore.loading
+                          ? '…'
+                          : activeStore.displayLabelForActive ||
+                            (activeStore.pointsOfSale.length === 1
+                              ? pointOfSaleDisplayLabel(activeStore.pointsOfSale[0])
+                              : '—')}
+                      </span>
+                      {!activeStore.loading &&
+                        !activeStore.displayLabelForActive &&
+                        activeStore.pointsOfSale.length === 0 &&
+                        hasSavedStorePreference && (
+                          <button
+                            type="button"
+                            onClick={() => void activeStore.refresh()}
+                            className="text-left text-[10px] font-semibold text-teal-700 dark:text-teal-400 hover:underline shrink-0"
+                          >
+                            Reintentar
+                          </button>
+                        )}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Search trigger — desktop only */}
             <button
               type="button"

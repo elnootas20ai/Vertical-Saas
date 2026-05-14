@@ -1,18 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mail, RefreshCw, CheckCircle, AlertCircle, ArrowRight, Clock } from 'lucide-react';
+import { Mail, RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { VertialLogo } from '../../components/VertialLogo';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useAuth } from '../../context/AuthContext';
 
-export const EMAIL_SKIP_KEY = (userId: string) => `emailVerifSkipped_${userId}`;
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
 
 export function VerifyEmailPending() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, resendVerificationEmail, verifyEmail } = useAuth();
+  const { user, resendVerificationEmail, verifyEmail, refreshCurrentUser } = useAuth();
 
   const tokenFromUrl = searchParams.get('token');
   const emailFromUrl = searchParams.get('email');
@@ -61,7 +60,6 @@ export function VerifyEmailPending() {
       verifyEmail(tokenFromUrl, emailFromUrl).then((result) => {
         if (result.success) {
           setVerifyState('success');
-          setTimeout(() => navigate('/auth/onboarding/business-type'), 2000);
         } else {
           setVerifyState('error');
           setVerifyError(result.error || 'Enlace inválido o expirado');
@@ -71,12 +69,49 @@ export function VerifyEmailPending() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenFromUrl, emailFromUrl]);
 
-  const handleSkip = () => {
-    if (user?.user_id) {
-      localStorage.setItem(EMAIL_SKIP_KEY(user.user_id), 'true');
-    }
-    navigate('/saas/dashboard', { replace: true });
-  };
+  /** Tras verificar con enlace del correo, breve mensaje de éxito y avance. */
+  useEffect(() => {
+    if (verifyState !== 'success' || !user?.emailVerified) return;
+    const t = window.setTimeout(() => {
+      navigate(user.accountType === 'user' ? '/saas/worker' : '/auth/onboarding/business-type', { replace: true });
+    }, 2000);
+    return () => window.clearTimeout(t);
+  }, [verifyState, user?.emailVerified, user?.accountType, navigate]);
+
+  /**
+   * Si verificaste el email en otra pestaña (mismo navegador), las cookies ya están bien:
+   * re-sincronizamos el perfil aquí para que esta pantalla avance sin recargar a mano.
+   */
+  useEffect(() => {
+    if (tokenFromUrl && emailFromUrl) return;
+    if (!user?.user_id || user.emailVerified) return;
+    if (verifyState === 'loading' || verifyState === 'success') return;
+
+    const tick = () => {
+      void refreshCurrentUser();
+    };
+
+    const id = window.setInterval(tick, 4000);
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    window.addEventListener('focus', onFocusOrVisible);
+    tick();
+
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      window.removeEventListener('focus', onFocusOrVisible);
+    };
+  }, [tokenFromUrl, emailFromUrl, user?.user_id, user?.emailVerified, verifyState, refreshCurrentUser]);
+
+  /** Verificación detectada vía /me (p. ej. otra pestaña) — no pisar la pantalla de éxito del enlace. */
+  useEffect(() => {
+    if (!user?.emailVerified) return;
+    if (verifyState === 'loading' || verifyState === 'success') return;
+    navigate(user.accountType === 'user' ? '/saas/worker' : '/auth/onboarding/business-type', { replace: true });
+  }, [user?.emailVerified, user?.accountType, verifyState, navigate]);
 
   const handleResend = async () => {
     if (!targetEmail || countdown > 0) return;
@@ -247,7 +282,10 @@ export function VerifyEmailPending() {
             </div>
             <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <span className="mt-0.5 text-gray-400 dark:text-gray-500">·</span>
-              <span>Necesitas verificar el email para <strong>acceder al panel</strong></span>
+              <span>
+                Si ya hiciste clic en el correo en <strong>otra pestaña</strong>, vuelve aquí o espera unos segundos:
+                detectamos la verificación automáticamente.
+              </span>
             </div>
           </div>
 
@@ -312,22 +350,13 @@ export function VerifyEmailPending() {
             </div>
           )}
 
-          <div className="mt-6 space-y-3">
+          <div className="mt-6 text-center">
             <button
-              onClick={handleSkip}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+              onClick={() => navigate('/auth/login')}
+              className="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 underline"
             >
-              Omitir por ahora
-              <ArrowRight className="w-4 h-4" />
+              Volver al inicio de sesión
             </button>
-            <div className="text-center">
-              <button
-                onClick={() => navigate('/auth/login')}
-                className="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 underline"
-              >
-                Volver al inicio de sesión
-              </button>
-            </div>
           </div>
         </div>
       </div>

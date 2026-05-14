@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import {
   createAndActivate,
   getStatus,
@@ -12,10 +12,10 @@ import {
 const subscriptionRouter = Router();
 
 // Rutas protegidas (requieren JWT)
-subscriptionRouter.post('/create', requireAuth, createAndActivate);
-subscriptionRouter.get('/status', requireAuth, getStatus);
-subscriptionRouter.post('/cancel', requireAuth, cancelUserSubscription);
-subscriptionRouter.post('/confirm', requireAuth, confirmSubscription);
+subscriptionRouter.post('/create', requireAuthAndEmailVerified, createAndActivate);
+subscriptionRouter.get('/status', requireAuthAndEmailVerified, getStatus);
+subscriptionRouter.post('/cancel', requireAuthAndEmailVerified, cancelUserSubscription);
+subscriptionRouter.post('/confirm', requireAuthAndEmailVerified, confirmSubscription);
 
 // Webhooks de MONEI (públicos — MONEI no envía JWT)
 subscriptionRouter.post('/webhook/status', webhookSubscriptionStatus);

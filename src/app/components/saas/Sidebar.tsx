@@ -126,7 +126,10 @@ import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuth } from '../../context/AuthContext';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { writeDeliveryOpsSelectedPdvId, notifyDeliveryActiveStoreChanged } from '../../lib/deliveryOpsPdvSelection';
 import { ActivationChecklist } from './ActivationChecklist';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
@@ -570,6 +573,40 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     return () => window.removeEventListener('work-centers:changed', handler);
   }, [loadSalesPoints]);
 
+  const activeStore = useActiveStoreScope();
+
+  /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
+  const selectedSidebarWorkCenterId = useMemo(() => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+    if (!bid || !dataUserId) return null;
+    const raw = activeStore.activePreferenceRaw?.trim();
+    const points = activeStore.pointsOfSale;
+    if (!raw) {
+      const aid = activeStore.activeSalesPointId;
+      if (aid && points.length) {
+        const p = points.find((x) => x._id === aid);
+        if (p?.workCenterId) return String(p.workCenterId).trim();
+      }
+      return null;
+    }
+    if (raw.startsWith('wc:')) return raw.slice(3).trim() || null;
+    const pdv = points.find((x) => x._id === raw);
+    if (pdv?.workCenterId) return String(pdv.workCenterId).trim();
+    const spHit = salesPoints.find(
+      (sp) => String(sp._id || sp.id || '') === raw || String(sp.id || '') === raw,
+    );
+    if (spHit) return String(spHit._id || spHit.id || '').trim() || null;
+    return null;
+  }, [
+    currentBusiness,
+    user,
+    activeStore.activePreferenceRaw,
+    activeStore.activeSalesPointId,
+    activeStore.pointsOfSale,
+    salesPoints,
+  ]);
+
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     home: false,
     'worker-main': false,
@@ -652,6 +689,17 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     if (item.id === 'tech') {
       window.open('/mecanico', '_blank', 'noopener,noreferrer');
       onMobileClose();
+      return;
+    }
+    if (item.id.startsWith('sp-')) {
+      const wcId = item.id.slice('sp-'.length);
+      const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+      const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+      if (bid && dataUserId && wcId) {
+        writeDeliveryOpsSelectedPdvId(bid, dataUserId, `wc:${wcId}`);
+        notifyDeliveryActiveStoreChanged();
+      }
+      handleNavigate('/saas/delivery-ops');
       return;
     }
     handleNavigate(item.path);
@@ -748,6 +796,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
     (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
     (item.id === 'salesPoints-settings' && location.pathname.startsWith('/saas/settings/centros-de-trabajo')) ||
+    (item.id === 'salesPoints-add' && location.pathname.startsWith('/saas/settings/centros-de-trabajo')) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
     (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
@@ -802,7 +851,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id.startsWith('pharmacy-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('carwash-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('vet-') && location.pathname.startsWith(item.path)) ||
-    (item.id.startsWith('sp-') && location.pathname.startsWith(item.path));
+    (item.id.startsWith('sp-') && (() => {
+      const wcId = item.id.slice('sp-'.length);
+      if (!wcId || !selectedSidebarWorkCenterId) return false;
+      return selectedSidebarWorkCenterId === wcId;
+    })());
 
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
   const COMMON_SIDEBAR_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
@@ -813,26 +866,43 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
     ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
   ];
-  const salesPointItems: SidebarItem[] = salesPoints.map((sp) => ({
+  const workCentersSettingsPath = '/saas/settings/centros-de-trabajo';
+  const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
+
+  const salesPointRows: SidebarItem[] = salesPoints.map((sp) => ({
     id: `sp-${sp._id}`,
     label: sp.name,
     icon: <Store className="w-3.5 h-3.5" />,
-    path: `/saas/tpv/punto/${sp._id}`,
+    path: '#',
   }));
 
-  const salesPointsSettingsItem: SidebarItem = {
-    id: 'salesPoints-settings',
-    label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
-    icon: <Building2 className="w-5 h-5" />,
-    path: '/saas/settings/centros-de-trabajo',
-  };
+  /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
+  const workCentersSidebarItems: SidebarItem[] =
+    salesPoints.length === 0
+      ? [
+          {
+            id: 'salesPoints-settings',
+            label: t('sidebar.workCenters.firstCenter', 'Primer centro'),
+            icon: <Plus className="w-5 h-5" />,
+            path: workCentersAddPath,
+          },
+        ]
+      : [
+          ...salesPointRows,
+          {
+            id: 'salesPoints-add',
+            label: t('sidebar.workCenters.newCenter', 'Nuevo centro'),
+            icon: <Plus className="w-3.5 h-3.5" />,
+            path: workCentersAddPath,
+          },
+        ];
 
   const salesPointsGroup: (SidebarGroup & { items: SidebarItem[] }) = {
     id: 'salesPoints',
     label: t('sidebar.groups.salesPoints', 'Centros de trabajo'),
     icon: <Building2 className="w-4 h-4 shrink-0" />,
-    itemIds: [salesPointsSettingsItem.id, ...salesPointItems.map((i) => i.id)],
-    items: [salesPointsSettingsItem, ...salesPointItems],
+    itemIds: workCentersSidebarItems.map((i) => i.id),
+    items: workCentersSidebarItems,
   };
 
   const groupedVisibleItems = (() => {
@@ -1097,7 +1167,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                       const isCalendar = item.id === 'calendar';
                       /** Marca visual en sidebar: zona Ops ya trabajada / hub principal */
                       const isDeliveryOpsHub = item.id === 'delivery-ops';
-                      const isSalesPointSubItem = item.id.startsWith('sp-');
+                      const isSalesPointSubItem =
+                        item.id.startsWith('sp-') || item.id === 'salesPoints-add';
                       const itemDimmed = !dimmed && searchNorm && !itemMatchesSearch(item);
                       const calendarV2 = CALENDAR_V2_VISUAL && isCalendar;
                       return (
@@ -1214,9 +1285,10 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
         {!workerMode && canUseDevPlanSwitcher && (isMobile || !collapsed) && (
           <div className={`mb-3 rounded-xl border border-dashed border-violet-300 bg-violet-50/60 px-3 py-2 dark:border-violet-700 dark:bg-violet-950/20 ${narrow ? 'mx-0.5' : 'mx-2'}`}>
-            <div className="flex items-center justify-between gap-2 mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">Plan (dev)</span>
-              <span className="text-[10px] text-violet-600/80 dark:text-violet-400/80">uriel@admin.com</span>
+            <div className="mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+                Plan (dev)
+              </span>
             </div>
             <div className="grid grid-cols-3 gap-1">
               {(['basic', 'normal', 'pro'] as const).map((p) => {
@@ -1241,10 +1313,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                   </button>
                 );
               })}
-            </div>
-            <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-violet-700/70 dark:text-violet-300/70">
-              <span className="truncate" title={user?.email}>{user?.email}</span>
-              <span className="font-semibold uppercase">{subscription.planName || 'Basic'}</span>
             </div>
             <button
               type="button"

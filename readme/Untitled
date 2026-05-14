@@ -151,3 +151,25 @@ pm2 startup
 ## 9) Nota importante de seguridad
 
 Si tienes claves en `.env`, no las publiques ni las subas a repositorios.
+
+---
+
+## 10) Notas de desarrollo — tienda activa en delivery (gerente / CEO)
+
+**Objetivo de producto:** con un clic en el menú (p. ej. Badalona vs Tiana), lo relevante de delivery debe mostrarse **solo para esa tienda** (PDV / centro de trabajo), sin mezclar sedes. Es **una preferencia de tienda** que las pantallas deben respetar, no “interconectar” sistemas aparte.
+
+**Ya alineado (referencia técnica):**
+
+- Preferencia en `localStorage` y resolución `wc:` → PDV: `src/app/lib/deliveryOpsPdvSelection.ts`.
+- Sidebar y Centro operativo escriben / leen esa preferencia y disparan `notifyDeliveryActiveStoreChanged()`.
+- Vista de pedidos `Delivery` filtra KPIs, lista e historial por la tienda activa y escucha ese evento: `src/app/pages/saas/Delivery.tsx`.
+- Cabecera del Centro operativo indica la tienda cuando hay filtro: `DeliveryOpsCenter.tsx`.
+
+**Seguir con esta lógica (checklist):**
+
+1. **`DeliveryOrders.tsx`** — Si sigue en rutas o embeds: fusionar PDVs como en Ops, inicializar filtro desde la preferencia, escuchar `DELIVERY_ACTIVE_STORE_CHANGED`, y al cambiar el `<select>` persistir preferencia (`wc:` si aplica) + notificar.
+2. **Coherencia multi-pestaña** — Tras escribir preferencia en `TpvRegisterGate` / `SalesPointTpvPage` (abrir caja, elegir tienda), llamar también a `notifyDeliveryActiveStoreChanged()` donde aún no se haga.
+3. **Otras pantallas** con listas globales de pedidos — Revisar y filtrar por PDV resuelto (cliente) o ampliar API: cocina / montaje / reparto sueltos, TPV rápido, caja (pedidos), búsqueda global, etc.
+4. **UX** — Donde falte contexto, aviso breve tipo “Viendo: {nombre tienda}”.
+
+Al implementar: reutilizar `readDeliveryOpsSelectedPdvId`, `writeDeliveryOpsSelectedPdvId`, `resolvePreferenceToPdvId`, `mergePointsOfSaleWithRetailWorkCenters` y `DELIVERY_ACTIVE_STORE_CHANGED` en lugar de duplicar reglas.

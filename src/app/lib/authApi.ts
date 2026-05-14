@@ -57,6 +57,8 @@ export interface AuthUser {
   onboardingCompleted: boolean;
   onboardingData?: Record<string, unknown>;
   emailVerified: boolean;
+  /** Definido por el servidor: solo true para la cuenta que puede usar el plan simulado (dev). */
+  devPlanSwitcher?: boolean;
   paymentSummary?: BillingPaymentSummary;
   subscription?: BillingSubscription;
   permissions?: AccountPermissionMatrix;
@@ -510,7 +512,7 @@ export async function loginRequest(email: string, password: string) {
 }
 
 export async function registerRequest(data: RegisterPayload) {
-  return request<AuthUser>('/api/auth/register', {
+  return request<AuthUser & { redirectTo?: string; pendingInvitationsCount?: number }>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -817,7 +819,11 @@ export async function logoutRequest(_refreshToken?: string) {
 // AUTH-02: Verificar email con token
 export async function verifyEmailRequest(token: string, email: string) {
   const params = new URLSearchParams({ token, email });
-  return request<AuthUser>(`/api/auth/verify-email?${params.toString()}`);
+  const result = await request<AuthUser & { accessToken?: string }>(`/api/auth/verify-email?${params.toString()}`);
+  if (result.accessToken) {
+    cacheAccessToken(result.accessToken);
+  }
+  return result;
 }
 
 // AUTH-02: Reenviar email de verificación
@@ -842,6 +848,79 @@ export async function saveOnboardingProgressRequest(
     method: 'PUT',
     body: JSON.stringify(data),
   });
+}
+
+/** Perfil actual desde el servidor. No usa `request()`: un 401 aquí no debe llamar `_onUnauthorized` (evita “pérdida” de sesión al hidratar en local). */
+export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> {
+  const url = `${API_BASE}/api/auth/me`;
+
+  const buildHeaders = (): Record<string, string> => ({
+    'Content-Type': 'application/json',
+    ...(_inMemoryToken ? { Authorization: `Bearer ${_inMemoryToken}` } : {}),
+  });
+
+  const parseEnvelope = (rawText: string): ApiEnvelope<AuthUser> => {
+    if (!rawText) return {} as ApiEnvelope<AuthUser>;
+    try {
+      return JSON.parse(rawText) as ApiEnvelope<AuthUser>;
+    } catch {
+      return { ok: false, error: rawText.slice(0, 300) } as ApiEnvelope<AuthUser>;
+    }
+  };
+
+  const doFetch = async (): Promise<{ response: Response; payload: ApiEnvelope<AuthUser>; rawText: string }> => {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: buildHeaders(),
+      });
+    } catch (err) {
+      const hint = API_BASE
+        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
+        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
+      throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+    }
+    const rawText = await response.text();
+    const payload = parseEnvelope(rawText);
+    return { response, payload, rawText };
+  };
+
+  const run = async (_retried: boolean): Promise<ApiEnvelope<AuthUser>> => {
+    const { response, payload, rawText } = await doFetch();
+
+    if (response.status === 401) {
+      if (typeof payload.error === 'string' && payload.error.trim()) {
+        throw new Error(payload.error.trim());
+      }
+      if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
+        const refreshed = await tryRefreshToken();
+        if (refreshed) return run(true);
+      }
+      return { ok: false, error: 'No se pudo sincronizar el perfil; se mantiene la sesión en caché.' };
+    }
+
+    if (!response.ok || payload.ok === false) {
+      const fromPayload =
+        (typeof payload.error === 'string' && payload.error.trim())
+        || (typeof payload.message === 'string' && payload.message.trim())
+        || '';
+      if (fromPayload) {
+        throw new Error(fromPayload);
+      }
+      const statusBit = `${response.status} ${response.statusText || ''}`.trim();
+      const bodyBit =
+        rawText && typeof payload.error !== 'string' ? rawText.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
+      throw new Error(
+        bodyBit ? `${statusBit}: ${bodyBit}` : `${statusBit}. La API no devolvió un mensaje de error.`,
+      );
+    }
+
+    return payload as ApiEnvelope<AuthUser>;
+  };
+
+  return run(false);
 }
 
 // S-07: Listar sesiones activas del usuario actual

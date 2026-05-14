@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { CreditCard, Lock, Calendar, Shield, AlertCircle } from 'lucide-react';
+import { CreditCard, Lock, Shield, AlertCircle } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
 import { useAuth } from '../../../context/AuthContext';
@@ -165,22 +165,8 @@ export function PaymentInfo() {
               Información de pago
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Para activar tu prueba gratuita de 14 días
+              Introduce los datos de la tarjeta. El trámite se realiza de forma segura.
             </p>
-          </div>
-
-          <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4 mb-6">
-            <div className="flex items-start gap-3">
-              <Calendar className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-bold text-blue-900 mb-1">
-                  Prueba gratuita de 14 días
-                </p>
-                <p className="text-sm text-blue-800">
-                  <strong>No se te cobrará ahora.</strong> Después de 14 días, se activará automáticamente tu suscripción al plan seleccionado. Puedes cancelar en cualquier momento antes de que termine la prueba.
-                </p>
-              </div>
-            </div>
           </div>
 
           <form id="payment-form" onSubmit={handleSubmit} className="space-y-5">
@@ -296,7 +282,7 @@ export function PaymentInfo() {
                   className="mt-1 w-4 h-4 border-2 border-gray-300 rounded"
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Acepto que se cargue automáticamente el importe de la suscripción después de los 14 días de prueba gratuita. Puedo cancelar en cualquier momento.
+                  Confirmo que los datos son correctos y autorizo guardar este método de pago conforme a los términos aplicables.
                 </span>
               </label>
               {errors.acceptTerms && (
@@ -352,7 +338,7 @@ export function PaymentInfo() {
             fullWidth
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Guardando...' : 'Activar prueba gratis'}
+            {isSubmitting ? 'Guardando...' : 'Continuar'}
           </ACCESO__Button>
         </div>
       </div>

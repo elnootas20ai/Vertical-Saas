@@ -15,11 +15,19 @@ import {
   updateDeliveryOrderRequest,
   deleteDeliveryOrderRequest,
   listCatalogItemsRequest,
+  listPointsOfSaleRequest,
+  mergePointsOfSaleWithRetailWorkCenters,
+  pointOfSaleDisplayLabel,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryOrderItem,
   type CatalogItem,
 } from '../../lib/deliveryApi';
+import {
+  DELIVERY_ACTIVE_STORE_CHANGED,
+  readDeliveryOpsSelectedPdvId,
+  resolvePreferenceToPdvId,
+} from '../../lib/deliveryOpsPdvSelection';
 import {
   Plus,
   PlusCircle,
@@ -1033,6 +1041,8 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Tienda activa (sidebar / centro ops): solo pedidos de ese PDV en esta vista. */
+  const [activeStoreScope, setActiveStoreScope] = useState<{ pdvId: string; label: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<DeliveryOrderStatus | 'all'>('all');
@@ -1079,6 +1089,44 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
   useModalClose(!!selectedOrder, () => setSelectedOrder(null));
   useModalClose(!!incidentOrder, () => setIncidentOrder(null));
   useModalClose(!!resolveOrder, () => setResolveOrder(null));
+
+  const syncActiveStoreFromPreference = useCallback(async () => {
+    if (!userId) {
+      setActiveStoreScope(null);
+      return;
+    }
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (!bid) {
+      setActiveStoreScope(null);
+      return;
+    }
+    const raw = readDeliveryOpsSelectedPdvId(bid, userId);
+    try {
+      const pdvRaw = await listPointsOfSaleRequest(userId);
+      const merged = await mergePointsOfSaleWithRetailWorkCenters(userId, pdvRaw, { business: currentBusiness });
+      const pdvId = resolvePreferenceToPdvId(merged, raw);
+      const p = merged.find((x) => x._id === pdvId);
+      if (pdvId && p) {
+        setActiveStoreScope({ pdvId, label: pointOfSaleDisplayLabel(p) });
+      } else {
+        setActiveStoreScope(null);
+      }
+    } catch {
+      setActiveStoreScope(null);
+    }
+  }, [userId, currentBusiness]);
+
+  useEffect(() => {
+    void syncActiveStoreFromPreference();
+  }, [syncActiveStoreFromPreference]);
+
+  useEffect(() => {
+    const onStore = () => {
+      void syncActiveStoreFromPreference();
+    };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [syncActiveStoreFromPreference]);
 
   const loadOrders = useCallback(async () => {
     if (!userId) return;
@@ -1194,8 +1242,13 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
     }
   };
 
+  const ordersForScope = useMemo(() => {
+    if (!activeStoreScope?.pdvId) return orders;
+    return orders.filter((o) => o.salesPointId === activeStoreScope.pdvId);
+  }, [orders, activeStoreScope?.pdvId]);
+
   const filtered = useMemo(() => {
-    return orders.filter(o => {
+    return ordersForScope.filter(o => {
       if (filterStatus !== 'all' && o.status !== filterStatus) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -1203,30 +1256,37 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
       }
       return true;
     });
-  }, [orders, search, filterStatus]);
+  }, [ordersForScope, search, filterStatus]);
 
   const kpis = useMemo(() => ({
-    pending: orders.filter(o => o.status === 'nuevo').length,
-    kitchen: orders.filter(o => o.status === 'cocina').length,
-    assembly: orders.filter(o => o.status === 'listo').length,
-    delivery: orders.filter(o => o.status === 'listo' && o.deliveryType === 'domicilio').length,
-    delivered: orders.filter(o => o.status === 'entregado').length,
-    incidents: orders.filter(o => o.status === 'incident').length,
-  }), [orders]);
+    pending: ordersForScope.filter(o => o.status === 'nuevo').length,
+    kitchen: ordersForScope.filter(o => o.status === 'cocina').length,
+    assembly: ordersForScope.filter(o => o.status === 'listo').length,
+    delivery: ordersForScope.filter(o => o.status === 'listo' && o.deliveryType === 'domicilio').length,
+    delivered: ordersForScope.filter(o => o.status === 'entregado').length,
+    incidents: ordersForScope.filter(o => o.status === 'incident').length,
+  }), [ordersForScope]);
 
   const historyTabCount = useMemo(
-    () => orders.filter(o => o.status === 'entregado' || o.status === 'cancelled').length,
-    [orders],
+    () => ordersForScope.filter(o => o.status === 'entregado' || o.status === 'cancelled').length,
+    [ordersForScope],
   );
 
   const tabsConfig = [
-    { id: 'orders', label: 'Pedidos', count: orders.filter(o => !['entregado', 'cancelled'].includes(o.status)).length || undefined },
+    { id: 'orders', label: 'Pedidos', count: ordersForScope.filter(o => !['entregado', 'cancelled'].includes(o.status)).length || undefined },
     { id: 'history', label: 'Historial', count: historyTabCount || undefined },
   ];
 
   // ═══ TAB: Pedidos ═══
   const renderOrdersTab = () => (
     <div className="space-y-5">
+      {embedded && activeStoreScope && (
+        <div className="rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/90 dark:bg-teal-950/40 px-4 py-3 text-sm text-teal-900 dark:text-teal-100">
+          <span className="font-semibold">Tienda activa:</span>{' '}
+          <span className="font-bold">{activeStoreScope.label}</span>
+          <span className="text-teal-800/90 dark:text-teal-200/90"> — solo ves pedidos de esta sede. Cambia de tienda desde el menú lateral (Centros de trabajo).</span>
+        </div>
+      )}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         {[
           { label: 'Pendientes', value: kpis.pending, bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', num: 'text-amber-900', icon: <Clock className="w-5 h-5" /> },
@@ -1295,7 +1355,7 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
 
   // ═══ TAB: Historial (con exportar CSV) ═══
   const renderHistoryTab = () => {
-    const historyOrders = orders
+    const historyOrders = ordersForScope
       .filter(o => o.status === 'entregado' || o.status === 'cancelled')
       .filter(o => {
         if (historyFrom && new Date(o.createdAt) < new Date(historyFrom)) return false;

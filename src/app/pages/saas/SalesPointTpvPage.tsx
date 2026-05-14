@@ -8,6 +8,8 @@ import { EventsWorkstationPage } from './EventsWorkstationPage';
 import { HairSalonWorkstationPage } from './HairSalonWorkstationPage';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import { Store, Loader2 } from 'lucide-react';
 
@@ -23,8 +25,21 @@ export function SalesPointTpvPage() {
   const isCarDealership = businessType === 'carDealership';
   const isEvents = businessType === 'events';
   const isHairSalon = businessType === 'hairSalon';
+  const isDelivery = businessType === 'delivery';
 
   useEffect(() => {
+    if (!isDelivery || !salesPointId || !user) return;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+    if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, `wc:${salesPointId}`);
+    navigate('/saas/delivery-ops', { replace: true });
+  }, [isDelivery, salesPointId, user, currentBusiness, navigate]);
+
+  useEffect(() => {
+    if (isDelivery) {
+      setLoading(false);
+      return;
+    }
     if (!user?.id || !salesPointId) {
       setLoading(false);
       return;
@@ -36,7 +51,17 @@ export function SalesPointTpvPage() {
       })
       .catch(() => setSalesPoint(null))
       .finally(() => setLoading(false));
-  }, [user?.id, salesPointId]);
+  }, [user?.id, salesPointId, isDelivery]);
+
+  if (isDelivery && salesPointId) {
+    return (
+      <Layout title="Delivery" subtitle="Cambiando de tienda…">
+        <div className="flex items-center justify-center py-32">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+        </div>
+      </Layout>
+    );
+  }
 
   if (loading) {
     return (

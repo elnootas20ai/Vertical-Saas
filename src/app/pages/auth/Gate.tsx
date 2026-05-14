@@ -32,6 +32,7 @@ import { ModalModulo } from '../../components/gate/ModalModulo';
 import { VehicleImportWizard } from '../../components/saas/VehicleImportWizard';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import type { BusinessType } from '../../lib/businessApi';
+import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 
 const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'carDealership', label: 'Compraventa' },
@@ -58,6 +59,14 @@ const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'butcherShop', label: 'Carniceria' },
 ];
 
+const GATE_CREATE_BUSINESS_FORM_ID = 'gate-create-business-modal-form';
+
+const CREATE_BUSINESS_FLOW_STEPS = [
+  { step: 1, title: 'Empresa y sector', hint: 'Nombre y tipo de negocio' },
+  { step: 2, title: 'Identificación', hint: 'CIF, teléfono y email' },
+  { step: 3, title: 'Ubicación', hint: 'Ciudad y dirección' },
+] as const;
+
 function isValidTaxId(value: string) {
   const clean = value.trim().toUpperCase();
   return /^[A-Z0-9]{8,12}$/.test(clean);
@@ -80,7 +89,7 @@ export function Gate() {
   const { logout, user } = useAuth();
   const { businesses, currentBusiness, switchBusiness, isLoading: isLoadingBusinesses, createBusiness, reloadBusinesses } = useBusiness();
   const { vehicles, leads, clients, sales } = useApp();
-  const isSuperAdmin = (user?.email || '').trim().toLowerCase() === 'uriel@admin.com';
+  const isSuperAdmin = isVertialSuperAdminEmail(user?.email);
   const showAncoveIntegration = currentBusiness?.businessType === 'carDealership';
 
   useEffect(() => {
@@ -570,24 +579,83 @@ export function Gate() {
         </div>
       </ACCESO__Modal>
 
-      {/* Modal crear empresa */}
+      {/* Modal crear empresa: acciones fijas abajo; solo el cuerpo hace scroll */}
       <ACCESO__Modal
         isOpen={showCreateBusiness}
         onClose={resetCreateBusinessModal}
         title="Crear nueva empresa"
-        maxWidth="2xl"
-      >
-        <form onSubmit={handleCreateBusiness} className="space-y-4">
-          <div className="flex items-center gap-2">
-            {[1, 2, 3].map((step) => (
-              <div
-                key={step}
-                className={`h-2 flex-1 rounded-full ${createBusinessStep >= step ? 'bg-amber-500' : 'bg-gray-200 dark:bg-gray-700'}`}
-              />
-            ))}
+        maxWidth="7xl"
+        tall
+        spaciousBody
+        footer={
+          <div className="flex gap-3">
+            <ACCESO__Button
+              type="button"
+              onClick={createBusinessStep === 1 ? resetCreateBusinessModal : handlePrevCreateStep}
+              variant="outline"
+              fullWidth
+            >
+              {createBusinessStep === 1 ? 'Cancelar' : 'Anterior'}
+            </ACCESO__Button>
+            {createBusinessStep < 3 ? (
+              <ACCESO__Button type="button" variant="primary" fullWidth onClick={handleNextCreateStep}>
+                Siguiente
+              </ACCESO__Button>
+            ) : (
+              <ACCESO__Button
+                type="submit"
+                form={GATE_CREATE_BUSINESS_FORM_ID}
+                variant="primary"
+                fullWidth
+                disabled={isCreatingBusiness || !createBusinessData.name.trim()}
+              >
+                {isCreatingBusiness ? 'Creando...' : 'Crear empresa'}
+              </ACCESO__Button>
+            )}
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Paso {createBusinessStep} de 3
+        }
+      >
+        <form id={GATE_CREATE_BUSINESS_FORM_ID} onSubmit={handleCreateBusiness} className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {CREATE_BUSINESS_FLOW_STEPS.map(({ step, title, hint }) => {
+              const done = createBusinessStep > step;
+              const active = createBusinessStep === step;
+              return (
+                <div
+                  key={step}
+                  className={`rounded-xl border-2 px-3 py-2.5 sm:py-3 text-left transition-colors ${
+                    done
+                      ? 'border-green-300 bg-green-50/80 dark:border-green-800 dark:bg-green-950/30'
+                      : active
+                        ? 'border-amber-500 bg-amber-50/90 dark:border-amber-600 dark:bg-amber-950/25 ring-1 ring-amber-200/80 dark:ring-amber-800/50'
+                        : 'border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-900/40'
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                        done
+                          ? 'bg-green-600 text-white'
+                          : active
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-gray-300 text-gray-700 dark:bg-gray-600 dark:text-gray-200'
+                      }`}
+                    >
+                      {done ? '✓' : step}
+                    </span>
+                    <div className="min-w-0 pt-0.5">
+                      <p className={`text-sm font-semibold leading-tight ${active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-800 dark:text-gray-200'}`}>
+                        {title}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-400 leading-snug">{hint}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 -mt-2">
+            Paso {createBusinessStep} de 3 — {CREATE_BUSINESS_FLOW_STEPS[createBusinessStep - 1]?.title}
           </p>
 
           {createBusinessStep === 1 && (
@@ -603,7 +671,7 @@ export function Gate() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Tipo de negocio (vertical)
                 </label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-3 min-[480px]:grid-cols-4 sm:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2">
                   {BUSINESS_TYPE_OPTIONS.map((option) => {
                     const selected = createBusinessData.businessType === option.value;
                     return (
@@ -616,18 +684,15 @@ export function Gate() {
                             businessType: option.value,
                           })
                         }
-                        className={`p-3 rounded-xl border text-left transition-all ${
+                        className={`min-h-[3rem] rounded-xl border px-3 py-3 text-left transition-all sm:min-h-[3.25rem] sm:px-3.5 sm:py-3.5 ${
                           selected
                             ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 ring-2 ring-amber-200 dark:ring-amber-800'
                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
                         }`}
                       >
-                        <p className={`text-sm font-semibold ${selected ? 'text-amber-800 dark:text-amber-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                        <span className={`block text-sm font-semibold leading-snug sm:text-base ${selected ? 'text-amber-800 dark:text-amber-300' : 'text-gray-900 dark:text-gray-100'}`}>
                           {option.label}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                          Vertical
-                        </p>
+                        </span>
                       </button>
                     );
                   })}
@@ -637,12 +702,18 @@ export function Gate() {
           )}
 
           {createBusinessStep === 2 && (
-            <>
+            <div className="space-y-5">
               <ACCESO__Input
                 label="CIF / NIF"
-                placeholder="B12345678"
+                placeholder="Ej. B12345674 (9 caracteres)"
                 value={createBusinessData.taxId}
-                onChange={(e) => setCreateBusinessData({ ...createBusinessData, taxId: e.target.value })}
+                onChange={(e) =>
+                  setCreateBusinessData({
+                    ...createBusinessData,
+                    taxId: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+                  })
+                }
+                maxLength={14}
                 required
               />
               <ACCESO__Input
@@ -665,8 +736,8 @@ export function Gate() {
                 }
                 required
               />
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-4 space-y-2">
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Comprobacion de datos</p>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-5 space-y-2.5">
+                <p className="text-base font-semibold text-gray-900 dark:text-gray-100">Comprobación de datos</p>
                 <p className={`text-sm ${isValidTaxId(createBusinessData.taxId) ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {isValidTaxId(createBusinessData.taxId) ? 'OK' : 'Pendiente'} - CIF/NIF valido
                 </p>
@@ -677,12 +748,12 @@ export function Gate() {
                   {isValidEmail(createBusinessData.email) ? 'OK' : 'Pendiente'} - Email valido
                 </p>
               </div>
-            </>
+            </div>
           )}
 
           {createBusinessStep === 3 && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <ACCESO__Input
                   label="Ciudad"
                   placeholder="Madrid"
@@ -696,10 +767,10 @@ export function Gate() {
                   onChange={(e) => setCreateBusinessData({ ...createBusinessData, address: e.target.value })}
                 />
               </div>
-              <div className="rounded-lg bg-gray-50 dark:bg-gray-800 p-3 text-sm text-gray-600 dark:text-gray-300">
+              <div className="rounded-xl bg-gray-50 dark:bg-gray-800 p-4 text-base leading-relaxed text-gray-600 dark:text-gray-300">
                 Revisa los datos y pulsa <strong>Crear empresa</strong> para finalizar.
               </div>
-            </>
+            </div>
           )}
 
           {createBusinessError && (
@@ -707,36 +778,6 @@ export function Gate() {
               {createBusinessError}
             </div>
           )}
-
-          <div className="flex gap-3 pt-2">
-            <ACCESO__Button
-              type="button"
-              onClick={createBusinessStep === 1 ? resetCreateBusinessModal : handlePrevCreateStep}
-              variant="outline"
-              fullWidth
-            >
-              {createBusinessStep === 1 ? 'Cancelar' : 'Anterior'}
-            </ACCESO__Button>
-            {createBusinessStep < 3 ? (
-              <ACCESO__Button
-                type="button"
-                variant="primary"
-                fullWidth
-                onClick={handleNextCreateStep}
-              >
-                Siguiente
-              </ACCESO__Button>
-            ) : (
-              <ACCESO__Button
-                type="submit"
-                variant="primary"
-                fullWidth
-                disabled={isCreatingBusiness || !createBusinessData.name.trim()}
-              >
-                {isCreatingBusiness ? 'Creando...' : 'Crear empresa'}
-              </ACCESO__Button>
-            )}
-          </div>
         </form>
       </ACCESO__Modal>
 

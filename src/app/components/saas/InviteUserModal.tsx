@@ -83,6 +83,18 @@ const CONTRACT_TYPES = [
   { id: 'fijo_discontinuo', label: 'Fijo discontinuo' },
 ] as const;
 
+/** Sueldo: solo dígitos → miles con punto (es-ES), p. ej. 12000 → "12.000". */
+function formatSalaryThousandsEs(digitsOnly: string): string {
+  if (!digitsOnly) return '';
+  const n = Number(digitsOnly);
+  if (!Number.isFinite(n) || n < 0) return '';
+  return n.toLocaleString('es-ES', { maximumFractionDigits: 0, useGrouping: true });
+}
+
+function salaryDigitsFromDisplay(display: string): string {
+  return display.replace(/\D/g, '');
+}
+
 const LANDING_PAGES = [
   { id: '/saas/worker', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
   { id: '/saas/vehicles', icon: <Car className="w-3.5 h-3.5" /> },
@@ -190,7 +202,7 @@ function SelectDropdown({
         <ChevronDown className={`w-4 h-4 text-gray-400 dark:text-gray-500 ml-auto flex-shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl z-50 overflow-hidden max-h-60 overflow-y-auto">
+        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl z-50 overflow-hidden">
           {options.map((opt) => {
             const isSel = value === opt.id;
             return (
@@ -283,7 +295,7 @@ function RoleDropdown({
 
 // --- CountryPrefixDropdown ---
 
-function CountryPrefixDropdown({ value, onChange }: { value: string; onChange: (p: string) => void }) {
+function CountryPrefixDropdown({ value, onChange, embedded }: { value: string; onChange: (p: string) => void; embedded?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -298,13 +310,17 @@ function CountryPrefixDropdown({ value, onChange }: { value: string; onChange: (
   const selected = COUNTRY_PREFIXES.find((c) => c.prefix === value) || COUNTRY_PREFIXES[0];
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${embedded ? 'h-full' : ''}`}>
       <button type="button" onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 px-2.5 py-2.5 border-2 border-r-0 border-gray-200 dark:border-gray-700 rounded-l-xl bg-gray-50 dark:bg-gray-700 text-sm hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors outline-none min-w-[85px]"
+        className={
+          embedded
+            ? 'flex h-full min-h-[44px] items-center gap-1 px-2.5 border-0 bg-gray-50 dark:bg-gray-700/90 text-sm hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors outline-none min-w-[88px]'
+            : 'flex items-center gap-1 px-2.5 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-700 text-sm hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors outline-none min-w-[85px]'
+        }
       >
         <span className="text-base leading-none">{selected.flag}</span>
         <span className="text-gray-700 dark:text-gray-300 font-medium text-xs">{selected.prefix}</span>
-        <ChevronDown className={`w-3 h-3 text-gray-400 ml-auto transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3 h-3 text-gray-400 ml-auto shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl z-50 overflow-hidden max-h-52 overflow-y-auto w-56">
@@ -375,7 +391,6 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   const [phoneNumber, setPhoneNumber] = useState('');
 
   // Step 2
-  const [position, setPosition] = useState('');
   const [contractType, setContractType] = useState<string | null>(null);
   const [grossSalary, setGrossSalary] = useState('');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
@@ -447,9 +462,9 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
         phone: fullPhone,
         role: role!,
         landingPage,
-        position: position.trim(),
+        position: '',
         contractType: contractType!,
-        grossMonthlySalary: grossSalary.trim(),
+        grossMonthlySalary: salaryDigitsFromDisplay(grossSalary),
         workCenterId: workCenterId || '',
         businessId: selectedBusinessId || undefined,
       });
@@ -476,7 +491,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
 
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
-    setPosition(''); setContractType(null); setGrossSalary(''); setWorkCenterId(null);
+    setContractType(null); setGrossSalary(''); setWorkCenterId(null);
     setRole(null); setLandingPage('/saas/worker');
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
@@ -495,7 +510,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !isSubmitting) onClose(); }}>
-      <div className="bg-white dark:bg-gray-800 w-full sm:max-w-lg rounded-t-3xl sm:rounded-3xl border-2 border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[85vh]">
+      <div className="bg-white dark:bg-gray-800 w-full sm:max-w-2xl rounded-t-3xl sm:rounded-3xl border-2 border-gray-200 dark:border-gray-700 shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[min(92vh,880px)]">
 
         {success ? (
           <>
@@ -506,7 +521,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
               </button>
             </div>
             {/* Success body */}
-            <div className="px-6 pb-6 flex flex-col items-center text-center overflow-y-auto">
+            <div className="px-6 pb-6 flex flex-col items-center text-center overflow-y-auto overscroll-contain">
               <div className="w-14 h-14 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center mb-4">
                 <CheckCircle2 className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
               </div>
@@ -580,35 +595,34 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                 </div>
               )}
 
-              {/* Worker must complete */}
-              <div className="w-full bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3 mb-3 text-left">
-                <div className="flex items-center gap-2 mb-2">
-                  <UserCheck className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                  <p className="text-xs font-bold text-blue-800 dark:text-blue-300">El trabajador debe completar</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 w-full text-left">
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-3 py-2.5">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <UserCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                    <p className="text-xs font-bold text-blue-800 dark:text-blue-300">El trabajador debe completar</p>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {['DNI / NIE', 'Fecha de nacimiento', 'Nacionalidad', 'Lugar de nacimiento', 'Dirección completa', 'Contacto emergencia', 'N. Seguridad Social', 'Cuenta bancaria'].map((item) => (
+                      <li key={item} className="text-[10px] leading-snug text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
+                        <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0 mt-1.5" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                  {['DNI / NIE', 'Fecha de nacimiento', 'Nacionalidad', 'Lugar de nacimiento', 'Direccion completa', 'Contacto emergencia', 'N. Seguridad Social', 'Cuenta bancaria'].map((item) => (
-                    <p key={item} className="text-[11px] text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-blue-400 flex-shrink-0" />
-                      {item}
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* HR must complete */}
-              <div className="w-full bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5 text-left">
-                <div className="flex items-center gap-2 mb-2">
-                  <FileWarning className="w-4 h-4 text-violet-500 flex-shrink-0" />
-                  <p className="text-xs font-bold text-violet-800 dark:text-violet-300">Gestoria / RRHH debe completar</p>
-                </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                  {['Fecha de alta', 'Grupo de cotizacion', 'Mutua'].map((item) => (
-                    <p key={item} className="text-[11px] text-violet-700 dark:text-violet-300 flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-violet-400 flex-shrink-0" />
-                      {item}
-                    </p>
-                  ))}
+                <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-3 py-2.5">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <FileWarning className="w-4 h-4 text-violet-500 shrink-0" />
+                    <p className="text-xs font-bold text-violet-800 dark:text-violet-300">Gestoría / RRHH debe completar</p>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {['Fecha de alta', 'Grupo de cotización', 'Mutua'].map((item) => (
+                      <li key={item} className="text-[10px] leading-snug text-violet-700 dark:text-violet-300 flex items-start gap-1.5">
+                        <span className="w-1 h-1 rounded-full bg-violet-400 shrink-0 mt-1.5" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
 
@@ -715,34 +729,39 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       Numero de telefono
                     </label>
-                    <div className="flex">
-                      <CountryPrefixDropdown value={phonePrefix} onChange={setPhonePrefix} />
-                      <input type="tel" value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value.replace(/[^\d\s]/g, ''))}
-                        placeholder="612 345 678"
-                        className="flex-1 px-3.5 py-2.5 border-2 border-l-0 border-gray-200 dark:border-gray-700 rounded-r-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-800 focus:border-blue-500" />
+                    <div className="flex min-h-[46px] items-stretch rounded-xl border-2 border-gray-200 bg-white transition-colors focus-within:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:focus-within:border-blue-500">
+                      <CountryPrefixDropdown embedded value={phonePrefix} onChange={setPhonePrefix} />
+                      <input
+                        type="tel"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
+                        placeholder="612345678"
+                        className="min-w-0 flex-1 border-0 border-l border-gray-200 bg-transparent py-2.5 pl-3.5 pr-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 dark:border-gray-700 dark:text-gray-100"
+                      />
                     </div>
                   </div>
                 </>
               ) : (
                 <>
-                  {/* Cargo interno */}
+                  {/* Funcion del trabajador (primera linea) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Cargo interno
+                      Función del trabajador <span className="text-red-400">*</span>
                     </label>
-                    <div className="relative">
-                      <Briefcase className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300 pointer-events-none" />
-                      <input type="text" value={position}
-                        onChange={(e) => { setPosition(e.target.value); clearFieldError('position'); }}
-                        onBlur={() => setTouched((p) => ({ ...p, position: true }))}
-                        placeholder="Opcional: turno, notas internas, etc."
-                        className={`w-full pl-10 pr-4 py-2.5 border-2 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 ${
-                          errors.position ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
-                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:border-blue-500'
-                        }`} />
-                    </div>
-                    {errors.position && <p className="text-xs text-red-500 mt-1 flex items-center gap-1"><span>&#x2715;</span>{errors.position}</p>}
+                    <RoleDropdown
+                      value={role}
+                      onChange={(r) => {
+                        setRole(r);
+                        setErrors((p) => {
+                          const n = { ...p };
+                          delete n.role;
+                          return n;
+                        });
+                      }}
+                      error={errors.role}
+                      roles={roleOptions}
+                      selectRolePlaceholder="Selecciona función"
+                    />
                   </div>
 
                   {/* Tipo de contrato */}
@@ -750,11 +769,21 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       Tipo de contrato <span className="text-red-400">*</span>
                     </label>
-                    <SelectDropdown value={contractType}
-                      onChange={(v) => { setContractType(v); setErrors((p) => { const n = { ...p }; delete n.contractType; return n; }); }}
+                    <SelectDropdown
+                      value={contractType}
+                      onChange={(v) => {
+                        setContractType(v);
+                        setErrors((p) => {
+                          const n = { ...p };
+                          delete n.contractType;
+                          return n;
+                        });
+                      }}
                       options={CONTRACT_TYPES.map((c) => ({ id: c.id, label: c.label }))}
-                      placeholder="Selecciona tipo de contrato" error={errors.contractType}
-                      icon={<ClipboardList className="w-4 h-4" />} />
+                      placeholder="Selecciona tipo de contrato"
+                      error={errors.contractType}
+                      icon={<ClipboardList className="w-4 h-4" />}
+                    />
                   </div>
 
                   {/* Sueldo bruto mensual */}
@@ -763,12 +792,21 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                       Sueldo bruto mensual
                     </label>
                     <div className="relative">
-                      <DollarSign className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300 pointer-events-none" />
-                      <input type="text" value={grossSalary}
-                        onChange={(e) => setGrossSalary(e.target.value.replace(/[^\d.,]/g, ''))}
-                        placeholder="Ej: 1.800,00"
-                        className="w-full pl-10 pr-12 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 bg-white dark:bg-gray-800 focus:border-blue-500" />
-                      <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-medium">&euro;/mes</span>
+                      <DollarSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={grossSalary}
+                        onChange={(e) => {
+                          const digits = salaryDigitsFromDisplay(e.target.value);
+                          setGrossSalary(digits ? formatSalaryThousandsEs(digits) : '');
+                        }}
+                        placeholder="Ej: 12.000"
+                        className="w-full rounded-xl border-2 border-gray-200 bg-white py-2.5 pl-10 pr-14 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                      />
+                      <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400">
+                        &euro;/mes
+                      </span>
                     </div>
                   </div>
 
@@ -778,12 +816,16 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                       <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                         Empresa
                       </label>
-                      <SelectDropdown value={selectedBusinessId} onChange={(id) => {
-                        setSelectedBusinessId(id);
-                        setWorkCenterId(null);
-                      }}
-                        options={businessOptions} placeholder="Selecciona empresa"
-                        icon={<Building2 className="w-4 h-4" />} />
+                      <SelectDropdown
+                        value={selectedBusinessId}
+                        onChange={(id) => {
+                          setSelectedBusinessId(id);
+                          setWorkCenterId(null);
+                        }}
+                        options={businessOptions}
+                        placeholder="Selecciona empresa"
+                        icon={<Building2 className="w-4 h-4" />}
+                      />
                     </div>
                   )}
 
@@ -793,36 +835,31 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                       Centro de trabajo / PDV
                     </label>
                     {wcOptions.length > 0 ? (
-                      <SelectDropdown value={workCenterId} onChange={setWorkCenterId}
-                        options={wcOptions} placeholder="Selecciona centro de trabajo"
-                        icon={<MapPin className="w-4 h-4" />} />
+                      <SelectDropdown
+                        value={workCenterId}
+                        onChange={setWorkCenterId}
+                        options={wcOptions}
+                        placeholder="Selecciona centro de trabajo"
+                        icon={<MapPin className="w-4 h-4" />}
+                      />
                     ) : (
-                      <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-800/50">
-                        <MapPin className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                        <p className="text-xs text-gray-400 dark:text-gray-500">No hay centros de trabajo configurados. Puedes anadirlos en Ajustes.</p>
+                      <div className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                        <MapPin className="h-4 w-4 shrink-0 text-gray-300" />
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          No hay centros de trabajo configurados. Puedes anadirlos en Ajustes.
+                        </p>
                       </div>
                     )}
                   </div>
 
                   <div className="h-px bg-gray-100 dark:bg-gray-700" />
 
-                  {/* Funcion */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Funcion del trabajador <span className="text-red-400">*</span>
-                    </label>
-                    <RoleDropdown value={role}
-                      onChange={(r) => { setRole(r); setErrors((p) => { const n = { ...p }; delete n.role; return n; }); }}
-                      error={errors.role} roles={roleOptions}
-                      selectRolePlaceholder="Selecciona funcion" />
-                  </div>
-
                   {/* Pagina inicial */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       {t('team.inviteModal.landingPage', 'Pagina inicial')}
                     </label>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mb-2">
+                    <p className="mb-2 text-[11px] text-gray-400 dark:text-gray-500">
                       {t('team.inviteModal.landingPageHint', 'La primera pantalla que vera este usuario al iniciar sesion.')}
                     </p>
                     <div className="grid grid-cols-4 gap-2">
@@ -830,13 +867,18 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                         const isActive = landingPage === page.id;
                         const label = t(`team.inviteModal.pages.${page.id.replace('/saas/', '')}`, page.id.replace('/saas/', ''));
                         return (
-                          <button key={page.id} type="button" onClick={() => setLandingPage(page.id)}
-                            className={`flex flex-col items-center gap-1.5 px-2 py-2.5 rounded-xl border-2 text-xs font-medium transition-all ${
-                              isActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
-                            }`}>
+                          <button
+                            key={page.id}
+                            type="button"
+                            onClick={() => setLandingPage(page.id)}
+                            className={`flex flex-col items-center gap-1.5 rounded-xl border-2 px-2 py-2.5 text-xs font-medium transition-all ${
+                              isActive
+                                ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
+                                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-gray-600'
+                            }`}
+                          >
                             <span className={isActive ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'}>{page.icon}</span>
-                            <span className="truncate w-full text-center text-[10px] leading-tight">{label}</span>
+                            <span className="w-full truncate text-center text-[10px] leading-tight">{label}</span>
                           </button>
                         );
                       })}
@@ -844,17 +886,17 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                   </div>
 
                   {/* Info */}
-                  <div className="flex items-start gap-2.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-4 py-3">
-                    <Mail className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                  <div className="flex items-start gap-2.5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-900/20">
+                    <Mail className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                    <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
                       {t('team.inviteModal.emailInfo', 'Se enviara un correo al trabajador con las credenciales de acceso para que complete su perfil.')}
                     </p>
                   </div>
 
                   {submitError && (
-                    <div className="flex items-start gap-2.5 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl px-4 py-3">
-                      <X className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-red-700 dark:text-red-300 leading-relaxed">{submitError}</p>
+                    <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-800 dark:bg-red-900/20">
+                      <X className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+                      <p className="text-xs leading-relaxed text-red-700 dark:text-red-300">{submitError}</p>
                     </div>
                   )}
                 </>

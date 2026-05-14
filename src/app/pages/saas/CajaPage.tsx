@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   listTpvRegisterSessionsRequest,
   updateTpvRegisterSessionRequest,
@@ -490,7 +492,11 @@ type TabId = 'estado' | 'historial' | 'incidencias' | 'configuracion';
 
 export function CajaPage() {
   const { user } = useAuth();
-  const userId = user?.user_id || user?.id || '';
+  const { currentBusiness } = useBusiness();
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
   const navigate = useNavigate();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
@@ -512,16 +518,18 @@ export function CajaPage() {
   const [ordersTo, setOrdersTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const loadData = useCallback(async () => {
-    if (!userId) return;
+    if (!dataUserId) return;
     try {
       const [sessData, pdvData, driverData, cfgData] = await Promise.all([
-        listTpvRegisterSessionsRequest(userId),
-        listPointsOfSaleRequest(userId),
-        listDriverCashSessionsRequest(userId),
-        getDeliveryConfigRequest(userId).catch(() => null),
+        listTpvRegisterSessionsRequest(dataUserId),
+        listPointsOfSaleRequest(dataUserId),
+        listDriverCashSessionsRequest(dataUserId),
+        getDeliveryConfigRequest(dataUserId).catch(() => null),
       ]);
       setSessions(sessData);
-      setPointsOfSale(await mergePointsOfSaleWithRetailWorkCenters(userId, pdvData));
+      setPointsOfSale(
+        await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvData, { business: currentBusiness }),
+      );
       setDriverSessions(driverData);
       if (cfgData) setDeliveryConfig(cfgData);
     } catch {
@@ -529,22 +537,22 @@ export function CajaPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [dataUserId, currentBusiness]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const loadOrders = useCallback(async () => {
-    if (!userId) return;
+    if (!dataUserId) return;
     setLoadingOrders(true);
     try {
-      const all = await listDeliveryOrdersRequest(userId);
+      const all = await listDeliveryOrdersRequest(dataUserId);
       setOrders(all || []);
     } catch {
       setOrders([]);
     } finally {
       setLoadingOrders(false);
     }
-  }, [userId]);
+  }, [dataUserId]);
 
   useEffect(() => {
     if (tab !== 'historial') return;
@@ -628,9 +636,9 @@ export function CajaPage() {
   }, [sessions]);
 
   const handleValidate = async (notes: string) => {
-    if (!validatingSession || !userId) return;
+    if (!validatingSession || !dataUserId) return;
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, {
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
         ...validatingSession,
         closingValidatedBy: user?.name || user?.email || 'Gerente',
         closingValidatedAt: new Date().toISOString(),
@@ -646,9 +654,9 @@ export function CajaPage() {
   };
 
   const handleReject = async (notes: string) => {
-    if (!validatingSession || !userId) return;
+    if (!validatingSession || !dataUserId) return;
     try {
-      const updated = await updateTpvRegisterSessionRequest(userId, {
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
         ...validatingSession,
         closingValidatedBy: user?.name || user?.email || 'Gerente',
         closingValidatedAt: new Date().toISOString(),
@@ -664,10 +672,10 @@ export function CajaPage() {
   };
 
   const handleSaveConfig = async (updates: DeliveryConfig['cashRegisterAlerts']) => {
-    if (!userId || !deliveryConfig) return;
+    if (!dataUserId || !deliveryConfig) return;
     setSavingConfig(true);
     try {
-      const updated = await updateDeliveryConfigRequest(userId, { ...deliveryConfig, cashRegisterAlerts: updates });
+      const updated = await updateDeliveryConfigRequest(dataUserId, { ...deliveryConfig, cashRegisterAlerts: updates });
       setDeliveryConfig(updated);
       toast.success('Configuración de caja guardada');
     } catch {

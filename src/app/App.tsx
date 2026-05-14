@@ -4,6 +4,7 @@ import { ThemeProvider, useTheme } from 'next-themes';
 import { router } from './routes';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { BusinessProvider } from './context/BusinessContext';
 
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
@@ -88,7 +89,9 @@ export default function App() {
       <AuthProvider>
         <OnboardingProvider>
           <OnboardingUserSync />
-          <RouterProvider router={router} />
+          <BusinessProvider>
+            <RouterProvider router={router} />
+          </BusinessProvider>
         </OnboardingProvider>
       </AuthProvider>
     </ThemeProvider>

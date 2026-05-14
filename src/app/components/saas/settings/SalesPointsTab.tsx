@@ -18,6 +18,16 @@ import {
   type OwnershipType,
   type ContractInfo,
 } from '../../../lib/workCentersApi';
+import {
+  listPointsOfSaleRequest,
+  pointOfSaleDisplayLabel,
+  suggestNextPdvCode,
+} from '../../../lib/deliveryApi';
+import {
+  formatMoneyAsYouType,
+  parseSpanishMoneyInput,
+  moneyNumberToDisplay,
+} from '../../../lib/workCenterMoneyInput';
 import { AddButtonDropdown } from '../AddButtonDropdown';
 import {
   Search,
@@ -60,6 +70,8 @@ const CENTER_TYPE_ICONS: Record<WorkCenterType, React.ReactNode> = {
   custom: <Tag className="w-4 h-4" />,
 };
 
+const EMPTY_PDV_CODES: readonly string[] = [];
+
 const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
   oficina: 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400',
   punto_de_venta: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',
@@ -75,9 +87,18 @@ interface WorkCenterModalProps {
   onSave: (data: Partial<WorkCenter>) => Promise<void>;
   editItem?: WorkCenter | null;
   forcePointOfSale?: boolean;
+  /** Códigos PDV ya existentes (delivery), para previsualizar el siguiente `PREFIX-01`. */
+  existingPdvCodes?: readonly string[];
 }
 
-function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale = false }: WorkCenterModalProps) {
+function WorkCenterModal({
+  isOpen,
+  onClose,
+  onSave,
+  editItem,
+  forcePointOfSale = false,
+  existingPdvCodes = EMPTY_PDV_CODES,
+}: WorkCenterModalProps) {
   const navigate = useNavigate();
   useModalClose(isOpen, onClose);
   const [form, setForm] = useState({
@@ -109,6 +130,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
   });
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad'>('general');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (editItem) {
@@ -132,8 +154,8 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
         cadastralReference: editItem.cadastralReference || '',
         contractStartDate: editItem.contract?.startDate || '',
         contractEndDate: editItem.contract?.endDate || '',
-        monthlyPrice: editItem.contract?.monthlyPrice ? String(editItem.contract.monthlyPrice) : '',
-        deposit: editItem.contract?.deposit ? String(editItem.contract.deposit) : '',
+        monthlyPrice: moneyNumberToDisplay(editItem.contract?.monthlyPrice, true),
+        deposit: moneyNumberToDisplay(editItem.contract?.deposit, false),
         landlord: editItem.contract?.landlord || '',
         landlordPhone: editItem.contract?.landlordPhone || '',
         landlordEmail: editItem.contract?.landlordEmail || '',
@@ -142,38 +164,106 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
     } else {
       setForm({
         name: '', centerType: 'punto_de_venta', customTypeName: '', ownership: 'propiedad',
-        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '3', squareMeters: '',
+        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '', squareMeters: '',
         notes: '', active: true, purchasePrice: '', purchaseDate: '', cadastralReference: '',
         contractStartDate: '', contractEndDate: '', monthlyPrice: '', deposit: '',
         landlord: '', landlordPhone: '', landlordEmail: '', contractNotes: '',
       });
     }
     setStep('general');
+    setFieldErrors({});
   }, [editItem, isOpen]);
+
+  const simplifyPdvCreate = forcePointOfSale && !editItem;
+  const showPdvLabelPreview =
+    isOpen && !editItem && (simplifyPdvCreate || form.centerType === 'punto_de_venta');
+  const pdvLabelPreview = useMemo(() => {
+    if (!showPdvLabelPreview) return null;
+    const rawName = form.name.trim();
+    const code = suggestNextPdvCode(rawName || ' ', [...existingPdvCodes]);
+    const label = pointOfSaleDisplayLabel({ name: rawName, code });
+    return { code, label };
+  }, [showPdvLabelPreview, form.name, existingPdvCodes]);
 
   if (!isOpen) return null;
 
+  const clearFieldError = (key: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const stepIds = ['general', 'ubicacion', 'propiedad'] as const;
+  type WizardStepId = (typeof stepIds)[number];
+
+  const stepHasFieldError = (sid: WizardStepId) => {
+    const keys =
+      sid === 'general'
+        ? (simplifyPdvCreate
+            ? (['name', 'customTypeName'] as const)
+            : (['name', 'customTypeName', 'expectedStaffCount'] as const))
+        : sid === 'ubicacion'
+          ? (['address', 'city', 'postalCode', 'phone'] as const)
+          : (['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'] as const);
+    return keys.some((k) => Boolean(fieldErrors[k]));
+  };
+
   const handleSubmit = async () => {
-    if (!form.name.trim()) {
-      toast.error('El nombre es obligatorio');
-      return;
-    }
+    const nextErr: Record<string, string> = {};
+    if (!form.name.trim()) nextErr.name = ' ';
     if (form.centerType === 'custom' && !form.customTypeName.trim()) {
-      toast.error('Especifica el tipo personalizado');
+      nextErr.customTypeName = ' ';
+    }
+    const staffCount = simplifyPdvCreate
+      ? Math.max(1, Math.min(999, Math.floor(Number(form.expectedStaffCount) || 3)))
+      : Number(form.expectedStaffCount || 0);
+    if (
+      !simplifyPdvCreate &&
+      (!String(form.expectedStaffCount ?? '').trim() || !Number.isFinite(staffCount) || staffCount < 1 || staffCount > 999)
+    ) {
+      nextErr.expectedStaffCount = ' ';
+    }
+    if (!form.address.trim()) nextErr.address = ' ';
+    if (!form.city.trim()) nextErr.city = ' ';
+    if (!form.postalCode.trim()) nextErr.postalCode = ' ';
+    if (!form.phone.trim()) nextErr.phone = ' ';
+
+    if (form.ownership === 'propiedad') {
+      if (!form.purchaseDate.trim()) nextErr.purchaseDate = ' ';
+      const pp = Number(String(form.purchasePrice).replace(',', '.'));
+      if (!String(form.purchasePrice ?? '').trim() || !Number.isFinite(pp) || pp < 0) {
+        nextErr.purchasePrice = ' ';
+      }
+    } else {
+      if (!form.landlord.trim()) nextErr.landlord = ' ';
+      if (!form.contractStartDate.trim()) nextErr.contractStartDate = ' ';
+      const mp = parseSpanishMoneyInput(form.monthlyPrice);
+      if (!String(form.monthlyPrice ?? '').trim() || !Number.isFinite(mp) || mp <= 0) {
+        nextErr.monthlyPrice = ' ';
+      }
+    }
+
+    if (Object.keys(nextErr).length > 0) {
+      setFieldErrors(nextErr);
+      const s1 = ['name', 'customTypeName', 'expectedStaffCount'].some((k) => nextErr[k]);
+      const s2 = ['address', 'city', 'postalCode', 'phone'].some((k) => nextErr[k]);
+      const s3 = ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].some((k) => nextErr[k]);
+      if (s1) setStep('general');
+      else if (s2) setStep('ubicacion');
+      else setStep('propiedad');
       return;
     }
-    const staffCount = Number(form.expectedStaffCount || 0);
-    if (!Number.isFinite(staffCount) || staffCount < 1 || staffCount > 999) {
-      toast.error('Indica cuántos trabajadores tiene este centro (1-999)');
-      return;
-    }
+    setFieldErrors({});
     setSaving(true);
     try {
       const contract: ContractInfo | undefined = form.ownership === 'alquiler' ? {
         startDate: form.contractStartDate || undefined,
         endDate: form.contractEndDate || undefined,
-        monthlyPrice: form.monthlyPrice ? Number(form.monthlyPrice) : undefined,
-        deposit: form.deposit ? Number(form.deposit) : undefined,
+        monthlyPrice: String(form.monthlyPrice ?? '').trim() ? parseSpanishMoneyInput(form.monthlyPrice) : undefined,
+        deposit: String(form.deposit ?? '').trim() ? parseSpanishMoneyInput(form.deposit) : undefined,
         landlord: form.landlord.trim() || undefined,
         landlordPhone: form.landlordPhone.trim() || undefined,
         landlordEmail: form.landlordEmail.trim() || undefined,
@@ -187,7 +277,10 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
         customTypeName: !forcePointOfSale && form.centerType === 'custom' ? form.customTypeName.trim() : undefined,
         ownership: form.ownership,
         contract,
-        purchasePrice: form.ownership === 'propiedad' && form.purchasePrice ? Number(form.purchasePrice) : undefined,
+        purchasePrice:
+          form.ownership === 'propiedad' && String(form.purchasePrice ?? '').trim()
+            ? Number(String(form.purchasePrice).replace(',', '.'))
+            : undefined,
         purchaseDate: form.ownership === 'propiedad' ? form.purchaseDate || undefined : undefined,
         cadastralReference: form.cadastralReference.trim() || undefined,
         address: form.address.trim() || undefined,
@@ -199,7 +292,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
         expectedStaffCount: Math.max(1, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: form.notes.trim() || undefined,
-        active: form.active,
+        active: simplifyPdvCreate ? true : form.active,
       });
       onClose();
     } catch {
@@ -209,11 +302,23 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
     }
   };
 
-  const inputClass =
-    'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
+  const inputBase =
+    'w-full px-3 py-2.5 border-2 rounded-xl outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
+  const inputOk = 'border-gray-200 dark:border-gray-700 focus:border-gray-900 dark:focus:border-gray-400';
+  const inputErr = 'border-red-500 dark:border-red-500 focus:border-red-600 dark:focus:border-red-500';
+  const inputClass = (field?: string) =>
+    `${inputBase} ${field && fieldErrors[field] ? inputErr : inputOk}`;
   const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
-  const steps = ['general', 'ubicacion', 'propiedad'] as const;
-  const stepLabels = { general: 'Datos generales', ubicacion: 'Ubicación', propiedad: form.ownership === 'alquiler' ? 'Contrato alquiler' : 'Datos propiedad' };
+  const wizardRows: { id: WizardStepId; n: number; title: string; hint: string }[] = [
+    { id: 'general', n: 1, title: 'General', hint: simplifyPdvCreate ? 'Tipo y nombre' : 'Tipo, nombre, trabajadores' },
+    { id: 'ubicacion', n: 2, title: 'Ubicación', hint: 'Dirección y contacto' },
+    {
+      id: 'propiedad',
+      n: 3,
+      title: form.ownership === 'alquiler' ? 'Contrato' : 'Propiedad',
+      hint: form.ownership === 'alquiler' ? 'Alquiler' : 'Compra',
+    },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -224,7 +329,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
               {editItem ? 'Editar centro de trabajo' : 'Nuevo centro de trabajo'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              Configura los datos del centro de trabajo
+              {editItem ? 'Actualiza los datos del centro' : 'Completa los 3 pasos y guarda'}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
@@ -232,20 +337,42 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
           </button>
         </div>
 
-        <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
-          {steps.map((s) => (
-            <button
-              key={s}
-              onClick={() => setStep(s)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                step === s
-                  ? 'border-gray-900 dark:border-gray-100 text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              {stepLabels[s]}
-            </button>
-          ))}
+        <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-white dark:from-gray-900/90 dark:to-gray-800">
+          <p className="text-center text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
+            Asistente · 3 pasos
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {wizardRows.map((row) => {
+              const active = step === row.id;
+              const err = stepHasFieldError(row.id);
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setStep(row.id)}
+                  className={`rounded-xl border-2 p-3 flex flex-col items-center gap-1.5 text-center transition-all min-h-[5.5rem] justify-center ${
+                    active
+                      ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 shadow-sm'
+                      : 'border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-800/60 hover:border-gray-400 dark:hover:border-gray-500'
+                  } ${err ? 'ring-2 ring-red-400 dark:ring-red-700 ring-offset-1 ring-offset-gray-50 dark:ring-offset-gray-900' : ''}`}
+                >
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
+                      active
+                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+                    }`}
+                  >
+                    {row.n}
+                  </span>
+                  <span className={`text-xs font-bold leading-tight ${active ? 'text-gray-900 dark:text-gray-50' : 'text-gray-600 dark:text-gray-300'}`}>
+                    {row.title}
+                  </span>
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight px-0.5">{row.hint}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="p-6 space-y-4">
@@ -253,11 +380,6 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
             <>
               <div>
                 <label className={labelClass}>Tipo de centro *</label>
-                {forcePointOfSale && (
-                  <p className="mb-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/20 dark:text-indigo-300">
-                    Este flujo crea un Punto de venta para poder operar delivery y TPV.
-                  </p>
-                )}
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { type: 'oficina' as WorkCenterType, desc: 'Oficinas, despachos' },
@@ -296,37 +418,79 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
                 <div>
                   <label className={labelClass}>Nombre del tipo personalizado *</label>
                   <input
-                    className={inputClass}
+                    className={inputClass('customTypeName')}
                     placeholder="Ej: Garaje, Trastero, Nave industrial, Parking..."
                     value={form.customTypeName}
-                    onChange={(e) => setForm(f => ({ ...f, customTypeName: e.target.value }))}
+                    onChange={(e) => {
+                      clearFieldError('customTypeName');
+                      setForm(f => ({ ...f, customTypeName: e.target.value }));
+                    }}
                   />
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Define el tipo de espacio a tu medida</p>
+                </div>
+              )}
+
+              {pdvLabelPreview && (
+                <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50/90 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/35">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
+                    Cómo se verá en caja, delivery y menús
+                  </p>
+                  <div className="mt-2 flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-gray-900">
+                      <Store className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        Código automático{' '}
+                        <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">{pdvLabelPreview.code}</span>
+                        {' '}· mismo criterio que al guardar (nombre + PDV ya creados).
+                      </p>
+                      <p
+                        className="truncate text-sm font-bold text-gray-900 dark:text-gray-100"
+                        title={pdvLabelPreview.label}
+                      >
+                        {pdvLabelPreview.label}
+                      </p>
+                      {!form.name.trim() && (
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                          Escribe el nombre de la tienda para ver la etiqueta completa (código · nombre).
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
               <div>
                 <label className={labelClass}>Nombre *</label>
                 <input
-                  className={inputClass}
+                  className={inputClass('name')}
                   placeholder="Ej: Oficina Central, Tienda Gran Vía..."
                   value={form.name}
-                  onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
+                  onChange={(e) => {
+                    clearFieldError('name');
+                    setForm(f => ({ ...f, name: e.target.value }));
+                  }}
                   autoFocus
                 />
               </div>
-              <div>
-                <label className={labelClass}>Trabajadores previstos *</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={999}
-                  className={inputClass}
-                  placeholder="Ej: 8"
-                  value={form.expectedStaffCount}
-                  onChange={(e) => setForm(f => ({ ...f, expectedStaffCount: e.target.value }))}
-                />
-              </div>
+              {!simplifyPdvCreate && (
+                <div>
+                  <label className={labelClass}>Trabajadores previstos *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    className={inputClass('expectedStaffCount')}
+                    placeholder="Obligatorio — número de personas (1–999)"
+                    value={form.expectedStaffCount}
+                    onChange={(e) => {
+                      clearFieldError('expectedStaffCount');
+                      setForm(f => ({ ...f, expectedStaffCount: e.target.value }));
+                    }}
+                  />
+                </div>
+              )}
 
               <div>
                 <label className={labelClass}>Régimen</label>
@@ -335,7 +499,18 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
                     <button
                       key={ow}
                       type="button"
-                      onClick={() => setForm(f => ({ ...f, ownership: ow }))}
+                      onClick={() => {
+                        setForm(f => ({ ...f, ownership: ow }));
+                        setFieldErrors((p) => {
+                          const n = { ...p };
+                          ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].forEach(
+                            (k) => {
+                              delete n[k];
+                            },
+                          );
+                          return n;
+                        });
+                      }}
                       className={`flex items-center gap-2.5 p-3 rounded-xl border-2 text-left transition-all text-sm ${
                         form.ownership === ow
                           ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-700'
@@ -355,92 +530,133 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
                 <label className={labelClass}>Notas internas</label>
                 <textarea
                   rows={2}
-                  className={`${inputClass} resize-none`}
+                  className={`${inputClass()} resize-none`}
                   placeholder="Notas adicionales..."
                   value={form.notes}
                   onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, active: !f.active }))}
-                className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
-                  form.active
-                    ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-                      {form.active ? 'Activo' : 'Inactivo'}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {form.active ? 'Visible en la aplicación' : 'Oculto en los selectores'}
-                    </p>
-                  </div>
-                  {form.active ? <ToggleRight className="w-7 h-7 text-green-600" /> : <ToggleLeft className="w-7 h-7 text-gray-400" />}
-                </div>
-              </button>
-              <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
-                  <Users className="w-6 h-6 text-gray-700 dark:text-gray-200" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Invitar equipo del centro</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Configura usuarios desde Equipo para que el centro opere correctamente.</p>
-                </div>
+              {!simplifyPdvCreate && (
                 <button
                   type="button"
-                  onClick={() => navigate('/saas/team')}
-                  className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                  onClick={() => setForm(f => ({ ...f, active: !f.active }))}
+                  className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+                    form.active
+                      ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
+                      : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
+                  }`}
                 >
-                  Ir a Equipo
-                  <ArrowRight className="w-4 h-4" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-gray-900 dark:text-gray-100 text-sm">
+                        {form.active ? 'Activo' : 'Inactivo'}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {form.active ? 'Visible en la aplicación' : 'Oculto en los selectores'}
+                      </p>
+                    </div>
+                    {form.active ? <ToggleRight className="w-7 h-7 text-green-600" /> : <ToggleLeft className="w-7 h-7 text-gray-400" />}
+                  </div>
                 </button>
-              </div>
+              )}
+              {!simplifyPdvCreate && (
+                <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
+                    <Users className="w-6 h-6 text-gray-700 dark:text-gray-200" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Invitar equipo del centro</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Configura usuarios desde Equipo para que el centro opere correctamente.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/saas/team')}
+                    className="shrink-0 inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+                  >
+                    Ir a Equipo
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </>
           )}
 
           {step === 'ubicacion' && (
             <>
               <div>
-                <label className={labelClass}>Dirección</label>
-                <input className={inputClass} placeholder="Calle, número..." value={form.address} onChange={(e) => setForm(f => ({ ...f, address: e.target.value }))} />
+                <label className={labelClass}>Dirección *</label>
+                <input
+                  className={inputClass('address')}
+                  placeholder="Calle, número, piso…"
+                  value={form.address}
+                  onChange={(e) => {
+                    clearFieldError('address');
+                    setForm(f => ({ ...f, address: e.target.value }));
+                  }}
+                />
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className={labelClass}>Ciudad</label>
-                  <input className={inputClass} placeholder="Madrid" value={form.city} onChange={(e) => setForm(f => ({ ...f, city: e.target.value }))} />
+                  <label className={labelClass}>Ciudad *</label>
+                  <input
+                    className={inputClass('city')}
+                    placeholder="Ciudad"
+                    value={form.city}
+                    onChange={(e) => {
+                      clearFieldError('city');
+                      setForm(f => ({ ...f, city: e.target.value }));
+                    }}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Provincia</label>
-                  <input className={inputClass} placeholder="Madrid" value={form.province} onChange={(e) => setForm(f => ({ ...f, province: e.target.value }))} />
+                  <input
+                    className={inputClass()}
+                    placeholder="Provincia"
+                    value={form.province}
+                    onChange={(e) => setForm(f => ({ ...f, province: e.target.value }))}
+                  />
                 </div>
                 <div>
-                  <label className={labelClass}>C.P.</label>
-                  <input className={inputClass} placeholder="28001" value={form.postalCode} onChange={(e) => setForm(f => ({ ...f, postalCode: e.target.value }))} />
+                  <label className={labelClass}>C.P. *</label>
+                  <input
+                    className={inputClass('postalCode')}
+                    placeholder="Código postal"
+                    value={form.postalCode}
+                    onChange={(e) => {
+                      clearFieldError('postalCode');
+                      setForm(f => ({ ...f, postalCode: e.target.value }));
+                    }}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Teléfono</label>
-                  <input className={inputClass} placeholder="+34 600 000 000" value={form.phone} onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))} />
+                  <label className={labelClass}>Teléfono del centro *</label>
+                  <input
+                    className={inputClass('phone')}
+                    placeholder="+34 …"
+                    value={form.phone}
+                    onChange={(e) => {
+                      clearFieldError('phone');
+                      setForm(f => ({ ...f, phone: e.target.value }));
+                    }}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Email</label>
-                  <input type="email" className={inputClass} placeholder="centro@empresa.com" value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
+                  <input type="email" className={inputClass()} placeholder="centro@empresa.com" value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Superficie (m²)</label>
-                  <input type="number" className={inputClass} placeholder="120" value={form.squareMeters} onChange={(e) => setForm(f => ({ ...f, squareMeters: e.target.value }))} />
+                  <input type="number" className={inputClass()} placeholder="120" value={form.squareMeters} onChange={(e) => setForm(f => ({ ...f, squareMeters: e.target.value }))} />
                 </div>
                 <div>
                   <label className={labelClass}>Referencia catastral</label>
-                  <input className={inputClass} placeholder="Ref. catastral" value={form.cadastralReference} onChange={(e) => setForm(f => ({ ...f, cadastralReference: e.target.value }))} />
+                  <input className={inputClass()} placeholder="Ref. catastral" value={form.cadastralReference} onChange={(e) => setForm(f => ({ ...f, cadastralReference: e.target.value }))} />
                 </div>
               </div>
             </>
@@ -448,20 +664,32 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
 
           {step === 'propiedad' && form.ownership === 'propiedad' && (
             <>
-              <div className="flex items-center gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800 rounded-xl">
-                <Home className="w-5 h-5 text-emerald-600 shrink-0" />
-                <p className="text-sm text-emerald-800 dark:text-emerald-300">
-                  Datos de la propiedad. Estos campos son opcionales y se almacenan de forma privada.
-                </p>
-              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Precio de compra (€)</label>
-                  <input type="number" className={inputClass} placeholder="150000" value={form.purchasePrice} onChange={(e) => setForm(f => ({ ...f, purchasePrice: e.target.value }))} />
+                  <label className={labelClass}>Precio de compra (€) *</label>
+                  <input
+                    type="number"
+                    min={0}
+                    className={inputClass('purchasePrice')}
+                    placeholder="0"
+                    value={form.purchasePrice}
+                    onChange={(e) => {
+                      clearFieldError('purchasePrice');
+                      setForm(f => ({ ...f, purchasePrice: e.target.value }));
+                    }}
+                  />
                 </div>
                 <div>
-                  <label className={labelClass}>Fecha de compra</label>
-                  <input type="date" className={inputClass} value={form.purchaseDate} onChange={(e) => setForm(f => ({ ...f, purchaseDate: e.target.value }))} />
+                  <label className={labelClass}>Fecha de compra *</label>
+                  <input
+                    type="date"
+                    className={inputClass('purchaseDate')}
+                    value={form.purchaseDate}
+                    onChange={(e) => {
+                      clearFieldError('purchaseDate');
+                      setForm(f => ({ ...f, purchaseDate: e.target.value }));
+                    }}
+                  />
                 </div>
               </div>
             </>
@@ -469,59 +697,130 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem, forcePointOfSale =
 
           {step === 'propiedad' && form.ownership === 'alquiler' && (
             <>
-              <div className="flex items-center gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-xl">
-                <FileText className="w-5 h-5 text-orange-600 shrink-0" />
-                <p className="text-sm text-orange-800 dark:text-orange-300">
-                  Datos del contrato de alquiler. Toda la información se almacena de forma privada.
-                </p>
-              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Inicio del contrato</label>
-                  <input type="date" className={inputClass} value={form.contractStartDate} onChange={(e) => setForm(f => ({ ...f, contractStartDate: e.target.value }))} />
+                  <label className={labelClass}>Inicio del contrato *</label>
+                  <input
+                    type="date"
+                    className={inputClass('contractStartDate')}
+                    value={form.contractStartDate}
+                    onChange={(e) => {
+                      clearFieldError('contractStartDate');
+                      setForm(f => ({ ...f, contractStartDate: e.target.value }));
+                    }}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Fin del contrato</label>
-                  <input type="date" className={inputClass} value={form.contractEndDate} onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))} />
+                  <input
+                    type="date"
+                    className={inputClass()}
+                    value={form.contractEndDate}
+                    onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>Precio mensual (€)</label>
-                  <input type="number" className={inputClass} placeholder="1200" value={form.monthlyPrice} onChange={(e) => setForm(f => ({ ...f, monthlyPrice: e.target.value }))} />
+                  <label className={labelClass}>Precio mensual (€) *</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className={inputClass('monthlyPrice')}
+                    placeholder="1.200 o 1.200,50"
+                    value={form.monthlyPrice}
+                    onChange={(e) => {
+                      clearFieldError('monthlyPrice');
+                      setForm((f) => ({ ...f, monthlyPrice: formatMoneyAsYouType(e.target.value, true) }));
+                    }}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Fianza (€)</label>
-                  <input type="number" className={inputClass} placeholder="2400" value={form.deposit} onChange={(e) => setForm(f => ({ ...f, deposit: e.target.value }))} />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className={inputClass()}
+                    placeholder="2.400"
+                    value={form.deposit}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, deposit: formatMoneyAsYouType(e.target.value, false) }))
+                    }
+                  />
                 </div>
               </div>
               <div>
-                <label className={labelClass}>Arrendador (nombre)</label>
-                <input className={inputClass} placeholder="Nombre del arrendador" value={form.landlord} onChange={(e) => setForm(f => ({ ...f, landlord: e.target.value }))} />
+                <label className={labelClass}>Arrendador (nombre) *</label>
+                <input
+                  className={inputClass('landlord')}
+                  placeholder="Nombre o razón social"
+                  value={form.landlord}
+                  onChange={(e) => {
+                    clearFieldError('landlord');
+                    setForm(f => ({ ...f, landlord: e.target.value }));
+                  }}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Teléfono arrendador</label>
-                  <input className={inputClass} placeholder="+34 600 000 000" value={form.landlordPhone} onChange={(e) => setForm(f => ({ ...f, landlordPhone: e.target.value }))} />
+                  <input
+                    className={inputClass()}
+                    placeholder="+34 600 000 000"
+                    value={form.landlordPhone}
+                    onChange={(e) => setForm(f => ({ ...f, landlordPhone: e.target.value }))}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>Email arrendador</label>
-                  <input type="email" className={inputClass} placeholder="arrendador@email.com" value={form.landlordEmail} onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))} />
+                  <input
+                    type="email"
+                    className={inputClass()}
+                    placeholder="arrendador@email.com"
+                    value={form.landlordEmail}
+                    onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))}
+                  />
                 </div>
               </div>
               <div>
                 <label className={labelClass}>Notas del contrato</label>
-                <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Condiciones especiales, renovación..." value={form.contractNotes} onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))} />
+                <textarea
+                  rows={2}
+                  className={`${inputClass()} resize-none`}
+                  placeholder="Condiciones especiales, renovación..."
+                  value={form.contractNotes}
+                  onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))}
+                />
               </div>
             </>
           )}
         </div>
 
-        <div className="sticky bottom-0 bg-white dark:bg-gray-800 flex gap-3 p-6 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
-          <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm">
+        <div className="sticky bottom-0 bg-white dark:bg-gray-800 flex flex-col sm:flex-row gap-2 p-6 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
+          >
             Cancelar
           </button>
-          <button type="button" onClick={handleSubmit} disabled={saving} className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+          {step !== 'propiedad' && (
+            <button
+              type="button"
+              onClick={() => setStep(step === 'general' ? 'ubicacion' : 'propiedad')}
+              className="flex-1 px-4 py-2.5 border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
+            >
+              Siguiente paso
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={saving}
+            className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          >
             {saving ? 'Guardando...' : editItem ? 'Guardar cambios' : 'Crear centro de trabajo'}
           </button>
         </div>
@@ -551,12 +850,20 @@ export function SalesPointsTab() {
   const [deleteTarget, setDeleteTarget] = useState<WorkCenter | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
+  /** Códigos de PDV en delivery (para previsualizar etiqueta al crear tienda). */
+  const [deliveryPdvCodes, setDeliveryPdvCodes] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
     if (!resolvedUserId) return;
     try {
-      const wcs = await listWorkCenters(resolvedUserId);
+      const [wcs, pdvList] = await Promise.all([
+        listWorkCenters(resolvedUserId),
+        listPointsOfSaleRequest(resolvedUserId).catch(() => []),
+      ]);
       setWorkCenters(wcs);
+      setDeliveryPdvCodes(
+        (pdvList as { code?: string }[]).map((p) => String(p.code || '').trim()).filter(Boolean),
+      );
     } catch {
       toast.error('Error al cargar los centros de trabajo');
     } finally {
@@ -1036,6 +1343,7 @@ export function SalesPointsTab() {
         onSave={handleSave}
         editItem={editingItem}
         forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv}
+        existingPdvCodes={deliveryPdvCodes}
       />
 
       {showProAccessModal && (

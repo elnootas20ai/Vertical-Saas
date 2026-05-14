@@ -137,11 +137,17 @@ function getSedesStatus(count: number): BlockStatus {
   return 'empty';
 }
 
+/** Miembros que no son el titular = invitación aceptada al negocio. */
+function invitedWorkersCount(biz: Business | null): number {
+  if (!biz) return 0;
+  return biz.members.filter((m) => m.user_id !== biz.owner_user_id).length;
+}
+
 function getUsuariosStatus(biz: Business | null): BlockStatus {
-  if (!biz) return 'empty';
-  if (biz.members.length >= 2) return 'complete';
-  if (biz.members.length === 1) return 'partial';
-  return 'empty';
+  if (!biz || biz.members.length === 0) return 'empty';
+  const invited = invitedWorkersCount(biz);
+  if (invited >= 1) return 'complete';
+  return 'partial';
 }
 
 function getPermisosStatus(biz: Business | null): BlockStatus {
@@ -290,12 +296,11 @@ const CONNECTIONS = [
 export function ConfiguracionGeneral() {
   const navigate = useNavigate();
   const { currentBusiness } = useBusiness();
-  const { user, listUsers } = useAuth();
+  const { user } = useAuth();
   const { subscription } = useApp();
 
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loadingCenters, setLoadingCenters] = useState(true);
-  const [teamCount, setTeamCount] = useState(0);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [modulesData, setModulesData] = useState<ModulesConfig | null>(null);
   const [invoiceEmailData, setInvoiceEmailData] = useState<InvoiceEmailConfig | null>(null);
@@ -385,12 +390,6 @@ export function ConfiguracionGeneral() {
   }, [user?.id]);
 
   useEffect(() => {
-    listUsers()
-      .then((members) => setTeamCount(members.length))
-      .catch(() => setTeamCount(0));
-  }, [listUsers]);
-
-  useEffect(() => {
     if (!bizId) return;
     getModulesConfig(bizId).then(setModulesData).catch(() => {});
     getInvoiceEmailConfig(bizId).then(setInvoiceEmailData).catch(() => {});
@@ -447,6 +446,8 @@ export function ConfiguracionGeneral() {
 
   const activeCenters = workCenters.filter((c) => c.active);
 
+  const invitedAccepted = invitedWorkersCount(biz);
+
   const activeModulesSet = useMemo(() => new Set(modulesData?.activeModules ?? biz?.activeModules ?? []), [modulesData, biz]);
   const contractedModulesSet = useMemo(() => new Set(modulesData?.contractedModules ?? biz?.contractedModules ?? []), [modulesData, biz]);
 
@@ -473,10 +474,13 @@ export function ConfiguracionGeneral() {
       id: 'usuarios',
       icon: Users,
       title: 'Usuarios',
-      description: teamCount > 0 ? `${teamCount} miembro(s) en el equipo` : 'Invita a tu equipo',
+      description:
+        invitedAccepted === 0
+          ? 'Ningún trabajador ha aceptado invitación aún'
+          : `${invitedAccepted} trabajador${invitedAccepted === 1 ? '' : 'es'} con invitación aceptada`,
       status: getUsuariosStatus(biz),
       route: '/saas/settings/usuarios',
-      stats: `${teamCount} usuarios`,
+      stats: invitedAccepted === 0 ? 'Invita desde Equipo' : 'Cuenta sincronizada con miembros del negocio',
     },
     {
       id: 'permisos',
@@ -544,7 +548,7 @@ export function ConfiguracionGeneral() {
         return `${[s.stock, s.clients, s.catalog].filter((v) => v === 'completed').length}/3 completados`;
       })(),
     },
-  ], [biz, activeCenters, teamCount, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet]);
+  ], [biz, activeCenters, invitedAccepted, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet]);
 
   const visibleBlocks = blocks.filter((b) => !('hidden' in b && b.hidden));
 

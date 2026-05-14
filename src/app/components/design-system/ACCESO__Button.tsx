@@ -38,6 +38,8 @@ export const ACCESO__Button = forwardRef<HTMLButtonElement, ACCESO__ButtonProps>
     
     const widthStyles = fullWidth ? 'w-full' : '';
     
+    const iconSize = size === 'lg' ? 'w-5 h-5' : 'w-4 h-4';
+
     return (
       <button
         ref={ref}
@@ -45,10 +47,10 @@ export const ACCESO__Button = forwardRef<HTMLButtonElement, ACCESO__ButtonProps>
         disabled={disabled || loading}
         {...props}
       >
-        {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-        {!loading && icon === 'back' && <ArrowLeft className="w-4 h-4" />}
+        {loading && <Loader2 className={`${iconSize} animate-spin`} />}
+        {!loading && icon === 'back' && <ArrowLeft className={iconSize} />}
         {children}
-        {!loading && icon === 'next' && <ArrowRight className="w-4 h-4" />}
+        {!loading && icon === 'next' && <ArrowRight className={iconSize} />}
       </button>
     );
   }

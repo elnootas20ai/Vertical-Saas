@@ -1,13 +1,13 @@
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useEffect, useRef, useState } from 'react';
 import { AppProvider, useApp } from '../context/AppContext';
-import { BusinessProvider, useBusiness } from '../context/BusinessContext';
+import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
+import { useBusiness } from '../context/BusinessContext';
 import { GroupProvider } from '../context/GroupContext';
 import { ActivationChecklistProvider } from '../context/ActivationChecklistContext';
 import { SetupProgressProvider, useSetupProgress } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 import { useAuth } from '../context/AuthContext';
-import { EMAIL_SKIP_KEY } from './auth/VerifyEmailPending';
 
 interface OnboardingCompanyProfile {
   tradeName?: string;
@@ -15,6 +15,7 @@ interface OnboardingCompanyProfile {
   taxId?: string;
   address?: string;
   province?: string;
+  city?: string;
   companyEmail?: string;
   companyPhone?: string;
 }
@@ -43,12 +44,10 @@ function SaasContent() {
 
   useEffect(() => {
     if (!isInitializing && isAuthenticated && user && !user.emailVerified) {
-      const skipped = localStorage.getItem(EMAIL_SKIP_KEY(user.user_id));
-      if (!skipped) {
-        navigate('/auth/verify-email-pending', { replace: true });
-      }
+      if (location.pathname.startsWith('/saas/settings')) return;
+      navigate('/auth/verify-email-pending', { replace: true });
     }
-  }, [isInitializing, isAuthenticated, user, navigate]);
+  }, [isInitializing, isAuthenticated, user, navigate, location.pathname]);
 
   useEffect(() => {
     if (
@@ -89,7 +88,7 @@ function SaasContent() {
         legalName: profile?.legalName,
         taxId: profile?.taxId,
         address: profile?.address,
-        city: profile?.province,
+        city: profile?.city || profile?.province,
         phone: profile?.companyPhone,
         email: profile?.companyEmail,
         businessType: bt || 'carDealership',
@@ -97,6 +96,10 @@ function SaasContent() {
         .then((result) => {
           if (!result.success) {
             navigate('/auth/gate', { replace: true });
+            return;
+          }
+          if (onboarding?.businessType === 'delivery') {
+            navigate('/saas/settings/centros-de-trabajo?action=new-pdv', { replace: true });
           }
         })
         .catch(() => {
@@ -170,7 +173,7 @@ function SaasContent() {
 
 export function SaasRoot() {
   return (
-    <BusinessProvider>
+    <ActiveStoreScopeProvider>
       <GroupProvider>
         <AppProvider>
           <ScrapyardProvider>
@@ -182,6 +185,6 @@ export function SaasRoot() {
           </ScrapyardProvider>
         </AppProvider>
       </GroupProvider>
-    </BusinessProvider>
+    </ActiveStoreScopeProvider>
   );
 }

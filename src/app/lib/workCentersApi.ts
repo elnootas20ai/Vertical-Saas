@@ -159,6 +159,30 @@ export async function listWorkCenters(userId: string): Promise<WorkCenter[]> {
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
+/**
+ * Misma DB que `listWorkCenters`, pero incluye documentos guardados bajo el `user_id` de
+ * cualquier miembro del negocio. Así el TPV/delivery (datos bajo el titular) ve también
+ * centros creados desde la cuenta de un encargado u otro miembro.
+ */
+export async function listWorkCentersForDelivery(
+  dataUserId: string,
+  business?: { members?: { user_id?: string }[] } | null,
+): Promise<WorkCenter[]> {
+  const id = String(dataUserId || '').trim();
+  if (!id) return [];
+  await ensureDb();
+  const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
+  const allowed = new Set<string>([id]);
+  for (const m of business?.members || []) {
+    const uid = String(m.user_id || '').trim();
+    if (uid) allowed.add(uid);
+  }
+  return ((payload.docs || []) as unknown[])
+    .map(normalizeWorkCenter)
+    .filter((wc): wc is WorkCenter => wc !== null && allowed.has(wc.user_id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
 export async function createWorkCenter(
   userId: string,
   payload: Omit<CreateWorkCenterPayload, 'user_id'>,

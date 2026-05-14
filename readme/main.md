@@ -68,3 +68,4 @@ La arquitectura está orientada a producto SaaS modular:
 - **Dominio separado por carpetas** dentro de `components`.
 - **Sistema visual global** en `styles`.
 - **Documentación viva** para orientar cambios pequeños sin afectar producción.
+- **Notas operativas y checklist de pendientes** (p. ej. delivery / tienda activa): `readme/Untitled`.

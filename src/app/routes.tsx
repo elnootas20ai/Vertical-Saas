@@ -16,7 +16,7 @@ import { Recommendation } from './pages/auth/onboarding/Recommendation';
 import { PaymentInfo } from './pages/auth/onboarding/PaymentInfo';
 import { Confirmation } from './pages/auth/onboarding/Confirmation';
 import { Gate } from './pages/auth/Gate';
-import { BusinessProvider } from './context/BusinessContext';
+import { RequireEmailVerified } from './components/RequireEmailVerified';
 import { VerifyEmailPending } from './pages/auth/VerifyEmailPending';
 import { SaasRoot } from './pages/SaasRoot';
 import { Dashboard } from './pages/saas/Dashboard';
@@ -105,6 +105,7 @@ import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
+import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
 import { ChangelogPage } from './pages/saas/ChangelogPage';
 import { WorkOrderStatus } from './pages/public/WorkOrderStatus';
@@ -311,14 +312,6 @@ function CatchAll() {
   return <Navigate to="/saas/dashboard" replace />;
 }
 
-function GateWithBusinessProvider() {
-  return (
-    <BusinessProvider>
-      <Gate />
-    </BusinessProvider>
-  );
-}
-
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -374,35 +367,67 @@ export const router = createBrowserRouter([
       },
       {
         path: 'auth/onboarding/business-type',
-        Component: BusinessType,
+        element: (
+          <RequireEmailVerified>
+            <BusinessType />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/company',
-        Component: Company,
+        element: (
+          <RequireEmailVerified>
+            <Company />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/structure',
-        Component: Structure,
+        element: (
+          <RequireEmailVerified>
+            <Structure />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/needs',
-        Component: Needs,
+        element: (
+          <RequireEmailVerified>
+            <Needs />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/recommendation',
-        Component: Recommendation,
+        element: (
+          <RequireEmailVerified>
+            <Recommendation />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/payment-info',
-        Component: PaymentInfo,
+        element: (
+          <RequireEmailVerified>
+            <PaymentInfo />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/onboarding/confirmation',
-        Component: Confirmation,
+        element: (
+          <RequireEmailVerified>
+            <Confirmation />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/gate',
-        Component: GateWithBusinessProvider,
+        element: (
+          <RequireEmailVerified>
+            <Gate />
+          </RequireEmailVerified>
+        ),
       },
       {
         path: 'auth/verify-email',
@@ -499,7 +524,7 @@ export const router = createBrowserRouter([
           { path: 'delivery-crm', Component: DeliveryCrm },
           { path: 'delivery-crm/worker', Component: DeliveryCrmWorker },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },
-          { path: 'admin', element: <RequireBusinessOwner><AdminPanel /></RequireBusinessOwner> },
+          { path: 'admin', element: <RequireBusinessOwner><RequireSuperAdmin><AdminPanel /></RequireSuperAdmin></RequireBusinessOwner> },
           { path: 'gdpr', element: <RequireBusinessOwner><GdprPanel /></RequireBusinessOwner> },
           { path: 'settings', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'settings/:tab', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },

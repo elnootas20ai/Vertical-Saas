@@ -114,3 +114,17 @@ export function getNifOrCifError(value: string): string | null {
   if (!value.trim()) return null;
   return validateNifOrCif(value) ? null : 'NIF/CIF no válido. Comprueba el número y el dígito de control';
 }
+
+/** Longitud típica DNI / NIE / CIF español (sin contar guiones). */
+export const SPANISH_TAX_ID_FULL_LENGTH = 9;
+
+/**
+ * Para validación en vivo al escribir: no marcamos error hasta tener
+ * 9 caracteres (formato completo). Así no bloquea la captura letra a letra.
+ */
+export function getNifOrCifErrorWhileTyping(value: string): string | null {
+  const v = value.trim().toUpperCase();
+  if (!v) return null;
+  if (v.length < SPANISH_TAX_ID_FULL_LENGTH) return null;
+  return getNifOrCifError(v);
+}

@@ -5,6 +5,15 @@ import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import {
+  DELIVERY_ACTIVE_STORE_CHANGED,
+  readDeliveryOpsSelectedPdvId,
+  writeDeliveryOpsSelectedPdvId,
+  resolvePreferenceToPdvId,
+  notifyDeliveryActiveStoreChanged,
+} from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { getAuthHeaders } from '../../lib/authApi';
@@ -712,6 +721,7 @@ function opsPanelFromSearch(panelParam: string | null): OpsPanelId {
 export function DeliveryOpsCenter() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const opsPanel = opsPanelFromSearch(searchParams.get('panel'));
@@ -771,6 +781,10 @@ export function DeliveryOpsCenter() {
     }
   }, []);
   const authUserId = user?.user_id || user?.id || user?.userId || user?._id || sessionUserId || null;
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
   const sseToken = useMemo(() => {
     const headers = getAuthHeaders();
     const authHeader = headers.Authorization || headers.authorization;
@@ -799,6 +813,83 @@ export function DeliveryOpsCenter() {
       return { ...prev, salesPointId: singleActivePdvId };
     });
   }, [singleActivePdvId]);
+
+  const restoredOpsPdvSelectionRef = useRef(false);
+  const persistBootRef = useRef(false);
+  const prevPersistedSalesPointRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    restoredOpsPdvSelectionRef.current = false;
+    persistBootRef.current = false;
+    prevPersistedSalesPointRef.current = undefined;
+  }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
+
+  /** Persistir tienda elegida para que el TPV rápido abra esa caja sin paso intermedio. */
+  useEffect(() => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (!bid || !dataUserId) return;
+    const id = filters.salesPointId?.trim() || null;
+    let toStore = id;
+    if (id && data?.pointsOfSale?.length) {
+      const pdv = data.pointsOfSale.find((p) => p._id === id);
+      if (pdv && String(pdv.workCenterId || '').trim()) {
+        toStore = `wc:${String(pdv.workCenterId).trim()}`;
+      }
+    }
+    if (!persistBootRef.current) {
+      persistBootRef.current = true;
+      prevPersistedSalesPointRef.current = toStore;
+      if (toStore) {
+        writeDeliveryOpsSelectedPdvId(bid, dataUserId, toStore);
+        notifyDeliveryActiveStoreChanged();
+      }
+      return;
+    }
+    if (prevPersistedSalesPointRef.current === toStore) return;
+    prevPersistedSalesPointRef.current = toStore;
+    writeDeliveryOpsSelectedPdvId(bid, dataUserId, toStore);
+    notifyDeliveryActiveStoreChanged();
+  }, [filters.salesPointId, currentBusiness?.business_id, currentBusiness?.id, dataUserId, data?.pointsOfSale]);
+
+  useEffect(() => {
+    if (!data?.pointsOfSale?.length || restoredOpsPdvSelectionRef.current) return;
+    const activePdvs = data.pointsOfSale.filter((p) => p.active !== false);
+    if (activePdvs.length <= 1) {
+      restoredOpsPdvSelectionRef.current = true;
+      return;
+    }
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (!bid || !dataUserId) {
+      restoredOpsPdvSelectionRef.current = true;
+      return;
+    }
+    const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+    const pdvId = resolvePreferenceToPdvId(data.pointsOfSale, saved);
+    if (pdvId) {
+      setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
+    }
+    restoredOpsPdvSelectionRef.current = true;
+  }, [data?.pointsOfSale, currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+
+  /** Selector global (Topbar) o sidebar: misma clave localStorage → alinear filtro Ops sin recargar. */
+  useEffect(() => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const onStore = () => {
+      if (!bid || !dataUserId) return;
+      const list = data?.pointsOfSale;
+      if (!list?.length) return;
+      const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+      if (!saved) {
+        setFilters((f) => (f.salesPointId ? { ...f, salesPointId: undefined } : f));
+        return;
+      }
+      const pdvId = resolvePreferenceToPdvId(list, saved);
+      if (pdvId) {
+        setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
+      }
+    };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId, data?.pointsOfSale]);
 
   /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
   const pedidosQueueCount = useMemo(() => {
@@ -919,7 +1010,39 @@ export function DeliveryOpsCenter() {
       ? 'bg-amber-500 animate-pulse'
       : 'bg-red-500 animate-pulse';
 
-  const layoutSubtitle =
+  /** Etiqueta PDV para cabecera y barra interna: filtro Ops, preferencia local, un solo PDV, o selector global. */
+  const effectiveOpsPdvLabel = useMemo(() => {
+    const list = data?.pointsOfSale ?? [];
+    const id = filters.salesPointId?.trim();
+    if (id && list.length) {
+      const p = list.find((x) => x._id === id);
+      if (p) return pointOfSaleDisplayLabel(p);
+    }
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (bid && dataUserId && list.length > 1) {
+      const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+      const pid = resolvePreferenceToPdvId(list, saved);
+      if (pid) {
+        const p = list.find((x) => x._id === pid);
+        if (p) return pointOfSaleDisplayLabel(p);
+      }
+    }
+    const activeList = list.filter((p) => p.active !== false);
+    if (activeList.length === 1) {
+      return pointOfSaleDisplayLabel(activeList[0]);
+    }
+    const global = activeStoreScope.displayLabelForActive?.trim();
+    return global || null;
+  }, [
+    filters.salesPointId,
+    data?.pointsOfSale,
+    activeStoreScope.displayLabelForActive,
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    dataUserId,
+  ]);
+
+  const layoutSecondaryLine =
     opsPanel === 'pedidos'
       ? 'Pedidos e historial integrados en Ops'
       : opsPanel === 'clients'
@@ -927,6 +1050,10 @@ export function DeliveryOpsCenter() {
         : opsPanel === 'promotions'
           ? 'Promociones en Ops'
           : subtitle;
+
+  const layoutSubtitle = effectiveOpsPdvLabel
+    ? `${effectiveOpsPdvLabel} · ${layoutSecondaryLine}`
+    : layoutSecondaryLine;
 
   return (
     <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
@@ -942,7 +1069,14 @@ export function DeliveryOpsCenter() {
               </span>
             </div>
             <span className="text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-50 truncate">
-              Vista principal · delivery
+              {effectiveOpsPdvLabel ? (
+                <>
+                  Viendo <span className="text-teal-700 dark:text-teal-400">{effectiveOpsPdvLabel}</span>
+                  <span className="font-normal text-gray-600 dark:text-gray-400"> · delivery</span>
+                </>
+              ) : (
+                <>Vista principal · delivery</>
+              )}
             </span>
             <div className="flex-1 min-w-[4px]" />
             <button type="button" onClick={load} className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 rounded-md hover:bg-white/80 dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-600 transition-colors shrink-0" title="Actualizar">

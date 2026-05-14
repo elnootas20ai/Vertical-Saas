@@ -24,7 +24,7 @@ import {
   updateCommissionStatusAdmin,
   deleteCommissionAdmin,
 } from '../controllers/affiliateController.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import { apiLimiter } from '../middleware/rateLimiter.js';
 
 export const affiliateRouter = Router();
@@ -41,22 +41,22 @@ affiliateRouter.post('/portal/:code/clients', apiLimiter, portalRegisterClient);
 affiliateRouter.get('/portal/:code/referred', portalReferredAccounts);
 
 // ── Admin (requires auth) ──────────────────────────────────────────────────────
-affiliateRouter.get('/admin/:userId/affiliates', requireAuth, listAffiliatesAdmin);
-affiliateRouter.post('/admin/:userId/affiliates', requireAuth, createAffiliateAdmin);
-affiliateRouter.put('/admin/:userId/affiliates/:affiliateId', requireAuth, updateAffiliateAdmin);
-affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/status', requireAuth, updateAffiliateStatusAdmin);
-affiliateRouter.delete('/admin/:userId/affiliates/:affiliateId', requireAuth, deleteAffiliateAdmin);
+affiliateRouter.get('/admin/:userId/affiliates', requireAuthAndEmailVerified, listAffiliatesAdmin);
+affiliateRouter.post('/admin/:userId/affiliates', requireAuthAndEmailVerified, createAffiliateAdmin);
+affiliateRouter.put('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, updateAffiliateAdmin);
+affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/status', requireAuthAndEmailVerified, updateAffiliateStatusAdmin);
+affiliateRouter.delete('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, deleteAffiliateAdmin);
 
-affiliateRouter.get('/admin/:userId/contacts', requireAuth, listContactsAdmin);
-affiliateRouter.post('/admin/:userId/contacts', requireAuth, createContactAdmin);
-affiliateRouter.put('/admin/:userId/contacts/:contactId', requireAuth, updateContactAdmin);
-affiliateRouter.delete('/admin/:userId/contacts/:contactId', requireAuth, deleteContactAdmin);
+affiliateRouter.get('/admin/:userId/contacts', requireAuthAndEmailVerified, listContactsAdmin);
+affiliateRouter.post('/admin/:userId/contacts', requireAuthAndEmailVerified, createContactAdmin);
+affiliateRouter.put('/admin/:userId/contacts/:contactId', requireAuthAndEmailVerified, updateContactAdmin);
+affiliateRouter.delete('/admin/:userId/contacts/:contactId', requireAuthAndEmailVerified, deleteContactAdmin);
 
-affiliateRouter.get('/admin/:userId/followups', requireAuth, listFollowUpsAdmin);
-affiliateRouter.post('/admin/:userId/followups', requireAuth, createFollowUpAdmin);
-affiliateRouter.delete('/admin/:userId/followups/:followUpId', requireAuth, deleteFollowUpAdmin);
+affiliateRouter.get('/admin/:userId/followups', requireAuthAndEmailVerified, listFollowUpsAdmin);
+affiliateRouter.post('/admin/:userId/followups', requireAuthAndEmailVerified, createFollowUpAdmin);
+affiliateRouter.delete('/admin/:userId/followups/:followUpId', requireAuthAndEmailVerified, deleteFollowUpAdmin);
 
-affiliateRouter.get('/admin/:userId/commissions', requireAuth, listCommissionsAdmin);
-affiliateRouter.post('/admin/:userId/commissions', requireAuth, createCommissionAdmin);
-affiliateRouter.put('/admin/:userId/commissions/:commissionId/status', requireAuth, updateCommissionStatusAdmin);
-affiliateRouter.delete('/admin/:userId/commissions/:commissionId', requireAuth, deleteCommissionAdmin);
+affiliateRouter.get('/admin/:userId/commissions', requireAuthAndEmailVerified, listCommissionsAdmin);
+affiliateRouter.post('/admin/:userId/commissions', requireAuthAndEmailVerified, createCommissionAdmin);
+affiliateRouter.put('/admin/:userId/commissions/:commissionId/status', requireAuthAndEmailVerified, updateCommissionStatusAdmin);
+affiliateRouter.delete('/admin/:userId/commissions/:commissionId', requireAuthAndEmailVerified, deleteCommissionAdmin);

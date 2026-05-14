@@ -9,6 +9,7 @@ import {
   getBillingCard,
   getMyJoinRequests,
   getOnboarding,
+  getMe,
   getUserActivity,
   googleLogin,
   inviteUser,
@@ -43,7 +44,7 @@ import {
   updateProfile,
   verifyEmail,
 } from '../controllers/authController.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireAuthAndEmailVerified } from '../middleware/auth.js';
 import { authLimiter, registerLimiter, recoverLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
@@ -84,46 +85,51 @@ authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), 
 // Team login: miembros entran con código de empresa + usuario + contraseña
 authRouter.post('/team-login', authLimiter, validate(teamLoginSchema), teamLogin);
 // POS switch: cambio rápido de usuario en TPV (requiere sesión activa)
-authRouter.post('/pos-switch', requireAuth, validate(posSwitchUserSchema), posSwitchUser);
+authRouter.post('/pos-switch', requireAuthAndEmailVerified, validate(posSwitchUserSchema), posSwitchUser);
+
+// Perfil actual desde BD (alinear caché local con servidor tras despliegue o cambios de cuenta)
+authRouter.get('/me', requireAuth, getMe);
 
 // Rutas protegidas con JWT y validación de input
-authRouter.post('/invite', requireAuth, validate(inviteUserSchema), inviteUser);
-authRouter.post('/activity', requireAuth, logActivity);
-authRouter.get('/activities', requireAuth, listAllActivities);
-authRouter.get('/users', requireAuth, listUsers);
-authRouter.get('/roles', requireAuth, listRoles);
-authRouter.put('/profile/:userId', requireAuth, validateParams(userIdParamSchema), updateProfile);
-authRouter.put('/profile/:userId/password', requireAuth, validateParams(userIdParamSchema), validate(updatePasswordSchema), updatePassword);
-authRouter.put('/profile/:userId/reset-password', requireAuth, validateParams(userIdParamSchema), resetUserPassword);
-authRouter.post('/profile/:userId/resend-invite', requireAuth, validateParams(userIdParamSchema), resendInvite);
-authRouter.get('/profile/:userId/card', requireAuth, validateParams(userIdParamSchema), getBillingCard);
-authRouter.put('/profile/:userId/card', requireAuth, validateParams(userIdParamSchema), validate(saveBillingCardSchema), saveBillingCard);
-authRouter.get('/profile/:userId/activity', requireAuth, validateParams(userIdParamSchema), getUserActivity);
-authRouter.get('/profile/:userId/onboarding', requireAuth, validateParams(userIdParamSchema), getOnboarding);
-authRouter.put('/profile/:userId/onboarding', requireAuth, validateParams(userIdParamSchema), saveOnboarding);
-authRouter.delete('/profile/:userId', requireAuth, validateParams(userIdParamSchema), deleteUser);
+authRouter.post('/invite', requireAuthAndEmailVerified, validate(inviteUserSchema), inviteUser);
+authRouter.post('/activity', requireAuthAndEmailVerified, logActivity);
+authRouter.get('/activities', requireAuthAndEmailVerified, listAllActivities);
+authRouter.get('/users', requireAuthAndEmailVerified, listUsers);
+authRouter.get('/roles', requireAuthAndEmailVerified, listRoles);
+authRouter.put('/profile/:userId', requireAuthAndEmailVerified, validateParams(userIdParamSchema), updateProfile);
+authRouter.put('/profile/:userId/password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(updatePasswordSchema), updatePassword);
+authRouter.put('/profile/:userId/reset-password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resetUserPassword);
+authRouter.post('/profile/:userId/resend-invite', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resendInvite);
+authRouter.get('/profile/:userId/card', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getBillingCard);
+authRouter.put('/profile/:userId/card', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(saveBillingCardSchema), saveBillingCard);
+authRouter.get('/profile/:userId/activity', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getUserActivity);
+authRouter.get('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getOnboarding);
+authRouter.put('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), saveOnboarding);
+authRouter.delete('/profile/:userId', requireAuthAndEmailVerified, validateParams(userIdParamSchema), deleteUser);
 
 // RGPD: Descargar mis datos personales
-authRouter.get('/export-my-data', requireAuth, exportMyData);
+authRouter.get('/export-my-data', requireAuthAndEmailVerified, exportMyData);
 
 // S-07: Gestión de sesiones simultáneas
-authRouter.get('/sessions', requireAuth, listSessions);
-authRouter.delete('/sessions/others', requireAuth, revokeOtherSessionsEndpoint);
-authRouter.delete('/sessions/:sessionId', requireAuth, revokeSessionEndpoint);
+authRouter.get('/sessions', requireAuthAndEmailVerified, listSessions);
+authRouter.delete('/sessions/others', requireAuthAndEmailVerified, revokeOtherSessionsEndpoint);
+authRouter.delete('/sessions/:sessionId', requireAuthAndEmailVerified, revokeSessionEndpoint);
 
 // Join requests: solicitudes de usuario para unirse a empresa
-authRouter.post('/join-requests', requireAuth, validate(joinRequestSchema), createJoinRequest);
-authRouter.get('/join-requests/mine', requireAuth, getMyJoinRequests);
-authRouter.get('/join-requests/business/:businessId', requireAuth, getBusinessJoinRequests);
-authRouter.put('/join-requests/:requestId', requireAuth, validate(joinRequestActionSchema), reviewJoinRequest);
-authRouter.get('/businesses/search', requireAuth, searchBusinesses);
+authRouter.post('/join-requests', requireAuthAndEmailVerified, validate(joinRequestSchema), createJoinRequest);
+authRouter.get('/join-requests/mine', requireAuthAndEmailVerified, getMyJoinRequests);
+authRouter.get('/join-requests/business/:businessId', requireAuthAndEmailVerified, getBusinessJoinRequests);
+authRouter.put('/join-requests/:requestId', requireAuthAndEmailVerified, validate(joinRequestActionSchema), reviewJoinRequest);
+authRouter.get('/businesses/search', requireAuthAndEmailVerified, searchBusinesses);
 
 // Team invitations (in-app): invitar por email, aceptar/rechazar dentro de Vertial.
+// Ver /invitations/mine + accept/reject con solo sesión: el invitado puede ver y actuar
+// sin depender de verificación de email (la invitación ya va al email de la cuenta).
 authRouter.get('/invitations/mine', requireAuth, listMyInvitations);
 authRouter.post('/invitations/:invitationId/accept', requireAuth, validateParams(invitationIdParamSchema), acceptInvitation);
 authRouter.post('/invitations/:invitationId/reject', requireAuth, validateParams(invitationIdParamSchema), rejectInvitation);
-authRouter.post('/invitations/:invitationId/resend', requireAuth, validateParams(invitationIdParamSchema), resendInvitation);
-authRouter.delete('/invitations/:invitationId', requireAuth, validateParams(invitationIdParamSchema), revokeInvitation);
-authRouter.get('/businesses/:businessId/invitations', requireAuth, validateParams(businessIdParamSchema), listBusinessInvitations);
+authRouter.post('/invitations/:invitationId/resend', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), resendInvitation);
+authRouter.delete('/invitations/:invitationId', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), revokeInvitation);
+authRouter.get('/businesses/:businessId/invitations', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), listBusinessInvitations);
 
 export { authRouter };

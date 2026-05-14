@@ -72,6 +72,8 @@ import {
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
+import logger from '../services/logger.js';
+import { invalidateDb } from '../services/cache.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -236,19 +238,54 @@ export async function register(req, res) {
       sendWelcomeEmail(savedAccount).catch(() => null);
     }
 
-    // Aviso interno: nuevo registro (el paquete se elige más tarde en facturación).
+    const referralDisplay = String(resolvedReferralCode || referralCode || '').trim() || '—';
+    const accountTypeLabel =
+      accountType === 'company' ? 'Empresa' : accountType === 'user' ? 'Usuario' : escapeHtml(String(accountType || '—'));
+    const providerLabel =
+      savedAccount.provider === 'google'
+        ? 'Google'
+        : savedAccount.provider === 'email'
+          ? 'Correo electrónico'
+          : escapeHtml(String(savedAccount.provider || '—'));
+
     sendAdminAlert({
       key: `user_registered:${savedAccount.user_id}`,
-      subject: `👤 Nuevo registro: ${savedAccount.fullName || savedAccount.email}`,
-      html: `<p><b>Nuevo registro</b></p>
-<ul>
-  <li><b>Nombre</b>: ${escapeHtml(savedAccount.fullName || '')}</li>
-  <li><b>Email</b>: ${escapeHtml(savedAccount.email || '')}</li>
-  <li><b>Tipo</b>: ${escapeHtml(String(accountType || ''))}</li>
-  <li><b>Proveedor</b>: ${escapeHtml(String(savedAccount.provider || ''))}</li>
-  <li><b>Referral</b>: ${escapeHtml(String(resolvedReferralCode || referralCode || '—'))}</li>
-  <li><b>Paquete</b>: pendiente (se elige después)</li>
-</ul>`,
+      subject: `Nuevo registro · ${savedAccount.fullName || savedAccount.email}`,
+      html: `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;background:#f4f4f5;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:28px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e4e4e7;box-shadow:0 4px 24px rgba(0,0,0,.06);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#18181b 0%,#27272a 100%);padding:22px 26px;">
+            <p style="margin:0;color:#fafafa;font-size:15px;font-weight:600;letter-spacing:-0.02em;">Vertial</p>
+            <p style="margin:6px 0 0;color:#a1a1aa;font-size:13px;line-height:1.4;">Nueva cuenta en la plataforma</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:26px 26px 22px;">
+            <p style="margin:0 0 18px;color:#52525b;font-size:14px;line-height:1.55;">Se ha completado un registro. Datos del perfil:</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#18181b;border-collapse:collapse;">
+              <tr><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;color:#71717a;width:38%;vertical-align:top;">Nombre</td><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;font-weight:500;">${escapeHtml(savedAccount.fullName || '—')}</td></tr>
+              <tr><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;color:#71717a;vertical-align:top;">Correo</td><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;font-weight:500;"><a href="mailto:${encodeURIComponent(savedAccount.email || '')}" style="color:#18181b;text-decoration:none;">${escapeHtml(savedAccount.email || '—')}</a></td></tr>
+              <tr><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;color:#71717a;vertical-align:top;">Tipo de cuenta</td><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;font-weight:500;">${accountTypeLabel}</td></tr>
+              <tr><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;color:#71717a;vertical-align:top;">Acceso</td><td style="padding:10px 0;border-bottom:1px solid #f4f4f5;font-weight:500;">${providerLabel}</td></tr>
+              <tr><td style="padding:10px 0;color:#71717a;vertical-align:top;">Referido</td><td style="padding:10px 0;font-weight:500;">${referralDisplay === '—' ? '—' : escapeHtml(referralDisplay)}</td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 26px 22px;">
+            <p style="margin:0;padding:12px 14px;background:#fafafa;border-radius:10px;font-size:12px;color:#71717a;line-height:1.5;">Mensaje automático del sistema. La facturación y el plan se gestionan desde el panel del cliente cuando corresponda.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
       cooldownMs: 0,
     }).catch(() => null);
 
@@ -260,9 +297,16 @@ export async function register(req, res) {
       console.error('[AUTH] Error consultando invitaciones pendientes en register:', invErr?.message);
     }
 
-    const redirectTo = pendingInvitationsCount > 0
-      ? '/saas/invitations'
-      : (isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type');
+    let redirectTo;
+    if (!savedAccount.emailVerified) {
+      redirectTo = '/auth/verify-email-pending';
+    } else if (pendingInvitationsCount > 0) {
+      redirectTo = '/saas/invitations';
+    } else if (isUserAccount) {
+      redirectTo = '/saas/worker';
+    } else {
+      redirectTo = '/auth/onboarding/business-type';
+    }
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
     return res.status(201).json({
@@ -410,12 +454,16 @@ export async function googleLogin(req, res) {
     });
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    let redirectTo = '/saas/dashboard';
+    if (!savedAccount.emailVerified) {
+      redirectTo = '/auth/verify-email-pending';
+    }
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
       accessToken,
       refreshToken,
-      redirectTo: '/saas/dashboard',
+      redirectTo,
     });
   } catch (error) {
     console.error('[AUTH] Google login error:', error?.message || error);
@@ -531,7 +579,6 @@ export async function login(req, res) {
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
     const isUserAccount = savedAccount.accountType === 'user';
-    const redirectTo = isUserAccount ? '/saas/worker' : '/auth/gate';
 
     let pendingInvitationsCount = 0;
     try {
@@ -539,6 +586,15 @@ export async function login(req, res) {
       pendingInvitationsCount = pending.length;
     } catch (invErr) {
       console.error('[AUTH] Error consultando invitaciones pendientes en login:', invErr?.message);
+    }
+
+    let redirectTo;
+    if (!savedAccount.emailVerified) {
+      redirectTo = '/auth/verify-email-pending';
+    } else if (pendingInvitationsCount > 0) {
+      redirectTo = '/saas/invitations';
+    } else {
+      redirectTo = isUserAccount ? '/saas/worker' : '/auth/gate';
     }
 
     return res.json({
@@ -881,6 +937,19 @@ export async function inviteUser(req, res) {
       return badRequest(res, 'El email es obligatorio');
     }
 
+    const actorUserId = String(req.authUser?.userId || '').trim();
+    let invitedByDisplay = String(req.authUser?.email || '').trim();
+    if (actorUserId) {
+      try {
+        const inviter = await findAccountByUserId(req, actorUserId);
+        if (inviter?.fullName?.trim()) {
+          invitedByDisplay = inviter.fullName.trim();
+        }
+      } catch {
+        /* noop */
+      }
+    }
+
     await ensureDatabase(req, ACCOUNTS_DB);
 
     // Validar que la empresa existe si se proporciona businessId
@@ -950,8 +1019,8 @@ export async function inviteUser(req, res) {
           salary: grossMonthlySalary,
           salesPointId: workCenterId,
         },
-        invitedBy,
-        invitedByName: req.authUser?.email || '',
+        invitedBy: actorUserId || String(invitedBy || '').trim(),
+        invitedByName: invitedByDisplay,
         message,
       });
 
@@ -974,8 +1043,8 @@ export async function inviteUser(req, res) {
     const savedInvitation = await saveTeamInvitation(req, invitationDoc);
 
     await logAccountActivity(req, {
-      actorUserId: invitedBy,
-      actorName: invitedBy,
+      actorUserId: actorUserId || String(invitedBy || '').trim(),
+      actorName: invitedByDisplay,
       targetUserId: existingAccount?.user_id || '',
       type: 'team',
       action: existingInvitation ? 'Invitación actualizada' : 'Invitación creada',
@@ -992,7 +1061,7 @@ export async function inviteUser(req, res) {
 
     return res.status(existingInvitation ? 200 : 201).json({
       ok: true,
-      invitation: savedInvitation,
+      invitation: sanitizeInvitation(savedInvitation),
       isExistingUser: Boolean(existingAccount),
       companyCode: business?.companyCode || '',
       inviteExpiresAt: savedInvitation.expiresAt,
@@ -1658,10 +1727,17 @@ export async function recoverPassword(req, res) {
       return badRequest(res, 'El email es obligatorio');
     }
 
+    // Lista de cuentas en memoria (TTL ~30s): tras un registro reciente puede no incluir la cuenta nueva.
+    invalidateDb(ACCOUNTS_DB);
+
     const account = await findAccountByEmail(req, email);
 
     // No revelar si el email existe o no (prevención de enumeración)
     if (!account) {
+      logger.warn(
+        { tag: 'AUTH_RECOVER', hint: 'no_account' },
+        'Recuperación solicitada para un email sin cuenta en esta base (no se envía correo).',
+      );
       return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
     }
 
@@ -1669,7 +1745,9 @@ export async function recoverPassword(req, res) {
     await saveResetToken(req, account, rawToken);
 
     const { subject, html } = buildPasswordResetEmail(email, rawToken);
-    await sendEmail({ to: email, subject, html });
+    await sendEmail({ to: email, subject, html, requireDelivery: true });
+
+    logger.info({ tag: 'AUTH_RECOVER', to: email }, 'Correo de recuperación de contraseña enviado');
 
     await logAccountActivity(req, {
       actorUserId: account.user_id,
@@ -2079,6 +2157,30 @@ export async function acceptInvite(req, res) {
   }
 }
 
+/** GET /api/auth/me — perfil actual desde BD (sincroniza caché local, p. ej. flags de UI). */
+export async function getMe(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account || account.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(account),
+    });
+  } catch (error) {
+    console.error('[AUTH] getMe error:', error?.message || error);
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar el perfil',
+    });
+  }
+}
+
 // ─── RGPD: Descargar mis datos personales ────────────────────────────────────
 
 export async function exportMyData(req, res) {
@@ -2432,6 +2534,10 @@ export async function teamLogin(req, res) {
     });
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    let redirectTo = savedAccount.landingPage || '/saas/dashboard';
+    if (!savedAccount.emailVerified) {
+      redirectTo = '/auth/verify-email-pending';
+    }
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
@@ -2443,7 +2549,7 @@ export async function teamLogin(req, res) {
       },
       accessToken,
       refreshToken,
-      redirectTo: savedAccount.landingPage || '/saas/dashboard',
+      redirectTo,
     });
   } catch (error) {
     return res.status(500).json({

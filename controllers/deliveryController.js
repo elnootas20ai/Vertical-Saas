@@ -46,12 +46,34 @@ import {
   getFinanceDbName,
   buildFinanceDocument,
 } from '../services/couchdb.js';
+import { randomUUID } from 'node:crypto';
 import { suggestNextPdvCode } from '../shared/naming/deliveryPointOfSaleCode.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
 import logger from '../services/logger.js';
+
+/** Reglas mínimas para operar TPV / delivery con un PDV identificable. */
+function validatePointOfSaleTerminals(terminals) {
+  const list = Array.isArray(terminals) ? terminals : [];
+  if (list.length < 1) return 'Debe existir al menos un terminal TPV';
+  const primary = list.find((t) => t && t.active !== false) || list[0];
+  if (!primary) return 'Debe existir al menos un terminal TPV activo';
+  if (!String(primary.code || '').trim()) return 'El terminal principal necesita un código (ej. TPV-01)';
+  if (!String(primary.name || '').trim()) return 'El terminal principal necesita un nombre (ej. Caja principal)';
+  return null;
+}
+
+function validatePointOfSaleCreateBody(body) {
+  const name = String(body.name || '').trim();
+  if (!name) return 'El nombre del punto de venta es obligatorio';
+  const code = String(body.code || '').trim();
+  if (!code) return 'El código del PDV es obligatorio';
+  const addr = String(body.address || '').trim();
+  if (addr.length < 5) return 'La dirección del local es obligatoria (calle y referencia, mínimo 5 caracteres)';
+  return validatePointOfSaleTerminals(body.terminals);
+}
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -1395,7 +1417,6 @@ export async function createPointOfSale(req, res) {
     const { pointOfSale } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
     if (!pointOfSale || typeof pointOfSale !== 'object') return badRequest(res, 'Falta el objeto pointOfSale');
-    if (!pointOfSale.name) return badRequest(res, 'El nombre del punto de venta es obligatorio');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
@@ -1405,8 +1426,25 @@ export async function createPointOfSale(req, res) {
     if (!codeStr) {
       const existing = await listPointsOfSaleByUser(req, userId);
       const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
-      body = { ...body, code: suggestNextPdvCode(body.name, codes) };
+      body = { ...body, code: suggestNextPdvCode(String(body.name || '').trim() || 'PDV', codes) };
     }
+    if (!Array.isArray(body.terminals) || body.terminals.length === 0) {
+      body = {
+        ...body,
+        terminals: [
+          {
+            id: randomUUID(),
+            code: 'TPV-01',
+            name: 'Terminal principal',
+            datafonName: '',
+            printerName: '',
+            active: true,
+          },
+        ],
+      };
+    }
+    const createErr = validatePointOfSaleCreateBody(body);
+    if (createErr) return badRequest(res, createErr);
     const doc = buildPointOfSaleDocument(userId, body);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
@@ -1426,6 +1464,17 @@ export async function updatePointOfSale(req, res) {
     const { userId, pdvId } = req.params;
     const { pointOfSale } = req.body || {};
     if (!pointOfSale || typeof pointOfSale !== 'object') return badRequest(res, 'Faltan datos');
+    if (Object.prototype.hasOwnProperty.call(pointOfSale, 'address')) {
+      const a = String(pointOfSale.address || '').trim();
+      if (a.length < 5) return badRequest(res, 'La dirección del local es obligatoria (mínimo 5 caracteres)');
+    }
+    if (Array.isArray(pointOfSale.terminals)) {
+      if (pointOfSale.terminals.length === 0) {
+        return badRequest(res, 'No puedes dejar el PDV sin terminales TPV');
+      }
+      const termErr = validatePointOfSaleTerminals(pointOfSale.terminals);
+      if (termErr) return badRequest(res, termErr);
+    }
     const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
     const account = await findAccountByUserId(req, userId);

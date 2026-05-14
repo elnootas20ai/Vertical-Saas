@@ -1,18 +1,39 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { AlertTriangle, CreditCard, Clock, X } from 'lucide-react';
+import { useEffect, useReducer, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router';
+import { AlertTriangle, Clock, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import {
+  dismissBannerForRestOfLocalDay,
+  isBannerDismissedForLocalToday,
+} from '../../lib/dayBannerDismiss';
 
 export function SubscriptionBanner() {
   const { subscription } = useApp();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [dismissed, setDismissed] = useState(false);
+  const location = useLocation();
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
   const [timeLeft, setTimeLeft] = useState('');
 
+  const userId = user?.user_id ?? '';
+  const trialDismissKey = userId ? `vertial.banner.dismissDay.${userId}.subscriptionTrial` : '';
+  const paymentDismissKey = userId ? `vertial.banner.dismissDay.${userId}.subscriptionPayment` : '';
+  const graceDismissKey = userId ? `vertial.banner.dismissDay.${userId}.subscriptionGrace` : '';
+
+  const dismissedTrial = trialDismissKey && isBannerDismissedForLocalToday(trialDismissKey);
+  const dismissedPayment = paymentDismissKey && isBannerDismissedForLocalToday(paymentDismissKey);
+  const dismissedGrace = graceDismissKey && isBannerDismissedForLocalToday(graceDismissKey);
+
+  /** Navegación u otro tick: releer localStorage; intervalo para pasar medianoche sin recargar. */
   useEffect(() => {
-    // Reset dismissed when status changes
-    setDismissed(false);
-  }, [subscription.status]);
+    rerender();
+  }, [location.pathname, subscription.status]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => rerender(), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (subscription.status === 'grace_period' && subscription.gracePeriodEndsAt) {
@@ -35,10 +56,8 @@ export function SubscriptionBanner() {
     }
   }, [subscription.status, subscription.gracePeriodEndsAt]);
 
-  if (dismissed) return null;
-
   // Trial active banner (countdown of 14 days)
-  if (subscription.status === 'trial_active' && subscription.trialEndsAt) {
+  if (!dismissedTrial && subscription.status === 'trial_active' && subscription.trialEndsAt) {
     const daysLeft = Math.ceil(
       (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
@@ -61,8 +80,14 @@ export function SubscriptionBanner() {
                   Activar suscripción
                 </button>
                 <button
-                  onClick={() => setDismissed(true)}
+                  type="button"
+                  onClick={() => {
+                    if (trialDismissKey) dismissBannerForRestOfLocalDay(trialDismissKey);
+                    rerender();
+                  }}
                   className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900 rounded transition-colors"
+                  aria-label="Cerrar hasta mañana"
+                  title="No mostrar hoy (se restablece a las 00:00)"
                 >
                   <X className="w-4 h-4 text-blue-700 dark:text-blue-400" />
                 </button>
@@ -75,7 +100,7 @@ export function SubscriptionBanner() {
   }
 
   // Trial expiring banner (<=3 days)
-  if (subscription.status === 'trial_expiring' && subscription.trialEndsAt) {
+  if (!dismissedTrial && subscription.status === 'trial_expiring' && subscription.trialEndsAt) {
     const daysLeft = Math.ceil(
       (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
@@ -98,8 +123,14 @@ export function SubscriptionBanner() {
                 Ver planes
               </button>
               <button
-                onClick={() => setDismissed(true)}
+                type="button"
+                onClick={() => {
+                  if (trialDismissKey) dismissBannerForRestOfLocalDay(trialDismissKey);
+                  rerender();
+                }}
                 className="p-1 hover:bg-amber-200 dark:hover:bg-amber-900 rounded transition-colors"
+                aria-label="Cerrar hasta mañana"
+                title="No mostrar hoy (se restablece a las 00:00)"
               >
                 <X className="w-4 h-4 text-amber-700 dark:text-amber-400" />
               </button>
@@ -111,7 +142,7 @@ export function SubscriptionBanner() {
   }
 
   // Payment failed banner
-  if (subscription.status === 'payment_failed') {
+  if (!dismissedPayment && subscription.status === 'payment_failed') {
     return (
       <div className="bg-red-100 dark:bg-red-950/80 border-b-2 border-red-300 dark:border-red-800">
         <div className="px-4 md:px-6 py-2 md:py-3">
@@ -130,8 +161,14 @@ export function SubscriptionBanner() {
                 Actualizar
               </button>
               <button
-                onClick={() => setDismissed(true)}
+                type="button"
+                onClick={() => {
+                  if (paymentDismissKey) dismissBannerForRestOfLocalDay(paymentDismissKey);
+                  rerender();
+                }}
                 className="p-1 hover:bg-red-200 dark:hover:bg-red-900 rounded transition-colors"
+                aria-label="Cerrar hasta mañana"
+                title="No mostrar hoy (se restablece a las 00:00)"
               >
                 <X className="w-4 h-4 text-red-700 dark:text-red-400" />
               </button>
@@ -143,7 +180,7 @@ export function SubscriptionBanner() {
   }
 
   // Grace period banner (72h countdown)
-  if (subscription.status === 'grace_period') {
+  if (!dismissedGrace && subscription.status === 'grace_period') {
     return (
       <div className="bg-orange-100 dark:bg-orange-950/80 border-b-2 border-orange-300 dark:border-orange-800">
         <div className="px-4 md:px-6 py-2 md:py-3">
@@ -162,8 +199,14 @@ export function SubscriptionBanner() {
                 Resolver
               </button>
               <button
-                onClick={() => setDismissed(true)}
+                type="button"
+                onClick={() => {
+                  if (graceDismissKey) dismissBannerForRestOfLocalDay(graceDismissKey);
+                  rerender();
+                }}
                 className="p-1 hover:bg-orange-200 dark:hover:bg-orange-900 rounded transition-colors"
+                aria-label="Cerrar hasta mañana"
+                title="No mostrar hoy (se restablece a las 00:00)"
               >
                 <X className="w-4 h-4 text-orange-700 dark:text-orange-400" />
               </button>

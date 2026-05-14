@@ -12,6 +12,7 @@ import {
   acceptInvitationRequest,
   clearAuthTokens,
   deleteUserRequest,
+  fetchCurrentUserRequest,
   getBillingCardRequest,
   getUserActivityRequest,
   googleLoginRequest,
@@ -51,10 +52,12 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; redirectTo?: string; error?: string; code?: string; lockUntil?: string }>;
-  register: (data: RegisterPayload) => Promise<{ success: boolean; error?: string }>;
+  register: (data: RegisterPayload) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
   logout: () => Promise<void>;
   updateOnboardingData: (data: Record<string, unknown>) => Promise<void>;
   verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
+  /** Sincroniza usuario con /api/auth/me (p. ej. verificación hecha en otra pestaña). */
+  refreshCurrentUser: () => Promise<boolean>;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
   googleLogin: (credential: string) => Promise<{
     success: boolean;
@@ -155,7 +158,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
 
+  const setSessionUser = (nextUser: User) => {
+    setUser(nextUser);
+    setIsAuthenticated(true);
+    persistSession(nextUser);
+  };
+
   useEffect(() => {
+    let cancelled = false;
+
     // S-01: Ya no se cargan tokens de localStorage — las cookies httpOnly se envían automáticamente
     loadStoredTokens();
 
@@ -169,28 +180,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const sessionUser = localStorage.getItem('vertial_session_user');
     if (!sessionUser) {
       setIsInitializing(false);
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
+    let parsedFromStorage: User | null = null;
     try {
-      const userData = JSON.parse(sessionUser) as User;
-      setUser(userData);
+      parsedFromStorage = JSON.parse(sessionUser) as User;
+      setUser(parsedFromStorage);
       setIsAuthenticated(true);
     } catch (error) {
       console.error('Error loading session:', error);
       persistSession(null);
-    } finally {
       setIsInitializing(false);
+      return () => {
+        cancelled = true;
+      };
     }
+
+    void (async () => {
+      try {
+        const response = await fetchCurrentUserRequest();
+        if (cancelled || !response.user || !parsedFromStorage) return;
+        if (response.user.user_id !== parsedFromStorage.user_id) return;
+        setSessionUser(response.user);
+      } catch {
+        // Sin red o sesión inválida: se mantiene el usuario leído de localStorage
+      } finally {
+        if (!cancelled) setIsInitializing(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const setSessionUser = (nextUser: User) => {
-    setUser(nextUser);
-    setIsAuthenticated(true);
-    persistSession(nextUser);
-  };
-
-  const register = async (data: RegisterPayload): Promise<{ success: boolean; error?: string }> => {
+  const register = async (data: RegisterPayload): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
     try {
       const response = await registerRequest(data);
       if (!response.user) {
@@ -198,7 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // S-01: Cookies establecidas por el backend
       setSessionUser(response.user);
-      return { success: true };
+      return { success: true, redirectTo: response.redirectTo };
     } catch (error) {
       return {
         success: false,
@@ -612,6 +639,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshCurrentUser = async (): Promise<boolean> => {
+    try {
+      const response = await fetchCurrentUserRequest();
+      if (!response.ok || !response.user) return false;
+      setSessionUser(response.user);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
       await resendVerificationEmailRequest(email);
@@ -702,6 +740,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         updateOnboardingData,
         verifyEmail,
+        refreshCurrentUser,
         resendVerificationEmail,
         googleLogin,
         updateProfile,

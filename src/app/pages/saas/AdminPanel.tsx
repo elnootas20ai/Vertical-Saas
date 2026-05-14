@@ -63,6 +63,7 @@ import {
 import { impersonateUser } from '../../lib/settingsApi';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import type { AuthUser } from '../../lib/authApi';
 import {
   getPlanPricingConfig,
@@ -2639,11 +2640,11 @@ export function AdminPanel() {
     accountSaveCallbackRef.current?.(updated);
   }, []);
 
-  if (user?.role !== 'Admin') {
+  if (!isVertialSuperAdminEmail(user?.email)) {
     return (
       <Layout title="Panel admin" subtitle="Acceso restringido">
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-sm text-amber-800">
-          Este panel solo está disponible para usuarios con rol `Admin`.
+          Este panel solo está disponible para la cuenta interna de plataforma (super-admin).
         </div>
       </Layout>
     );

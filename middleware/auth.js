@@ -93,6 +93,11 @@ export function requireEmailVerified(req, res, next) {
   return next();
 }
 
+/** Autenticación JWT + email verificado (panel y APIs de datos). */
+export function requireAuthAndEmailVerified(req, res, next) {
+  requireAuth(req, res, () => requireEmailVerified(req, res, next));
+}
+
 // S-07: Middleware para requerir el sessionId del JWT (útil para invalidación de sesión)
 export function extractSessionId(req, _res, next) {
   try {

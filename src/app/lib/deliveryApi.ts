@@ -1,6 +1,6 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
-import { listWorkCenters, type WorkCenter } from './workCentersApi';
+import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -738,18 +738,20 @@ export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSa
 
 /**
  * Los PDV de caja viven en la DB delivery (`point_of_sale`); los de Ajustes → Centros de trabajo
- * son `sales_point` en otra DB. Si hay centros tipo «punto_de_venta» sin PDV delivery enlazado,
- * crea el documento para que aparezcan en apertura de caja / listados.
+ * son `sales_point` en otra DB. Centros tipo **punto de venta** o **almacén** activos sin PDV delivery enlazado
+ * generan (o enlazan) el documento; si ya existe un PDV con el mismo nombre pero sin `workCenterId`,
+ * lo actualiza para enlazarlo a ese centro (varias tiendas → un PDV caja cada una).
  */
 export async function mergePointsOfSaleWithRetailWorkCenters(
   userId: string,
   existingPdvs: PointOfSale[],
+  options?: { business?: { members?: { user_id?: string }[] } | null },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
   const pdvData = [...existingPdvs];
   let wcs: WorkCenter[] = [];
   try {
-    wcs = await listWorkCenters(id);
+    wcs = await listWorkCentersForDelivery(id, options?.business ?? null);
   } catch {
     return pdvData;
   }
@@ -758,13 +760,44 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
   );
   const namesUsed = new Set(pdvData.map((p) => p.name.trim().toLowerCase()));
 
+  const isRetailLikeCenter = (wc: WorkCenter) =>
+    (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && wc.active && !wc.deletedAt;
+
   for (const wc of wcs) {
-    if (wc.centerType !== 'punto_de_venta' || !wc.active || wc.deletedAt) continue;
+    if (!isRetailLikeCenter(wc)) continue;
     if (linkedWcIds.has(wc._id)) continue;
     const nameLower = wc.name.trim().toLowerCase();
+    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+
+    // PDV creado a mano o legado sin `workCenterId`: mismo nombre que el centro → enlazar (cada tienda carga su PDV).
+    const orphanIdx = pdvData.findIndex(
+      (p) =>
+        !String(p.workCenterId || '').trim() &&
+        p.name.trim().toLowerCase() === nameLower,
+    );
+    if (orphanIdx >= 0) {
+      const orphan = pdvData[orphanIdx];
+      try {
+        const updated = await updatePointOfSaleRequest(id, {
+          ...orphan,
+          workCenterId: wc._id,
+          active: true,
+          address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
+        });
+        pdvData[orphanIdx] = updated;
+        linkedWcIds.add(wc._id);
+      } catch {
+        /* no bloquear el resto */
+      }
+      continue;
+    }
+
     if (namesUsed.has(nameLower)) continue;
 
-    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+    if (String(addr).trim().length < 5) {
+      continue;
+    }
+
     const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
     const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
     const termId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'

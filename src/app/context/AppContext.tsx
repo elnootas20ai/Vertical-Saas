@@ -43,6 +43,7 @@ import {
   deleteSaleInCouch,
 } from '../lib/salesApi';
 import type { SaleRecord } from '../lib/salesTypes';
+import { isVertialSuperAdminEmail } from '../lib/superAdmin';
 import {
   listDocumentsRequest,
   createDocumentRequest,
@@ -706,22 +707,15 @@ export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
 
 type DevPlan = 'basic' | 'normal' | 'pro';
 
-/**
- * Mantén la lista de cuentas con acceso al switcher dev de plan acotada.
- * El plan switcher es una herramienta de desarrollo para probar gates PRO sin pagar.
- */
-const DEV_PLAN_OVERRIDE_EMAILS = new Set([
-  'uriel@admin.com',
-]);
-
-function normalizeEmail(email?: string | null): string {
-  return (email || '').trim().toLowerCase();
-}
-
-export function userCanUseDevPlanOverride(authUser?: { email?: string; role?: string } | null): boolean {
+/** Solo la cuenta super-admin (o flag explícito) puede ver y usar el override de plan en localStorage. */
+export function userCanUseDevPlanOverride(
+  authUser?: { email?: string; role?: string; devPlanSwitcher?: boolean } | null,
+): boolean {
   if (!authUser) return false;
-  if (authUser.role === 'Superadmin') return true;
-  return DEV_PLAN_OVERRIDE_EMAILS.has(normalizeEmail(authUser.email));
+  if (typeof authUser.devPlanSwitcher === 'boolean') {
+    return authUser.devPlanSwitcher;
+  }
+  return isVertialSuperAdminEmail(authUser.email);
 }
 
 const DEV_PLAN_DEFINITIONS: Record<DevPlan, { planName: string; selectedPlanId: string }> = {

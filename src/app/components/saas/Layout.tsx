@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useEffect, useCallback, useRef } from 'react';
+import React, { ReactNode, useState, useEffect, useCallback, useRef, useReducer } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -14,7 +14,10 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { Mail, X, ArrowLeft } from 'lucide-react';
-import { EMAIL_SKIP_KEY } from '../../pages/auth/VerifyEmailPending';
+import {
+  dismissBannerForRestOfLocalDay,
+  isBannerDismissedForLocalToday,
+} from '../../lib/dayBannerDismiss';
 
 interface LayoutProps {
   children: ReactNode;
@@ -50,19 +53,30 @@ function DeliveryOpsReturnStrip() {
 function UnverifiedEmailBanner() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [dismissed, setDismissed] = useState(false);
+  const location = useLocation();
+  const [, rerender] = useReducer((x: number) => x + 1, 0);
 
-  if (!user || user.emailVerified || dismissed) return null;
+  const dismissKey = user?.user_id ? `vertial.banner.dismissDay.${user.user_id}.emailUnverified` : '';
+  const dismissedToday = dismissKey && isBannerDismissedForLocalToday(dismissKey);
+
+  useEffect(() => {
+    rerender();
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => rerender(), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!user || user.emailVerified || dismissedToday) return null;
 
   const handleDismiss = () => {
-    setDismissed(true);
+    if (dismissKey) dismissBannerForRestOfLocalDay(dismissKey);
+    rerender();
   };
 
   const handleVerify = () => {
-    if (user.user_id) {
-      localStorage.removeItem(EMAIL_SKIP_KEY(user.user_id));
-    }
-    navigate('/auth/verify-email-pending');
+    navigate('/saas/settings/seguridad');
   };
 
   return (
@@ -82,7 +96,8 @@ function UnverifiedEmailBanner() {
       <button
         onClick={handleDismiss}
         className="shrink-0 p-0.5 rounded hover:opacity-80 transition-opacity"
-        aria-label="Cerrar"
+        aria-label="Cerrar hasta mañana"
+        title="No mostrar hoy (se restablece a las 00:00)"
       >
         <X className="w-4 h-4" />
       </button>

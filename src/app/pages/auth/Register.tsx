@@ -190,7 +190,9 @@ export function Register() {
     setIsSubmitting(false);
 
     if (result.success) {
-      navigate(isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type');
+      navigate(
+        result.redirectTo ?? (isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type'),
+      );
     } else {
       setErrors({ email: result.error || 'Error al crear la cuenta' });
     }
@@ -216,7 +218,7 @@ export function Register() {
             <p className="text-gray-600 dark:text-gray-400">
               {isUserAccount
                 ? 'Registro rápido — podrás unirte a empresas después'
-                : 'Comienza tu prueba gratuita de 14 días'}
+                : 'Crea tu espacio de trabajo en minutos'}
             </p>
             <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
               {isUserAccount ? (

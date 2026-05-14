@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -11,17 +11,16 @@ import {
   updateTpvRegisterSessionRequest,
   listPointsOfSaleRequest,
   mergePointsOfSaleWithRetailWorkCenters,
-  createPointOfSaleRequest,
-  suggestNextPdvCode,
+  pointOfSaleDisplayLabel,
   type TpvRegisterSession,
   type TpvRegisterTransaction,
   type CashDenominationCount,
   type TpvCashCount,
   type TpvRegisterSummary,
   type PointOfSale,
-  type TerminalConfig,
 } from '../../lib/deliveryApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
 import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
@@ -184,13 +183,14 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions, onCreateDefaultPdv, creatingDefaultPdv }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions, restrictedToPdvId, onClearStorePick }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
   workerOptions: { id: string; name: string }[];
-  onCreateDefaultPdv: () => void;
-  creatingDefaultPdv: boolean;
+  /** Gerente: PDV acotado (tienda elegida en Centro de operaciones o al abrir caja). */
+  restrictedToPdvId?: string | null;
+  onClearStorePick?: () => void;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -202,7 +202,13 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   const total = calcDenominationTotal(counts);
   const hasCounted = total > 0 || Object.values(counts).some(v => v !== undefined && v > 0);
 
-  const hasPdvs = pointsOfSale.length > 0;
+  const allActivePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);
+  const displayPdvs = useMemo(() => {
+    if (!restrictedToPdvId) return allActivePdvs;
+    return allActivePdvs.filter((p) => p._id === restrictedToPdvId);
+  }, [allActivePdvs, restrictedToPdvId]);
+
+  const hasPdvs = allActivePdvs.length > 0;
   const pointOfSaleAccess = usePointOfSaleAccess(pointsOfSale.length);
   const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId);
   const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
@@ -237,14 +243,19 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     if (match) setSelectedWorkerId(match.id);
   }, [workerOptions, selectedWorkerId]);
 
+  useEffect(() => {
+    if (!restrictedToPdvId) return;
+    setSelectedPdvId(restrictedToPdvId);
+    setSelectedTerminalId('');
+  }, [restrictedToPdvId]);
+
   // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
   useEffect(() => {
     if (selectedPdvId) return;
-    const activePdvs = pointsOfSale.filter((p) => p.active);
-    if (activePdvs.length === 1) {
-      setSelectedPdvId(activePdvs[0]._id);
+    if (displayPdvs.length === 1) {
+      setSelectedPdvId(displayPdvs[0]._id);
     }
-  }, [pointsOfSale, selectedPdvId]);
+  }, [displayPdvs, selectedPdvId]);
 
   // Autoseleccionar el único terminal activo del PDV elegido.
   useEffect(() => {
@@ -265,7 +276,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     onOpen({
       workerName: wName,
       pointOfSaleId: selectedPdv?._id || '',
-      pointOfSaleName: selectedPdv?.name || '',
+      pointOfSaleName: selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : '',
       terminalId: selectedTerminal?.id || '',
       terminalName: effectiveTerminalName,
       datafonName: effectiveDatafon,
@@ -332,7 +343,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               <>
                 <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate">
                   <Store className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span className="truncate">{selectedPdv.name}</span>
+                  <span className="truncate">{pointOfSaleDisplayLabel(selectedPdv)}</span>
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                   Apertura de caja
@@ -392,8 +403,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               )}
             </div>
 
-            {/* Point of Sale selection */}
-            {hasPdvs && (
+            {/* Point of Sale selection (gerente con tienda ya elegida en el hub: oculto) */}
+            {hasPdvs && !restrictedToPdvId && (
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
                   <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><MapPin className="w-3 h-3 inline mr-1" />Punto de venta *</label>
@@ -412,14 +423,23 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
                   </button>
                 </div>
                 <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                  {pointsOfSale.filter(p => p.active).map(pdv => (
+                  {displayPdvs.map(pdv => (
                     <button key={pdv._id} onClick={() => handleSelectPdv(pdv._id)}
                       className={`p-2.5 rounded-xl border-2 text-left transition-all ${selectedPdvId === pdv._id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                      <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate"><Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" /><span className="truncate">{pdv.name}</span></div>
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{pdv.code} · {pdv.terminals.filter(t => t.active).length} TPV{pdv.terminals.length !== 1 ? 's' : ''}</div>
+                      <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate"><Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" /><span className="truncate">{pointOfSaleDisplayLabel(pdv)}</span></div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{pdv.code || '—'} · {pdv.terminals.filter(t => t.active).length} TPV{pdv.terminals.length !== 1 ? 's' : ''}</div>
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {restrictedToPdvId && hasPdvs && displayPdvs.length === 0 && onClearStorePick && (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-900 dark:text-amber-100">
+                <p className="font-semibold">Esta tienda ya no está disponible.</p>
+                <button type="button" onClick={onClearStorePick} className="mt-3 px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs">
+                  Elegir otra tienda
+                </button>
               </div>
             )}
 
@@ -427,23 +447,23 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
                 <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
                 <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
-                  Para abrir caja necesitas al menos 1 punto de venta con su terminal. Puedes crear uno básico ahora y personalizarlo más tarde desde Ajustes.
+                  Para abrir caja necesitas un punto de venta con dirección completa y al menos un terminal TPV. Desde
+                  Ajustes indicas nombre, dirección, ciudad y código postal; el sistema crea el TPV base.
                 </p>
                 <div className="mt-3 flex gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={onCreateDefaultPdv}
-                    disabled={creatingDefaultPdv}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                    onClick={() => navigate('/saas/settings/centros-de-trabajo?action=new-pdv')}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors inline-flex items-center gap-1.5"
                   >
-                    {creatingDefaultPdv ? 'Creando…' : 'Crear PDV por defecto'}
+                    Crear mi primera tienda / PDV
                   </button>
                   <button
                     type="button"
                     onClick={() => navigate('/saas/settings/centros-de-trabajo')}
                     className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
                   >
-                    Configurar manualmente
+                    Ir a centros de trabajo
                   </button>
                 </div>
               </div>
@@ -515,7 +535,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
             disabled={!canOpen || parentLoading}
             className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}
           >
-            <Unlock className="w-4 h-4" /> Abrir caja{selectedPdv ? ` — ${selectedPdv.name}` : ''} — {total.toFixed(2)}€ de fondo
+            <Unlock className="w-4 h-4" /> Abrir caja{selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''} — {total.toFixed(2)}€ de fondo
           </button>
         </div>
       </div>
@@ -951,13 +971,45 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
-  const [creatingDefaultPdv, setCreatingDefaultPdv] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
+  const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
+  const skipManagerAutoPdvRef = useRef(false);
 
-  const activeSession = sessions.find(s => s.status === 'open') || null;
+  const isWorkerUser = useMemo(
+    () => Boolean(user && (user.accountType === 'user' || Boolean((user as { invitedBy?: string }).invitedBy))),
+    [user],
+  );
+
+  useEffect(() => {
+    if (isWorkerUser || managerPdvPickId || skipManagerAutoPdvRef.current) return;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (bid && dataUserId) {
+      const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+      const pdvId = resolvePreferenceToPdvId(pointsOfSale, saved);
+      if (pdvId) {
+        setManagerPdvPickId(pdvId);
+        skipManagerAutoPdvRef.current = false;
+        return;
+      }
+    }
+    const open = sessions.filter((s) => s.status === 'open');
+    if (open.length !== 1) return;
+    const id = String(open[0].pointOfSaleId || '').trim();
+    if (id) setManagerPdvPickId(id);
+  }, [isWorkerUser, managerPdvPickId, sessions, pointsOfSale, dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
+
+  const activeSession = useMemo(() => {
+    const open = sessions.filter((s) => s.status === 'open');
+    if (isWorkerUser) return open[0] || null;
+    if (managerPdvPickId) {
+      return open.find((s) => String(s.pointOfSaleId || '').trim() === managerPdvPickId) || null;
+    }
+    if (open.length === 1) return open[0];
+    return null;
+  }, [sessions, isWorkerUser, managerPdvPickId]);
 
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
@@ -967,14 +1019,16 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         listPointsOfSaleRequest(dataUserId),
       ]);
       setSessions(sessData);
-      const merged = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvDataRaw);
+      const merged = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvDataRaw, {
+        business: currentBusiness,
+      });
       setPointsOfSale(merged);
     } catch {
       // silent
     } finally {
       setLoading(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, currentBusiness]);
 
   useEffect(() => {
     if (businessLoading || !dataUserId) {
@@ -983,34 +1037,6 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     }
     loadData();
   }, [businessLoading, dataUserId, loadData]);
-
-  const handleCreateDefaultPdv = useCallback(async () => {
-    if (!dataUserId || creatingDefaultPdv) return;
-    setCreatingDefaultPdv(true);
-    try {
-      const existingCodes = pointsOfSale.map((p) => String(p.code || '').trim()).filter(Boolean);
-      const pdvCode = suggestNextPdvCode('Tienda principal', existingCodes);
-      const defaultTerminal: Partial<TerminalConfig> = {
-        code: 'TPV-01',
-        name: 'TPV principal',
-        active: true,
-        type: 'pos',
-        peripherals: { receiptPrinter: true, cashDrawer: true, paymentDatafono: true },
-      };
-      const created = await createPointOfSaleRequest(dataUserId, {
-        name: 'Tienda principal',
-        code: pdvCode,
-        active: true,
-        terminals: [defaultTerminal as TerminalConfig],
-      } as Partial<PointOfSale>);
-      setPointsOfSale(prev => [created, ...prev]);
-      toast.success('PDV por defecto creado. Ya puedes abrir la caja.');
-    } catch {
-      toast.error('No se pudo crear el PDV por defecto. Ve a Ajustes para configurarlo manualmente.');
-    } finally {
-      setCreatingDefaultPdv(false);
-    }
-  }, [dataUserId, creatingDefaultPdv, pointsOfSale]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
@@ -1035,6 +1061,18 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         salesByChannel: {},
       } as Partial<TpvRegisterSession>);
       setSessions(prev => [created, ...prev]);
+      if (!isWorkerUser) {
+        const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+        if (bid && dataUserId && data.pointOfSaleId) {
+          const pdvObj = pointsOfSale.find((p) => p._id === data.pointOfSaleId);
+          const token = pdvObj?.workCenterId
+            ? `wc:${String(pdvObj.workCenterId).trim()}`
+            : data.pointOfSaleId;
+          writeDeliveryOpsSelectedPdvId(bid, dataUserId, token);
+          setManagerPdvPickId(data.pointOfSaleId);
+        }
+        skipManagerAutoPdvRef.current = false;
+      }
       toast.success(`Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`);
       // Aviso para el campanario de notificaciones. Útil para auditoría y para que
       // un encargado vea aperturas desde el móvil. Si la llamada al backend falla
@@ -1262,8 +1300,17 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         loading={loading}
         pointsOfSale={pointsOfSale}
         workerOptions={workerOptions}
-        onCreateDefaultPdv={handleCreateDefaultPdv}
-        creatingDefaultPdv={creatingDefaultPdv}
+        restrictedToPdvId={!isWorkerUser ? managerPdvPickId : null}
+        onClearStorePick={
+          !isWorkerUser
+            ? () => {
+                const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+                if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, null);
+                skipManagerAutoPdvRef.current = true;
+                setManagerPdvPickId(null);
+              }
+            : undefined
+        }
       />
     );
   }

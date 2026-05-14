@@ -54,11 +54,12 @@ export function BusinessType() {
   return (
     <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
       {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-6 pb-2 shrink-0">
+      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-4 pb-1 shrink-0">
         <div className="w-full max-w-5xl mx-auto">
           <ACCESO__Stepper
             steps={[...ONBOARDING_STEPS]}
             currentStep={STEP_INDEX}
+            compact
             onStepClick={(i) => {
               if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
             }}

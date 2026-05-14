@@ -32,6 +32,20 @@ const PLAN_CATALOG = {
   pro: { name: 'Pro', monthlyPrice: 34900, annualPrice: 335040 },
 };
 
+/** Alinea plan en cuenta con metadata de MONEI (createSubscription guarda planId / billingMode). */
+function subscriptionPlanFieldsFromMoneiMetadata(metadata) {
+  const raw = metadata && typeof metadata === 'object' ? metadata : {};
+  const planId = String(raw.planId || '').trim();
+  const row = PLAN_CATALOG[planId];
+  if (!row) return {};
+  return { selectedPlanId: planId, planName: row.name };
+}
+
+function isSkipMoneiSubscription() {
+  const v = String(process.env.SKIP_MONEI_SUBSCRIPTION || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 /**
  * POST /api/subscriptions/create
  * Crea una suscripción MONEI con 14 días de prueba y la activa.
@@ -54,6 +68,36 @@ export async function createAndActivate(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    if (isSkipMoneiSubscription()) {
+      const now = new Date().toISOString();
+      await saveAccount(req, {
+        ...account,
+        subscription: {
+          ...account.subscription,
+          moneiSubscriptionId: '',
+          moneiPaymentId: null,
+          moneiSubscriptionStatus: 'SKIPPED',
+          selectedPlanId: planId,
+          planName: plan.name,
+          billingMode,
+          status: 'subscription_active',
+          lastPaymentAt: now,
+        },
+        updatedAt: now,
+      });
+      logger.warn(
+        { userId, planId, billingMode },
+        '[MONEI] SKIP_MONEI_SUBSCRIPTION activo: plan guardado en cuenta sin pasarela',
+      );
+      return res.json({
+        ok: true,
+        redirectUrl: null,
+        subscriptionId: 'skip-monei',
+        paymentId: null,
+        skippedMonei: true,
+      });
     }
 
     const userApiKey = await resolveApiKey(req, userId);
@@ -318,6 +362,7 @@ export async function confirmSubscription(req, res) {
     else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
 
     const now = new Date();
+    const fromMoneiMeta = subscriptionPlanFieldsFromMoneiMetadata(moneiSub.metadata);
     const updatedAccount = await saveAccount(req, {
       ...account,
       subscription: {
@@ -326,6 +371,7 @@ export async function confirmSubscription(req, res) {
         moneiSubscriptionId: subscriptionId,
         moneiSubscriptionStatus: moneiStatus,
         lastPaymentAt: paymentInfo?.status === 'SUCCEEDED' ? now.toISOString() : account.subscription?.lastPaymentAt,
+        ...fromMoneiMeta,
       },
       updatedAt: now.toISOString(),
     });
@@ -399,12 +445,15 @@ export async function webhookSubscriptionStatus(req, res) {
     else if (moneiStatus === 'PAUSED') appStatus = 'grace_period';
     else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
 
+    const fromWebhookMeta = subscriptionPlanFieldsFromMoneiMetadata(metadata);
+
     const updatedAccount = await saveAccount(req, {
       ...account,
       subscription: {
         ...account.subscription,
         status: appStatus,
         moneiSubscriptionStatus: moneiStatus,
+        ...fromWebhookMeta,
       },
       updatedAt: new Date().toISOString(),
     });

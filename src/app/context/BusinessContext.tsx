@@ -24,7 +24,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface BusinessContextType {
+export interface BusinessContextType {
   businesses: Business[];
   currentBusiness: Business | null;
   isLoading: boolean;
@@ -90,10 +90,13 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
   const reloadBusinesses = useCallback(async () => {
     if (!user?.user_id) {
-      setBusinesses([]);
-      setCurrentBusiness(null);
-      // Mientras Auth hidrata la sesión, no marcar carga como terminada (evita race con SaasRoot → /auth/gate)
       setIsLoading(isInitializing);
+      // No vaciar empresas mientras Auth aún hidrata: un frame sin `user_id` dejaba la lista vacía y
+      // SaasRoot redirigía a /auth/gate o pantalla en blanco.
+      if (!isInitializing) {
+        setBusinesses([]);
+        setCurrentBusiness(null);
+      }
       return;
     }
 
@@ -105,8 +108,8 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       resolveCurrentBusiness(list, user.user_id);
     } catch (error) {
       console.error('Error loading businesses:', error);
-      setBusinesses([]);
-      setCurrentBusiness(null);
+      // No borrar estado local ante error transitorio (red, 5xx): vaciar aquí mandaba a Gate/bienvenida
+      // y la pestaña Usuarios quedaba en blanco aunque la empresa existiera.
     } finally {
       setIsLoading(false);
     }
@@ -310,8 +313,12 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   );
 }
 
+export function useBusinessOptional(): BusinessContextType | undefined {
+  return useContext(BusinessContext);
+}
+
 export function useBusiness() {
-  const context = useContext(BusinessContext);
+  const context = useBusinessOptional();
   if (context === undefined) {
     throw new Error('useBusiness must be used within a BusinessProvider');
   }

@@ -251,14 +251,8 @@ export function Recommendation() {
               ))}
             </ul>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-blue-900">
-                <strong>Prueba gratis de 14 días.</strong> La modalidad elegida también se guardará para poder verla y editarla más adelante.
-              </p>
-            </div>
-
             <ACCESO__Button onClick={handleStartTrial} variant="primary" fullWidth size="lg">
-              Empezar prueba gratis
+              Continuar
               <ArrowRight className="w-5 h-5 ml-2" />
             </ACCESO__Button>
           </div>

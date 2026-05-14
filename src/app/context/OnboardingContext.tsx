@@ -27,6 +27,8 @@ export interface OnboardingData {
     legalName: string;
     taxId: string;
     province: string;
+    /** Localidad (p. ej. desde autocompletado de dirección); si falta, SaaS usa provincia como respaldo para el negocio. */
+    city?: string;
     address: string;
     companyEmail: string;
     companyPhone: string;

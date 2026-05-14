@@ -2967,6 +2967,7 @@ export function Team() {
     });
     await loadDirectory(null);
     await loadPendingInvitations();
+    window.dispatchEvent(new CustomEvent('vertial:invitations:refresh'));
 
     return {
       isExistingUser,

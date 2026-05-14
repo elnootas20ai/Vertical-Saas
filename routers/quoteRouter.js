@@ -5,7 +5,7 @@ import {
   getPublicQuote,
   sendQuoteByEmail,
 } from '../controllers/quoteController.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import { burstLimiter, planAwareLimiter } from '../middleware/rateLimiter.js';
 
 const quoteRouter = Router();
@@ -16,6 +16,6 @@ quoteRouter.get('/accept', acceptQuote);
 quoteRouter.get('/reject', rejectQuote);
 
 // Authenticated endpoint — send quote by email
-quoteRouter.post('/send/:quoteId', requireAuth, burstLimiter, planAwareLimiter, sendQuoteByEmail);
+quoteRouter.post('/send/:quoteId', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, sendQuoteByEmail);
 
 export { quoteRouter };

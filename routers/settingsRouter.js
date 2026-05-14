@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import {
   getBranding,
   saveBranding,
@@ -37,7 +37,7 @@ const settingsRouter = Router();
 settingsRouter.get('/platform/changelog', getPlatformChangelog);
 
 // Todas las rutas siguientes requieren autenticación
-settingsRouter.use(requireAuth);
+settingsRouter.use(requireAuthAndEmailVerified);
 
 // ADM-01: Impersonation (solo Admin)
 settingsRouter.post('/impersonate/:userId', impersonateUser);
