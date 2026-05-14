@@ -15,6 +15,7 @@ import {
   registerPaymentRequest,
   listCatalogItemsRequest,
   listPointsOfSaleRequest,
+  pointOfSaleDisplayLabel,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryChannel,
@@ -188,6 +189,17 @@ export function DeliveryOrders() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active !== false), [pointsOfSale]);
+  const singlePdvId = useMemo(
+    () => (activePdvs.length === 1 ? activePdvs[0]._id : null),
+    [activePdvs],
+  );
+
+  useEffect(() => {
+    if (!singlePdvId) return;
+    setFilters((f) => (f.salesPointId === singlePdvId ? f : { ...f, salesPointId: singlePdvId }));
+  }, [singlePdvId]);
+
   // Auto-refresh every 30s
   useEffect(() => {
     const interval = setInterval(() => { if (!loading) loadData(); }, 30_000);
@@ -341,7 +353,13 @@ export function DeliveryOrders() {
     return result.filter((a) => !dismissedAlerts.has(a.id));
   }, [filtered, dismissedAlerts]);
 
-  const hasActiveFilters = Object.values(filters).some((v) => v !== '');
+  const hasActiveFilters = useMemo(() => {
+    return Object.entries(filters).some(([key, v]) => {
+      if (v === '' || v == null) return false;
+      if (singlePdvId && key === 'salesPointId' && v === singlePdvId) return false;
+      return true;
+    });
+  }, [filters, singlePdvId]);
 
   const selectCls = 'px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-100 focus:outline-none';
 
@@ -432,7 +450,7 @@ export function DeliveryOrders() {
               <label className="block text-xs font-bold text-gray-500 uppercase mb-1">PDV</label>
               <select value={filters.salesPointId} onChange={(e) => setFilters((f) => ({ ...f, salesPointId: e.target.value }))} className={selectCls}>
                 <option value="">Todos</option>
-                {pointsOfSale.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
+                {pointsOfSale.map((p) => <option key={p._id} value={p._id}>{pointOfSaleDisplayLabel(p)}</option>)}
               </select>
             </div>
             <div>
@@ -579,7 +597,13 @@ export function DeliveryOrders() {
 
                         {/* PDV */}
                         <td className="px-4 py-3">
-                          <p className="text-xs text-gray-500 truncate max-w-[80px]">{order.salesPointName || '—'}</p>
+                          <p className="text-xs text-gray-500 truncate max-w-[80px]">
+                            {(() => {
+                              const pdv = pointsOfSale.find((p) => p._id === order.salesPointId);
+                              if (pdv) return pointOfSaleDisplayLabel(pdv);
+                              return order.salesPointName || '—';
+                            })()}
+                          </p>
                         </td>
 
                         {/* Estado */}

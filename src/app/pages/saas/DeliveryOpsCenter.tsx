@@ -6,11 +6,12 @@ import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useSSE } from '../../hooks/useSSE';
-import { useHasProAccess } from '../../hooks/useHasProAccess';
+import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { getAuthHeaders } from '../../lib/authApi';
 import { Delivery } from './Delivery';
 import {
   getOpsCenterRequest,
+  pointOfSaleDisplayLabel,
   updateDeliveryOrderRequest,
   type OpsCenterData,
   type OpsCenterFilters,
@@ -25,6 +26,8 @@ import {
   ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
   Timer, Users, Bell, ChevronDown, ChevronUp,
   Filter, X, Armchair, Boxes, BookOpen, Hash,
+  Store,
+  Plus,
   RefreshCw,
   Zap,
   ClipboardCheck,
@@ -75,8 +78,54 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
 }) {
   const [open, setOpen] = useState(false);
   const nav = useNavigate();
-  const hasProAccess = useHasProAccess();
-  const ac = [filters.salesPointId, filters.channel, filters.timeSlot].filter(Boolean).length;
+  const { user } = useAuth();
+  const pointOfSaleAccess = usePointOfSaleAccess(pdvs.length);
+
+  const goToPdvBilling = () => {
+    const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
+    if (resolvedUserId) {
+      try {
+        localStorage.setItem(
+          `billing_selection_${resolvedUserId}`,
+          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    nav('/saas/settings/facturacion');
+  };
+
+  const handleAddPdvClick = () => {
+    if (pointOfSaleAccess.canCreatePointOfSale) {
+      nav('/saas/settings/centros-de-trabajo?action=new-pdv');
+      return;
+    }
+    goToPdvBilling();
+  };
+
+  const addPdvLabel = pointOfSaleAccess.canCreatePointOfSale
+    ? 'Nuevo PDV'
+    : pointOfSaleAccess.needsPointOfSaleAddon
+      ? 'Añadir PDV extra'
+      : 'Multi-PDV (PRO)';
+  const addPdvTitle = pointOfSaleAccess.canCreatePointOfSale
+    ? `Crear un nuevo punto de venta (${pdvs.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
+    : pointOfSaleAccess.needsPointOfSaleAddon
+      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Añade un extra para crear otro.`
+      : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
+
+  const addPdvButtonClass =
+    'px-3 py-2 rounded-lg text-sm font-semibold border transition-colors inline-flex items-center gap-1.5 shrink-0 ' +
+    (pointOfSaleAccess.canCreatePointOfSale
+      ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
+      : 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30');
+
+  const ac = [
+    pdvs.length > 1 ? filters.salesPointId : '',
+    filters.channel,
+    filters.timeSlot,
+  ].filter(Boolean).length;
   const sel = 'px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
 
   const inner = (
@@ -90,22 +139,38 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
           <option value="">Todas las tiendas</option>
           {pdvs.map((p) => (
             <option key={p._id} value={p._id}>
-              {p.name}
+              {pointOfSaleDisplayLabel(p)}
             </option>
           ))}
         </select>
+      ) : pdvs.length === 1 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className={`${sel} flex items-center gap-2 border-gray-900/25 dark:border-gray-400/30 bg-gray-50 dark:bg-gray-800/90 font-medium text-gray-900 dark:text-gray-100`}
+            title="Centro de trabajo / PDV activo en esta vista"
+          >
+            <Store className="w-4 h-4 shrink-0 opacity-80" />
+            <span className="truncate max-w-[14rem]">{pointOfSaleDisplayLabel(pdvs[0])}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleAddPdvClick}
+            className={addPdvButtonClass}
+            title={addPdvTitle}
+          >
+            {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3.5 h-3.5" />}
+            {addPdvLabel}
+          </button>
+        </div>
       ) : (
         <button
           type="button"
-          onClick={() => nav('/saas/settings/centros-de-trabajo')}
-          className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-opacity ${
-            hasProAccess
-              ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
-              : 'border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-sm hover:opacity-95'
-          }`}
-          title={hasProAccess ? 'Añadir/gestionar tiendas' : 'Activa multi-tienda (PRO)'}
+          onClick={handleAddPdvClick}
+          className={addPdvButtonClass}
+          title={addPdvTitle}
         >
-          {hasProAccess ? 'Añadir tienda' : 'Multi-tienda (PRO)'}
+          {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3.5 h-3.5" />}
+          {addPdvLabel}
         </button>
       )}
       <select className={sel} value={filters.channel || ''} onChange={e => onChange({ ...filters, channel: e.target.value || undefined })}>
@@ -719,6 +784,21 @@ export function DeliveryOpsCenter() {
   const [sseOk, setSseOk] = useState(false);
   const [lastUp, setLastUp] = useState<Date | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Un solo PDV activo: fijamos el filtro para que la vista y la API queden ancladas a esa tienda (p. ej. gerente con una sede). */
+  const singleActivePdvId = useMemo(() => {
+    const list = data?.pointsOfSale || [];
+    const active = list.filter((p) => p.active !== false);
+    return active.length === 1 ? active[0]._id : null;
+  }, [data?.pointsOfSale]);
+
+  useEffect(() => {
+    if (!singleActivePdvId) return;
+    setFilters((prev) => {
+      if (prev.salesPointId === singleActivePdvId) return prev;
+      return { ...prev, salesPointId: singleActivePdvId };
+    });
+  }, [singleActivePdvId]);
 
   /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
   const pedidosQueueCount = useMemo(() => {

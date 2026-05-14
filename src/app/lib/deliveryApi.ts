@@ -1,5 +1,6 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
+import { listWorkCenters, type WorkCenter } from './workCentersApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -699,6 +700,8 @@ export interface PointOfSale {
   type: 'point_of_sale';
   id: string;
   user_id: string;
+  /** Si viene de un centro «punto de venta» en Ajustes, id del documento sales_point */
+  workCenterId?: string;
   name: string;
   code: string;
   address: string;
@@ -708,12 +711,92 @@ export interface PointOfSale {
   updatedAt: string;
 }
 
+/** Etiqueta en pantalla: refuerza el **punto de venta** (código + nombre local), no solo la marca de la cuenta. */
+export function pointOfSaleDisplayLabel(p: Pick<PointOfSale, 'name' | 'code'>): string {
+  const code = String(p.code || '').trim();
+  const name = String(p.name || '').trim();
+  if (!name && !code) return 'Punto de venta';
+  if (code && name && code.toLowerCase() !== name.toLowerCase()) return `${code} · ${name}`;
+  return name || code;
+}
+
+/** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */
+import {
+  derivePdvCodePrefix,
+  suggestNextPdvCode,
+} from '../../../shared/naming/deliveryPointOfSaleCode.js';
+
+export { derivePdvCodePrefix, suggestNextPdvCode };
+
 export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; pointsOfSale: PointOfSale[] }>(
     `/api/delivery/points-of-sale/${encodeURIComponent(id)}`,
   );
   return payload.pointsOfSale || [];
+}
+
+/**
+ * Los PDV de caja viven en la DB delivery (`point_of_sale`); los de Ajustes → Centros de trabajo
+ * son `sales_point` en otra DB. Si hay centros tipo «punto_de_venta» sin PDV delivery enlazado,
+ * crea el documento para que aparezcan en apertura de caja / listados.
+ */
+export async function mergePointsOfSaleWithRetailWorkCenters(
+  userId: string,
+  existingPdvs: PointOfSale[],
+): Promise<PointOfSale[]> {
+  const id = normalizeUserId(userId);
+  const pdvData = [...existingPdvs];
+  let wcs: WorkCenter[] = [];
+  try {
+    wcs = await listWorkCenters(id);
+  } catch {
+    return pdvData;
+  }
+  const linkedWcIds = new Set(
+    pdvData.map((p) => p.workCenterId).filter((wcId): wcId is string => !!wcId && wcId.length > 0),
+  );
+  const namesUsed = new Set(pdvData.map((p) => p.name.trim().toLowerCase()));
+
+  for (const wc of wcs) {
+    if (wc.centerType !== 'punto_de_venta' || !wc.active || wc.deletedAt) continue;
+    if (linkedWcIds.has(wc._id)) continue;
+    const nameLower = wc.name.trim().toLowerCase();
+    if (namesUsed.has(nameLower)) continue;
+
+    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+    const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
+    const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
+    const termId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const created = await createPointOfSaleRequest(id, {
+        name: wc.name,
+        code: pdvCode,
+        address: addr,
+        active: true,
+        workCenterId: wc._id,
+        terminals: [{
+          id: termId,
+          code: 'TPV-1',
+          name: 'Terminal principal',
+          datafonName: '',
+          printerName: '',
+          scaleDeviceId: '',
+          scaleName: '',
+          active: true,
+        }],
+      });
+      pdvData.push(created);
+      existingCodes.push(String(created.code || '').trim());
+      linkedWcIds.add(wc._id);
+      namesUsed.add(created.name.trim().toLowerCase());
+    } catch {
+      /* no bloquear el resto */
+    }
+  }
+  return pdvData;
 }
 
 export async function createPointOfSaleRequest(userId: string, data: Partial<PointOfSale>): Promise<PointOfSale> {

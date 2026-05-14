@@ -10,7 +10,9 @@ import {
   createTpvRegisterSessionRequest,
   updateTpvRegisterSessionRequest,
   listPointsOfSaleRequest,
+  mergePointsOfSaleWithRetailWorkCenters,
   createPointOfSaleRequest,
+  suggestNextPdvCode,
   type TpvRegisterSession,
   type TpvRegisterTransaction,
   type CashDenominationCount,
@@ -960,12 +962,13 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
     try {
-      const [sessData, pdvData] = await Promise.all([
+      const [sessData, pdvDataRaw] = await Promise.all([
         listTpvRegisterSessionsRequest(dataUserId),
         listPointsOfSaleRequest(dataUserId),
       ]);
       setSessions(sessData);
-      setPointsOfSale(pdvData);
+      const merged = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvDataRaw);
+      setPointsOfSale(merged);
     } catch {
       // silent
     } finally {
@@ -985,6 +988,8 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     if (!dataUserId || creatingDefaultPdv) return;
     setCreatingDefaultPdv(true);
     try {
+      const existingCodes = pointsOfSale.map((p) => String(p.code || '').trim()).filter(Boolean);
+      const pdvCode = suggestNextPdvCode('Tienda principal', existingCodes);
       const defaultTerminal: Partial<TerminalConfig> = {
         code: 'TPV-01',
         name: 'TPV principal',
@@ -993,8 +998,8 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         peripherals: { receiptPrinter: true, cashDrawer: true, paymentDatafono: true },
       };
       const created = await createPointOfSaleRequest(dataUserId, {
-        name: currentBusiness?.companyName || 'PDV principal',
-        code: 'PDV-01',
+        name: 'Tienda principal',
+        code: pdvCode,
         active: true,
         terminals: [defaultTerminal as TerminalConfig],
       } as Partial<PointOfSale>);
@@ -1005,7 +1010,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     } finally {
       setCreatingDefaultPdv(false);
     }
-  }, [dataUserId, creatingDefaultPdv, currentBusiness]);
+  }, [dataUserId, creatingDefaultPdv, pointsOfSale]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;

@@ -6,6 +6,7 @@ import {
   listTpvRegisterSessionsRequest,
   updateTpvRegisterSessionRequest,
   listPointsOfSaleRequest,
+  mergePointsOfSaleWithRetailWorkCenters,
   listDriverCashSessionsRequest,
   getDeliveryConfigRequest,
   updateDeliveryConfigRequest,
@@ -520,7 +521,7 @@ export function CajaPage() {
         getDeliveryConfigRequest(userId).catch(() => null),
       ]);
       setSessions(sessData);
-      setPointsOfSale(pdvData);
+      setPointsOfSale(await mergePointsOfSaleWithRetailWorkCenters(userId, pdvData));
       setDriverSessions(driverData);
       if (cfgData) setDeliveryConfig(cfgData);
     } catch {

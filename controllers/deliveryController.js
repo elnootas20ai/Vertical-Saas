@@ -46,6 +46,7 @@ import {
   getFinanceDbName,
   buildFinanceDocument,
 } from '../services/couchdb.js';
+import { suggestNextPdvCode } from '../shared/naming/deliveryPointOfSaleCode.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
@@ -1372,7 +1373,16 @@ export async function listPointsOfSale(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const pdvs = await listPointsOfSaleByUser(req, userId);
+    let pdvs = await listPointsOfSaleByUser(req, userId);
+    // Trabajadores con PDV asignado en empleo: solo ven ese centro (id PDV o workCenter enlazado).
+    if (req.callerIsWorker) {
+      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      if (workerSalesPoint) {
+        pdvs = pdvs.filter(
+          (p) => p._id === workerSalesPoint || p.workCenterId === workerSalesPoint,
+        );
+      }
+    }
     return res.json({ ok: true, pointsOfSale: pdvs.map(sanitizePointOfSale) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar puntos de venta' });
@@ -1390,7 +1400,14 @@ export async function createPointOfSale(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
-    const doc = buildPointOfSaleDocument(userId, pointOfSale);
+    let body = { ...pointOfSale };
+    const codeStr = String(body.code || '').trim();
+    if (!codeStr) {
+      const existing = await listPointsOfSaleByUser(req, userId);
+      const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
+      body = { ...body, code: suggestNextPdvCode(body.name, codes) };
+    }
+    const doc = buildPointOfSaleDocument(userId, body);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,

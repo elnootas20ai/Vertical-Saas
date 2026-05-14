@@ -1,11 +1,17 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   X, ArrowLeft, ArrowRight, Home, Briefcase, Truck, ShoppingBag,
   Search, Plus, Minus, CreditCard, Banknote, Smartphone, Wallet,
   ChevronRight, Check, MapPin, User as UserIcon, Store,
   Loader2,
 } from 'lucide-react';
-import type { DeliveryOrder, DeliveryType, CatalogItem, PointOfSale } from '../../lib/deliveryApi';
+import {
+  pointOfSaleDisplayLabel,
+  type DeliveryOrder,
+  type DeliveryType,
+  type CatalogItem,
+  type PointOfSale,
+} from '../../lib/deliveryApi';
 import type { Client } from '../../context/AppContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 
@@ -96,6 +102,18 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
     matchByName: true,
     minQueryLength: 2,
   });
+
+  const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);
+
+  useEffect(() => {
+    if (activePdvs.length !== 1) return;
+    const only = activePdvs[0];
+    const label = pointOfSaleDisplayLabel(only);
+    setData((prev) => {
+      if (prev.salesPointId === only._id && prev.salesPointName === label) return prev;
+      return { ...prev, salesPointId: only._id, salesPointName: label };
+    });
+  }, [activePdvs]);
 
   const applyClient = useCallback((client: Client) => {
     selectClient(client);
@@ -368,11 +386,11 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
               ) : (
                 <div className="space-y-2">
                   {pointsOfSale.filter((p) => p.active).map((pdv) => (
-                    <button key={pdv._id} onClick={() => update({ salesPointId: pdv._id, salesPointName: pdv.name })}
+                    <button key={pdv._id} onClick={() => update({ salesPointId: pdv._id, salesPointName: pointOfSaleDisplayLabel(pdv) })}
                       className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all ${data.salesPointId === pdv._id ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-800' : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'}`}>
                       <Store className={`w-5 h-5 ${data.salesPointId === pdv._id ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'}`} />
                       <div>
-                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">{pdv.name}</p>
+                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">{pointOfSaleDisplayLabel(pdv)}</p>
                         {pdv.address && <p className="text-xs text-gray-500">{pdv.address}</p>}
                       </div>
                       {data.salesPointId === pdv._id && <Check className="w-5 h-5 text-gray-900 dark:text-gray-100 ml-auto" />}
