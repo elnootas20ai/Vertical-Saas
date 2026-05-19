@@ -300,10 +300,6 @@ export function buildEmailVerificationEmail(email, token) {
           <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
             Este enlace expira en <strong>24 horas</strong>. Si no creaste esta cuenta, puedes ignorar este email.
           </p>
-          <p style="color:#aaa;font-size:12px;margin:16px 0 0;">
-            O copia y pega esta URL en tu navegador:<br>
-            <span style="color:#555;word-break:break-all;">${verifyUrl}</span>
-          </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
           <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>

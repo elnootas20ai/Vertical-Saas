@@ -266,39 +266,12 @@ export function VerifyEmailPending() {
             <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
               Correo confirmado
             </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 leading-relaxed">
-              Tu email ya está verificado. Para seguir con el registro, vuelve a la pantalla donde te
-              registraste (la que dice «Revisa tu correo»).
+            <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+              Tu email ya está verificado. Vuelve a la pestaña de Vertial en el ordenador donde te
+              registraste (la pantalla «Revisa tu correo») y pulsa{' '}
+              <strong className="text-gray-700 dark:text-gray-200">«Ya he confirmado el email»</strong>.
+              El registro continuará allí. Puedes cerrar esta ventana.
             </p>
-            <ol className="text-left text-sm text-gray-600 dark:text-gray-300 space-y-3 mb-6 pl-1">
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  1
-                </span>
-                <span>Cierra esta ventana o vuelve a la pestaña anterior de Vertial.</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  2
-                </span>
-                <span>
-                  Pulsa el botón{' '}
-                  <strong className="text-gray-900 dark:text-gray-100">«Ya he confirmado el email»</strong>.
-                </span>
-              </li>
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  3
-                </span>
-                <span>Te llevaremos al siguiente paso del registro.</span>
-              </li>
-            </ol>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-              Si cerraste esa pantalla, puedes continuar desde aquí.
-            </p>
-            <ACCESO__Button variant="secondary" fullWidth onClick={() => goAfterVerify(user?.accountType)}>
-              Continuar el registro aquí
-            </ACCESO__Button>
           </div>
         </div>
       </div>
