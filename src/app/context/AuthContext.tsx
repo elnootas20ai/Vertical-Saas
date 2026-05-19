@@ -57,7 +57,7 @@ interface AuthContextType {
   updateOnboardingData: (data: Record<string, unknown>) => Promise<void>;
   verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
   /** Sincroniza usuario con /api/auth/me (p. ej. verificación hecha en otra pestaña). */
-  refreshCurrentUser: () => Promise<boolean>;
+  refreshCurrentUser: () => Promise<{ ok: boolean; emailVerified: boolean }>;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
   googleLogin: (credential: string) => Promise<{
     success: boolean;
@@ -217,7 +217,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const register = async (data: RegisterPayload): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
+  const register = async (data: RegisterPayload): Promise<{
+    success: boolean;
+    redirectTo?: string;
+    emailVerified?: boolean;
+    error?: string;
+  }> => {
     try {
       const response = await registerRequest(data);
       if (!response.user) {
@@ -225,7 +230,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // S-01: Cookies establecidas por el backend
       setSessionUser(response.user);
-      return { success: true, redirectTo: response.redirectTo };
+      return {
+        success: true,
+        redirectTo: response.redirectTo,
+        emailVerified: Boolean(response.user.emailVerified),
+      };
     } catch (error) {
       return {
         success: false,
@@ -639,12 +648,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refreshCurrentUser = useCallback(async (): Promise<boolean> => {
+  const refreshCurrentUser = useCallback(async (): Promise<{ ok: boolean; emailVerified: boolean }> => {
     try {
       const response = await fetchCurrentUserRequest();
-      if (!response.ok || !response.user) return false;
+      if (!response.ok || !response.user) {
+        return { ok: false, emailVerified: false };
+      }
+      const next = response.user;
       setUser((prev) => {
-        const next = response.user!;
         if (
           prev?.user_id === next.user_id &&
           prev.emailVerified === next.emailVerified &&
@@ -656,9 +667,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return next;
       });
       setIsAuthenticated(true);
-      return true;
+      return { ok: true, emailVerified: Boolean(next.emailVerified) };
     } catch {
-      return false;
+      return { ok: false, emailVerified: false };
     }
   }, []);
 

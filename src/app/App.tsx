@@ -5,6 +5,7 @@ import { router } from './routes';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BusinessProvider } from './context/BusinessContext';
+import { SetupProgressProvider } from './context/SetupProgressContext';
 
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
@@ -90,7 +91,9 @@ export default function App() {
         <OnboardingProvider>
           <OnboardingUserSync />
           <BusinessProvider>
-            <RouterProvider router={router} />
+            <SetupProgressProvider>
+              <RouterProvider router={router} />
+            </SetupProgressProvider>
           </BusinessProvider>
         </OnboardingProvider>
       </AuthProvider>

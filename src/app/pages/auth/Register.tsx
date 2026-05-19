@@ -41,6 +41,17 @@ function generateSecurePassword(length = 16): string {
   return chars.join('');
 }
 
+function destinationAfterSignup(opts: {
+  emailVerified?: boolean;
+  redirectTo?: string;
+  isUserAccount: boolean;
+}) {
+  if (opts.emailVerified === false) {
+    return '/auth/verify-email-pending';
+  }
+  return opts.redirectTo ?? (opts.isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type');
+}
+
 export function Register() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -113,7 +124,13 @@ export function Register() {
       const result = await googleLogin(credential);
 
       if (result.success) {
-        navigate(result.redirectTo || '/auth/onboarding/business-type');
+        navigate(
+          destinationAfterSignup({
+            emailVerified: true,
+            redirectTo: result.redirectTo,
+            isUserAccount,
+          }),
+        );
         return;
       }
 
@@ -191,7 +208,12 @@ export function Register() {
 
     if (result.success) {
       navigate(
-        result.redirectTo ?? (isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type'),
+        destinationAfterSignup({
+          emailVerified: result.emailVerified,
+          redirectTo: result.redirectTo,
+          isUserAccount,
+        }),
+        { replace: true },
       );
     } else {
       setErrors({ email: result.error || 'Error al crear la cuenta' });
