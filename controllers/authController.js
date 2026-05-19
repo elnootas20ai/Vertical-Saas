@@ -1950,7 +1950,12 @@ export async function resendVerificationEmail(req, res) {
     const rawToken = crypto.randomBytes(32).toString('hex');
     await saveEmailVerificationToken(req, account, rawToken);
     const { subject, html } = buildEmailVerificationEmail(account.email, rawToken);
-    await sendEmail({ to: account.email, subject, html });
+    await sendEmail({
+      to: account.email,
+      subject,
+      html,
+      requireDelivery: process.env.NODE_ENV === 'production',
+    });
 
     return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
   } catch (error) {

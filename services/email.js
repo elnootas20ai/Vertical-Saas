@@ -35,6 +35,8 @@ function hasUsableResendKey() {
 async function sendViaResend(to, subject, html, replyTo) {
   const payload = { from: getFromAddress(), to, subject, html };
   if (replyTo) payload.reply_to = replyTo;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.EMAIL_SEND_TIMEOUT_MS || 15000));
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -42,6 +44,9 @@ async function sendViaResend(to, subject, html, replyTo) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal: controller.signal,
+  }).finally(() => {
+    clearTimeout(timeout);
   });
 
   if (!response.ok) {
@@ -57,6 +62,9 @@ async function sendViaSMTP(to, subject, html, replyTo) {
     host: String(process.env.SMTP_HOST || '').trim(),
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 10000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS || 10000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 15000),
     auth: {
       user: smtpUser,
       pass: smtpPass,
