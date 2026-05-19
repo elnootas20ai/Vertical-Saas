@@ -42,6 +42,7 @@ export function VerifyEmailPending() {
   const autoSendAttemptedRef = useRef(false);
 
   const targetEmail = (emailFromUrl || routeState?.email || user?.email || '').trim();
+  const openedFromEmailLink = Boolean(tokenFromUrl && emailFromUrl);
 
   const goAfterVerify = useCallback(
     (accountType?: string) => {
@@ -88,6 +89,13 @@ export function VerifyEmailPending() {
         if (result.success) {
           broadcastEmailVerified(emailFromUrl);
           setVerifyState('success');
+          window.setTimeout(() => {
+            try {
+              window.close();
+            } catch {
+              /* el navegador suele bloquear close si no es ventana abierta por script */
+            }
+          }, 800);
         } else {
           setVerifyState('error');
           setVerifyError(result.error || 'Enlace inválido o expirado');
@@ -111,7 +119,14 @@ export function VerifyEmailPending() {
         }
       });
     });
-  }, [tokenFromUrl, emailFromUrl, targetEmail, refreshCurrentUser, user?.accountType, goAfterVerify]);
+  }, [tokenFromUrl, emailFromUrl, targetEmail, refreshCurrentUser]);
+
+  /** Marca esta pestaña como la de «espera» (registro), no la del enlace del correo. */
+  useEffect(() => {
+    if (!openedFromEmailLink) {
+      sessionStorage.setItem('vertial_verify_waiting', '1');
+    }
+  }, [openedFromEmailLink]);
 
   /**
    * Si verificaste el email en otra pestaña (mismo navegador), las cookies ya están bien:
@@ -126,7 +141,7 @@ export function VerifyEmailPending() {
       void refreshCurrentUser();
     };
 
-    const id = window.setInterval(tick, 3000);
+    const id = window.setInterval(tick, 1500);
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') tick();
     };
@@ -149,12 +164,13 @@ export function VerifyEmailPending() {
     setCheckState('success');
   }, [user?.emailVerified, verifyState]);
 
-  /** Tras verificar: redirección automática al onboarding. */
+  /** Tras verificar en la pestaña de registro: redirección automática (no en la pestaña del correo). */
   useEffect(() => {
-    if (verifyState !== 'success' && checkState !== 'success') return;
+    if (verifyState === 'success' && openedFromEmailLink) return;
+    if (checkState !== 'success' && !(verifyState === 'success' && !openedFromEmailLink)) return;
     const t = window.setTimeout(() => goAfterVerify(user?.accountType), REDIRECT_DELAY_MS);
     return () => window.clearTimeout(t);
-  }, [verifyState, checkState, user?.accountType, goAfterVerify]);
+  }, [verifyState, checkState, openedFromEmailLink, user?.accountType, goAfterVerify]);
 
   const handleCheckVerified = async () => {
     setCheckMessage('');
@@ -235,7 +251,61 @@ export function VerifyEmailPending() {
   }
 
 
-  if (verifyState === 'success' || checkState === 'success') {
+
+  if (verifyState === 'success' && openedFromEmailLink) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-6">
+        <div className="w-full max-w-[420px] text-center">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm px-8 py-10">
+            <div className="flex justify-center mb-8">
+              <VertialLogo size="lg" />
+            </div>
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40">
+              <CheckCircle className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
+              Correo confirmado
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 leading-relaxed">
+              Tu email ya está verificado. Para seguir con el registro, vuelve a la pantalla donde te
+              registraste (la que dice «Revisa tu correo»).
+            </p>
+            <ol className="text-left text-sm text-gray-600 dark:text-gray-300 space-y-3 mb-6 pl-1">
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  1
+                </span>
+                <span>Cierra esta ventana o vuelve a la pestaña anterior de Vertial.</span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  2
+                </span>
+                <span>
+                  Pulsa el botón{' '}
+                  <strong className="text-gray-900 dark:text-gray-100">«Ya he confirmado el email»</strong>.
+                </span>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  3
+                </span>
+                <span>Te llevaremos al siguiente paso del registro.</span>
+              </li>
+            </ol>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+              Si cerraste esa pantalla, puedes continuar desde aquí.
+            </p>
+            <ACCESO__Button variant="secondary" fullWidth onClick={() => goAfterVerify(user?.accountType)}>
+              Continuar el registro aquí
+            </ACCESO__Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (checkState === 'success' || (verifyState === 'success' && !openedFromEmailLink)) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-6">
         <div className="w-full max-w-[420px] text-center">
@@ -343,7 +413,8 @@ export function VerifyEmailPending() {
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Revisa tu correo</h1>
             <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">
-              Hemos enviado un enlace de confirmación. Ábrelo para activar tu cuenta.
+              Hemos enviado un enlace de confirmación. Ábrelo para activar tu cuenta y, cuando lo hayas
+              hecho, vuelve a esta pantalla y pulsa «Ya he confirmado el email».
             </p>
             {targetEmail && (
               <p className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 dark:bg-gray-700/80 text-sm font-medium text-gray-900 dark:text-gray-100">
