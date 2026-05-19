@@ -3524,7 +3524,7 @@ export function Settings() {
   const { user, updateProfile, listRoles, listUsers } = useAuth();
   const { parkingZones, addParkingZone } = useApp();
   const { templates, upsertTemplate, duplicateTemplate } = useDocumentTemplates();
-  const { currentBusiness, reloadBusinesses } = useBusiness();
+  const { currentBusiness } = useBusiness();
   const activeTab: TabId = (tabSlug && SLUG_TO_TAB[tabSlug]) || DEFAULT_TAB;
   const setActiveTab = useCallback((id: TabId) => navigate(`/saas/settings/${TAB_TO_SLUG[id]}`), [navigate]);
 
@@ -3593,11 +3593,6 @@ export function Settings() {
   useEffect(() => {
     void loadDirectory();
   }, []);
-
-  useEffect(() => {
-    if (activeTab !== 'users') return;
-    void reloadBusinesses();
-  }, [activeTab, reloadBusinesses]);
 
   const currentRoleStyles = useMemo(() => roleStyles(user?.role || 'Admin'), [user?.role]);
   const roles = useMemo(() => mergeRoleCatalog(baseRoles, customRoles, users), [baseRoles, customRoles, users]);

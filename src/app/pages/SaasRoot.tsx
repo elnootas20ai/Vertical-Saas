@@ -144,7 +144,10 @@ function SaasContent() {
     }
   }, [subscription.status, location.pathname, navigate]);
 
-  if (isInitializing || isLoadingBusinesses || isAutoCreating) {
+  // Solo bloquear la primera carga de empresas; un reload desde Ajustes no debe desmontar el Outlet
+  // (si no, Settings monta → reloadBusinesses → isLoading → null → desmonta → bucle).
+  const isInitialBusinessLoad = isLoadingBusinesses && businesses.length === 0;
+  if (isInitializing || isInitialBusinessLoad || isAutoCreating) {
     return null;
   }
 

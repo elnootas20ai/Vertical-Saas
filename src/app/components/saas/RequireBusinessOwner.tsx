@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext';
  * sensibles (p. ej. `/api/delivery/ops-center/...` devuelve 403 para workers).
  */
 export function RequireBusinessOwner({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user, isInitializing } = useAuth();
   const navigate = useNavigate();
 
   const isWorker = Boolean(
@@ -20,14 +20,14 @@ export function RequireBusinessOwner({ children }: { children: React.ReactNode }
   );
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isInitializing) return;
     if (!user) return;
     if (isWorker) {
       navigate('/saas/worker', { replace: true });
     }
-  }, [isLoading, user, isWorker, navigate]);
+  }, [isInitializing, user, isWorker, navigate]);
 
-  if (isLoading) return null;
+  if (isInitializing) return null;
   if (isWorker) return null;
   return <>{children}</>;
 }

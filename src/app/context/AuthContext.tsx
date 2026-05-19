@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   type AccountActivityItem,
   type ActiveSession,
@@ -158,11 +158,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  const setSessionUser = (nextUser: User) => {
+  const setSessionUser = useCallback((nextUser: User) => {
     setUser(nextUser);
     setIsAuthenticated(true);
     persistSession(nextUser);
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -639,16 +639,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refreshCurrentUser = async (): Promise<boolean> => {
+  const refreshCurrentUser = useCallback(async (): Promise<boolean> => {
     try {
       const response = await fetchCurrentUserRequest();
       if (!response.ok || !response.user) return false;
-      setSessionUser(response.user);
+      setUser((prev) => {
+        const next = response.user!;
+        if (
+          prev?.user_id === next.user_id &&
+          prev.emailVerified === next.emailVerified &&
+          prev.updatedAt === next.updatedAt
+        ) {
+          return prev;
+        }
+        persistSession(next);
+        return next;
+      });
+      setIsAuthenticated(true);
       return true;
     } catch {
       return false;
     }
-  };
+  }, []);
 
   const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
     try {
