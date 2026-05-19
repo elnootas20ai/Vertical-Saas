@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { RouterProvider } from 'react-router';
+import { RouterProvider } from 'react-router-dom';
 import { ThemeProvider, useTheme } from 'next-themes';
 import { router } from './routes';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BusinessProvider } from './context/BusinessContext';
-import { SetupProgressProvider } from './context/SetupProgressContext';
-
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
   const { user } = useAuth();
@@ -91,9 +89,7 @@ export default function App() {
         <OnboardingProvider>
           <OnboardingUserSync />
           <BusinessProvider>
-            <SetupProgressProvider>
-              <RouterProvider router={router} />
-            </SetupProgressProvider>
+            <RouterProvider router={router} />
           </BusinessProvider>
         </OnboardingProvider>
       </AuthProvider>

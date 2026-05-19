@@ -512,7 +512,9 @@ export async function loginRequest(email: string, password: string) {
 }
 
 export async function registerRequest(data: RegisterPayload) {
-  return request<AuthUser & { redirectTo?: string; pendingInvitationsCount?: number }>('/api/auth/register', {
+  return request<
+    AuthUser & { redirectTo?: string; pendingInvitationsCount?: number; verificationEmailSent?: boolean }
+  >('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify(data),
   });

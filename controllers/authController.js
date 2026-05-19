@@ -47,6 +47,7 @@ import {
   saveBusiness,
   saveCard,
   saveEmailVerificationToken,
+  markVerificationEmailSent,
   saveInviteToken,
   saveJoinRequest,
   saveSession,
@@ -209,7 +210,7 @@ export async function register(req, res) {
       };
     }
 
-    const savedAccount = await saveAccount(req, account);
+    let savedAccount = await saveAccount(req, account);
     await logAccountActivity(req, {
       actorUserId: savedAccount.user_id,
       actorName: savedAccount.fullName,
@@ -223,18 +224,20 @@ export async function register(req, res) {
         : { accountType },
     });
 
+    let verificationEmailSent = Boolean(googleUser);
     if (!googleUser) {
       try {
-        const rawVerificationToken = crypto.randomBytes(32).toString('hex');
-        await saveEmailVerificationToken(req, savedAccount, rawVerificationToken);
-        const { subject, html } = buildEmailVerificationEmail(savedAccount.email, rawVerificationToken);
-        await sendEmail({ to: savedAccount.email, subject, html });
+        savedAccount = await sendAccountVerificationEmail(req, savedAccount);
+        verificationEmailSent = true;
       } catch (emailError) {
-        console.error('[AUTH] Error enviando email de verificación:', emailError?.message || emailError);
+        logger.error(
+          { tag: 'AUTH_REGISTER', email: savedAccount.email, err: emailError?.message || emailError },
+          'Error enviando email de verificación en registro',
+        );
       }
     }
 
-    if (!isUserAccount) {
+    if (!isUserAccount && verificationEmailSent) {
       sendWelcomeEmail(savedAccount).catch(() => null);
     }
 
@@ -316,6 +319,7 @@ export async function register(req, res) {
       refreshToken,
       redirectTo,
       pendingInvitationsCount,
+      verificationEmailSent,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1918,6 +1922,19 @@ export async function verifyEmail(req, res) {
 // AUTH-02: Reenviar email de verificación (cooldown 60 s)
 const RESEND_COOLDOWN_MS = 60 * 1000;
 
+async function sendAccountVerificationEmail(req, account) {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const withToken = await saveEmailVerificationToken(req, account, rawToken);
+  const { subject, html } = buildEmailVerificationEmail(account.email, rawToken);
+  await sendEmail({
+    to: account.email,
+    subject,
+    html,
+    requireDelivery: process.env.NODE_ENV === 'production',
+  });
+  return markVerificationEmailSent(req, withToken);
+}
+
 export async function resendVerificationEmail(req, res) {
   try {
     const { email } = req.body || {};
@@ -1947,15 +1964,7 @@ export async function resendVerificationEmail(req, res) {
       }
     }
 
-    const rawToken = crypto.randomBytes(32).toString('hex');
-    await saveEmailVerificationToken(req, account, rawToken);
-    const { subject, html } = buildEmailVerificationEmail(account.email, rawToken);
-    await sendEmail({
-      to: account.email,
-      subject,
-      html,
-      requireDelivery: process.env.NODE_ENV === 'production',
-    });
+    await sendAccountVerificationEmail(req, account);
 
     return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
   } catch (error) {

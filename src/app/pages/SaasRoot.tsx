@@ -5,7 +5,7 @@ import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 import { useBusiness } from '../context/BusinessContext';
 import { GroupProvider } from '../context/GroupContext';
 import { ActivationChecklistProvider } from '../context/ActivationChecklistContext';
-import { useSetupProgress } from '../context/SetupProgressContext';
+import { SetupProgressProvider, useSetupProgress } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -176,16 +176,18 @@ function SaasContent() {
 
 export function SaasRoot() {
   return (
-    <ActiveStoreScopeProvider>
-      <GroupProvider>
-        <AppProvider>
-          <ScrapyardProvider>
-            <ActivationChecklistProvider>
-              <SaasContent />
-            </ActivationChecklistProvider>
-          </ScrapyardProvider>
-        </AppProvider>
-      </GroupProvider>
-    </ActiveStoreScopeProvider>
+    <SetupProgressProvider>
+      <ActiveStoreScopeProvider>
+        <GroupProvider>
+          <AppProvider>
+            <ScrapyardProvider>
+              <ActivationChecklistProvider>
+                <SaasContent />
+              </ActivationChecklistProvider>
+            </ScrapyardProvider>
+          </AppProvider>
+        </GroupProvider>
+      </ActiveStoreScopeProvider>
+    </SetupProgressProvider>
   );
 }

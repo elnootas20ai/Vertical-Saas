@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Mail, RefreshCw, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { Mail, RefreshCw, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
 import { VertialLogo } from '../../components/VertialLogo';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useAuth } from '../../context/AuthContext';
@@ -9,14 +9,21 @@ import { broadcastEmailVerified, subscribeEmailVerified } from '../../lib/emailV
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
 
+type LocationState = {
+  email?: string;
+  verificationEmailSent?: boolean;
+};
+
 function postVerifyPath(accountType?: string) {
   return accountType === 'user' ? '/saas/worker' : '/auth/onboarding/business-type';
 }
 
 export function VerifyEmailPending() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { user, resendVerificationEmail, verifyEmail, refreshCurrentUser } = useAuth();
+  const routeState = (location.state as LocationState | null) ?? null;
 
   const tokenFromUrl = searchParams.get('token');
   const emailFromUrl = searchParams.get('email');
@@ -28,10 +35,12 @@ export function VerifyEmailPending() {
   const [countdown, setCountdown] = useState(0);
   const [checkState, setCheckState] = useState<'idle' | 'checking' | 'success'>('idle');
   const [checkMessage, setCheckMessage] = useState('');
+  const [deliveryNotice, setDeliveryNotice] = useState<'sent' | 'retrying' | 'failed' | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectScheduledRef = useRef(false);
+  const autoSendAttemptedRef = useRef(false);
 
-  const targetEmail = emailFromUrl || user?.email || '';
+  const targetEmail = (emailFromUrl || routeState?.email || user?.email || '').trim();
 
   const goAfterVerify = useCallback(
     (accountType?: string) => {
@@ -155,8 +164,8 @@ export function VerifyEmailPending() {
     setCheckState('idle');
     setCheckMessage(
       result.ok
-        ? 'Aún no aparece como verificado. Abre el enlace del correo (o el del móvil) y vuelve a pulsar este botón.'
-        : 'No se pudo comprobar el estado. Comprueba tu conexión e inténtalo de nuevo.',
+        ? 'Todavía no consta como verificado. Abre el enlace del correo e inténtalo de nuevo.'
+        : 'No se pudo comprobar. Revisa tu conexión.',
     );
   };
 
@@ -167,6 +176,7 @@ export function VerifyEmailPending() {
     const result = await resendVerificationEmail(targetEmail);
     if (result.success) {
       setResendState('sent');
+      setDeliveryNotice('sent');
       localStorage.setItem(RESEND_COOLDOWN_KEY, String(Date.now()));
       startCountdown(COOLDOWN_SECONDS);
     } else {
@@ -178,8 +188,28 @@ export function VerifyEmailPending() {
         localStorage.setItem(RESEND_COOLDOWN_KEY, String(Date.now() - (COOLDOWN_SECONDS - secs) * 1000));
       }
       setResendError(result.error || 'Error al reenviar el email');
+      setDeliveryNotice('failed');
     }
   };
+
+  /** Si el registro no pudo enviar el correo, reintentar una vez al llegar aquí. */
+  useEffect(() => {
+    if (tokenFromUrl || emailFromUrl) return;
+    if (autoSendAttemptedRef.current) return;
+    if (routeState?.verificationEmailSent !== false) return;
+    if (!targetEmail) return;
+
+    autoSendAttemptedRef.current = true;
+    setDeliveryNotice('retrying');
+    void handleResend();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeState?.verificationEmailSent, targetEmail, tokenFromUrl, emailFromUrl]);
+
+  useEffect(() => {
+    if (routeState?.verificationEmailSent === true && deliveryNotice === null) {
+      setDeliveryNotice('sent');
+    }
+  }, [routeState?.verificationEmailSent, deliveryNotice]);
 
   // Estado: verificando token de URL
   if (verifyState === 'loading') {
@@ -218,16 +248,12 @@ export function VerifyEmailPending() {
             <p className="text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">
               Tu correo ya está confirmado.
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 leading-relaxed text-left bg-gray-50 dark:bg-gray-900/40 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-              Si dejaste Vertial abierto en <strong>otra pestaña</strong>, vuelve a esa ventana: continuará sola en
-              unos segundos. También puedes seguir desde aquí.
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+              Si tenías Vertial abierto en otra pestaña, vuelve allí o continúa desde aquí.
             </p>
             <ACCESO__Button variant="primary" fullWidth onClick={() => goAfterVerify(user?.accountType)}>
-              Continuar configuración
+              Continuar
             </ACCESO__Button>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-4">
-              Puedes cerrar esta pestaña si prefieres usar la otra.
-            </p>
           </div>
         </div>
       </div>
@@ -277,8 +303,7 @@ export function VerifyEmailPending() {
                     </div>
                     {countdown > 0 && (
                       <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
-                        <Clock className="w-4 h-4" />
-                        <span>Podrás reenviar en {countdown}s</span>
+                        <span>Reenviar en {countdown}s</span>
                       </div>
                     )}
                   </div>
@@ -296,7 +321,6 @@ export function VerifyEmailPending() {
                       </span>
                     ) : countdown > 0 ? (
                       <span className="flex items-center gap-2 justify-center">
-                        <Clock className="w-4 h-4" />
                         Espera {countdown}s
                       </span>
                     ) : (
@@ -337,35 +361,32 @@ export function VerifyEmailPending() {
           </div>
 
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">Confirma tu email</h1>
-            <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
-              Te hemos enviado un enlace de verificación a{' '}
-              {targetEmail ? (
-                <strong className="text-gray-900 dark:text-gray-100">{targetEmail}</strong>
-              ) : (
-                'tu dirección de email'
-              )}
-              . Haz clic en el enlace para activar tu cuenta.
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Revisa tu correo</h1>
+            <p className="text-gray-600 dark:text-gray-400 text-sm leading-relaxed">
+              Hemos enviado un enlace de confirmación. Ábrelo para activar tu cuenta.
             </p>
+            {targetEmail && (
+              <p className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 dark:bg-gray-700/80 text-sm font-medium text-gray-900 dark:text-gray-100">
+                <Mail className="w-4 h-4 text-gray-500 shrink-0" />
+                {targetEmail}
+              </p>
+            )}
+            {(deliveryNotice === 'retrying' || resendState === 'loading') && (
+              <p className="mt-4 text-sm text-gray-500 dark:text-gray-400 flex items-center justify-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Enviando correo…
+              </p>
+            )}
+            {deliveryNotice === 'failed' && resendState === 'error' && (
+              <p className="mt-4 text-sm text-red-600 dark:text-red-400">
+                {resendError || 'No pudimos enviar el correo. Pulsa «Reenviar correo» abajo.'}
+              </p>
+            )}
           </div>
 
-          <div className="space-y-4 mb-6 text-sm text-gray-500 dark:text-gray-400">
-            <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-              <span className="mt-0.5 text-gray-400 dark:text-gray-500">·</span>
-              <span>El enlace expira en <strong>24 horas</strong></span>
-            </div>
-            <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-              <span className="mt-0.5 text-gray-400 dark:text-gray-500">·</span>
-              <span>Revisa la carpeta de <strong>spam o correo no deseado</strong></span>
-            </div>
-            <div className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-              <span className="mt-0.5 text-gray-400 dark:text-gray-500">·</span>
-              <span>
-                Si ya hiciste clic en el enlace (en esta u otra pestaña), pulsa <strong>Ya he verificado</strong> o
-                espera unos segundos: lo detectamos solos.
-              </span>
-            </div>
-          </div>
+          <p className="text-sm text-center text-gray-500 dark:text-gray-400 mb-6">
+            El enlace caduca en 24 h. Revisa spam si no lo ves en unos minutos.
+          </p>
 
           <div className="space-y-3 mb-6">
             <ACCESO__Button
@@ -382,84 +403,26 @@ export function VerifyEmailPending() {
               ) : (
                 <span className="flex items-center gap-2 justify-center">
                   <CheckCircle className="w-4 h-4" />
-                  Ya he verificado el email
+                  Ya he confirmado el email
                 </span>
               )}
             </ACCESO__Button>
             {checkMessage && (
-              <p className="text-sm text-amber-700 dark:text-amber-300 text-center bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                {checkMessage}
-              </p>
+              <p className="text-sm text-amber-700 dark:text-amber-300 text-center mt-2">{checkMessage}</p>
             )}
           </div>
 
-          {/* Reenviar email */}
-          {resendState === 'sent' && countdown > 0 ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span>Nuevo enlace enviado a <strong>{targetEmail}</strong></span>
-              </div>
-              <div className="flex items-center justify-center gap-2 text-sm text-gray-400 dark:text-gray-500">
-                <Clock className="w-4 h-4" />
-                <span>Podrás reenviar en {countdown}s</span>
-              </div>
-            </div>
-          ) : resendState === 'sent' && countdown <= 0 ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span>Enlace enviado a <strong>{targetEmail}</strong></span>
-              </div>
-              <ACCESO__Button
-                variant="secondary"
-                fullWidth
-                onClick={() => { setResendState('idle'); handleResend(); }}
-              >
-                <span className="flex items-center gap-2 justify-center">
-                  <RefreshCw className="w-4 h-4" />
-                  Reenviar de nuevo
-                </span>
-              </ACCESO__Button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-center text-sm text-gray-500 dark:text-gray-400">¿No has recibido el email?</p>
-              <ACCESO__Button
-                variant="secondary"
-                fullWidth
-                disabled={resendState === 'loading' || !targetEmail || countdown > 0}
-                onClick={handleResend}
-              >
-                {resendState === 'loading' ? (
-                  <span className="flex items-center gap-2 justify-center">
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Enviando...
-                  </span>
-                ) : countdown > 0 ? (
-                  <span className="flex items-center gap-2 justify-center">
-                    <Clock className="w-4 h-4" />
-                    Espera {countdown}s para reenviar
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2 justify-center">
-                    <RefreshCw className="w-4 h-4" />
-                    Reenviar enlace de verificación
-                  </span>
-                )}
-              </ACCESO__Button>
-              {resendState === 'error' && resendError && (
-                <p className="text-sm text-red-600 text-center">{resendError}</p>
-              )}
-            </div>
-          )}
-
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => navigate('/auth/login')}
-              className="text-sm text-gray-400 dark:text-gray-500 hover:text-gray-600 underline"
-            >
-              Volver al inicio de sesión
+          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 flex flex-col items-center gap-3">
+            <button type="button" onClick={handleResend}
+              disabled={resendState === 'loading' || !targetEmail || countdown > 0}
+              className="text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 disabled:opacity-40 inline-flex items-center gap-1.5">
+              <RefreshCw className={`w-3.5 h-3.5 ${resendState === 'loading' ? 'animate-spin' : ''}`} />
+              {countdown > 0 ? `Reenviar en ${countdown}s` : 'Reenviar correo'}
+            </button>
+            {resendState === 'error' && resendError && <p className="text-sm text-red-600 text-center">{resendError}</p>}
+            <button type="button" onClick={() => navigate('/auth/login')}
+              className="text-sm text-gray-400 hover:text-gray-600 inline-flex items-center gap-1">
+              <ArrowLeft className="w-3.5 h-3.5" /> Volver al inicio de sesión
             </button>
           </div>
         </div>

@@ -1360,6 +1360,14 @@ export async function saveEmailVerificationToken(req, account, rawToken) {
     ...account,
     emailVerificationTokenHash: hashToken(rawToken),
     emailVerificationExpiry: expiry,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Solo tras envío real del correo (evita cooldown si falló Resend/SMTP). */
+export async function markVerificationEmailSent(req, account) {
+  return saveAccount(req, {
+    ...account,
     lastVerificationEmailSentAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });

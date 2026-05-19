@@ -52,7 +52,13 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isInitializing: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; redirectTo?: string; error?: string; code?: string; lockUntil?: string }>;
-  register: (data: RegisterPayload) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
+  register: (data: RegisterPayload) => Promise<{
+    success: boolean;
+    redirectTo?: string;
+    emailVerified?: boolean;
+    verificationEmailSent?: boolean;
+    error?: string;
+  }>;
   logout: () => Promise<void>;
   updateOnboardingData: (data: Record<string, unknown>) => Promise<void>;
   verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
@@ -221,6 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     success: boolean;
     redirectTo?: string;
     emailVerified?: boolean;
+    verificationEmailSent?: boolean;
     error?: string;
   }> => {
     try {
@@ -234,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         success: true,
         redirectTo: response.redirectTo,
         emailVerified: Boolean(response.user.emailVerified),
+        verificationEmailSent: response.verificationEmailSent !== false,
       };
     } catch (error) {
       return {

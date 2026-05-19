@@ -207,14 +207,21 @@ export function Register() {
     setIsSubmitting(false);
 
     if (result.success) {
-      navigate(
-        destinationAfterSignup({
-          emailVerified: result.emailVerified,
-          redirectTo: result.redirectTo,
-          isUserAccount,
-        }),
-        { replace: true },
-      );
+      const path = destinationAfterSignup({
+        emailVerified: result.emailVerified,
+        redirectTo: result.redirectTo,
+        isUserAccount,
+      });
+      navigate(path, {
+        replace: true,
+        state:
+          path === '/auth/verify-email-pending'
+            ? {
+                email: formData.email.trim(),
+                verificationEmailSent: result.verificationEmailSent,
+              }
+            : undefined,
+      });
     } else {
       setErrors({ email: result.error || 'Error al crear la cuenta' });
     }
