@@ -8,6 +8,7 @@ import { broadcastEmailVerified, subscribeEmailVerified } from '../../lib/emailV
 
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
+const REDIRECT_DELAY_MS = 2500;
 
 type LocationState = {
   email?: string;
@@ -107,7 +108,6 @@ export function VerifyEmailPending() {
       void refreshCurrentUser().then((result) => {
         if (result.emailVerified) {
           setCheckState('success');
-          window.setTimeout(() => goAfterVerify(user?.accountType), 800);
         }
       });
     });
@@ -147,9 +147,14 @@ export function VerifyEmailPending() {
     if (verifyState === 'loading') return;
     if (verifyState === 'success') return;
     setCheckState('success');
-    const t = window.setTimeout(() => goAfterVerify(user.accountType), 600);
+  }, [user?.emailVerified, verifyState]);
+
+  /** Tras verificar: redirección automática al onboarding. */
+  useEffect(() => {
+    if (verifyState !== 'success' && checkState !== 'success') return;
+    const t = window.setTimeout(() => goAfterVerify(user?.accountType), REDIRECT_DELAY_MS);
     return () => window.clearTimeout(t);
-  }, [user?.emailVerified, user?.accountType, verifyState, goAfterVerify]);
+  }, [verifyState, checkState, user?.accountType, goAfterVerify]);
 
   const handleCheckVerified = async () => {
     setCheckMessage('');
@@ -158,14 +163,13 @@ export function VerifyEmailPending() {
     if (result.emailVerified) {
       if (targetEmail) broadcastEmailVerified(targetEmail);
       setCheckState('success');
-      window.setTimeout(() => goAfterVerify(user?.accountType), 800);
       return;
     }
     setCheckState('idle');
     setCheckMessage(
       result.ok
-        ? 'Todavía no consta como verificado. Abre el enlace del correo e inténtalo de nuevo.'
-        : 'No se pudo comprobar. Revisa tu conexión.',
+        ? 'Aún no detectamos la verificación. Abre el enlace del correo e inténtalo de nuevo.'
+        : 'No se pudo comprobar. Inténtalo en unos segundos.',
     );
   };
 
@@ -230,49 +234,25 @@ export function VerifyEmailPending() {
     );
   }
 
-  // Estado: verificación completada (enlace del correo o «Ya he verificado»)
-  const verifiedFromEmailLink = verifyState === 'success' && Boolean(tokenFromUrl && emailFromUrl);
 
-  if (verifiedFromEmailLink) {
+  if (verifyState === 'success' || checkState === 'success') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-        <div className="w-full max-w-md text-center">
-          <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
-            <div className="flex justify-center mb-6">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center p-6">
+        <div className="w-full max-w-[420px] text-center">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm px-8 py-10">
+            <div className="flex justify-center mb-8">
               <VertialLogo size="lg" />
             </div>
-            <div className="flex justify-center mb-6">
-              <CheckCircle className="w-16 h-16 text-green-500" />
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40">
+              <CheckCircle className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">¡Email verificado!</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">
-              Tu correo ya está confirmado.
+            <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
+              Cuenta verificada
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center justify-center gap-2">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Redirigiendo…
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Si tenías Vertial abierto en otra pestaña, vuelve allí o continúa desde aquí.
-            </p>
-            <ACCESO__Button variant="primary" fullWidth onClick={() => goAfterVerify(user?.accountType)}>
-              Continuar
-            </ACCESO__Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (checkState === 'success') {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-        <div className="w-full max-w-md text-center">
-          <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-10 shadow-sm">
-            <div className="flex justify-center mb-6">
-              <VertialLogo size="lg" />
-            </div>
-            <div className="flex justify-center mb-6">
-              <CheckCircle className="w-16 h-16 text-green-500" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">¡Email verificado!</h1>
-            <p className="text-gray-600 dark:text-gray-400 mb-6">Entrando en la configuración de tu cuenta…</p>
           </div>
         </div>
       </div>

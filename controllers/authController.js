@@ -237,10 +237,6 @@ export async function register(req, res) {
       }
     }
 
-    if (!isUserAccount && verificationEmailSent) {
-      sendWelcomeEmail(savedAccount).catch(() => null);
-    }
-
     const referralDisplay = String(resolvedReferralCode || referralCode || '').trim() || '—';
     const accountTypeLabel =
       accountType === 'company' ? 'Empresa' : accountType === 'user' ? 'Usuario' : escapeHtml(String(accountType || '—'));
@@ -1903,6 +1899,8 @@ export async function verifyEmail(req, res) {
       entityId: savedAccount.user_id,
       entityLabel: savedAccount.fullName,
     });
+
+    sendWelcomeEmail(savedAccount).catch(() => null);
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
     return res.json({
