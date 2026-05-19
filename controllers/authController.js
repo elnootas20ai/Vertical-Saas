@@ -2193,6 +2193,13 @@ export async function getMe(req, res) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
+    // Tras verificar en otro dispositivo, el JWT del PC puede quedar desactualizado.
+    const jwtVerified = Boolean(req.authUser?.emailVerified);
+    const dbVerified = Boolean(account.emailVerified);
+    if (jwtVerified !== dbVerified) {
+      await issueTokens(req, res, account);
+    }
+
     return res.json({
       ok: true,
       user: sanitizeAccount(account),

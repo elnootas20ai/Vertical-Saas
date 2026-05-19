@@ -27,6 +27,7 @@ export function PaymentInfo() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Formatear número de tarjeta (espacios cada 4 dígitos)
@@ -111,6 +112,7 @@ export function PaymentInfo() {
 
     if (validateForm()) {
       setIsSubmitting(true);
+      setSubmitError('');
 
       updateData('paymentDetails', formData);
       const result = await saveBillingCard({
@@ -125,10 +127,12 @@ export function PaymentInfo() {
       setIsSubmitting(false);
 
       if (!result.success) {
-        setErrors((prev) => ({
-          ...prev,
-          cardNumber: result.error || 'No se pudo guardar la tarjeta',
-        }));
+        const msg = result.error || 'No se pudo guardar la tarjeta';
+        if (/verificar tu email/i.test(msg)) {
+          setSubmitError(msg);
+        } else {
+          setErrors((prev) => ({ ...prev, cardNumber: msg }));
+        }
         return;
       }
 
@@ -170,6 +174,15 @@ export function PaymentInfo() {
           </div>
 
           <form id="payment-form" onSubmit={handleSubmit} className="space-y-5">
+            {submitError && (
+              <div
+                className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-4 py-3 text-sm text-amber-900 dark:text-amber-100 flex gap-2"
+                role="alert"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{submitError}</span>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
                 Número de tarjeta *

@@ -392,8 +392,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: 'No hay usuario autenticado' };
     }
 
+    const attemptSave = async () => saveBillingCardRequest(user.user_id, data);
+
     try {
-      const response = await saveBillingCardRequest(user.user_id, data);
+      let response;
+      try {
+        response = await attemptSave();
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '';
+        if (/verificar tu email/i.test(msg)) {
+          const me = await fetchCurrentUserRequest();
+          if (me.user) setSessionUser(me.user);
+          response = await attemptSave();
+        } else {
+          throw error;
+        }
+      }
       if (response.user) {
         setSessionUser(response.user);
       }
