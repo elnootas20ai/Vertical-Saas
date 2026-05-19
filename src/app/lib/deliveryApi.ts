@@ -736,6 +736,130 @@ export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSa
   return payload.pointsOfSale || [];
 }
 
+/** Un PDV activo por `workCenterId` y por nombre (evita duplicados tras crear centro + PDV). */
+export function dedupePointsOfSale(pdvs: PointOfSale[]): PointOfSale[] {
+  const byWc = new Map<string, PointOfSale>();
+  const byName = new Map<string, PointOfSale>();
+  const rest: PointOfSale[] = [];
+
+  const pickNewer = (a: PointOfSale, b: PointOfSale) =>
+    String(b.updatedAt || b.createdAt || '') >= String(a.updatedAt || a.createdAt || '') ? b : a;
+
+  for (const p of pdvs) {
+    if (p.active === false) continue;
+    const wcId = String(p.workCenterId || '').trim();
+    const nameKey = p.name.trim().toLowerCase();
+    if (wcId) {
+      const prev = byWc.get(wcId);
+      byWc.set(wcId, prev ? pickNewer(prev, p) : p);
+      continue;
+    }
+    if (nameKey) {
+      const prev = byName.get(nameKey);
+      byName.set(nameKey, prev ? pickNewer(prev, p) : p);
+      continue;
+    }
+    rest.push(p);
+  }
+
+  const linkedNames = new Set(
+    [...byWc.values()].map((p) => p.name.trim().toLowerCase()).filter(Boolean),
+  );
+  const orphanByName = [...byName.values()].filter((p) => !linkedNames.has(p.name.trim().toLowerCase()));
+  return dedupePointsOfSaleById([...byWc.values(), ...orphanByName, ...rest]);
+}
+
+function dedupePointsOfSaleById(pdvs: PointOfSale[]): PointOfSale[] {
+  const byId = new Map<string, PointOfSale>();
+  for (const p of pdvs) {
+    const id = String(p._id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id);
+    if (!prev) byId.set(id, p);
+    else {
+      const newer =
+        String(p.updatedAt || p.createdAt || '') >= String(prev.updatedAt || prev.createdAt || '') ? p : prev;
+      byId.set(id, newer);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Crea o enlaza el PDV de caja (delivery) para un centro de trabajo retail.
+ * Idempotente: no duplica si ya hay PDV con el mismo `workCenterId` o nombre huérfano.
+ */
+export async function ensureDeliveryPdvForWorkCenter(
+  userId: string,
+  wc: WorkCenter,
+  options?: { existingPdvs?: PointOfSale[]; business?: { members?: { user_id?: string }[] } | null },
+): Promise<PointOfSale | null> {
+  const id = normalizeUserId(userId);
+  if (!id || !wc?._id) return null;
+
+  const isRetailLike =
+    (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && wc.active && !wc.deletedAt;
+  if (!isRetailLike) return null;
+
+  let pdvData = options?.existingPdvs ?? (await listPointsOfSaleRequest(id).catch(() => []));
+  pdvData = dedupePointsOfSale(pdvData);
+
+  const linked = pdvData.find((p) => String(p.workCenterId || '').trim() === wc._id);
+  if (linked) return linked;
+
+  const nameLower = wc.name.trim().toLowerCase();
+  const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+  const orphanIdx = pdvData.findIndex(
+    (p) => !String(p.workCenterId || '').trim() && p.name.trim().toLowerCase() === nameLower,
+  );
+  if (orphanIdx >= 0) {
+    const orphan = pdvData[orphanIdx];
+    try {
+      return await updatePointOfSaleRequest(id, {
+        ...orphan,
+        workCenterId: wc._id,
+        active: true,
+        address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
+      });
+    } catch {
+      return orphan;
+    }
+  }
+
+  if (String(addr).trim().length < 5) return null;
+
+  const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
+  const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
+  const termId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    return await createPointOfSaleRequest(id, {
+      name: wc.name,
+      code: pdvCode,
+      address: addr,
+      active: true,
+      workCenterId: wc._id,
+      terminals: [
+        {
+          id: termId,
+          code: 'TPV-1',
+          name: 'Terminal principal',
+          datafonName: '',
+          printerName: '',
+          scaleDeviceId: '',
+          scaleName: '',
+          active: true,
+        },
+      ],
+    });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Los PDV de caja viven en la DB delivery (`point_of_sale`); los de Ajustes → Centros de trabajo
  * son `sales_point` en otra DB. Centros tipo **punto de venta** o **almacén** activos sin PDV delivery enlazado
@@ -748,86 +872,24 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
   options?: { business?: { members?: { user_id?: string }[] } | null },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
-  const pdvData = [...existingPdvs];
+  let pdvData = dedupePointsOfSale([...existingPdvs]);
   let wcs: WorkCenter[] = [];
   try {
     wcs = await listWorkCentersForDelivery(id, options?.business ?? null);
   } catch {
     return pdvData;
   }
-  const linkedWcIds = new Set(
-    pdvData.map((p) => p.workCenterId).filter((wcId): wcId is string => !!wcId && wcId.length > 0),
-  );
-  const namesUsed = new Set(pdvData.map((p) => p.name.trim().toLowerCase()));
-
-  const isRetailLikeCenter = (wc: WorkCenter) =>
-    (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && wc.active && !wc.deletedAt;
 
   for (const wc of wcs) {
-    if (!isRetailLikeCenter(wc)) continue;
-    if (linkedWcIds.has(wc._id)) continue;
-    const nameLower = wc.name.trim().toLowerCase();
-    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
-
-    // PDV creado a mano o legado sin `workCenterId`: mismo nombre que el centro → enlazar (cada tienda carga su PDV).
-    const orphanIdx = pdvData.findIndex(
-      (p) =>
-        !String(p.workCenterId || '').trim() &&
-        p.name.trim().toLowerCase() === nameLower,
-    );
-    if (orphanIdx >= 0) {
-      const orphan = pdvData[orphanIdx];
-      try {
-        const updated = await updatePointOfSaleRequest(id, {
-          ...orphan,
-          workCenterId: wc._id,
-          active: true,
-          address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
-        });
-        pdvData[orphanIdx] = updated;
-        linkedWcIds.add(wc._id);
-      } catch {
-        /* no bloquear el resto */
-      }
-      continue;
-    }
-
-    if (namesUsed.has(nameLower)) continue;
-
-    if (String(addr).trim().length < 5) {
-      continue;
-    }
-
-    const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
-    const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
-    const termId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    try {
-      const created = await createPointOfSaleRequest(id, {
-        name: wc.name,
-        code: pdvCode,
-        address: addr,
-        active: true,
-        workCenterId: wc._id,
-        terminals: [{
-          id: termId,
-          code: 'TPV-1',
-          name: 'Terminal principal',
-          datafonName: '',
-          printerName: '',
-          scaleDeviceId: '',
-          scaleName: '',
-          active: true,
-        }],
-      });
-      pdvData.push(created);
-      existingCodes.push(String(created.code || '').trim());
-      linkedWcIds.add(wc._id);
-      namesUsed.add(created.name.trim().toLowerCase());
-    } catch {
-      /* no bloquear el resto */
-    }
+    const ensured = await ensureDeliveryPdvForWorkCenter(id, wc, {
+      existingPdvs: pdvData,
+      business: options?.business ?? null,
+    });
+    if (!ensured) continue;
+    const idx = pdvData.findIndex((p) => p._id === ensured._id);
+    if (idx >= 0) pdvData[idx] = ensured;
+    else pdvData.push(ensured);
+    pdvData = dedupePointsOfSale(pdvData);
   }
   return pdvData;
 }

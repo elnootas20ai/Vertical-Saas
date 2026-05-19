@@ -97,16 +97,9 @@ export function SetupOnboarding() {
   const { user } = useAuth();
   const { progress, definitions, status, loading, completeStep, skipStep, skipAll, verifyAll } = useSetupProgress();
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setVerifying(true);
-      await verifyAll();
-      if (!cancelled) setVerifying(false);
-    })();
-    return () => { cancelled = true; };
+    void verifyAll();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -117,7 +110,7 @@ export function SetupOnboarding() {
     }
   }, [progress?.steps, expandedStep]);
 
-  if (loading || verifying) {
+  if (loading) {
     return (
       <Layout title="Configuración inicial" subtitle="Preparando tu espacio...">
         <div className="flex items-center justify-center py-20">

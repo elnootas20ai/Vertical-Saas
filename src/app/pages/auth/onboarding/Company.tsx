@@ -23,6 +23,14 @@ export function Company() {
     }
   }, [data.completedStep, navigate]);
 
+  useEffect(() => {
+    if (data.businessType === 'carDealership') return;
+    setFormData((prev) => {
+      if (!prev.isAncovePartner && !prev.ancoveMemberNumber) return prev;
+      return { ...prev, isAncovePartner: false, ancoveMemberNumber: '' };
+    });
+  }, [data.businessType]);
+
   const handleTaxIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const upper = e.target.value.toUpperCase();
     setFormData({ ...formData, taxId: upper });
@@ -53,9 +61,10 @@ export function Company() {
     } else {
       setTaxIdError(null);
     }
-    const payload = data.businessType === 'delivery'
-      ? { ...formData, isAncovePartner: false, ancoveMemberNumber: '' }
-      : formData;
+    const payload =
+      data.businessType === 'carDealership'
+        ? formData
+        : { ...formData, isAncovePartner: false, ancoveMemberNumber: '' };
     updateData('companyProfile', payload);
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/structure');
@@ -181,7 +190,7 @@ export function Company() {
               />
             </div>
 
-            {data.businessType !== 'delivery' && (
+            {data.businessType === 'carDealership' && (
               <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
                 <ACCESO__Checkbox
                   label="Soy socio ANCOVE"

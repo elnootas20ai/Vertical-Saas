@@ -46,6 +46,13 @@ export function BusinessType() {
   const [selectedType, setSelectedType] = useState(data.businessType || 'events');
 
   const handleContinue = () => {
+    if (selectedType !== 'carDealership') {
+      updateData('companyProfile', {
+        ...data.companyProfile,
+        isAncovePartner: false,
+        ancoveMemberNumber: '',
+      });
+    }
     updateData('businessType', selectedType);
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/company');

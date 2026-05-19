@@ -17,12 +17,8 @@ import {
   resolvePreferenceToPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
-import {
-  listPointsOfSaleRequest,
-  mergePointsOfSaleWithRetailWorkCenters,
-  pointOfSaleDisplayLabel,
-  type PointOfSale,
-} from '../lib/deliveryApi';
+import { pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
+import { loadDeliveryStores } from '../lib/deliverySetup';
 import { listWorkCentersForDelivery } from '../lib/workCentersApi';
 
 export interface ActiveStoreScopeValue {
@@ -83,23 +79,20 @@ function ActiveStoreScopeProviderImpl({
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
   const load = useCallback(async () => {
-    if (!dataUserId) {
+    if (!dataUserId || !user) {
       setPointsOfSale([]);
       return;
     }
     setLoading(true);
     try {
-      const raw = await listPointsOfSaleRequest(dataUserId);
-      const merged = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, raw || [], {
-        business: currentBusiness ?? null,
-      });
-      setPointsOfSale((merged || []).filter((p) => p.active !== false));
+      const state = await loadDeliveryStores(user, currentBusiness ?? null);
+      setPointsOfSale(state.pointsOfSale);
     } catch {
-      setPointsOfSale((prev) => prev);
+      setPointsOfSale([]);
     } finally {
       setLoading(false);
     }
-  }, [dataUserId, currentBusiness]);
+  }, [dataUserId, currentBusiness, user]);
 
   useEffect(() => {
     void load();

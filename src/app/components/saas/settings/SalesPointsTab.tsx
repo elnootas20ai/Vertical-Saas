@@ -2,6 +2,15 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
+import { useBusiness } from '../../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
+import {
+  isDeliveryBusinessType,
+  loadDeliveryStores,
+  notifyDeliveryWorkCentersChanged,
+  selectDeliveryPointOfSale,
+  DELIVERY_WORK_CENTERS_CHANGED,
+} from '../../../lib/deliverySetup';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -19,7 +28,7 @@ import {
   type ContractInfo,
 } from '../../../lib/workCentersApi';
 import {
-  listPointsOfSaleRequest,
+  ensureDeliveryPdvForWorkCenter,
   pointOfSaleDisplayLabel,
   suggestNextPdvCode,
 } from '../../../lib/deliveryApi';
@@ -833,10 +842,13 @@ function WorkCenterModal({
 
 export function SalesPointsTab() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const hasProAccess = useHasProAccess();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -852,27 +864,44 @@ export function SalesPointsTab() {
   const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
   /** Códigos de PDV en delivery (para previsualizar etiqueta al crear tienda). */
   const [deliveryPdvCodes, setDeliveryPdvCodes] = useState<string[]>([]);
+  const [deliveryPdvsByWorkCenter, setDeliveryPdvsByWorkCenter] = useState<
+    Record<string, { code?: string; name: string }>
+  >({});
 
   const loadData = useCallback(async () => {
-    if (!resolvedUserId) return;
+    if (!dataUserId || !user) return;
     try {
-      const [wcs, pdvList] = await Promise.all([
-        listWorkCenters(resolvedUserId),
-        listPointsOfSaleRequest(resolvedUserId).catch(() => []),
-      ]);
-      setWorkCenters(wcs);
-      setDeliveryPdvCodes(
-        (pdvList as { code?: string }[]).map((p) => String(p.code || '').trim()).filter(Boolean),
-      );
+      const state = await loadDeliveryStores(user, currentBusiness);
+      setWorkCenters(state.workCenters);
+      const pdvList = state.pointsOfSale;
+      setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
+      const byWc: Record<string, { code?: string; name: string }> = {};
+      for (const p of pdvList) {
+        const wcId = String(p.workCenterId || '').trim();
+        if (wcId) byWc[wcId] = { code: p.code, name: String(p.name || '') };
+      }
+      setDeliveryPdvsByWorkCenter(byWc);
     } catch {
       toast.error('Error al cargar los centros de trabajo');
     } finally {
       setLoading(false);
     }
-  }, [resolvedUserId]);
+  }, [dataUserId, user, currentBusiness]);
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const onChanged = () => {
+      void loadData();
+    };
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
+    window.addEventListener('work-centers:changed', onChanged);
+    return () => {
+      window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
+      window.removeEventListener('work-centers:changed', onChanged);
+    };
   }, [loadData]);
 
   const pointOfSaleCount = useMemo(
@@ -926,10 +955,10 @@ export function SalesPointsTab() {
   }, [loading, searchParams, setSearchParams, pointOfSaleAccess.canCreatePointOfSale]);
 
   const goToProAccess = () => {
-    if (resolvedUserId) {
+    if (dataUserId) {
       try {
         localStorage.setItem(
-          `billing_selection_${resolvedUserId}`,
+          `billing_selection_${dataUserId}`,
           JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
         );
       } catch {
@@ -942,7 +971,7 @@ export function SalesPointsTab() {
   };
 
   const handleSave = async (data: Partial<WorkCenter>) => {
-    if (!resolvedUserId) {
+    if (!dataUserId || !user) {
       toast.error('No hay usuario autenticado para guardar este centro.');
       return;
     }
@@ -970,7 +999,7 @@ export function SalesPointsTab() {
         notifyWorkCentersChanged();
         toast.success(`"${updated.name}" actualizado`);
       } else {
-        const created = await createWorkCenter(resolvedUserId, {
+        const created = await createWorkCenter(dataUserId, {
           name: data.name!,
           centerType: requestedCenterType,
           customTypeName: requestedCenterType === 'custom' ? data.customTypeName : undefined,
@@ -989,9 +1018,23 @@ export function SalesPointsTab() {
           expectedStaffCount: data.expectedStaffCount ?? 3,
           squareMeters: data.squareMeters,
           notes: data.notes,
+          businessId: currentBusiness?.business_id || currentBusiness?.id,
         });
+        if (
+          isDelivery &&
+          (requestedCenterType === 'punto_de_venta' || requestedCenterType === 'almacen')
+        ) {
+          const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
+            business: currentBusiness ?? null,
+          });
+          if (pdv) {
+            selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
+          }
+        }
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
+        notifyDeliveryWorkCentersChanged();
+        void loadData();
         toast.success(`"${created.name}" creado`);
       }
       setShowModal(false);
@@ -1004,7 +1047,7 @@ export function SalesPointsTab() {
   };
 
   const handleToggleActive = async (wc: WorkCenter) => {
-    if (!resolvedUserId) return;
+    if (!dataUserId) return;
     if (wc.active && isPrimaryPdv(wc)) {
       toast.error('No se puede desactivar el PDV principal. Necesitas al menos un PDV activo para operar.');
       return;
@@ -1224,6 +1267,11 @@ export function SalesPointsTab() {
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="PDV principal de la cuenta, no se puede eliminar">
                           <Lock className="w-2.5 h-2.5" />
                           Principal
+                        </span>
+                      )}
+                      {isDelivery && deliveryPdvsByWorkCenter[wc._id] && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200" title="PDV de caja enlazado">
+                          {pointOfSaleDisplayLabel(deliveryPdvsByWorkCenter[wc._id])}
                         </span>
                       )}
                     </div>

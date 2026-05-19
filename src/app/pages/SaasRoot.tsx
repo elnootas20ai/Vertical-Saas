@@ -1,5 +1,6 @@
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { AppProvider, useApp } from '../context/AppContext';
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 import { useBusiness } from '../context/BusinessContext';
@@ -8,6 +9,12 @@ import { ActivationChecklistProvider } from '../context/ActivationChecklistConte
 import { SetupProgressProvider, useSetupProgress } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 import { useAuth } from '../context/AuthContext';
+import {
+  countDeliveryPointsOfSale,
+  DELIVERY_FIRST_PDV_PATH,
+  isDeliveryBusinessType,
+  isDeliveryPdvExemptPath,
+} from '../lib/deliverySetup';
 
 interface OnboardingCompanyProfile {
   tradeName?: string;
@@ -28,13 +35,20 @@ interface OnboardingDataShape {
 function SaasContent() {
   const { subscription } = useApp();
   const { isAuthenticated, isInitializing, user } = useAuth();
-  const { businesses, isLoading: isLoadingBusinesses, createBusiness } = useBusiness();
+  const { businesses, currentBusiness, isLoading: isLoadingBusinesses, createBusiness } = useBusiness();
   const { status: setupStatus, loading: setupLoading } = useSetupProgress();
   const location = useLocation();
   const navigate = useNavigate();
   const [isAutoCreating, setIsAutoCreating] = useState(false);
   const autoCreateAttempted = useRef(false);
   const setupRedirectDone = useRef(false);
+  const [deliveryHasPdv, setDeliveryHasPdv] = useState<boolean | null>(null);
+
+  const activeBusinessType =
+    currentBusiness?.businessType ||
+    (user?.onboardingData as OnboardingDataShape | undefined)?.businessType ||
+    businesses[0]?.businessType;
+  const isDeliveryAccount = isDeliveryBusinessType(activeBusinessType);
 
   useEffect(() => {
     if (!isInitializing && !isAuthenticated) {
@@ -50,15 +64,75 @@ function SaasContent() {
   }, [isInitializing, isAuthenticated, user, navigate, location.pathname]);
 
   useEffect(() => {
+    if (!isAuthenticated || isInitializing || isLoadingBusinesses || !isDeliveryAccount) {
+      setDeliveryHasPdv(null);
+      return;
+    }
+    if (!user) {
+      setDeliveryHasPdv(null);
+      return;
+    }
+    let cancelled = false;
+    setDeliveryHasPdv(null);
+    void countDeliveryPointsOfSale(user, currentBusiness ?? businesses[0] ?? null)
+      .then((count) => {
+        if (!cancelled) setDeliveryHasPdv(count > 0);
+      })
+      .catch(() => {
+        if (!cancelled) setDeliveryHasPdv(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isAuthenticated,
+    isInitializing,
+    isLoadingBusinesses,
+    isDeliveryAccount,
+    user?.user_id,
+    user?.id,
+    currentBusiness,
+    businesses,
+  ]);
+
+  /** Delivery: obligar primer PDV antes del checklist o del tour. */
+  useEffect(() => {
+    if (!isAuthenticated || isInitializing || isLoadingBusinesses || !isDeliveryAccount) return;
+    if (deliveryHasPdv !== false) return;
+    if (isDeliveryPdvExemptPath(location.pathname)) return;
+    navigate(DELIVERY_FIRST_PDV_PATH, { replace: true });
+  }, [
+    isAuthenticated,
+    isInitializing,
+    isLoadingBusinesses,
+    isDeliveryAccount,
+    deliveryHasPdv,
+    location.pathname,
+    navigate,
+  ]);
+
+  useEffect(() => {
     if (
       isInitializing || !isAuthenticated || setupLoading || setupRedirectDone.current ||
       !setupStatus || setupStatus.overallCompleted || Boolean(setupStatus.skippedAt)
     ) return;
+    if (isDeliveryAccount && deliveryHasPdv === false) return;
+    if (isDeliveryAccount && deliveryHasPdv === null) return;
+    if (location.pathname === DELIVERY_FIRST_PDV_PATH) return;
     if (location.pathname === '/saas/dashboard' || location.pathname === '/saas' || location.pathname === '/saas/') {
       setupRedirectDone.current = true;
       navigate('/saas/onboarding', { replace: true });
     }
-  }, [isInitializing, isAuthenticated, setupLoading, setupStatus, location.pathname, navigate]);
+  }, [
+    isInitializing,
+    isAuthenticated,
+    setupLoading,
+    setupStatus,
+    location.pathname,
+    navigate,
+    isDeliveryAccount,
+    deliveryHasPdv,
+  ]);
 
   const isUserAccount = user?.accountType === 'user';
 
@@ -99,7 +173,7 @@ function SaasContent() {
             return;
           }
           if (onboarding?.businessType === 'delivery') {
-            navigate('/saas/settings/centros-de-trabajo?action=new-pdv', { replace: true });
+            navigate(DELIVERY_FIRST_PDV_PATH, { replace: true });
           }
         })
         .catch(() => {
@@ -147,8 +221,15 @@ function SaasContent() {
   // Solo bloquear la primera carga de empresas; un reload desde Ajustes no debe desmontar el Outlet
   // (si no, Settings monta → reloadBusinesses → isLoading → null → desmonta → bucle).
   const isInitialBusinessLoad = isLoadingBusinesses && businesses.length === 0;
-  if (isInitializing || isInitialBusinessLoad || isAutoCreating) {
-    return null;
+  const onFirstPdvRoute = location.pathname === DELIVERY_FIRST_PDV_PATH;
+  const deliveryPdvGateLoading = isDeliveryAccount && deliveryHasPdv === null && !onFirstPdvRoute;
+
+  if (isInitializing || isInitialBusinessLoad || isAutoCreating || deliveryPdvGateLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
+      </div>
+    );
   }
 
   if (!isAuthenticated) {

@@ -129,6 +129,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
 import { writeDeliveryOpsSelectedPdvId, notifyDeliveryActiveStoreChanged } from '../../lib/deliveryOpsPdvSelection';
 import { ActivationChecklist } from './ActivationChecklist';
 
@@ -553,14 +554,23 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const [salesPoints, setSalesPoints] = useState<SalesPoint[]>([]);
 
   const loadSalesPoints = useCallback(async () => {
-    if (!user?.id) return;
+    const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+    if (!dataUserId) return;
     try {
-      const sps = await listSalesPoints(user.id);
-      setSalesPoints(sps.filter((sp) => sp.active));
+      const sps = await listSalesPoints(dataUserId);
+      setSalesPoints(
+        sps.filter(
+          (sp) =>
+            sp.active &&
+            (vertical !== 'delivery' ||
+              sp.centerType === 'punto_de_venta' ||
+              sp.centerType === 'almacen'),
+        ),
+      );
     } catch {
       // silent
     }
-  }, [user?.id]);
+  }, [user, currentBusiness, vertical]);
 
   useEffect(() => {
     loadSalesPoints();
@@ -692,11 +702,16 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       return;
     }
     if (item.id.startsWith('sp-')) {
-      const wcId = item.id.slice('sp-'.length);
+      const rawId = item.id.slice('sp-'.length);
       const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
       const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
-      if (bid && dataUserId && wcId) {
-        writeDeliveryOpsSelectedPdvId(bid, dataUserId, `wc:${wcId}`);
+      if (bid && dataUserId && rawId) {
+        const isDeliveryPdvRow = activeStore.pointsOfSale.some((p) => p._id === rawId);
+        writeDeliveryOpsSelectedPdvId(
+          bid,
+          dataUserId,
+          isDeliveryPdvRow ? rawId : `wc:${rawId}`,
+        );
         notifyDeliveryActiveStoreChanged();
       }
       handleNavigate('/saas/delivery-ops');
@@ -852,9 +867,14 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id.startsWith('carwash-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('vet-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('sp-') && (() => {
-      const wcId = item.id.slice('sp-'.length);
-      if (!wcId || !selectedSidebarWorkCenterId) return false;
-      return selectedSidebarWorkCenterId === wcId;
+      const rawId = item.id.slice('sp-'.length);
+      if (!rawId) return false;
+      if (vertical === 'delivery') {
+        const pdv = activeStore.pointsOfSale.find((p) => p._id === rawId);
+        if (pdv) return activeStore.activeSalesPointId === pdv._id;
+      }
+      if (!selectedSidebarWorkCenterId) return false;
+      return selectedSidebarWorkCenterId === rawId;
     })());
 
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
@@ -869,16 +889,30 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const workCentersSettingsPath = '/saas/settings/centros-de-trabajo';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
-  const salesPointRows: SidebarItem[] = salesPoints.map((sp) => ({
-    id: `sp-${sp._id}`,
-    label: sp.name,
-    icon: <Store className="w-3.5 h-3.5" />,
-    path: '#',
-  }));
+  const deliverySidebarPdvs =
+    vertical === 'delivery' && activeStore.pointsOfSale.length > 0
+      ? activeStore.pointsOfSale
+      : null;
+
+  const salesPointRows: SidebarItem[] = deliverySidebarPdvs
+    ? deliverySidebarPdvs.map((pdv) => ({
+        id: `sp-${pdv._id}`,
+        label: pointOfSaleDisplayLabel(pdv),
+        icon: <Store className="w-3.5 h-3.5" />,
+        path: '#',
+      }))
+    : salesPoints.map((sp) => ({
+        id: `sp-${sp._id}`,
+        label: sp.name,
+        icon: <Store className="w-3.5 h-3.5" />,
+        path: '#',
+      }));
+
+  const workCentersSidebarCount = deliverySidebarPdvs?.length ?? salesPoints.length;
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
-    salesPoints.length === 0
+    workCentersSidebarCount === 0
       ? [
           {
             id: 'salesPoints-settings',
@@ -1235,7 +1269,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                               V2
                             </span>
                           )}
-                          {(isMobile || !collapsed) && item.id === 'calendar' && salesPoints.length > 1 && (
+                          {(isMobile || !collapsed) && item.id === 'calendar' && workCentersSidebarCount > 1 && (
                             <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
                               <Store className="w-2.5 h-2.5" />
                               PDV
@@ -1261,7 +1295,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                           {!isMobile && collapsed && item.id === 'calendar' && CALENDAR_V2_VISUAL && (
                             <span className="absolute left-1 top-1 w-1.5 h-1.5 bg-fuchsia-500 rounded-full" />
                           )}
-                          {!isMobile && collapsed && item.id === 'calendar' && salesPoints.length > 1 && (
+                          {!isMobile && collapsed && item.id === 'calendar' && workCentersSidebarCount > 1 && (
                             <span className="absolute right-1 top-1 w-2 h-2 bg-emerald-500 rounded-full" />
                           )}
                           {!isMobile && collapsed && item.pro && (

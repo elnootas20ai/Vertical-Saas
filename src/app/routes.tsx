@@ -101,6 +101,7 @@ import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { CatalogPage } from './pages/saas/DeliveryCatalog';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
+import { DeliveryFirstPdv } from './pages/saas/delivery/DeliveryFirstPdv';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
@@ -444,6 +445,7 @@ export const router = createBrowserRouter([
         children: [
           { path: 'dashboard', element: <RequireBusinessOwner><Dashboard /></RequireBusinessOwner> },
           { path: 'onboarding', Component: SetupOnboarding },
+          { path: 'delivery/primer-pdv', Component: DeliveryFirstPdv },
           { path: 'user-dashboard', Component: UserDashboard },
           { path: 'reports', element: <RequireBusinessOwner><Reports /></RequireBusinessOwner> },
           { path: 'calendar', Component: CalendarView },
