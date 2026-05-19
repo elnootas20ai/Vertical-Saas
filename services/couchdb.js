@@ -1364,6 +1364,18 @@ export async function saveEmailVerificationToken(req, account, rawToken) {
   });
 }
 
+/** Tras envío real del correo: token + marca de envío en un solo PUT (menos conflictos CouchDB). */
+export async function persistEmailVerificationAfterSend(req, account, rawToken) {
+  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  return saveAccount(req, {
+    ...account,
+    emailVerificationTokenHash: hashToken(rawToken),
+    emailVerificationExpiry: expiry,
+    lastVerificationEmailSentAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 /** Solo tras envío real del correo (evita cooldown si falló Resend/SMTP). */
 export async function markVerificationEmailSent(req, account) {
   return saveAccount(req, {

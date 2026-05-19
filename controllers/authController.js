@@ -48,6 +48,7 @@ import {
   saveCard,
   saveEmailVerificationToken,
   markVerificationEmailSent,
+  persistEmailVerificationAfterSend,
   saveInviteToken,
   saveJoinRequest,
   saveSession,
@@ -211,18 +212,6 @@ export async function register(req, res) {
     }
 
     let savedAccount = await saveAccount(req, account);
-    await logAccountActivity(req, {
-      actorUserId: savedAccount.user_id,
-      actorName: savedAccount.fullName,
-      targetUserId: savedAccount.user_id,
-      type: 'team',
-      action: googleUser ? 'Cuenta creada con Google OAuth' : 'Cuenta creada',
-      entityId: savedAccount.user_id,
-      entityLabel: savedAccount.fullName,
-      metadata: googleUser
-        ? { googleId: googleUser.googleId, scopes: googleUser.scopes, accountType }
-        : { accountType },
-    });
 
     let verificationEmailSent = Boolean(googleUser);
     if (!googleUser) {
@@ -236,6 +225,19 @@ export async function register(req, res) {
         );
       }
     }
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'team',
+      action: googleUser ? 'Cuenta creada con Google OAuth' : 'Cuenta creada',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      metadata: googleUser
+        ? { googleId: googleUser.googleId, scopes: googleUser.scopes, accountType }
+        : { accountType },
+    });
 
     const referralDisplay = String(resolvedReferralCode || referralCode || '').trim() || '—';
     const accountTypeLabel =
@@ -1920,17 +1922,28 @@ export async function verifyEmail(req, res) {
 // AUTH-02: Reenviar email de verificación (cooldown 60 s)
 const RESEND_COOLDOWN_MS = 60 * 1000;
 
+async function resolveFreshAccount(req, account) {
+  const byEmail = account?.email ? await findAccountByEmail(req, account.email) : null;
+  if (byEmail) return byEmail;
+  if (account?.user_id) {
+    const byId = await findAccountByUserId(req, account.user_id);
+    if (byId) return byId;
+  }
+  return account;
+}
+
 async function sendAccountVerificationEmail(req, account) {
+  const fresh = await resolveFreshAccount(req, account);
   const rawToken = crypto.randomBytes(32).toString('hex');
-  const withToken = await saveEmailVerificationToken(req, account, rawToken);
-  const { subject, html } = buildEmailVerificationEmail(account.email, rawToken);
+  const { subject, html } = buildEmailVerificationEmail(fresh.email, rawToken);
   await sendEmail({
-    to: account.email,
+    to: fresh.email,
     subject,
     html,
     requireDelivery: process.env.NODE_ENV === 'production',
   });
-  return markVerificationEmailSent(req, withToken);
+  const latest = await resolveFreshAccount(req, fresh);
+  return persistEmailVerificationAfterSend(req, latest, rawToken);
 }
 
 export async function resendVerificationEmail(req, res) {
