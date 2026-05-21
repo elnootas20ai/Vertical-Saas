@@ -16,6 +16,7 @@ import {
   writeChangelog,
 } from '../services/couchdb.js';
 import logger from '../services/logger.js';
+import { sanitizePaymentErrorForClient, PUBLIC_PAYMENT_UNAVAILABLE } from '../utils/paymentErrorMessages.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import {
   sendPaymentSuccessNotification,
@@ -115,7 +116,7 @@ export async function createAndActivate(req, res) {
         if (existing.status === 'ACTIVE' || existing.status === 'TRIALING') {
           return res.status(409).json({
             ok: false,
-            error: 'Ya tienes una suscripción activa en MONEI.',
+            error: 'Ya tienes una suscripción activa.',
             moneiStatus: existing.status,
           });
         }
@@ -166,7 +167,7 @@ export async function createAndActivate(req, res) {
     const redirectUrl = activation?.nextAction?.redirectUrl;
     if (!redirectUrl) {
       logger.error({ activation }, '[MONEI] activateSubscription no devolvió redirectUrl');
-      return res.status(502).json({ ok: false, error: 'MONEI no devolvió URL de pago' });
+      return res.status(502).json({ ok: false, error: PUBLIC_PAYMENT_UNAVAILABLE });
     }
 
     await saveAccount(req, {
@@ -209,7 +210,9 @@ export async function createAndActivate(req, res) {
     logger.error(error, '[MONEI] Error creando suscripción');
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al crear la suscripción',
+      error: sanitizePaymentErrorForClient(
+        error instanceof Error ? error.message : 'Error al crear la suscripción',
+      ),
     });
   }
 }
@@ -262,7 +265,9 @@ export async function getStatus(req, res) {
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al obtener estado de suscripción',
+      error: sanitizePaymentErrorForClient(
+        error instanceof Error ? error.message : 'Error al obtener estado de suscripción',
+      ),
     });
   }
 }
@@ -285,7 +290,7 @@ export async function cancelUserSubscription(req, res) {
 
     const moneiSubId = account.subscription?.moneiSubscriptionId;
     if (!moneiSubId) {
-      return res.status(400).json({ ok: false, error: 'No hay suscripción MONEI activa' });
+      return res.status(400).json({ ok: false, error: 'No hay suscripción activa' });
     }
 
     const userApiKey = await resolveApiKey(req, userId);
@@ -317,7 +322,9 @@ export async function cancelUserSubscription(req, res) {
     logger.error(error, '[MONEI] Error cancelando suscripción');
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al cancelar la suscripción',
+      error: sanitizePaymentErrorForClient(
+        error instanceof Error ? error.message : 'Error al cancelar la suscripción',
+      ),
     });
   }
 }
@@ -385,7 +392,9 @@ export async function confirmSubscription(req, res) {
     logger.error(error, '[MONEI] Error confirmando suscripción');
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al confirmar la suscripción',
+      error: sanitizePaymentErrorForClient(
+        error instanceof Error ? error.message : 'Error al confirmar la suscripción',
+      ),
     });
   }
 }

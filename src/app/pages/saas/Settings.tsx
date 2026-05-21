@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from 'next-themes';
@@ -75,7 +75,9 @@ import {
 } from 'lucide-react';
 import { WysiwygTemplateEditor } from '../../components/saas/WysiwygTemplateEditor';
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
-import { BrandingTab } from '../../components/saas/settings/BrandingTab';
+import { CompanyMarcaSettings } from '../../components/saas/settings/CompanyMarcaSettings';
+import { BrandingTab, type BrandingTabHandle } from '../../components/saas/settings/BrandingTab';
+import { CompanyTiendaSettings } from '../../components/saas/settings/CompanyTiendaSettings';
 import { PipelineConfigTab } from '../../components/saas/settings/PipelineConfigTab';
 import { EmailTemplatesTab } from '../../components/saas/settings/EmailTemplatesTab';
 import { BusinessHoursTab } from '../../components/saas/settings/BusinessHoursTab';
@@ -109,18 +111,12 @@ import {
 } from '../../lib/billingApi';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import {
-  listBrandsRequest,
-  createBrandRequest,
-  updateBrandRequest,
-  deleteBrandRequest,
-  type Brand,
-} from '../../lib/brandApi';
-import {
   createMoneiSubscription,
   getSubscriptionStatus,
   confirmMoneiSubscription,
   cancelMoneiSubscription,
 } from '../../lib/subscriptionApi';
+import { PUBLIC_PAYMENT_UNAVAILABLE, sanitizePaymentError } from '../../lib/paymentErrors';
 import {
   getPlanPricingConfig,
   DEFAULT_PLANS,
@@ -150,7 +146,6 @@ type TabId =
   | 'billing'
   | 'businesses'
   | 'numbering'
-  | 'marca'
   | 'brands'
   | 'pipeline'
   | 'emails'
@@ -162,8 +157,8 @@ type TabId =
 
 const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] = [
   { id: 'users', slug: 'usuarios', i18nKey: 'settings.tabs.users' },
-  { id: 'roles', slug: 'roles', i18nKey: 'settings.tabs.roles' },
-  { id: 'businesses', slug: 'empresas', i18nKey: 'settings.tabs.businesses' },
+  { id: 'roles', slug: 'roles', label: 'Equipo' },
+  { id: 'businesses', slug: 'empresa', label: 'Empresa' },
   { id: 'locations', slug: 'ubicaciones', i18nKey: 'settings.tabs.locations' },
   { id: 'templates', slug: 'plantillas', i18nKey: 'settings.tabs.templates' },
   { id: 'integrations', slug: 'integraciones', i18nKey: 'settings.tabs.integrations' },
@@ -171,20 +166,26 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'numbering', slug: 'numeracion', label: 'Numeración' },
   { id: 'accountSecurity', slug: 'seguridad', label: 'Seguridad' },
   { id: 'devices', slug: 'mis-dispositivos', label: 'Mis dispositivos' },
-  { id: 'marca', slug: 'marca', label: 'Marca' },
-  { id: 'brands', slug: 'marcas-comerciales', label: 'Marcas comerciales' },
+  { id: 'brands', slug: 'marca', label: 'Marca' },
   { id: 'pipeline', slug: 'pipeline', label: 'Pipeline' },
   { id: 'emails', slug: 'emails', label: 'Plantillas email' },
   { id: 'horarios', slug: 'horarios', label: 'Horarios' },
   { id: 'datos', slug: 'datos', label: 'Datos' },
   { id: 'alertas', slug: 'alertas', label: 'Alertas' },
   { id: 'apariencia', slug: 'apariencia', label: 'Apariencia' },
-  { id: 'salesPoints', slug: 'centros-de-trabajo', label: 'Centros de trabajo' },
+  { id: 'salesPoints', slug: 'tienda', label: 'Tienda' },
 ];
 
 const SLUG_TO_TAB: Record<string, TabId> = {
   ...Object.fromEntries(TAB_KEYS.map((t) => [t.slug, t.id])),
   'puntos-de-venta': 'salesPoints',
+  'centros-de-trabajo': 'salesPoints',
+  tiendas: 'salesPoints',
+  empresas: 'businesses',
+  resumen: 'businesses',
+  identidad: 'brands',
+  marcas: 'brands',
+  'marcas-comerciales': 'brands',
   /** URL antigua: antes «security» era solo sesiones; ahora es «devices». */
   security: 'devices',
 } as Record<string, TabId>;
@@ -195,12 +196,16 @@ const TAB_TO_SLUG: Record<TabId, string> = Object.fromEntries(
 
 const DEFAULT_TAB: TabId = 'users';
 
-type SectionId = 'profile' | 'company' | 'salesPointsSection' | 'billing' | 'config' | 'alerts';
+type SectionId = 'profile' | 'company' | 'billing' | 'config' | 'alerts';
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ className?: string }>; tabs: TabId[] }[] = [
-  { id: 'profile', label: 'Mi perfil', icon: UserCircle2, tabs: ['users', 'accountSecurity', 'devices', 'apariencia'] },
-  { id: 'company', label: 'Empresa', icon: Building2, tabs: ['businesses', 'roles', 'marca', 'brands'] },
-  { id: 'salesPointsSection', label: 'Centros de trabajo', icon: Building2, tabs: ['salesPoints'] },
+  { id: 'profile', label: 'Mi perfil', icon: UserCircle2, tabs: ['users', 'roles', 'accountSecurity', 'devices', 'apariencia'] },
+  {
+    id: 'company',
+    label: 'Empresa',
+    icon: Building2,
+    tabs: ['businesses', 'brands', 'salesPoints'],
+  },
   { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
   { id: 'config', label: 'Configuración', icon: SettingsIcon, tabs: ['templates', 'integrations', 'pipeline', 'emails', 'datos'] },
   { id: 'alerts', label: 'Alertas', icon: Bell, tabs: ['alertas'] },
@@ -419,7 +424,9 @@ function TabBilling() {
         }
       } catch (error) {
         if (!cancelled) {
-          setBillingFeedback(error instanceof Error ? error.message : 'No se pudo cargar la facturación.');
+          setBillingFeedback(
+            sanitizePaymentError(error instanceof Error ? error.message : 'No se pudo cargar la facturación.'),
+          );
         }
       } finally {
         if (!cancelled) setIsLoadingBilling(false);
@@ -455,7 +462,7 @@ function TabBilling() {
       } catch {
         /* ignore */
       }
-      setBillingFeedback('Verificando suscripción con MONEI...');
+      setBillingFeedback('Verificando tu suscripción...');
       confirmMoneiSubscription(subId, paymentId || undefined)
         .then((result) => {
           if (result.ok) {
@@ -509,7 +516,9 @@ function TabBilling() {
           } catch {
             /* ignore */
           }
-          setBillingFeedback(err instanceof Error ? err.message : 'Error al confirmar la suscripción.');
+          setBillingFeedback(
+            sanitizePaymentError(err instanceof Error ? err.message : 'Error al confirmar la suscripción.'),
+          );
         })
         .finally(() => {
           const url = new URL(window.location.href);
@@ -576,7 +585,7 @@ function TabBilling() {
       const result = await createMoneiSubscription(selectedPlanId, billingMode);
 
       if (result.ok && result.redirectUrl) {
-        setBillingFeedback('Redirigiendo a la página de pago de MONEI...');
+        setBillingFeedback('Redirigiendo a la página de pago seguro...');
         window.location.href = result.redirectUrl;
         return;
       }
@@ -597,13 +606,8 @@ function TabBilling() {
         return;
       }
     } catch (error) {
-      const base = error instanceof Error ? error.message : 'No se pudo procesar la suscripción.';
       setBillingFeedback(
-        `${base} Modo prueba: simulando cobro y factura automática hasta que el sistema de pagos esté conectado.`,
-      );
-      setMoneiStatus('TRIALING');
-      await recordPaidSubscriptionInvoice(
-        `Suscripción ${plan.name} (${billingMode === 'annual' ? 'anual' : 'mensual'}) — cobro automático (simulación tras error de API)`,
+        sanitizePaymentError(error instanceof Error ? error.message : undefined),
       );
     } finally {
       setIsPaying(false);
@@ -623,7 +627,9 @@ function TabBilling() {
       setMoneiStatus('CANCELLED');
       setBillingFeedback('Suscripción cancelada correctamente.');
     } catch (error) {
-      setBillingFeedback(error instanceof Error ? error.message : 'No se pudo cancelar la suscripción.');
+      setBillingFeedback(
+        sanitizePaymentError(error instanceof Error ? error.message : 'No se pudo cancelar la suscripción.'),
+      );
     } finally {
       setIsCancelling(false);
     }
@@ -675,7 +681,9 @@ function TabBilling() {
       setIsInvoiceDialogOpen(false);
       setBillingFeedback('Factura creada en CouchDB dentro de `invoice`.');
     } catch (error) {
-      setBillingFeedback(error instanceof Error ? error.message : 'No se pudo crear la factura.');
+      setBillingFeedback(
+        sanitizePaymentError(error instanceof Error ? error.message : 'No se pudo crear la factura.'),
+      );
     } finally {
       setIsCreatingInvoice(false);
     }
@@ -918,7 +926,11 @@ function TabBilling() {
 
         {billingFeedback && (
           <div className={`mb-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
-            billingFeedback.includes('error') || billingFeedback.includes('Error') || billingFeedback.includes('cancelado')
+            billingFeedback === PUBLIC_PAYMENT_UNAVAILABLE ||
+            billingFeedback.includes('error') ||
+            billingFeedback.includes('Error') ||
+            billingFeedback.includes('No pudimos') ||
+            billingFeedback.includes('cancelado')
               ? 'bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
               : billingFeedback.includes('correctamente') || billingFeedback.includes('activada')
               ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
@@ -926,7 +938,10 @@ function TabBilling() {
           }`}>
             {billingFeedback.includes('correctamente') || billingFeedback.includes('activada') ? (
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
-            ) : billingFeedback.includes('error') || billingFeedback.includes('Error') ? (
+            ) : billingFeedback === PUBLIC_PAYMENT_UNAVAILABLE ||
+              billingFeedback.includes('error') ||
+              billingFeedback.includes('Error') ||
+              billingFeedback.includes('No pudimos') ? (
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
             ) : (
               <RefreshCw className="w-4 h-4 flex-shrink-0 animate-spin" />
@@ -1588,201 +1603,6 @@ function BusinessFormModal({
   );
 }
 
-function TabBrands() {
-  const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?.business_id || '';
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
-  const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ name: '', description: '', logo: '', website: '' });
-  const [submitting, setSubmitting] = useState(false);
-
-  const loadBrands = useCallback(async () => {
-    if (!businessId) return;
-    setLoading(true);
-    try {
-      setBrands(await listBrandsRequest(businessId));
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, [businessId]);
-
-  useEffect(() => { loadBrands(); }, [loadBrands]);
-
-  useEffect(() => {
-    if (editingBrand) {
-      setForm({ name: editingBrand.name, description: editingBrand.description || '', logo: editingBrand.logo || '', website: editingBrand.website || '' });
-    } else {
-      setForm({ name: '', description: '', logo: '', website: '' });
-    }
-  }, [editingBrand, showModal]);
-
-  const filtered = useMemo(() => {
-    if (!search) return brands;
-    const q = search.toLowerCase();
-    return brands.filter((b) => b.name.toLowerCase().includes(q) || b.description?.toLowerCase().includes(q));
-  }, [brands, search]);
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    setSubmitting(true);
-    try {
-      if (editingBrand) {
-        const updated = await updateBrandRequest(businessId, { ...editingBrand, ...form } as Brand);
-        setBrands((prev) => prev.map((b) => (b._id === updated._id ? updated : b)));
-      } else {
-        const created = await createBrandRequest(businessId, { ...form, active: true });
-        setBrands((prev) => [created, ...prev]);
-      }
-      setShowModal(false);
-      setEditingBrand(null);
-    } catch {
-      /* ignore */
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (brand: Brand) => {
-    if (!confirm(`¿Eliminar la marca "${brand.name}"?`)) return;
-    try {
-      await deleteBrandRequest(businessId, brand._id);
-      setBrands((prev) => prev.filter((b) => b._id !== brand._id));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const handleToggleActive = async (brand: Brand) => {
-    try {
-      const updated = await updateBrandRequest(businessId, { ...brand, active: !brand.active });
-      setBrands((prev) => prev.map((b) => (b._id === updated._id ? updated : b)));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const inputClass = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100';
-
-  if (!businessId) {
-    return (
-      <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-        <Tag className="w-10 h-10 mx-auto mb-3 text-gray-300" />
-        <p className="font-medium">Selecciona una empresa para gestionar sus marcas</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Marcas comerciales</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Gestiona las marcas de {currentBusiness?.name}</p>
-        </div>
-        <button onClick={() => { setEditingBrand(null); setShowModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-semibold transition-colors">
-          <Plus className="w-4 h-4" /> Nueva marca
-        </button>
-      </div>
-
-      {brands.length > 3 && (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full sm:w-72" placeholder="Buscar marca..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center py-12 text-gray-500">
-          <div className="animate-spin w-5 h-5 border-2 border-gray-300 border-t-gray-900 rounded-full mr-3" /> Cargando...
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-400 dark:text-gray-500 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-xl">
-          <Tag className="w-10 h-10 mx-auto mb-3 text-gray-300" />
-          <p className="font-medium">{search ? 'Sin resultados' : 'Sin marcas'}</p>
-          <p className="text-sm mt-1">{search ? 'Prueba otros términos' : 'Crea la primera marca comercial'}</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((brand) => (
-            <div key={brand._id} className="flex items-center gap-4 p-4 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 transition-colors group">
-              {brand.logo ? (
-                <img src={brand.logo} alt={brand.name} className="w-10 h-10 rounded-lg object-contain border border-gray-200 dark:border-gray-700 shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-              ) : (
-                <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0">
-                  <Tag className="w-5 h-5 text-gray-400" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{brand.name}</span>
-                  <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full border ${brand.active ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' : 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:border-gray-600'}`}>
-                    {brand.active ? 'Activa' : 'Inactiva'}
-                  </span>
-                </div>
-                {brand.description && <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{brand.description}</p>}
-                {brand.website && (
-                  <a href={brand.website.startsWith('http') ? brand.website : `https://${brand.website}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline flex items-center gap-1 mt-0.5">
-                    <Globe className="w-3 h-3" />{brand.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                  </a>
-                )}
-              </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <button onClick={() => { setEditingBrand(brand); setShowModal(true); }} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Editar"><Edit2 className="w-4 h-4 text-gray-500" /></button>
-                <button onClick={() => handleToggleActive(brand)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title={brand.active ? 'Desactivar' : 'Activar'}>
-                  <CheckCircle className={`w-4 h-4 ${brand.active ? 'text-green-600' : 'text-gray-400'}`} />
-                </button>
-                <button onClick={() => handleDelete(brand)} className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg" title="Eliminar"><Trash2 className="w-4 h-4 text-red-500" /></button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => { setShowModal(false); setEditingBrand(null); }}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{editingBrand ? 'Editar marca' : 'Nueva marca'}</h2>
-                <p className="text-sm text-gray-500 mt-0.5">{editingBrand ? 'Modifica los datos' : 'Registra una nueva marca comercial'}</p>
-              </div>
-              <button onClick={() => { setShowModal(false); setEditingBrand(null); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
-            </div>
-            <form onSubmit={handleSave} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Nombre *</label>
-                <input className={inputClass} placeholder="Nombre de la marca" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Descripción</label>
-                <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Descripción breve..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Sitio web</label>
-                <input className={inputClass} placeholder="https://www.ejemplo.com" value={form.website} onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">Logo (URL)</label>
-                <input className={inputClass} placeholder="https://..." value={form.logo} onChange={(e) => setForm((f) => ({ ...f, logo: e.target.value }))} />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => { setShowModal(false); setEditingBrand(null); }} className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancelar</button>
-                <button type="submit" disabled={submitting || !form.name.trim()} className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-60">{submitting ? 'Guardando…' : editingBrand ? 'Guardar' : 'Crear marca'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function TabBusinesses() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -1949,9 +1769,9 @@ function TabBusinesses() {
               <Building2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <h3 className="font-bold text-gray-900 dark:text-gray-100">Mis empresas</h3>
+              <h3 className="font-bold text-gray-900 dark:text-gray-100">Empresa</h3>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                Cada empresa es un espacio independiente con su propio equipo y datos
+                Razón social, CIF/NIF y tipo de actividad.
               </p>
             </div>
           </div>
@@ -3376,6 +3196,10 @@ function TabDevices() {
 
 function TabApariencia() {
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const { currentBusiness } = useBusiness();
+  const businessId = currentBusiness?.business_id || '';
+  const businessName = currentBusiness?.name || '';
+  const brandingRef = useRef<BrandingTabHandle>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
@@ -3413,16 +3237,40 @@ function TabApariencia() {
   ];
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Header */}
+    <div className="space-y-10 max-w-2xl">
+      <div>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Apariencia</h2>
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Tema de la interfaz y logo de tu empresa en la app.</p>
+      </div>
+
+      {businessId ? (
+        <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
+          <div>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Logo y colores de la empresa</h3>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Logo global de la empresa, distinto de cada marca (Ajustes → Marca).</p>
+          </div>
+          <BrandingTab ref={brandingRef} businessId={businessId} businessName={businessName} embedded />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void brandingRef.current?.save()}
+              className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+            >
+              Guardar logo y colores
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="space-y-4">
       <div className="flex items-center gap-3">
-        <div className="p-2 rounded-xl bg-violet-50 dark:bg-violet-900/20">
-          <Palette className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+        <div className="p-2 rounded-xl bg-gray-100 dark:bg-gray-800">
+          <Palette className="w-5 h-5 text-gray-600 dark:text-gray-400" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Apariencia</h2>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Tema de la interfaz</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Personaliza el tema visual de la interfaz.
+            Claro, oscuro o según el sistema.
           </p>
         </div>
       </div>
@@ -3501,15 +3349,10 @@ function TabApariencia() {
         </div>
       </div>
 
-      {/* Info box */}
-      <div className="flex items-start gap-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4">
-        <Monitor className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-        <p className="text-sm text-blue-700 dark:text-blue-300">
-          El tema se guarda en tu navegador y se aplica en todas las páginas de la aplicación. La opción
-          <strong className="font-semibold"> Sistema </strong>
-          detecta automáticamente si tu dispositivo usa modo claro u oscuro.
-        </p>
-      </div>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        El tema se guarda en tu navegador. <strong>Sistema</strong> sigue la preferencia de tu dispositivo.
+      </p>
+      </section>
     </div>
   );
 }
@@ -3527,6 +3370,17 @@ export function Settings() {
   const { currentBusiness } = useBusiness();
   const activeTab: TabId = (tabSlug && SLUG_TO_TAB[tabSlug]) || DEFAULT_TAB;
   const setActiveTab = useCallback((id: TabId) => navigate(`/saas/settings/${TAB_TO_SLUG[id]}`), [navigate]);
+
+  /** URLs antiguas → slug canónico (solo navegación). */
+  useEffect(() => {
+    if (!tabSlug) return;
+    const tabId = SLUG_TO_TAB[tabSlug];
+    if (!tabId) return;
+    const canonical = TAB_TO_SLUG[tabId];
+    if (canonical && tabSlug !== canonical) {
+      navigate(`/saas/settings/${canonical}${location.search}${location.hash}`, { replace: true });
+    }
+  }, [tabSlug, location.search, location.hash, navigate]);
 
   const teamStats = useMemo(() => {
     const members = currentBusiness?.members;
@@ -3740,16 +3594,9 @@ export function Settings() {
   return (
     <Layout title={t('settings.title')} subtitle={t('settings.subtitle')}>
       <div className="mx-auto max-w-6xl space-y-6">
-        <section className="relative overflow-hidden rounded-3xl border border-slate-200/90 bg-gradient-to-br from-white via-slate-50/80 to-amber-50/30 p-5 shadow-sm dark:border-gray-700 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950 sm:p-6">
-          <div className="pointer-events-none absolute -left-12 top-0 h-40 w-40 rounded-full bg-amber-400/10 blur-3xl dark:bg-amber-500/10" />
-          <div className="relative space-y-4">
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-amber-700/90 dark:text-amber-400/90">
-              Elige un área y luego la pestaña concreta
-            </p>
-
-            <div className="space-y-3">
+        <nav className="space-y-3 border-b border-gray-200 pb-4 dark:border-gray-700">
               <div
-                className="flex gap-0.5 overflow-x-auto rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55 [&::-webkit-scrollbar]:hidden"
+                className="flex gap-0.5 overflow-x-auto [&::-webkit-scrollbar]:hidden"
                 style={{ scrollbarWidth: 'none' }}
               >
                 {SECTIONS.map((section) => {
@@ -3760,14 +3607,14 @@ export function Settings() {
                       key={section.id}
                       type="button"
                       onClick={() => navigate(`/saas/settings/${TAB_TO_SLUG[section.tabs[0]]}`)}
-                      className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+                      className={`flex min-h-[40px] shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                         isActive
-                          ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 shadow-sm dark:bg-amber-900/25 dark:text-amber-300'
-                          : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
+                          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
                       }`}
                     >
                       <SectionIcon
-                        className={`h-4 w-4 shrink-0 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}
+                        className={`h-4 w-4 shrink-0 ${isActive ? 'text-white dark:text-gray-900' : 'text-gray-500 dark:text-gray-400'}`}
                       />
                       {section.label}
                     </button>
@@ -3780,7 +3627,7 @@ export function Settings() {
                 if (!currentSection || currentSection.tabs.length <= 1) return null;
                 return (
                   <div
-                    className="flex gap-0.5 overflow-x-auto rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55 [&::-webkit-scrollbar]:hidden"
+                    className="flex gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
                     style={{ scrollbarWidth: 'none' }}
                   >
                     {currentSection.tabs.map((tabId) => {
@@ -3800,10 +3647,10 @@ export function Settings() {
                           key={tab.id}
                           type="button"
                           onClick={() => navigate(`/saas/settings/${tab.slug}`)}
-                          className={`flex-shrink-0 rounded-lg px-3.5 py-2 text-xs font-medium transition-all ${
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                             activeTab === tab.id
-                              ? 'border-l-2 border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-300'
-                              : 'text-gray-700 hover:bg-white/60 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700/40 dark:hover:text-gray-100'
+                              ? 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100'
+                              : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
                           } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[9.5rem]' : ''}`}
                         >
                           {tab.id === 'users' && usersTabMeta ? (
@@ -3822,9 +3669,7 @@ export function Settings() {
                   </div>
                 );
               })()}
-            </div>
-          </div>
-        </section>
+        </nav>
 
         {isVertialSuperAdminEmail(user?.email) && (
           <div className="rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55">
@@ -4412,7 +4257,7 @@ export function Settings() {
 
         {activeTab === 'businesses' && <TabBusinesses />}
 
-        {activeTab === 'brands' && <TabBrands />}
+        {activeTab === 'brands' && <CompanyMarcaSettings />}
 
         {activeTab === 'integrations' && <IntegrationsPanel />}
 
@@ -4421,10 +4266,6 @@ export function Settings() {
         {activeTab === 'numbering' && <TabNumbering />}
 
         {activeTab === 'devices' && <TabDevices />}
-
-        {activeTab === 'marca' && currentBusiness && (
-          <BrandingTab businessId={currentBusiness.business_id} businessName={currentBusiness.name} />
-        )}
 
         {activeTab === 'pipeline' && user && (
           <PipelineConfigTab userId={user.user_id} />
@@ -4448,7 +4289,7 @@ export function Settings() {
 
         {activeTab === 'apariencia' && <TabApariencia />}
 
-        {activeTab === 'salesPoints' && <SalesPointsTab />}
+        {activeTab === 'salesPoints' && <CompanyTiendaSettings />}
       </div>
 
       <CreateRoleModal

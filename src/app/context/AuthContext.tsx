@@ -305,6 +305,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    const { clearAllDeliveryPdvSessionFlags } = await import('../lib/deliverySetup');
+    clearAllDeliveryPdvSessionFlags();
     setUser(null);
     setIsAuthenticated(false);
     persistSession(null);
@@ -826,4 +828,9 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+/** Para banners/layout que pueden montarse fuera del árbol de auth (HMR o rutas auxiliares). */
+export function useAuthOptional() {
+  return useContext(AuthContext);
 }

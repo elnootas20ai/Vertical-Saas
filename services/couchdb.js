@@ -7877,6 +7877,16 @@ export { CONSTRUCTION_PROJECT_TYPES, CONSTRUCTION_GUILDS, CONSTRUCTION_GUILD_LAB
 export function buildBrandDocument(businessId, userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `brand-${uuidv4()}`;
+  const salesPointIds = Array.isArray(data.salesPointIds)
+    ? data.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+    : Array.isArray(existing?.salesPointIds)
+      ? existing.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
+  const catalogCategories = Array.isArray(data.catalogCategories)
+    ? data.catalogCategories.map((x) => String(x || '').trim()).filter(Boolean)
+    : Array.isArray(existing?.catalogCategories)
+      ? existing.catalogCategories.map((x) => String(x || '').trim()).filter(Boolean)
+      : [];
 
   return {
     _id: id,
@@ -7889,6 +7899,13 @@ export function buildBrandDocument(businessId, userId, data = {}, existing = nul
     description: String(data.description || '').trim(),
     logo: String(data.logo || existing?.logo || ''),
     website: String(data.website || '').trim(),
+    primaryColor: String(data.primaryColor || existing?.primaryColor || '#6366F1').trim(),
+    secondaryColor: String(data.secondaryColor || existing?.secondaryColor || '').trim(),
+    shortCode: String(data.shortCode || existing?.shortCode || '').trim(),
+    salesPointIds,
+    deliveryLineKind: String(data.deliveryLineKind || existing?.deliveryLineKind || '').trim(),
+    catalogCategories,
+    isDefault: data.isDefault !== undefined ? Boolean(data.isDefault) : Boolean(existing?.isDefault),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active ?? true),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -7897,6 +7914,9 @@ export function buildBrandDocument(businessId, userId, data = {}, existing = nul
 
 export function sanitizeBrand(doc) {
   if (!doc) return null;
+  const salesPointIds = Array.isArray(doc.salesPointIds)
+    ? doc.salesPointIds.map((x) => String(x || '').trim()).filter(Boolean)
+    : [];
   return {
     _id: doc._id,
     _rev: doc._rev,
@@ -7908,6 +7928,15 @@ export function sanitizeBrand(doc) {
     description: doc.description || '',
     logo: doc.logo || '',
     website: doc.website || '',
+    primaryColor: doc.primaryColor || '#6366F1',
+    secondaryColor: doc.secondaryColor || '',
+    shortCode: doc.shortCode || '',
+    salesPointIds,
+    deliveryLineKind: String(doc.deliveryLineKind || '').trim(),
+    catalogCategories: Array.isArray(doc.catalogCategories)
+      ? doc.catalogCategories.map((x) => String(x || '').trim()).filter(Boolean)
+      : [],
+    isDefault: Boolean(doc.isDefault),
     active: doc.active !== undefined ? Boolean(doc.active) : true,
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),

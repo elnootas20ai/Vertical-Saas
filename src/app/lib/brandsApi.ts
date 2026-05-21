@@ -38,9 +38,17 @@ export interface Brand {
   description: string;
   logo: string;
   website: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  shortCode?: string;
+  salesPointIds?: string[];
+  deliveryLineKind?: string;
+  catalogCategories?: string[];
+  isDefault?: boolean;
   active: boolean;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
 }
 
 export async function listBrandsRequest(businessId: string): Promise<Brand[]> {

@@ -45,9 +45,14 @@ import {
   logAccountActivity,
   getFinanceDbName,
   buildFinanceDocument,
+  listBrandsByBusiness,
 } from '../services/couchdb.js';
 import { randomUUID } from 'node:crypto';
-import { suggestNextPdvCode } from '../shared/naming/deliveryPointOfSaleCode.js';
+import { suggestNextPdvCode, suggestNextPdvDisplayName } from '../shared/naming/deliveryPointOfSaleCode.js';
+import {
+  accumulateDeliveredOrderLines,
+  roundRevenueMap,
+} from '../shared/delivery/orderLineRevenueSplit.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
@@ -1422,12 +1427,22 @@ export async function createPointOfSale(req, res) {
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
     let body = { ...pointOfSale };
+    const existing = await listPointsOfSaleByUser(req, userId);
+    const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
+    const names = existing.map((d) => String(d.name || '').trim()).filter(Boolean);
     const codeStr = String(body.code || '').trim();
     if (!codeStr) {
-      const existing = await listPointsOfSaleByUser(req, userId);
-      const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
       body = { ...body, code: suggestNextPdvCode(String(body.name || '').trim() || 'PDV', codes) };
     }
+    body = {
+      ...body,
+      name: suggestNextPdvDisplayName(
+        String(body.name || '').trim() || 'PDV',
+        names,
+        codes,
+        body.code,
+      ),
+    };
     if (!Array.isArray(body.terminals) || body.terminals.length === 0) {
       body = {
         ...body,
@@ -1741,7 +1756,26 @@ export async function getOpsCenter(req, res) {
       revenueByHour[hour].orders++;
     }
 
+    const revenueByBrand = {};
+    const revenueByCategory = {};
+    for (const o of delivered) {
+      accumulateDeliveredOrderLines(o, revenueByBrand, revenueByCategory);
+    }
+
     const pdvs = await listPointsOfSaleByUser(req, userId);
+
+    let brandLabels = {};
+    const businessId = String(account.business_id || account.businessId || '').trim();
+    if (businessId) {
+      try {
+        const brands = await listBrandsByBusiness(req, businessId);
+        brandLabels = Object.fromEntries(
+          (brands || []).map((b) => [String(b._id || b.id || ''), String(b.name || '').trim()]).filter(([id]) => id),
+        );
+      } catch {
+        brandLabels = {};
+      }
+    }
 
     return res.json({
       ok: true,
@@ -1807,6 +1841,9 @@ export async function getOpsCenter(req, res) {
       },
       revenueByChannel,
       revenueByHour: Object.values(revenueByHour).sort((a, b) => a.hour.localeCompare(b.hour)),
+      revenueByBrand: roundRevenueMap(revenueByBrand),
+      revenueByCategory: roundRevenueMap(revenueByCategory),
+      brandLabels,
       pointsOfSale: pdvs.map(sanitizePointOfSale),
     });
   } catch (error) {

@@ -536,6 +536,10 @@ export interface Subscription {
   gracePeriodEndsAt?: Date;
   lastPaymentAt?: Date;
   cancelAtPeriodEnd: boolean;
+  /** Cupo extra de PDV concedido por superadmin (sin cobro). */
+  extraPointOfSaleSlots?: number;
+  /** Funciones PRO activadas manualmente por superadmin. */
+  adminProAccess?: boolean;
 }
 
 // ─── Context Type ─────────────────────────────────────────────────────────────
@@ -771,6 +775,8 @@ function deserializeSubscription(subscription?: PersistedBillingSubscription | n
     gracePeriodEndsAt: subscription.gracePeriodEndsAt ? new Date(subscription.gracePeriodEndsAt) : undefined,
     lastPaymentAt: subscription.lastPaymentAt ? new Date(subscription.lastPaymentAt) : undefined,
     cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
+    extraPointOfSaleSlots: subscription.extraPointOfSaleSlots,
+    adminProAccess: Boolean(subscription.adminProAccess),
   };
 }
 

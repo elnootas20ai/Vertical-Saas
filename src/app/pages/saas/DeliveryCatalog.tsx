@@ -5,6 +5,17 @@ import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { listBrandsRequest, createBrandRequest, type Brand } from '../../lib/brandsApi';
+import {
+  normalizeImportCategory,
+  resolveBrandIdsFromImportText,
+  shouldClearBrandForCategory,
+} from '../../lib/deliveryCatalogImport';
+import {
+  catalogCategorySuggestions,
+  defaultCategoryForSingleBrand,
+} from '../../lib/deliveryBrandLineKinds';
 import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
@@ -102,9 +113,23 @@ interface CreateCatalogItemModalProps {
   onClose: () => void;
   onCreate: (data: Partial<CatalogItem>) => Promise<void>;
   editItem?: CatalogItem | null;
+  brands: Brand[];
+  businessId: string;
+  onBrandsChange: (brands: Brand[]) => void;
+  /** Categorías ya usadas en el catálogo (para sugerencias). */
+  catalogCategoriesInUse?: string[];
 }
 
-function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateCatalogItemModalProps) {
+function CreateCatalogItemModal({
+  isOpen,
+  onClose,
+  onCreate,
+  editItem,
+  brands,
+  businessId,
+  onBrandsChange,
+  catalogCategoriesInUse = [],
+}: CreateCatalogItemModalProps) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -112,7 +137,9 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     name: '',
     description: '',
     category: '',
-    brandIdsCsv: '',
+    selectedBrandIds: [] as string[],
+    newBrandName: '',
+    showNewBrand: false,
     unit: 'ud',
     unitPrice: '',
     costPrice: '',
@@ -132,7 +159,9 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
         name: editItem.name,
         description: editItem.description,
         category: editItem.category,
-        brandIdsCsv: Array.isArray(editItem.brandIds) ? editItem.brandIds.join(', ') : '',
+        selectedBrandIds: Array.isArray(editItem.brandIds) ? [...editItem.brandIds] : [],
+        newBrandName: '',
+        showNewBrand: false,
         unit: editItem.unit || 'ud',
         unitPrice: String(editItem.unitPrice || ''),
         costPrice: String(editItem.costPrice || ''),
@@ -147,13 +176,29 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     } else {
       setForm({
         itemType: 'product', name: '', description: '', category: '', unit: 'ud',
-        brandIdsCsv: '',
+        selectedBrandIds: [],
+        newBrandName: '',
+        showNewBrand: false,
         unitPrice: '', costPrice: '', stockQuantity: '', minStock: '',
         image: '', allergens: [], notes: '', webVisible: true, available: true,
       });
     }
     setStep(1);
   }, [editItem, isOpen]);
+
+  const categorySuggestions = useMemo(
+    () => catalogCategorySuggestions(brands, form.selectedBrandIds, catalogCategoriesInUse),
+    [brands, form.selectedBrandIds, catalogCategoriesInUse],
+  );
+
+  useEffect(() => {
+    if (!isOpen || editItem) return;
+    if (form.selectedBrandIds.length !== 1) return;
+    const suggested = defaultCategoryForSingleBrand(brands, form.selectedBrandIds[0]);
+    if (!suggested) return;
+    setForm((f) => (f.category.trim() ? f : { ...f, category: suggested }));
+  }, [isOpen, editItem, form.selectedBrandIds, brands]);
+
   useModalClose(isOpen, onClose);
 
   if (!isOpen) return null;
@@ -169,16 +214,17 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
     }
     setSubmitting(true);
     try {
-      const parsedBrandIds = String(form.brandIdsCsv || '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const category = normalizeImportCategory(form.category);
+      const brandIds =
+        shouldClearBrandForCategory(category) && form.selectedBrandIds.length === 0
+          ? []
+          : [...form.selectedBrandIds];
       await onCreate({
         ...editItem,
         name: form.name,
         description: form.description,
-        category: form.category,
-        brandIds: parsedBrandIds,
+        category,
+        brandIds,
         itemType: form.itemType,
         unitPrice: Number(form.unitPrice) || 0,
         costPrice: Number(form.costPrice) || 0,
@@ -292,10 +338,6 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           {/* Step 1: Información básica */}
           {(step === 1 || isEditMode) && (
             <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl mb-2">
-                <Package className="w-6 h-6 text-blue-600 shrink-0" />
-                <p className="text-sm text-blue-800 dark:text-blue-300">Introduce el nombre y descripción del producto que aparecerá en el catálogo y en la web.</p>
-              </div>
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -329,16 +371,72 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
                 <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
               </div>
               <div>
-                <label className={labelClass}>Marca (para reporting interno)</label>
-                <input
-                  className={inputClass}
-                  placeholder="Ej: pizza, burger, comunes (separadas por coma)"
-                  value={form.brandIdsCsv}
-                  onChange={(e) => setForm((f) => ({ ...f, brandIdsCsv: e.target.value }))}
-                />
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                  Esto se copiará a cada línea del pedido al vender (histórico). Recomendado: usar <b>comunes</b> para bebidas/extras compartidos.
-                </p>
+                <label className={labelClass}>Marca</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {brands.filter((b) => b.active !== false).map((b) => (
+                    <button
+                      key={b._id}
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          selectedBrandIds: f.selectedBrandIds.includes(b._id)
+                            ? f.selectedBrandIds.filter((id) => id !== b._id)
+                            : [...f.selectedBrandIds, b._id],
+                        }))
+                      }
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${
+                        form.selectedBrandIds.includes(b._id)
+                          ? 'bg-violet-100 border-violet-400 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300'
+                          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {b.name}
+                    </button>
+                  ))}
+                </div>
+                {form.showNewBrand ? (
+                  <div className="flex gap-2">
+                    <input
+                      className={inputClass}
+                      placeholder="Nombre nueva marca"
+                      value={form.newBrandName}
+                      onChange={(e) => setForm((f) => ({ ...f, newBrandName: e.target.value }))}
+                      onKeyDown={async (e) => {
+                        if (e.key !== 'Enter' || !businessId) return;
+                        const name = form.newBrandName.trim();
+                        if (!name) return;
+                        try {
+                          const created = await createBrandRequest(businessId, { name, active: true });
+                          onBrandsChange([...brands, created]);
+                          setForm((f) => ({
+                            ...f,
+                            selectedBrandIds: [...f.selectedBrandIds, created._id],
+                            newBrandName: '',
+                            showNewBrand: false,
+                          }));
+                        } catch {
+                          toast.error('No se pudo crear la marca');
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, showNewBrand: false, newBrandName: '' }))}
+                      className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, showNewBrand: true }))}
+                    className="text-xs font-semibold text-violet-700 dark:text-violet-300 hover:underline"
+                  >
+                    + Nueva marca
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -346,13 +444,34 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           {/* Step 2: Categoría y unidad */}
           {(step === 2 || isEditMode) && (
             <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-xl mb-2">
-                <Layers className="w-6 h-6 text-purple-600 shrink-0" />
-                <p className="text-sm text-purple-800 dark:text-purple-300">Clasifica el producto para organizar tu catálogo y facilitar la búsqueda.</p>
-              </div>
               <div>
                 <label className={labelClass}>Categoría</label>
-                <input className={inputClass} placeholder="Ej: Bebidas, Entrantes, Postres..." value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} autoFocus />
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {categorySuggestions.map((cat) => {
+                    const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, category: cat }))}
+                        className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                          active
+                            ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    );
+                  })}
+                </div>
+                <input
+                  className={inputClass}
+                  placeholder="O escribe otra categoría…"
+                  value={form.category}
+                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                  autoFocus
+                />
               </div>
               <div>
                 <label className={labelClass}>Unidad de medida</label>
@@ -464,10 +583,6 @@ function CreateCatalogItemModal({ isOpen, onClose, onCreate, editItem }: CreateC
           {/* Step 6: Alérgenos y notas */}
           {(step === 6 || isEditMode) && (
             <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-xl mb-2">
-                <AlertTriangle className="w-6 h-6 text-orange-600 shrink-0" />
-                <p className="text-sm text-orange-800 dark:text-orange-300">Marca los alérgenos presentes y añade notas internas sobre el producto.</p>
-              </div>
               <div>
                 <label className={labelClass}>Alérgenos</label>
                 <div className="flex flex-wrap gap-2">
@@ -1199,6 +1314,9 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
 
 export function CatalogPage() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
@@ -1241,7 +1359,8 @@ export function CatalogPage() {
   const MODULE_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre' },
     { key: 'itemType', label: 'Tipo (product/service/combo)' },
-    { key: 'category', label: 'Categoría' },
+    { key: 'category', label: 'Categoría (bebidas, complementos…)' },
+    { key: 'marca', label: 'Marca (General, …)' },
     { key: 'price', label: 'Precio' },
     { key: 'description', label: 'Descripción' },
     { key: 'allergens', label: 'Alérgenos' },
@@ -1251,8 +1370,10 @@ export function CatalogPage() {
     { key: 'name', label: 'Nombre', required: true, example: '' },
     { key: 'sku', label: 'SKU', example: 'SKU-001' },
     { key: 'itemType', label: 'Tipo', example: 'product' },
-    { key: 'category', label: 'Categoría', example: '' },
+    { key: 'category', label: 'Categoría', example: 'principales' },
+    { key: 'marca', label: 'Marca', example: 'General' },
     { key: 'price', label: 'Precio', example: '' },
+    { key: 'costPrice', label: 'Coste', example: '' },
     { key: 'description', label: 'Descripción', example: '' },
     { key: 'allergens', label: 'Alérgenos', example: '' },
     { key: 'image', label: 'Imagen (URL opcional)', example: '' },
@@ -1260,12 +1381,25 @@ export function CatalogPage() {
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!user?.id) return;
-    const items = entries
-      .map((entry) => ({
-        name: String(entry.name || '').trim(),
-        category: String(entry.category || '').trim(),
+    let brandCache = [...brands];
+    const items: Partial<CatalogItem>[] = [];
+    for (const entry of entries) {
+      const name = String(entry.name || '').trim();
+      if (!name) continue;
+      const category = normalizeImportCategory(String(entry.category || ''));
+      const marcaText = String(entry.marca || entry.brand || '').trim();
+      let brandIds: string[] = [];
+      if (marcaText && businessId) {
+        const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
+        brandCache = resolved.cache;
+        brandIds = resolved.brandIds;
+      }
+      items.push({
+        name,
+        category,
+        brandIds,
         itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
-          ? String(entry.itemType).trim() as CatalogItem['itemType']
+          ? (String(entry.itemType).trim() as CatalogItem['itemType'])
           : 'product',
         unitPrice: Number(String(entry.price ?? entry.unitPrice ?? '').replace(',', '.')) || 0,
         description: String(entry.description || '').trim(),
@@ -1277,8 +1411,9 @@ export function CatalogPage() {
         available: true,
         webVisible: true,
         module: 'catalog' as const,
-      }))
-      .filter((item) => item.name);
+      });
+    }
+    if (brandCache.length !== brands.length) setBrands(brandCache);
     if (items.length === 0) {
       toast.error('No hay productos válidos para importar');
       return;
@@ -1302,42 +1437,64 @@ export function CatalogPage() {
     if (!user?.id) return 0;
     const zipProvided = Object.keys(imageZipMap).length > 0;
     const unmatchedImageRefs: string[] = [];
-    const items: Partial<CatalogItem>[] = entries
-      .map((entry, index) => {
-        const name = String(entry.name || '').trim();
-        if (!name) return null;
-        const sku = String(entry.sku || '').trim();
-        const imageFromZip =
-          imageZipMap[normalizeMediaKey(sku)] ||
-          imageZipMap[normalizeMediaKey(name)] ||
-          '';
-        const image = String(entry.image || '').trim() || imageFromZip;
-        if (zipProvided && !image) unmatchedImageRefs.push(sku || name || `fila ${index + 2}`);
-        return {
-          name,
-          category: String(entry.category || '').trim(),
-          itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
-            ? String(entry.itemType).trim() as CatalogItem['itemType']
-            : 'product',
-          description: String(entry.description || '').trim(),
-          unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
-          costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
-          stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
-          minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
-          allergens: String(entry.allergens || '')
-            .split(',')
-            .map((a) => a.trim())
-            .filter(Boolean),
-          image,
-          sku: sku || undefined,
-          unit: String(entry.unit || 'ud'),
-          active: true,
-          available: true,
-          webVisible: true,
-          module: 'catalog',
-        } as Partial<CatalogItem>;
-      })
-      .filter((item): item is Partial<CatalogItem> => Boolean(item));
+    let brandCache = [...brands];
+    const createdBrandNames: string[] = [];
+    const items: Partial<CatalogItem>[] = [];
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const name = String(entry.name || '').trim();
+      if (!name) continue;
+      const sku = String(entry.sku || '').trim();
+      const category = normalizeImportCategory(entry.category);
+      const marcaText = String(entry.marca || entry.brand || '').trim();
+      let brandIds: string[] = [];
+      if (marcaText && businessId) {
+        const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
+        brandCache = resolved.cache;
+        brandIds = resolved.brandIds;
+        createdBrandNames.push(...resolved.createdNames);
+      }
+
+      const imageFromZip =
+        imageZipMap[normalizeMediaKey(sku)] ||
+        imageZipMap[normalizeMediaKey(name)] ||
+        '';
+      const image = String(entry.image || '').trim() || imageFromZip;
+      if (zipProvided && !image) unmatchedImageRefs.push(sku || name || `fila ${index + 2}`);
+
+      items.push({
+        name,
+        category,
+        brandIds: brandIds.length > 0 ? brandIds : shouldClearBrandForCategory(category) ? [] : [],
+        itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
+          ? (String(entry.itemType).trim() as CatalogItem['itemType'])
+          : 'product',
+        description: String(entry.description || '').trim(),
+        unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
+        costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
+        stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
+        minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
+        allergens: String(entry.allergens || '')
+          .split(',')
+          .map((a) => a.trim())
+          .filter(Boolean),
+        image,
+        sku: sku || undefined,
+        unit: String(entry.unit || 'ud'),
+        active: true,
+        available: true,
+        webVisible: true,
+        module: 'catalog',
+      });
+    }
+
+    if (createdBrandNames.length > 0) {
+      setBrands(brandCache);
+      toast.message(`Marcas creadas en import: ${[...new Set(createdBrandNames)].join(', ')}`);
+    } else if (brandCache.length !== brands.length) {
+      setBrands(brandCache);
+    }
 
     if (items.length === 0) {
       toast.error('No hay productos válidos para importar');
@@ -1445,6 +1602,22 @@ export function CatalogPage() {
   }, []);
 
   // ── Data loading ────────────────────────────────────────────────────────────
+
+  const loadBrands = useCallback(async () => {
+    if (!businessId) {
+      setBrands([]);
+      return;
+    }
+    try {
+      setBrands(await listBrandsRequest(businessId));
+    } catch {
+      setBrands([]);
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    void loadBrands();
+  }, [loadBrands]);
 
   const loadCatalog = useCallback(async () => {
     if (!user?.id) return;
@@ -2376,6 +2549,10 @@ export function CatalogPage() {
         onClose={() => { setShowCreateItem(false); setEditingItem(null); }}
         onCreate={handleCreateItem}
         editItem={editingItem}
+        brands={brands}
+        businessId={businessId}
+        onBrandsChange={setBrands}
+        catalogCategoriesInUse={categories}
       />
 
       <CreateSupplierModal

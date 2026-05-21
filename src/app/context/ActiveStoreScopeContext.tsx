@@ -13,13 +13,14 @@ import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   notifyDeliveryActiveStoreChanged,
+  normalizeStoredPdvPreference,
+  pickDefaultActivePdvId,
   readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
 import { pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
 import { loadDeliveryStores } from '../lib/deliverySetup';
-import { listWorkCentersForDelivery } from '../lib/workCentersApi';
 
 export interface ActiveStoreScopeValue {
   pointsOfSale: PointOfSale[];
@@ -70,8 +71,6 @@ function ActiveStoreScopeProviderImpl({
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(false);
   const [version, setVersion] = useState(0);
-  /** Si la preferencia es `wc:` y aún no hay PDV en lista, mostrar al menos el nombre del centro. */
-  const [wcPreferenceLabel, setWcPreferenceLabel] = useState('');
 
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const dataUserId = useMemo(() => resolveBusinessDataUserId(user, currentBusiness), [user, currentBusiness]);
@@ -124,65 +123,21 @@ function ActiveStoreScopeProviderImpl({
     if (pointsOfSale.length === 0) return null;
     const resolved = resolvePreferenceToPdvId(pointsOfSale, activePreferenceRaw);
     if (resolved) return resolved;
-    if (pointsOfSale.length === 1) return pointsOfSale[0]._id;
-    return null;
+    return pickDefaultActivePdvId(pointsOfSale);
   }, [pointsOfSale, activePreferenceRaw]);
 
+  /** Normaliza preferencia (`wc:` → id PDV) y asegura siempre un PDV activo guardado. */
   useEffect(() => {
-    let cancelled = false;
-    const raw = activePreferenceRaw?.trim();
-    if (!raw || !dataUserId) {
-      setWcPreferenceLabel('');
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (activeSalesPointId) {
-      const p = pointsOfSale.find((x) => x._id === activeSalesPointId);
-      if (p) {
-        setWcPreferenceLabel('');
-        return () => {
-          cancelled = true;
-        };
-      }
-    }
-    if (!raw.startsWith('wc:')) {
-      setWcPreferenceLabel('');
-      return () => {
-        cancelled = true;
-      };
-    }
-    const wcId = raw.slice(3).trim();
-    if (!wcId) {
-      setWcPreferenceLabel('');
-      return () => {
-        cancelled = true;
-      };
-    }
-    void (async () => {
-      try {
-        const wcs = await listWorkCentersForDelivery(dataUserId, currentBusiness ?? null);
-        const wc = wcs.find((w) => String(w._id || w.id || '') === wcId);
-        if (!cancelled) {
-          setWcPreferenceLabel(wc?.name?.trim() ? String(wc.name).trim() : '');
-        }
-      } catch {
-        if (!cancelled) setWcPreferenceLabel('');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activePreferenceRaw, dataUserId, currentBusiness, activeSalesPointId, pointsOfSale]);
-
-  useEffect(() => {
-    if (!businessId || !dataUserId || pointsOfSale.length !== 1) return;
-    const only = pointsOfSale[0]._id;
+    if (!businessId || !dataUserId || pointsOfSale.length === 0) return;
     const raw = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    if (resolvePreferenceToPdvId(pointsOfSale, raw) === only) return;
-    writeDeliveryOpsSelectedPdvId(businessId, dataUserId, only);
-    notifyDeliveryActiveStoreChanged();
-    bump();
+    const normalized = normalizeStoredPdvPreference(pointsOfSale, raw);
+    const targetId = normalized || pickDefaultActivePdvId(pointsOfSale);
+    if (!targetId) return;
+    if (raw !== targetId) {
+      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, targetId);
+      notifyDeliveryActiveStoreChanged();
+      bump();
+    }
   }, [businessId, dataUserId, pointsOfSale, bump]);
 
   const setActiveSalesPoint = useCallback(
@@ -206,12 +161,10 @@ function ActiveStoreScopeProviderImpl({
   );
 
   const displayLabelForActive = useMemo(() => {
-    if (activeSalesPointId) {
-      const p = pointsOfSale.find((x) => x._id === activeSalesPointId);
-      if (p) return pointOfSaleDisplayLabel(p);
-    }
-    return wcPreferenceLabel;
-  }, [activeSalesPointId, pointsOfSale, wcPreferenceLabel]);
+    if (!activeSalesPointId) return '';
+    const p = pointsOfSale.find((x) => x._id === activeSalesPointId);
+    return p ? pointOfSaleDisplayLabel(p) : '';
+  }, [activeSalesPointId, pointsOfSale]);
 
   const value = useMemo<ActiveStoreScopeValue>(
     () => ({

@@ -101,7 +101,6 @@ import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { CatalogPage } from './pages/saas/DeliveryCatalog';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
-import { DeliveryFirstPdv } from './pages/saas/delivery/DeliveryFirstPdv';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
@@ -445,7 +444,7 @@ export const router = createBrowserRouter([
         children: [
           { path: 'dashboard', element: <RequireBusinessOwner><Dashboard /></RequireBusinessOwner> },
           { path: 'onboarding', Component: SetupOnboarding },
-          { path: 'delivery/primer-pdv', Component: DeliveryFirstPdv },
+          { path: 'delivery/primer-pdv', element: <Navigate to="/saas/dashboard" replace /> },
           { path: 'user-dashboard', Component: UserDashboard },
           { path: 'reports', element: <RequireBusinessOwner><Reports /></RequireBusinessOwner> },
           { path: 'calendar', Component: CalendarView },
@@ -485,8 +484,8 @@ export const router = createBrowserRouter([
           { path: 'finance', element: <RequireBusinessOwner><Finance /></RequireBusinessOwner> },
           { path: 'quotes', element: <RequireBusinessOwner><Quotes /></RequireBusinessOwner> },
           { path: 'promotions', element: <RequireBusinessOwner><PromotionsPage /></RequireBusinessOwner> },
-          { path: 'sales-points', element: <Navigate to="/saas/settings/centros-de-trabajo" replace /> },
-          { path: 'work-centers', element: <Navigate to="/saas/settings/centros-de-trabajo" replace /> },
+          { path: 'sales-points', element: <Navigate to="/saas/settings/tienda" replace /> },
+          { path: 'work-centers', element: <Navigate to="/saas/settings/tienda" replace /> },
           { path: 'groups', Component: Groups },
           { path: 'workshop', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><Workshop /></RequireWorkerPermission> },
           { path: 'workshop/:id', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><WorkOrderDetail /></RequireWorkerPermission> },

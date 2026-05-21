@@ -3,6 +3,7 @@ import {
   ensureDeliveryPdvForWorkCenter,
   listPointsOfSaleRequest,
   mergePointsOfSaleWithRetailWorkCenters,
+  suggestNextPdvDisplayName,
   type PointOfSale,
 } from './deliveryApi';
 import type { Business } from './businessApi';
@@ -17,17 +18,112 @@ import {
   writeDeliveryOpsSelectedPdvId,
 } from './deliveryOpsPdvSelection';
 
-export const DELIVERY_FIRST_PDV_PATH = '/saas/delivery/primer-pdv';
+export { notifyDeliveryActiveStoreChanged } from './deliveryOpsPdvSelection.js';
 
-export const DELIVERY_PDV_EXEMPT_PATHS = [
-  DELIVERY_FIRST_PDV_PATH,
-  '/saas/suspended',
-  '/saas/billing',
-  '/saas/help',
-] as const;
+/** @deprecated Pantalla obligatoria desactivada; PDV desde Ajustes → Empresa → Tiendas. */
+export const DELIVERY_FIRST_PDV_PATH = '/saas/settings/tienda';
 
-export function isDeliveryPdvExemptPath(pathname: string): boolean {
-  return DELIVERY_PDV_EXEMPT_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+/** Tras crear PDV en sesión (evita parpadeos al revalidar listas). */
+export const DELIVERY_PDV_SESSION_KEY = 'vertial_delivery_has_pdv';
+
+const ONBOARDING_STORAGE_KEY = 'vertial_onboarding_data';
+
+/** Tipo de negocio guardado en onboarding (local) antes de que el user en API esté al día. */
+export function readStoredOnboardingBusinessType(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { businessType?: string };
+    const bt = String(parsed?.businessType || '').trim();
+    return bt || null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveDeliveryBusinessType(
+  sources?: {
+    business?: Business | null;
+    businesses?: Business[];
+    userOnboarding?: { businessType?: string } | null;
+  },
+): string {
+  return (
+    String(sources?.business?.businessType || '').trim() ||
+    String(sources?.userOnboarding?.businessType || '').trim() ||
+    String(sources?.businesses?.[0]?.businessType || '').trim() ||
+    readStoredOnboardingBusinessType() ||
+    ''
+  );
+}
+
+export function isDeliveryAccountFromSources(
+  sources?: {
+    business?: Business | null;
+    businesses?: Business[];
+    userOnboarding?: { businessType?: string } | null;
+  },
+): boolean {
+  return isDeliveryBusinessType(resolveDeliveryBusinessType(sources));
+}
+
+/** Tras registro/onboarding: mismo destino que el resto de verticales. */
+export function getPostAuthSaasEntryPath(_businessType?: string | null, _hasPdv = false): string {
+  return '/saas/dashboard';
+}
+
+function deliveryPdvSessionStorageKey(userId: string): string {
+  return `${DELIVERY_PDV_SESSION_KEY}:${userId}`;
+}
+
+export function markDeliveryPdvSessionConfirmed(userId: string): void {
+  if (!userId || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(deliveryPdvSessionStorageKey(userId), '1');
+    sessionStorage.removeItem(DELIVERY_PDV_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function peekDeliveryPdvSessionConfirmed(userId?: string | null): boolean {
+  if (!userId || typeof sessionStorage === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(deliveryPdvSessionStorageKey(userId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function clearDeliveryPdvSessionForUser(userId: string): void {
+  if (!userId || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(deliveryPdvSessionStorageKey(userId));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Limpia flags de PDV (p. ej. al cerrar sesión). */
+export function clearAllDeliveryPdvSessionFlags(): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    const prefix = `${DELIVERY_PDV_SESSION_KEY}`;
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key && (key === DELIVERY_PDV_SESSION_KEY || key.startsWith(`${prefix}:`))) {
+        sessionStorage.removeItem(key);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** @deprecated Usar clearAllDeliveryPdvSessionFlags */
+export function clearDeliveryPdvSessionConfirmed(): void {
+  clearAllDeliveryPdvSessionFlags();
 }
 
 export function isDeliveryBusinessType(businessType?: string | null): boolean {
@@ -72,12 +168,25 @@ export async function loadDeliveryStores(
   return { dataUserId, workCenters, pointsOfSale };
 }
 
+/**
+ * Comprobación rápida para el gate (sin merge auto-crear PDV).
+ * El merge solo debe usarse al cargar listas en UI, no en cada redirect.
+ */
 export async function countDeliveryPointsOfSale(
   authUser: AuthLike,
   business?: Business | null,
 ): Promise<number> {
-  const { pointsOfSale } = await loadDeliveryStores(authUser, business);
-  return pointsOfSale.length;
+  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  if (!dataUserId) return 0;
+
+  const pdvs = await listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]);
+  const active = pdvs.filter((p) => p.active !== false).length;
+  if (active > 0) {
+    markDeliveryPdvSessionConfirmed(dataUserId);
+    return active;
+  }
+  if (peekDeliveryPdvSessionConfirmed(dataUserId)) return 1;
+  return 0;
 }
 
 export interface CreateRetailStorePayload {
@@ -108,8 +217,13 @@ export async function setupDeliveryRetailStore(
     throw new Error('Indica una dirección completa (mínimo 5 caracteres)');
   }
 
+  const existingPdvs = await listPointsOfSaleRequest(dataUserId).catch(() => []);
+  const existingCodes = existingPdvs.map((p) => String(p.code || '').trim()).filter(Boolean);
+  const existingNames = existingPdvs.map((p) => String(p.name || '').trim()).filter(Boolean);
+  const displayName = suggestNextPdvDisplayName(trimmedName, existingNames, existingCodes);
+
   const wc = await createWorkCenter(dataUserId, {
-    name: trimmedName,
+    name: displayName,
     centerType: 'punto_de_venta',
     ownership: 'propiedad',
     address: trimmedAddress,
@@ -136,6 +250,7 @@ export async function setupDeliveryRetailStore(
   }
 
   notifyDeliveryWorkCentersChanged();
+  markDeliveryPdvSessionConfirmed(dataUserId);
 
   return { workCenter: wc, pointOfSale: pdv };
 }

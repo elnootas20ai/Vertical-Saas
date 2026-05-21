@@ -12,6 +12,7 @@ import {
   readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
+  pickDefaultActivePdvId,
   notifyDeliveryActiveStoreChanged,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
@@ -30,6 +31,7 @@ import {
   type DeliveryConfig,
   type PointOfSale,
 } from '../../lib/deliveryApi';
+import { brandDisplayName, reportCategoryLabel } from '../../lib/deliveryOrderReporting';
 import {
   Activity, ChefHat, Package, Truck, CheckCircle2, Clock, AlertTriangle,
   ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
@@ -73,8 +75,34 @@ function eur(n: number) {
 }
 
 function extractBrandIds(order: DeliveryOrder): string[] {
-  const raw = (order.items || []).flatMap((it) => Array.isArray((it as any).brandIds) ? (it as any).brandIds : []);
+  const raw = (order.items || []).flatMap((it) =>
+    Array.isArray(it.brandIds) ? it.brandIds : [],
+  );
   return Array.from(new Set(raw.map((s) => String(s || '').trim()).filter(Boolean))).slice(0, 4);
+}
+
+function OrderBrandBadges({
+  order,
+  brandLabels,
+}: {
+  order: DeliveryOrder;
+  brandLabels?: Record<string, string>;
+}) {
+  const ids = extractBrandIds(order);
+  if (!ids.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {ids.map((b) => (
+        <span
+          key={b}
+          className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
+          title="Marca"
+        >
+          {brandDisplayName(b, brandLabels)}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 /* ── Filters Bar ─────────────────────────────────────────────────────────── */
@@ -107,7 +135,7 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
 
   const handleAddPdvClick = () => {
     if (pointOfSaleAccess.canCreatePointOfSale) {
-      nav('/saas/settings/centros-de-trabajo?action=new-pdv');
+      nav('/saas/settings/tienda?action=new-pdv');
       return;
     }
     goToPdvBilling();
@@ -450,9 +478,10 @@ function Metrics({ kpis }: { kpis: OpsCenterData['kpis'] | null }) {
 
 /* ── Kitchen Widget ──────────────────────────────────────────────────────── */
 
-function KitchenW({ ks, orders, onAdv }: {
+function KitchenW({ ks, orders, onAdv, brandLabels }: {
   ks: OpsCenterData['kitchenStatus'] | null; orders: DeliveryOrder[];
   onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
+  brandLabels?: Record<string, string>;
 }) {
   if (!ks) return null;
   const list = orders.filter(o => o.status === 'cocina').slice(0, 5);
@@ -482,19 +511,7 @@ function KitchenW({ ks, orders, onAdv }: {
           <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber} <span className="text-xs text-gray-500 font-normal">{o.items?.slice(0, 2).map(i => i.name).join(', ')}</span></p>
-              {extractBrandIds(o).length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {extractBrandIds(o).map((b) => (
-                    <span
-                      key={b}
-                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
-                      title="Marca (deducida del catálogo)"
-                    >
-                      {b}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <OrderBrandBadges order={o} brandLabels={brandLabels} />
               <p className={`text-xs mt-0.5 ${(Date.now() - new Date(o.createdAt).getTime()) / 60000 > 25 ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{ago(o.createdAt)}</p>
             </div>
             <button onClick={() => onAdv(o, 'listo')} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-semibold shrink-0">Listo</button>
@@ -507,7 +524,11 @@ function KitchenW({ ks, orders, onAdv }: {
 
 /* ── Assembly Widget ─────────────────────────────────────────────────────── */
 
-function AssemblyW({ orders, onAdv }: { orders: DeliveryOrder[]; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void }) {
+function AssemblyW({ orders, onAdv, brandLabels }: {
+  orders: DeliveryOrder[];
+  onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
+  brandLabels?: Record<string, string>;
+}) {
   // En montaje: pedidos en estado 'listo' pendientes de salir hacia entrega.
   // No incluimos 'en_reparto' porque ese ya está saliendo / fuera del local.
   const list = orders.filter(o => o.status === 'listo' && !o.assignedDriver && o.deliveryType !== 'sala').slice(0, 5);
@@ -524,19 +545,7 @@ function AssemblyW({ orders, onAdv }: { orders: DeliveryOrder[]; onAdv: (o: Deli
           <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
-              {extractBrandIds(o).length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {extractBrandIds(o).map((b) => (
-                    <span
-                      key={b}
-                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
-                      title="Marca (deducida del catálogo)"
-                    >
-                      {b}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <OrderBrandBadges order={o} brandLabels={brandLabels} />
               <p className="text-xs text-gray-400 mt-0.5">{o.deliveryType === 'recogida' ? 'Recogida' : 'Domicilio'} — {ago(o.createdAt)}</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shrink-0">Completado</button>
@@ -549,9 +558,10 @@ function AssemblyW({ orders, onAdv }: { orders: DeliveryOrder[]; onAdv: (o: Deli
 
 /* ── Delivery/Reparto Widget ─────────────────────────────────────────────── */
 
-function RepartoW({ ds, orders, cfg, onAdv }: {
+function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
   ds: OpsCenterData['deliveryStatus'] | null; orders: DeliveryOrder[];
   cfg: DeliveryConfig | null; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
+  brandLabels?: Record<string, string>;
 }) {
   if (!cfg?.hasOwnDelivery && !cfg?.hasPlatformDelivery) return null;
   // En reparto: pedidos ya marcados 'en_reparto' o, por compatibilidad,
@@ -576,19 +586,7 @@ function RepartoW({ ds, orders, cfg, onAdv }: {
           <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
-              {extractBrandIds(o).length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {extractBrandIds(o).map((b) => (
-                    <span
-                      key={b}
-                      className="px-1.5 py-0.5 rounded-md bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 text-[10px] font-bold border border-violet-200 dark:border-violet-800"
-                      title="Marca (deducida del catálogo)"
-                    >
-                      {b}
-                    </span>
-                  ))}
-                </div>
-              )}
+              <OrderBrandBadges order={o} brandLabels={brandLabels} />
               <p className="text-xs text-gray-400 mt-0.5">{o.assignedDriver} — {(o.customerAddress || '').slice(0, 30)}</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-semibold shrink-0">Entregado</button>
@@ -700,6 +698,40 @@ function ChannelsW({ data }: { data: Record<string, number> }) {
           <div key={ch} className="flex items-center gap-3">
             <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-20 shrink-0">{CH_LABELS[ch] || ch}</span>
             <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden"><div className="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all" style={{ width: `${(val / mx) * 100}%` }} /></div>
+            <span className="text-xs font-bold text-gray-700 dark:text-gray-300 w-20 text-right">{eur(val)} €</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RevenueBreakdownW({
+  title,
+  data,
+  labelForKey,
+  barClass = 'bg-violet-500 dark:bg-violet-400',
+}: {
+  title: string;
+  data: Record<string, number>;
+  labelForKey: (key: string) => string;
+  barClass?: string;
+}) {
+  const entries = Object.entries(data || {}).filter(([, v]) => Number(v) > 0).sort((a, b) => b[1] - a[1]);
+  const mx = Math.max(...entries.map((e) => e[1]), 1);
+  if (!entries.length) return null;
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-3">
+      <h3 className="text-[11px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-2">{title}</h3>
+      <div className="space-y-2">
+        {entries.map(([key, val]) => (
+          <div key={key} className="flex items-center gap-3">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400 w-24 shrink-0 truncate" title={labelForKey(key)}>
+              {labelForKey(key)}
+            </span>
+            <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${barClass}`} style={{ width: `${(val / mx) * 100}%` }} />
+            </div>
             <span className="text-xs font-bold text-gray-700 dark:text-gray-300 w-20 text-right">{eur(val)} €</span>
           </div>
         ))}
@@ -828,13 +860,7 @@ export function DeliveryOpsCenter() {
     const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
     if (!bid || !dataUserId) return;
     const id = filters.salesPointId?.trim() || null;
-    let toStore = id;
-    if (id && data?.pointsOfSale?.length) {
-      const pdv = data.pointsOfSale.find((p) => p._id === id);
-      if (pdv && String(pdv.workCenterId || '').trim()) {
-        toStore = `wc:${String(pdv.workCenterId).trim()}`;
-      }
-    }
+    const toStore = id;
     if (!persistBootRef.current) {
       persistBootRef.current = true;
       prevPersistedSalesPointRef.current = toStore;
@@ -863,7 +889,8 @@ export function DeliveryOpsCenter() {
       return;
     }
     const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-    const pdvId = resolvePreferenceToPdvId(data.pointsOfSale, saved);
+    const pdvId =
+      resolvePreferenceToPdvId(data.pointsOfSale, saved) || pickDefaultActivePdvId(activePdvs);
     if (pdvId) {
       setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
     }
@@ -878,18 +905,23 @@ export function DeliveryOpsCenter() {
       const list = data?.pointsOfSale;
       if (!list?.length) return;
       const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-      if (!saved) {
-        setFilters((f) => (f.salesPointId ? { ...f, salesPointId: undefined } : f));
-        return;
-      }
-      const pdvId = resolvePreferenceToPdvId(list, saved);
+      const pdvId =
+        resolvePreferenceToPdvId(list, saved) ||
+        activeStoreScope.activeSalesPointId ||
+        pickDefaultActivePdvId(list);
       if (pdvId) {
         setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
       }
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
-  }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId, data?.pointsOfSale]);
+  }, [
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    dataUserId,
+    data?.pointsOfSale,
+    activeStoreScope.activeSalesPointId,
+  ]);
 
   /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
   const pedidosQueueCount = useMemo(() => {
@@ -1010,36 +1042,26 @@ export function DeliveryOpsCenter() {
       ? 'bg-amber-500 animate-pulse'
       : 'bg-red-500 animate-pulse';
 
-  /** Etiqueta PDV para cabecera y barra interna: filtro Ops, preferencia local, un solo PDV, o selector global. */
+  /** Misma etiqueta que sidebar/topbar (sin parpadeo nombre centro → código PDV). */
   const effectiveOpsPdvLabel = useMemo(() => {
-    const list = data?.pointsOfSale ?? [];
-    const id = filters.salesPointId?.trim();
+    const list =
+      (data?.pointsOfSale?.length ? data.pointsOfSale : activeStoreScope.pointsOfSale) ?? [];
+    const id =
+      activeStoreScope.activeSalesPointId?.trim() ||
+      filters.salesPointId?.trim() ||
+      null;
     if (id && list.length) {
       const p = list.find((x) => x._id === id);
       if (p) return pointOfSaleDisplayLabel(p);
-    }
-    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
-    if (bid && dataUserId && list.length > 1) {
-      const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-      const pid = resolvePreferenceToPdvId(list, saved);
-      if (pid) {
-        const p = list.find((x) => x._id === pid);
-        if (p) return pointOfSaleDisplayLabel(p);
-      }
-    }
-    const activeList = list.filter((p) => p.active !== false);
-    if (activeList.length === 1) {
-      return pointOfSaleDisplayLabel(activeList[0]);
     }
     const global = activeStoreScope.displayLabelForActive?.trim();
     return global || null;
   }, [
     filters.salesPointId,
     data?.pointsOfSale,
+    activeStoreScope.pointsOfSale,
+    activeStoreScope.activeSalesPointId,
     activeStoreScope.displayLabelForActive,
-    currentBusiness?.business_id,
-    currentBusiness?.id,
-    dataUserId,
   ]);
 
   const layoutSecondaryLine =
@@ -1152,16 +1174,53 @@ export function DeliveryOpsCenter() {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {cfg?.hasKitchen !== false && <KitchenW ks={data?.kitchenStatus || null} orders={active} onAdv={advance} />}
-                {cfg?.hasAssemblyStation !== false && <AssemblyW orders={active} onAdv={advance} />}
-                {(cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) && <RepartoW ds={data?.deliveryStatus || null} orders={active} cfg={cfg} onAdv={advance} />}
+                {cfg?.hasKitchen !== false && (
+                  <KitchenW
+                    ks={data?.kitchenStatus || null}
+                    orders={active}
+                    onAdv={advance}
+                    brandLabels={data?.brandLabels}
+                  />
+                )}
+                {cfg?.hasAssemblyStation !== false && (
+                  <AssemblyW orders={active} onAdv={advance} brandLabels={data?.brandLabels} />
+                )}
+                {(cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) && (
+                  <RepartoW
+                    ds={data?.deliveryStatus || null}
+                    orders={active}
+                    cfg={cfg}
+                    onAdv={advance}
+                    brandLabels={data?.brandLabels}
+                  />
+                )}
                 <CashW cs={data?.cashStatus || null} />
                 <IncidentsW orders={active} onNavigate={navFromOps} />
                 {cfg?.hasPhysicalTables && cfg.tableCount > 0 && <TablesW cfg={cfg} orders={active} />}
               </div>
             )}
 
-            {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && <ChannelsW data={data.revenueByChannel} />}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+              {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && (
+                <ChannelsW data={data.revenueByChannel} />
+              )}
+              {data?.revenueByBrand && Object.keys(data.revenueByBrand).length > 0 && (
+                <RevenueBreakdownW
+                  title="Facturación por marca (entregado)"
+                  data={data.revenueByBrand}
+                  labelForKey={(id) => brandDisplayName(id, data.brandLabels)}
+                  barClass="bg-violet-500 dark:bg-violet-400"
+                />
+              )}
+              {data?.revenueByCategory && Object.keys(data.revenueByCategory).length > 0 && (
+                <RevenueBreakdownW
+                  title="Bebidas y complementos (sin marca)"
+                  data={data.revenueByCategory}
+                  labelForKey={(key) => reportCategoryLabel(key)}
+                  barClass="bg-amber-500 dark:bg-amber-400"
+                />
+              )}
+            </div>
           </div>
         )}
       </div>

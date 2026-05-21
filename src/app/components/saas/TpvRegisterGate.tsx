@@ -313,7 +313,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
 
   const handlePointOfSaleAction = () => {
     if (pointOfSaleAccess.canCreatePointOfSale) {
-      navigate('/saas/settings/centros-de-trabajo?action=new-pdv');
+      navigate('/saas/settings/tienda?action=new-pdv');
       return;
     }
     goToPdvBilling();
@@ -329,6 +329,70 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     : pointOfSaleAccess.needsPointOfSaleAddon
       ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Añade un extra para crear otro.`
       : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
+
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const terminalSectionRef = useRef<HTMLDivElement>(null);
+  const [showScrollHint, setShowScrollHint] = useState(false);
+
+  const openingSteps = useMemo(() => {
+    const steps: { id: string; label: string; done: boolean; current: boolean }[] = [];
+    const wDone = Boolean(effectiveWorkerName());
+    steps.push({ id: 'worker', label: 'Trabajador', done: wDone, current: !wDone });
+    if (!restrictedToPdvId && hasPdvs) {
+      const pDone = Boolean(selectedPdvId);
+      steps.push({ id: 'pdv', label: 'Tienda', done: pDone, current: wDone && !pDone });
+    }
+    const tDone = Boolean(selectedTerminalId);
+    steps.push({
+      id: 'terminal',
+      label: 'Terminal',
+      done: tDone,
+      current: wDone && Boolean(selectedPdvId || restrictedToPdvId) && !tDone,
+    });
+    steps.push({
+      id: 'cash',
+      label: 'Efectivo',
+      done: hasCounted,
+      current: wDone && tDone && !hasCounted,
+    });
+    return steps;
+  }, [
+    effectiveWorkerName,
+    restrictedToPdvId,
+    hasPdvs,
+    selectedPdvId,
+    selectedTerminalId,
+    hasCounted,
+  ]);
+
+  const updateScrollHint = useCallback(() => {
+    const el = bodyScrollRef.current;
+    if (!el) {
+      setShowScrollHint(false);
+      return;
+    }
+    const overflow = el.scrollHeight > el.clientHeight + 12;
+    const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 32;
+    setShowScrollHint(overflow && notAtBottom);
+  }, []);
+
+  useEffect(() => {
+    updateScrollHint();
+    const el = bodyScrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateScrollHint, { passive: true });
+    const ro = new ResizeObserver(updateScrollHint);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', updateScrollHint);
+      ro.disconnect();
+    };
+  }, [updateScrollHint, selectedPdvId, selectedTerminalId, hasWorkers, hasPdvs]);
+
+  useEffect(() => {
+    if (!selectedPdvId || selectedTerminalId) return;
+    terminalSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedPdvId, selectedTerminalId]);
 
   return (
     <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-3 sm:p-4 overflow-hidden">
@@ -374,8 +438,41 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
           </button>
         </div>
 
+        {/* Pasos visibles (scroll abajo en móvil) */}
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 text-center sm:text-left">
+            Completa en orden · desplázate hacia abajo si no ves todo
+          </p>
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            {openingSteps.map((s, idx) => (
+              <span
+                key={s.id}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                  s.current
+                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
+                    : s.done
+                      ? 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'
+                      : 'border-gray-200 bg-white/60 text-gray-400 dark:border-gray-700 dark:bg-gray-800/40'
+                }`}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                    s.done ? 'bg-emerald-600 text-white' : s.current ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500 dark:bg-gray-700'
+                  }`}
+                >
+                  {s.done ? '✓' : idx + 1}
+                </span>
+                {s.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
         {/* Body: 2 columns on lg+ */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden">
+        <div
+          ref={bodyScrollRef}
+          className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden relative"
+        >
           {/* Left panel: who + where */}
           <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-5 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
             {/* Worker */}
@@ -453,14 +550,14 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
                 <div className="mt-3 flex gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => navigate('/saas/settings/centros-de-trabajo?action=new-pdv')}
+                    onClick={() => navigate('/saas/settings/tienda?action=new-pdv')}
                     className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors inline-flex items-center gap-1.5"
                   >
                     Crear mi primera tienda / PDV
                   </button>
                   <button
                     type="button"
-                    onClick={() => navigate('/saas/settings/centros-de-trabajo')}
+                    onClick={() => navigate('/saas/settings/tienda')}
                     className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
                   >
                     Ir a centros de trabajo
@@ -469,9 +566,16 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               </div>
             )}
 
+            {selectedPdvId && !selectedTerminalId && (
+              <div className="lg:hidden flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
+                <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
+                Siguiente: elige un terminal más abajo
+              </div>
+            )}
+
             {/* Terminal selection from PDV (required) */}
             {selectedPdv ? (
-              <div>
+              <div ref={terminalSectionRef} className="scroll-mt-4">
                 <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><Monitor className="w-3 h-3 inline mr-1" />Terminal *</label>
                 {availableTerminals.length > 0 ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -506,7 +610,13 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
           </div>
 
           {/* Right panel: cash count */}
-          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col">
+          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4">
+            {selectedTerminalId && !hasCounted && (
+              <div className="lg:hidden flex items-center justify-center gap-2 mb-3 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-semibold">
+                <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
+                Cuenta el efectivo en esta zona
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2 mb-3">
               <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
               {!hasCounted && canOpen && (
@@ -519,10 +629,21 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               <CashCountGrid counts={counts} onChange={setCounts} />
             </div>
           </div>
+
+          {showScrollHint && (
+            <button
+              type="button"
+              onClick={() => bodyScrollRef.current?.scrollBy({ top: 220, behavior: 'smooth' })}
+              className="lg:hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900/90 text-white text-xs font-semibold shadow-lg backdrop-blur-sm"
+            >
+              <ChevronDown className="w-4 h-4 animate-bounce" />
+              Ver más abajo
+            </button>
+          )}
         </div>
 
         {/* Footer */}
-        <div className="px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
+        <div className="shrink-0 px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
           <button
             type="button"
             onClick={goBack}
@@ -1064,11 +1185,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       if (!isWorkerUser) {
         const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
         if (bid && dataUserId && data.pointOfSaleId) {
-          const pdvObj = pointsOfSale.find((p) => p._id === data.pointOfSaleId);
-          const token = pdvObj?.workCenterId
-            ? `wc:${String(pdvObj.workCenterId).trim()}`
-            : data.pointOfSaleId;
-          writeDeliveryOpsSelectedPdvId(bid, dataUserId, token);
+          writeDeliveryOpsSelectedPdvId(bid, dataUserId, data.pointOfSaleId);
           setManagerPdvPickId(data.pointOfSaleId);
         }
         skipManagerAutoPdvRef.current = false;

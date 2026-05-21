@@ -182,6 +182,10 @@ export interface BillingSubscription {
   moneiSubscriptionId?: string;
   moneiSubscriptionStatus?: string;
   moneiPaymentId?: string;
+  /** PDV adicionales sin cobro (solo editable por superadmin). */
+  extraPointOfSaleSlots?: number;
+  /** PRO manual sin pasarela (solo superadmin). */
+  adminProAccess?: boolean;
 }
 
 export interface BillingCard {

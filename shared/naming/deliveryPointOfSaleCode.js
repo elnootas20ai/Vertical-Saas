@@ -57,16 +57,50 @@ export function derivePdvCodePrefix(displayName) {
   return ini.slice(0, 3);
 }
 
-/** Siguiente código PREFIX-01, PREFIX-02… según códigos ya usados. */
+const PDV_CODE_SEQ_RE = /-(\d+)$/i;
+
+/**
+ * Siguiente código PREFIX-01, PREFIX-02…
+ * El número (01, 02…) es **global por cuenta**: 1.ª tienda → 01, 2.ª → 02 (aunque cambie el prefijo BAD/GRA).
+ * Cuenta códigos legacy tipo PDV-01 para no repetir 01 en la segunda tienda.
+ */
 export function suggestNextPdvCode(displayName, existingCodes) {
   const prefix = derivePdvCodePrefix(displayName);
-  const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`^${esc}-(\\d+)$`, 'i');
   let max = 0;
   for (const c of existingCodes || []) {
-    const m = String(c).trim().match(re);
+    const m = String(c).trim().match(PDV_CODE_SEQ_RE);
     if (m) max = Math.max(max, parseInt(m[1], 10));
   }
   const next = max + 1;
   return `${prefix}-${String(next).padStart(2, '0')}`;
+}
+
+const PDV_NAME_SUFFIX_RE = /\s*-\s*(\d{1,2})\s*$/i;
+
+/** Quita el sufijo « - 02 » del nombre para obtener la base (p. ej. «Badalona»). */
+export function stripPdvDisplayNameBase(displayName) {
+  const trimmed = String(displayName || '').trim();
+  if (!trimmed) return '';
+  const without = trimmed.replace(PDV_NAME_SUFFIX_RE, '').trim();
+  return without || trimmed;
+}
+
+/**
+ * Nombre visible al crear: 1.ª tienda de la cuenta = solo «Badalona»; 2.ª en adelante = «Badalona - 02».
+ * El número coincide con el del código (01 → sin sufijo en nombre; 02+ → sufijo en nombre).
+ */
+export function suggestNextPdvDisplayName(displayName, existingNames, existingCodes, explicitCode) {
+  const base = stripPdvDisplayNameBase(displayName);
+  if (!base) return '';
+
+  void existingNames;
+
+  const code =
+    String(explicitCode || '').trim() || suggestNextPdvCode(base, existingCodes || []);
+  const codeMatch = code.match(PDV_CODE_SEQ_RE);
+  const seq = codeMatch ? parseInt(codeMatch[1], 10) : 1;
+
+  if (seq <= 1) return base;
+
+  return `${base} - ${String(seq).padStart(2, '0')}`;
 }

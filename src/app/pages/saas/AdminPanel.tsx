@@ -47,6 +47,7 @@ import {
   Sparkles,
   LoaderCircle,
   Search,
+  Store,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -64,6 +65,11 @@ import { impersonateUser } from '../../lib/settingsApi';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
+import {
+  getBasePointOfSaleLimit,
+  getEffectivePointOfSaleLimit,
+  resolvePlanTier,
+} from '../../lib/pointOfSaleLimits';
 import type { AuthUser } from '../../lib/authApi';
 import {
   getPlanPricingConfig,
@@ -235,6 +241,12 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [subscriptionStatus, setSubscriptionStatus] = useState(
     account.subscription?.status || 'trial_active',
   );
+  const [extraPointOfSaleSlots, setExtraPointOfSaleSlots] = useState(
+    String(account.subscription?.extraPointOfSaleSlots ?? 0),
+  );
+  const [adminProAccess, setAdminProAccess] = useState(
+    Boolean(account.subscription?.adminProAccess),
+  );
   const [isBlocked, setIsBlocked] = useState(account.status === 'inactive');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -288,6 +300,8 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
         selectedPlanId,
         status: subscriptionStatus as AuthUser['subscription'] extends { status: infer S } ? S : never,
         cancelAtPeriodEnd: account.subscription?.cancelAtPeriodEnd ?? false,
+        extraPointOfSaleSlots: Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0))),
+        adminProAccess,
       },
     });
     setSaving(false);
@@ -346,6 +360,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     const plan = PLAN_OPTIONS.find((p) => p.id === planId);
     if (plan) { setSelectedPlanId(plan.id); setPlanName(plan.name); }
   };
+
+  const planTier = resolvePlanTier(selectedPlanId, planName);
+  const basePdvLimit = getBasePointOfSaleLimit(planTier);
+  const extraPdv = Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0)));
+  const totalPdvLimit = basePdvLimit + extraPdv;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -415,6 +434,47 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 transition-all appearance-none bg-white dark:bg-gray-900">
                 {SUBSCRIPTION_STATUS_OPTIONS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
+            <p className="text-xs font-semibold text-violet-800 dark:text-violet-200 uppercase tracking-wider">
+              Ventajas sin cobro (superadmin)
+            </p>
+            <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">
+              Para clientes que no pagan por pasarela: amplía PDV y/o funciones PRO. El plan del desplegable sigue contando como base (
+              {basePdvLimit} PDV en {planName}).
+            </p>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={adminProAccess}
+                onChange={(e) => setAdminProAccess(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+              />
+              <span className="text-sm text-violet-900 dark:text-violet-100">
+                <span className="font-semibold block">Funciones PRO</span>
+                <span className="text-xs text-violet-700 dark:text-violet-300">
+                  Desbloquea PRO aunque el plan sea Básico/Normal (centros extra, etc.).
+                </span>
+              </span>
+            </label>
+            <div>
+              <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200 mb-1.5">
+                PDV extra (además del plan)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={extraPointOfSaleSlots}
+                onChange={(e) => setExtraPointOfSaleSlots(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+              />
+              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
+                Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
+                Ej.: plan Pro (2) + 2 extra = 4 tiendas.
+              </p>
             </div>
           </div>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4 space-y-3">
@@ -545,7 +605,19 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
 
 // ─── Tab: Clientes SaaS ───────────────────────────────────────────────────────
 
-type SortField = 'fullName' | 'companyName' | 'email' | 'plan' | 'status' | 'trial' | 'createdAt' | 'card' | 'pixel' | 'import' | 'ancover';
+type SortField =
+  | 'fullName'
+  | 'companyName'
+  | 'email'
+  | 'plan'
+  | 'pdvMax'
+  | 'status'
+  | 'trial'
+  | 'createdAt'
+  | 'card'
+  | 'pixel'
+  | 'import'
+  | 'ancover';
 type SortDir = 'asc' | 'desc';
 
 function SortableHeader({
@@ -580,12 +652,27 @@ function SortableHeader({
   );
 }
 
+function getAccountPdvMaxInfo(account: AuthUser) {
+  const sub = account.subscription;
+  const total = getEffectivePointOfSaleLimit(sub);
+  const tier = resolvePlanTier(sub?.selectedPlanId || '', sub?.planName || '');
+  const base = getBasePointOfSaleLimit(tier);
+  const extra = Math.max(0, Math.floor(Number(sub?.extraPointOfSaleSlots) || 0));
+  return {
+    total,
+    base,
+    extra,
+    adminPro: Boolean(sub?.adminProAccess),
+  };
+}
+
 function getAccountSortValue(account: AuthUser, field: SortField): string | number {
   switch (field) {
     case 'fullName': return (account.fullName || '').toLowerCase();
     case 'companyName': return (account.companyName || '').toLowerCase();
     case 'email': return (account.email || '').toLowerCase();
     case 'plan': return (account.subscription?.planName || 'Basic').toLowerCase();
+    case 'pdvMax': return getAccountPdvMaxInfo(account).total;
     case 'status': return account.subscription?.status || '';
     case 'createdAt': return account.createdAt || '';
     case 'card': return getCardStatus(account) ? 1 : 0;
@@ -937,6 +1024,7 @@ function ClientsTab({
                   <SortableHeader label="Email" field="email" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Contraseña</th>
                   <SortableHeader label="Plan" field="plan" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="PDV máx." field="pdvMax" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Estado" field="status" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Trial" field="trial" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Alta" field="createdAt" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
@@ -949,7 +1037,7 @@ function ClientsTab({
               <tbody className="divide-y divide-gray-100">
                 {filteredAndSorted.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={13} className="px-4 py-12 text-center">
+                    <td colSpan={14} className="px-4 py-12 text-center">
                       <Search className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                       <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -984,6 +1072,31 @@ function ClientsTab({
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{account.email}</td>
                       <td className="px-4 py-3"><code className="inline-flex rounded-lg bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs text-gray-700 dark:text-gray-300">{account.password ? '••••••••' : 'No visible'}</code></td>
                       <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Users className="w-4 h-4 text-gray-400 dark:text-gray-500" />{account.subscription?.planName || 'Basic'}</div></td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const pdv = getAccountPdvMaxInfo(account);
+                          return (
+                            <div className="flex flex-col gap-1 min-w-[4.5rem]">
+                              <span className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-gray-100">
+                                <Store className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+                                {pdv.total}
+                              </span>
+                              {pdv.extra > 0 ? (
+                                <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {pdv.base}+{pdv.extra} extra
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500">plan</span>
+                              )}
+                              {pdv.adminPro && (
+                                <span className="inline-flex w-fit rounded-full bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 text-[9px] font-bold text-violet-800 dark:text-violet-200">
+                                  PRO admin
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3"><span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.color}`}>{statusBadge.label}</span></td>
                       <td className="px-4 py-3">
                         {(() => {

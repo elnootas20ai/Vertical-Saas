@@ -1,4 +1,5 @@
 import logger from './logger.js';
+import { PUBLIC_PAYMENT_UNAVAILABLE, sanitizePaymentErrorForClient } from '../utils/paymentErrorMessages.js';
 
 const MONEI_API_BASE = 'https://api.monei.com/v1';
 
@@ -103,9 +104,11 @@ export async function resolveApiKey(req, userId) {
 async function moneiRequest(method, path, body = null, apiKey = null) {
   const key = apiKey || getApiKeyForMode(DEFAULT_MODE);
   if (!key) {
-    throw new Error(
-      'No hay API key de MONEI configurada. Revisa TOKEN_API_KEY / TOKEN_API_KEY_TEST en .env o configúralo en Configuración > Pasarela de pago.',
+    logger.error(
+      { mode: getDefaultMode() },
+      '[MONEI] API key no configurada (TOKEN_API_KEY / pasarela en ajustes)',
     );
+    throw new Error(PUBLIC_PAYMENT_UNAVAILABLE);
   }
 
   const maskedKey =
@@ -150,13 +153,13 @@ async function moneiRequest(method, path, body = null, apiKey = null) {
   );
 
   if (!response.ok) {
-    const errorMsg =
+    const internalMsg =
       data?.message || data?.error || `MONEI API error ${response.status}`;
     logger.error(
       { status: response.status, data, maskedKey, url, mode },
-      `[MONEI] ${method} ${path} failed: ${errorMsg}`,
+      `[MONEI] ${method} ${path} failed: ${internalMsg}`,
     );
-    const error = new Error(errorMsg);
+    const error = new Error(sanitizePaymentErrorForClient(internalMsg));
     error.status = response.status;
     error.moneiData = data;
     throw error;

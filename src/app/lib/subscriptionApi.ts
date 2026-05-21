@@ -1,5 +1,6 @@
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { sanitizePaymentError } from './paymentErrors';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -18,7 +19,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
 
   if (!response.ok) {
-    throw new Error(payload?.error || `Error ${response.status}`);
+    throw new Error(sanitizePaymentError(payload?.error || `Error ${response.status}`));
   }
 
   return payload;

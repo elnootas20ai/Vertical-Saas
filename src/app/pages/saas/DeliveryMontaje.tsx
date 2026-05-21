@@ -6,10 +6,13 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import {
   listDeliveryOrdersRequest,
+  listPointsOfSaleRequest,
   updateDeliveryOrderRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
+  type PointOfSale,
 } from '../../lib/deliveryApi';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import {
   Package,
   Search,
@@ -173,6 +176,8 @@ export function DeliveryMontaje() {
 
   // Data
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
+  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
+  const [filterPdv, setFilterPdv] = useState('');
   const [loading, setLoading] = useState(true);
 
   // UI State
@@ -228,18 +233,42 @@ export function DeliveryMontaje() {
     }
   }, [user?.id]);
 
-  useEffect(() => { loadOrders(); }, [loadOrders]);
+  const loadPdv = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const data = await listPointsOfSaleRequest(user.id);
+      setPointsOfSale(data.filter((p) => p.active !== false));
+    } catch {
+      setPointsOfSale([]);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    void loadOrders();
+    void loadPdv();
+  }, [loadOrders, loadPdv]);
+
+  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
+    setFilterPdv(pdvId || '');
+  }, []);
+
+  useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
 
   // ─── Computed Data ───────────────────────────────────────────────────────
 
+  const storeOrders = useMemo(() => {
+    if (!filterPdv) return orders;
+    return orders.filter((o) => o.salesPointId === filterPdv);
+  }, [orders, filterPdv]);
+
   const assemblyOrders = useMemo(
-    () => orders.filter(o => o.status === 'assembly'),
-    [orders],
+    () => storeOrders.filter(o => o.status === 'assembly'),
+    [storeOrders],
   );
 
   const readyFromKitchen = useMemo(
-    () => orders.filter(o => o.status === 'kitchen' && o.kitchenCompletedAt),
-    [orders],
+    () => storeOrders.filter(o => o.status === 'kitchen' && o.kitchenCompletedAt),
+    [storeOrders],
   );
 
   const filteredOrders = useMemo(() => {

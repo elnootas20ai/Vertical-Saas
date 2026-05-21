@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -195,10 +196,12 @@ export function DeliveryOrders() {
     [activePdvs],
   );
 
-  useEffect(() => {
-    if (!singlePdvId) return;
-    setFilters((f) => (f.salesPointId === singlePdvId ? f : { ...f, salesPointId: singlePdvId }));
-  }, [singlePdvId]);
+  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
+    if (!pdvId) return;
+    setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
+  }, []);
+
+  useSyncDeliveryPdvFilter(activePdvs, applyGlobalPdvFilter);
 
   // Auto-refresh every 30s
   useEffect(() => {

@@ -2,12 +2,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mail, X, CheckCircle2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAuth } from '../../context/AuthContext';
+import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import type { TeamInvitation } from '../../lib/authApi';
 
-export function PendingInvitationsBanner() {
+function PendingInvitationsBannerInner({
+  auth,
+}: {
+  auth: AuthContextType;
+}) {
   const navigate = useNavigate();
-  const { isAuthenticated, user, listMyInvitations, acceptInvitation, rejectInvitation } = useAuth();
+  const { isAuthenticated, user, listMyInvitations, acceptInvitation, rejectInvitation } = auth;
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -26,7 +30,9 @@ export function PendingInvitationsBanner() {
   }, [load, user?.user_id]);
 
   useEffect(() => {
-    const handler = () => { void load(); };
+    const handler = () => {
+      void load();
+    };
     window.addEventListener('vertial:invitations:refresh', handler);
     return () => window.removeEventListener('vertial:invitations:refresh', handler);
   }, [load]);
@@ -144,4 +150,10 @@ export function PendingInvitationsBanner() {
       </div>
     </div>
   );
+}
+
+export function PendingInvitationsBanner() {
+  const auth = useAuthOptional();
+  if (!auth) return null;
+  return <PendingInvitationsBannerInner auth={auth} />;
 }

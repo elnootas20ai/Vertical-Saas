@@ -14,6 +14,7 @@ import {
 } from '../../lib/deliveryApi';
 import type { Client } from '../../context/AppContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'online' | '';
 
@@ -105,15 +106,18 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
 
   const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);
 
-  useEffect(() => {
-    if (activePdvs.length !== 1) return;
-    const only = activePdvs[0];
-    const label = pointOfSaleDisplayLabel(only);
+  const applyGlobalPdvToWizard = useCallback((pdvId: string | undefined) => {
+    if (!pdvId) return;
+    const p = activePdvs.find((x) => x._id === pdvId);
+    if (!p) return;
+    const label = pointOfSaleDisplayLabel(p);
     setData((prev) => {
-      if (prev.salesPointId === only._id && prev.salesPointName === label) return prev;
-      return { ...prev, salesPointId: only._id, salesPointName: label };
+      if (prev.salesPointId === pdvId && prev.salesPointName === label) return prev;
+      return { ...prev, salesPointId: pdvId, salesPointName: label };
     });
   }, [activePdvs]);
+
+  useSyncDeliveryPdvFilter(activePdvs, applyGlobalPdvToWizard);
 
   const applyClient = useCallback((client: Client) => {
     selectClient(client);

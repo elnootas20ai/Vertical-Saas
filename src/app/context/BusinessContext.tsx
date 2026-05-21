@@ -28,6 +28,8 @@ export interface BusinessContextType {
   businesses: Business[];
   currentBusiness: Business | null;
   isLoading: boolean;
+  /** Primera carga de empresas terminada (éxito o error). Evita mandar a Gate antes de tiempo. */
+  businessesFetchSettled: boolean;
   switchBusiness: (businessId: string) => void;
   createBusiness: (data: CreateBusinessPayload) => Promise<{ success: boolean; business?: Business; error?: string }>;
   updateBusiness: (businessId: string, data: UpdateBusinessPayload) => Promise<{ success: boolean; business?: Business; error?: string }>;
@@ -62,6 +64,33 @@ function storeBusinessId(userId: string, businessId: string | null) {
   }
 }
 
+function businessesCacheKey(userId: string) {
+  return `vertial_businesses_cache:${userId}`;
+}
+
+function readBusinessesCache(userId: string): Business[] {
+  try {
+    const raw = sessionStorage.getItem(businessesCacheKey(userId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as Business[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeBusinessesCache(userId: string, list: Business[]) {
+  try {
+    if (list.length > 0) {
+      sessionStorage.setItem(businessesCacheKey(userId), JSON.stringify(list));
+    } else {
+      sessionStorage.removeItem(businessesCacheKey(userId));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function BusinessProvider({ children }: { children: ReactNode }) {
@@ -70,6 +99,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [businessesFetchSettled, setBusinessesFetchSettled] = useState(false);
 
   const resolveCurrentBusiness = useCallback(
     (list: Business[], userId: string) => {
@@ -91,9 +121,8 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   const reloadBusinesses = useCallback(async () => {
     if (!user?.user_id) {
       setIsLoading(isInitializing);
-      // No vaciar empresas mientras Auth aún hidrata: un frame sin `user_id` dejaba la lista vacía y
-      // SaasRoot redirigía a /auth/gate o pantalla en blanco.
       if (!isInitializing) {
+        setBusinessesFetchSettled(true);
         setBusinesses([]);
         setCurrentBusiness(null);
       }
@@ -101,26 +130,49 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     }
 
     setIsLoading(true);
+    const userId = user.user_id;
+
+    const fetchWithRetry = async (): Promise<Business[]> => {
+      try {
+        const response = await listBusinessesRequest(userId);
+        return response.businesses || [];
+      } catch {
+        await new Promise((r) => setTimeout(r, 450));
+        const response = await listBusinessesRequest(userId);
+        return response.businesses || [];
+      }
+    };
+
     try {
-      const response = await listBusinessesRequest(user.user_id);
-      const list = response.businesses || [];
+      const list = await fetchWithRetry();
       setBusinesses(list);
-      resolveCurrentBusiness(list, user.user_id);
+      resolveCurrentBusiness(list, userId);
+      writeBusinessesCache(userId, list);
     } catch (error) {
       console.error('Error loading businesses:', error);
-      // No borrar estado local ante error transitorio (red, 5xx): vaciar aquí mandaba a Gate/bienvenida
-      // y la pestaña Usuarios quedaba en blanco aunque la empresa existiera.
+      const cached = readBusinessesCache(userId);
+      if (cached.length > 0) {
+        setBusinesses(cached);
+        resolveCurrentBusiness(cached, userId);
+      }
     } finally {
       setIsLoading(false);
+      setBusinessesFetchSettled(true);
     }
   }, [user?.user_id, isInitializing, resolveCurrentBusiness]);
 
-  // Antes de los useEffect hijos (p. ej. SaasRoot): si ya hay usuario, loading=true en el mismo commit
+  // Hidratar empresas desde caché de sesión antes del primer fetch (F5 no vacía la UI).
   useLayoutEffect(() => {
-    if (user?.user_id) {
-      setIsLoading(true);
+    const userId = user?.user_id;
+    if (!userId) return;
+    setBusinessesFetchSettled(false);
+    setIsLoading(true);
+    const cached = readBusinessesCache(userId);
+    if (cached.length > 0) {
+      setBusinesses(cached);
+      resolveCurrentBusiness(cached, userId);
     }
-  }, [user?.user_id]);
+  }, [user?.user_id, resolveCurrentBusiness]);
 
   useEffect(() => {
     void reloadBusinesses();
@@ -147,6 +199,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
         const newList = [...businesses, response.business];
         setBusinesses(newList);
+        if (user?.user_id) writeBusinessesCache(user.user_id, newList);
 
         if (!currentBusiness) {
           setCurrentBusiness(response.business);
@@ -174,6 +227,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
           b.business_id === businessId ? response.business! : b,
         );
         setBusinesses(updatedList);
+        if (user?.user_id) writeBusinessesCache(user.user_id, updatedList);
 
         if (currentBusiness?.business_id === businessId) {
           setCurrentBusiness(response.business);
@@ -187,7 +241,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         };
       }
     },
-    [businesses, currentBusiness],
+    [businesses, currentBusiness, user?.user_id],
   );
 
   const deleteBusiness = useCallback(
@@ -197,6 +251,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
         const newList = businesses.filter((b) => b.business_id !== businessId);
         setBusinesses(newList);
+        if (user?.user_id) writeBusinessesCache(user.user_id, newList);
 
         if (currentBusiness?.business_id === businessId) {
           const next = newList[0] || null;
@@ -298,6 +353,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         businesses,
         currentBusiness,
         isLoading,
+        businessesFetchSettled,
         switchBusiness,
         createBusiness,
         updateBusiness,

@@ -711,22 +711,29 @@ export interface PointOfSale {
   updatedAt: string;
 }
 
-/** Etiqueta en pantalla: refuerza el **punto de venta** (código + nombre local), no solo la marca de la cuenta. */
+/** Etiqueta fija en sidebar, topbar y ops: siempre «Nombre · CÓDIGO» (p. ej. Badalona · BAD-01). */
 export function pointOfSaleDisplayLabel(p: Pick<PointOfSale, 'name' | 'code'>): string {
   const code = String(p.code || '').trim();
   const name = String(p.name || '').trim();
   if (!name && !code) return 'Punto de venta';
-  if (code && name && code.toLowerCase() !== name.toLowerCase()) return `${code} · ${name}`;
+  if (name && code) return `${name} · ${code}`;
   return name || code;
 }
 
 /** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */
 import {
   derivePdvCodePrefix,
+  stripPdvDisplayNameBase,
   suggestNextPdvCode,
+  suggestNextPdvDisplayName,
 } from '../../../shared/naming/deliveryPointOfSaleCode.js';
 
-export { derivePdvCodePrefix, suggestNextPdvCode };
+export {
+  derivePdvCodePrefix,
+  stripPdvDisplayNameBase,
+  suggestNextPdvCode,
+  suggestNextPdvDisplayName,
+};
 
 export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
@@ -805,7 +812,29 @@ export async function ensureDeliveryPdvForWorkCenter(
   pdvData = dedupePointsOfSale(pdvData);
 
   const linked = pdvData.find((p) => String(p.workCenterId || '').trim() === wc._id);
-  if (linked) return linked;
+  if (linked) {
+    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+    const nextName = String(wc.name || '').trim() || linked.name;
+    const nextAddr =
+      (addr && String(addr).trim().length >= 5 ? addr : linked.address) || linked.address;
+    if (
+      nextName !== linked.name ||
+      nextAddr !== linked.address ||
+      (wc.active !== false) !== (linked.active !== false)
+    ) {
+      try {
+        return await updatePointOfSaleRequest(id, {
+          ...linked,
+          name: nextName,
+          address: nextAddr,
+          active: wc.active !== false,
+        });
+      } catch {
+        return linked;
+      }
+    }
+    return linked;
+  }
 
   const nameLower = wc.name.trim().toLowerCase();
   const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
@@ -829,7 +858,9 @@ export async function ensureDeliveryPdvForWorkCenter(
   if (String(addr).trim().length < 5) return null;
 
   const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
+  const existingNames = pdvData.map((p) => String(p.name || '').trim()).filter(Boolean);
   const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
+  const pdvName = suggestNextPdvDisplayName(wc.name, existingNames, existingCodes, pdvCode);
   const termId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -837,7 +868,7 @@ export async function ensureDeliveryPdvForWorkCenter(
 
   try {
     return await createPointOfSaleRequest(id, {
-      name: wc.name,
+      name: pdvName,
       code: pdvCode,
       address: addr,
       active: true,
@@ -1357,6 +1388,12 @@ export interface OpsCenterData {
   };
   revenueByChannel: Record<string, number>;
   revenueByHour: { hour: string; revenue: number; orders: number }[];
+  /** Importe por línea entregada agrupado por marca (id → €). Respeta filtro PDV del día. */
+  revenueByBrand: Record<string, number>;
+  /** Bebidas, complementos, etc. (sin marca en línea). */
+  revenueByCategory: Record<string, number>;
+  /** id marca → nombre visible */
+  brandLabels: Record<string, string>;
   pointsOfSale: PointOfSale[];
 }
 

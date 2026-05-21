@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -738,6 +739,12 @@ export function DeliveryKitchen() {
   }, [userId]);
 
   useEffect(() => { loadOrders(); loadPdv(); }, [loadOrders, loadPdv]);
+
+  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
+    setFilterPdv(pdvId || '');
+  }, []);
+
+  useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
 
   useEffect(() => {
     if (!userId) return;

@@ -23,4 +23,4 @@ Así un futuro cambio de regla es **un solo archivo** + tipos opcionales.
 
 | Archivo | Uso |
 | --- | --- |
-| `deliveryPointOfSaleCode.js` | Prefijo desde nombre del PDV + correlativo (`BAD-01`). Usado en `deliveryController` (crear PDV sin código), `deliveryApi` / TPV (merge y alta rápida). |
+| `deliveryPointOfSaleCode.js` | Prefijo desde nombre del PDV + correlativo (`BAD-01`). Nombre visible: 1.er local sin sufijo, 2.º+ `Base - 02`. Usado en `deliveryController`, `deliveryApi` / Ajustes / TPV. |

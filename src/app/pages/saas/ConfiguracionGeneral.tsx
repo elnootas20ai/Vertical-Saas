@@ -467,7 +467,7 @@ export function ConfiguracionGeneral() {
       title: 'Sedes / PDV',
       description: activeCenters.length > 0 ? `${activeCenters.length} centro(s) activo(s)` : 'Configura tus centros de trabajo',
       status: getSedesStatus(activeCenters.length),
-      route: '/saas/settings/centros-de-trabajo',
+      route: '/saas/settings/tienda',
       stats: `${activeCenters.length} activos`,
     },
     {

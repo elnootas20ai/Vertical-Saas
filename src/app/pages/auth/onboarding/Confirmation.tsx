@@ -59,13 +59,15 @@ export function Confirmation() {
       });
     }, 1000);
 
-    const finalTimer = window.setTimeout(() => {
-      navigate('/saas/dashboard');
-    }, 10000);
-
-    updateOnboardingData(data as unknown as Record<string, unknown>).catch(error => {
+    void updateOnboardingData(data as unknown as Record<string, unknown>).catch((error) => {
       console.error('Error saving onboarding:', error);
     });
+
+    const goToSaas = () => {
+      navigate('/saas/dashboard', { replace: true });
+    };
+
+    const finalTimer = window.setTimeout(goToSaas, 10000);
 
     return () => {
       window.clearTimeout(finalTimer);
@@ -137,7 +139,7 @@ export function Confirmation() {
               <div className="flex justify-center">
                 <ACCESO__Button
                   variant="primary"
-                  onClick={() => navigate('/saas/dashboard')}
+                  onClick={() => navigate('/saas/dashboard', { replace: true })}
                 >
                   {t('onboarding.confirmation.goNow')}
                 </ACCESO__Button>

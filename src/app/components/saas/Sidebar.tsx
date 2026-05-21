@@ -130,7 +130,6 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
-import { writeDeliveryOpsSelectedPdvId, notifyDeliveryActiveStoreChanged } from '../../lib/deliveryOpsPdvSelection';
 import { ActivationChecklist } from './ActivationChecklist';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
@@ -705,14 +704,13 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       const rawId = item.id.slice('sp-'.length);
       const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
       const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
-      if (bid && dataUserId && rawId) {
+      if (rawId) {
         const isDeliveryPdvRow = activeStore.pointsOfSale.some((p) => p._id === rawId);
-        writeDeliveryOpsSelectedPdvId(
-          bid,
-          dataUserId,
-          isDeliveryPdvRow ? rawId : `wc:${rawId}`,
-        );
-        notifyDeliveryActiveStoreChanged();
+        if (isDeliveryPdvRow) {
+          activeStore.setActiveSalesPoint(rawId);
+        } else {
+          activeStore.setActiveWorkCenterPreference(rawId);
+        }
       }
       handleNavigate('/saas/delivery-ops');
       return;
@@ -810,8 +808,14 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     location.pathname === item.path ||
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
     (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
-    (item.id === 'salesPoints-settings' && location.pathname.startsWith('/saas/settings/centros-de-trabajo')) ||
-    (item.id === 'salesPoints-add' && location.pathname.startsWith('/saas/settings/centros-de-trabajo')) ||
+    (item.id === 'salesPoints-settings' &&
+      (location.pathname.startsWith('/saas/settings/tienda') ||
+        location.pathname.startsWith('/saas/settings/tiendas') ||
+        location.pathname.startsWith('/saas/settings/centros-de-trabajo'))) ||
+    (item.id === 'salesPoints-add' &&
+      (location.pathname.startsWith('/saas/settings/tienda') ||
+        location.pathname.startsWith('/saas/settings/tiendas') ||
+        location.pathname.startsWith('/saas/settings/centros-de-trabajo'))) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
     (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
@@ -886,7 +890,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
     ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
   ];
-  const workCentersSettingsPath = '/saas/settings/centros-de-trabajo';
+  const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
   const deliverySidebarPdvs =
@@ -1105,7 +1109,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                   type="button"
                   onClick={() => {
                     setShowCompanyDropdown(false);
-                    navigate('/saas/settings/empresas');
+                    navigate('/saas/settings/empresa');
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
                 >

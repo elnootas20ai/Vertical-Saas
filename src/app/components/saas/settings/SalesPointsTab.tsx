@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
@@ -11,6 +11,7 @@ import {
   selectDeliveryPointOfSale,
   DELIVERY_WORK_CENTERS_CHANGED,
 } from '../../../lib/deliverySetup';
+import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -31,6 +32,7 @@ import {
   ensureDeliveryPdvForWorkCenter,
   pointOfSaleDisplayLabel,
   suggestNextPdvCode,
+  suggestNextPdvDisplayName,
 } from '../../../lib/deliveryApi';
 import {
   formatMoneyAsYouType,
@@ -38,6 +40,8 @@ import {
   moneyNumberToDisplay,
 } from '../../../lib/workCenterMoneyInput';
 import { AddButtonDropdown } from '../AddButtonDropdown';
+import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
+import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
   Search,
   X,
@@ -45,7 +49,6 @@ import {
   Lock,
   Edit3,
   MapPin,
-  ToggleLeft,
   ToggleRight,
   Phone,
   Mail,
@@ -59,6 +62,7 @@ import {
   Users,
   ArrowRight,
   AlertTriangle,
+  ChevronDown,
 } from 'lucide-react';
 
 const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
@@ -90,14 +94,18 @@ const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
 
 // ── Modal crear/editar centro de trabajo ──────────────────────────────────────
 
+export type WorkCenterSaveData = Partial<WorkCenter>;
+
 interface WorkCenterModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: Partial<WorkCenter>) => Promise<void>;
+  onSave: (data: WorkCenterSaveData) => Promise<void>;
   editItem?: WorkCenter | null;
   forcePointOfSale?: boolean;
   /** Códigos PDV ya existentes (delivery), para previsualizar el siguiente `PREFIX-01`. */
   existingPdvCodes?: readonly string[];
+  /** Nombres de PDV/centros retail ya existentes (para sufijo « - 02 » en el nombre). */
+  existingPdvNames?: readonly string[];
 }
 
 function WorkCenterModal({
@@ -107,9 +115,10 @@ function WorkCenterModal({
   editItem,
   forcePointOfSale = false,
   existingPdvCodes = EMPTY_PDV_CODES,
+  existingPdvNames = EMPTY_PDV_CODES,
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
-  useModalClose(isOpen, onClose);
+
   const [form, setForm] = useState({
     name: '',
     centerType: 'punto_de_venta' as WorkCenterType,
@@ -124,7 +133,6 @@ function WorkCenterModal({
     expectedStaffCount: '3',
     squareMeters: '',
     notes: '',
-    active: true,
     purchasePrice: '',
     purchaseDate: '',
     cadastralReference: '',
@@ -140,6 +148,8 @@ function WorkCenterModal({
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad'>('general');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (editItem) {
@@ -157,7 +167,6 @@ function WorkCenterModal({
         expectedStaffCount: String(editItem.expectedStaffCount ?? 3),
         squareMeters: editItem.squareMeters ? String(editItem.squareMeters) : '',
         notes: editItem.notes || '',
-        active: editItem.active,
         purchasePrice: editItem.purchasePrice ? String(editItem.purchasePrice) : '',
         purchaseDate: editItem.purchaseDate || '',
         cadastralReference: editItem.cadastralReference || '',
@@ -173,15 +182,30 @@ function WorkCenterModal({
     } else {
       setForm({
         name: '', centerType: 'punto_de_venta', customTypeName: '', ownership: 'propiedad',
-        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '', squareMeters: '',
-        notes: '', active: true, purchasePrice: '', purchaseDate: '', cadastralReference: '',
+        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '3', squareMeters: '',
+        notes: '', purchasePrice: '', purchaseDate: '', cadastralReference: '',
         contractStartDate: '', contractEndDate: '', monthlyPrice: '', deposit: '',
         landlord: '', landlordPhone: '', landlordEmail: '', contractNotes: '',
       });
     }
     setStep('general');
     setFieldErrors({});
+    setPdvMoreOpen(null);
   }, [editItem, isOpen]);
+
+  useEffect(() => {
+    setPdvMoreOpen(null);
+  }, [step]);
+
+  useEffect(() => {
+    if (!pdvMoreOpen) return;
+    const id = requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector('[data-pdv-more-panel]')
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [pdvMoreOpen]);
 
   const simplifyPdvCreate = forcePointOfSale && !editItem;
   const showPdvLabelPreview =
@@ -189,10 +213,19 @@ function WorkCenterModal({
   const pdvLabelPreview = useMemo(() => {
     if (!showPdvLabelPreview) return null;
     const rawName = form.name.trim();
-    const code = suggestNextPdvCode(rawName || ' ', [...existingPdvCodes]);
-    const label = pointOfSaleDisplayLabel({ name: rawName, code });
-    return { code, label };
-  }, [showPdvLabelPreview, form.name, existingPdvCodes]);
+    if (!rawName) {
+      return { code: '', displayName: '', label: '', needsName: true as const };
+    }
+    const code = suggestNextPdvCode(rawName, [...existingPdvCodes]);
+    const displayName = suggestNextPdvDisplayName(
+      rawName,
+      [...existingPdvNames],
+      [...existingPdvCodes],
+      code,
+    );
+    const label = pointOfSaleDisplayLabel({ name: displayName, code });
+    return { code, displayName, label, needsName: false as const };
+  }, [showPdvLabelPreview, form.name, existingPdvCodes, existingPdvNames]);
 
   if (!isOpen) return null;
 
@@ -211,9 +244,7 @@ function WorkCenterModal({
   const stepHasFieldError = (sid: WizardStepId) => {
     const keys =
       sid === 'general'
-        ? (simplifyPdvCreate
-            ? (['name', 'customTypeName'] as const)
-            : (['name', 'customTypeName', 'expectedStaffCount'] as const))
+        ? (['name', 'customTypeName', 'expectedStaffCount'] as const)
         : sid === 'ubicacion'
           ? (['address', 'city', 'postalCode', 'phone'] as const)
           : (['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'] as const);
@@ -226,12 +257,12 @@ function WorkCenterModal({
     if (form.centerType === 'custom' && !form.customTypeName.trim()) {
       nextErr.customTypeName = ' ';
     }
-    const staffCount = simplifyPdvCreate
-      ? Math.max(1, Math.min(999, Math.floor(Number(form.expectedStaffCount) || 3)))
-      : Number(form.expectedStaffCount || 0);
+    const staffCount = Number(form.expectedStaffCount || 0);
     if (
-      !simplifyPdvCreate &&
-      (!String(form.expectedStaffCount ?? '').trim() || !Number.isFinite(staffCount) || staffCount < 1 || staffCount > 999)
+      !String(form.expectedStaffCount ?? '').trim() ||
+      !Number.isFinite(staffCount) ||
+      staffCount < 1 ||
+      staffCount > 999
     ) {
       nextErr.expectedStaffCount = ' ';
     }
@@ -279,9 +310,19 @@ function WorkCenterModal({
         contractNotes: form.contractNotes.trim() || undefined,
       } : undefined;
 
+      const isRetailCreate =
+        !editItem && (forcePointOfSale || form.centerType === 'punto_de_venta' || form.centerType === 'almacen');
+      const saveName = isRetailCreate
+        ? suggestNextPdvDisplayName(
+            form.name.trim(),
+            [...existingPdvNames],
+            [...existingPdvCodes],
+          )
+        : form.name.trim();
+
       await onSave({
         ...editItem,
-        name: form.name.trim(),
+        name: saveName,
         centerType: forcePointOfSale ? 'punto_de_venta' : form.centerType,
         customTypeName: !forcePointOfSale && form.centerType === 'custom' ? form.customTypeName.trim() : undefined,
         ownership: form.ownership,
@@ -301,7 +342,7 @@ function WorkCenterModal({
         expectedStaffCount: Math.max(1, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: form.notes.trim() || undefined,
-        active: simplifyPdvCreate ? true : form.active,
+        active: editItem ? editItem.active !== false : true,
       });
       onClose();
     } catch {
@@ -311,13 +352,51 @@ function WorkCenterModal({
     }
   };
 
-  const inputBase =
-    'w-full px-3 py-2.5 border-2 rounded-xl outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
+  const inputBase = simplifyPdvCreate
+    ? 'w-full px-2.5 py-1.5 border-2 rounded-lg outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm'
+    : 'w-full px-3 py-2 border-2 rounded-xl outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
   const inputOk = 'border-gray-200 dark:border-gray-700 focus:border-gray-900 dark:focus:border-gray-400';
   const inputErr = 'border-red-500 dark:border-red-500 focus:border-red-600 dark:focus:border-red-500';
   const inputClass = (field?: string) =>
     `${inputBase} ${field && fieldErrors[field] ? inputErr : inputOk}`;
-  const labelClass = 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
+  const labelClass = simplifyPdvCreate
+    ? 'block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1'
+    : 'block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5';
+  const renderPdvMore = (
+    section: 'general' | 'ubicacion' | 'contrato',
+    label: string,
+    children: React.ReactNode,
+  ) => {
+    const open = pdvMoreOpen === section;
+    return (
+      <div className="w-full shrink-0">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setPdvMoreOpen(open ? null : section)}
+          className={`w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+            open
+              ? 'border-gray-400 bg-gray-100 text-gray-900 dark:border-gray-500 dark:bg-gray-700/60 dark:text-gray-100'
+              : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400 dark:hover:border-gray-500'
+          }`}
+        >
+          {label}
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 opacity-70 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          />
+        </button>
+        {open ? (
+          <div
+            data-pdv-more-panel
+            className="mt-2 w-full space-y-2 rounded-lg border border-gray-200 bg-white px-3 py-2.5 dark:border-gray-700 dark:bg-gray-800"
+          >
+            {children}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const wizardRows: { id: WizardStepId; n: number; title: string; hint: string }[] = [
     { id: 'general', n: 1, title: 'General', hint: simplifyPdvCreate ? 'Tipo y nombre' : 'Tipo, nombre, trabajadores' },
     { id: 'ubicacion', n: 2, title: 'Ubicación', hint: 'Dirección y contacto' },
@@ -329,64 +408,87 @@ function WorkCenterModal({
     },
   ];
 
+  const stepOrder = wizardRows.map((r) => r.id);
+  const activeStepIndex = stepOrder.indexOf(step);
+  const isLastStep = step === 'propiedad';
+
+  const goNext = () => {
+    if (step === 'general') setStep('ubicacion');
+    else if (step === 'ubicacion') setStep('propiedad');
+  };
+
+  const goBack = () => {
+    if (step === 'propiedad') setStep('ubicacion');
+    else if (step === 'ubicacion') setStep('general');
+  };
+
+  const shellSteps: SettingsWizardStep[] = wizardRows.map((row, index) => ({
+    id: row.id,
+    title: row.title,
+    hint: row.hint,
+    completed: activeStepIndex > index,
+    hasError: stepHasFieldError(row.id),
+  }));
+
+  const modalTitle = simplifyPdvCreate
+    ? 'Nuevo punto de venta (TPV)'
+    : editItem
+      ? 'Editar centro de trabajo'
+      : 'Nuevo centro de trabajo';
+
+  const storePreview = (
+    <div className="flex flex-col items-center gap-2 text-center">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Vista previa</p>
+      <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${CENTER_TYPE_COLORS[form.centerType]}`}>
+        {CENTER_TYPE_ICONS[form.centerType]}
+      </span>
+      <p className="line-clamp-2 w-full text-xs font-bold text-gray-900 dark:text-gray-100">
+        {pdvLabelPreview && !pdvLabelPreview.needsName
+          ? pdvLabelPreview.displayName
+          : form.name.trim() || 'Tu tienda'}
+      </p>
+      {pdvLabelPreview && !pdvLabelPreview.needsName && pdvLabelPreview.code ? (
+        <span className="font-mono text-[10px] text-gray-500">{pdvLabelPreview.code}</span>
+      ) : null}
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {editItem ? 'Editar centro de trabajo' : 'Nuevo centro de trabajo'}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {editItem ? 'Actualiza los datos del centro' : 'Completa los 3 pasos y guarda'}
-            </p>
-          </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
-            <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
-          </button>
-        </div>
-
-        <div className="px-4 sm:px-6 pt-4 pb-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-b from-gray-50 to-white dark:from-gray-900/90 dark:to-gray-800">
-          <p className="text-center text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3">
-            Asistente · 3 pasos
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            {wizardRows.map((row) => {
-              const active = step === row.id;
-              const err = stepHasFieldError(row.id);
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  onClick={() => setStep(row.id)}
-                  className={`rounded-xl border-2 p-3 flex flex-col items-center gap-1.5 text-center transition-all min-h-[5.5rem] justify-center ${
-                    active
-                      ? 'border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-800 shadow-sm'
-                      : 'border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-gray-800/60 hover:border-gray-400 dark:hover:border-gray-500'
-                  } ${err ? 'ring-2 ring-red-400 dark:ring-red-700 ring-offset-1 ring-offset-gray-50 dark:ring-offset-gray-900' : ''}`}
-                >
-                  <span
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
-                      active
-                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-                    }`}
-                  >
-                    {row.n}
-                  </span>
-                  <span className={`text-xs font-bold leading-tight ${active ? 'text-gray-900 dark:text-gray-50' : 'text-gray-600 dark:text-gray-300'}`}>
-                    {row.title}
-                  </span>
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 leading-tight px-0.5">{row.hint}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4">
+    <SettingsWizardShell
+      isOpen={isOpen}
+      onClose={onClose}
+      title={modalTitle}
+      subtitle={editItem ? 'Actualiza los datos del centro' : undefined}
+      icon={<Store className="h-5 w-5" />}
+      steps={shellSteps}
+      activeStepId={step}
+      onStepChange={(id) => setStep(id as WizardStepId)}
+      maxHeight={simplifyPdvCreate ? 'min(88dvh,680px)' : 'min(90dvh,920px)'}
+      preview={storePreview}
+      footer={
+        <SettingsWizardFooter
+          onCancel={onClose}
+          showBack={activeStepIndex > 0}
+          onBack={goBack}
+          onNext={goNext}
+          onSave={handleSubmit}
+          isLastStep={isLastStep}
+          saving={saving}
+          saveLabel={
+            editItem ? 'Guardar cambios' : simplifyPdvCreate ? 'Crear tienda / PDV' : 'Crear centro de trabajo'
+          }
+          nextLabel="Siguiente paso"
+        />
+      }
+    >
+      <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
           {step === 'general' && (
-            <>
+            <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
+              {simplifyPdvCreate ? (
+                <p className="text-xs text-emerald-800 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2 shrink-0">
+                  Tipo: <span className="font-semibold">Punto de venta</span> — se creará el TPV de caja automáticamente.
+                </p>
+              ) : (
               <div>
                 <label className={labelClass}>Tipo de centro *</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -422,8 +524,9 @@ function WorkCenterModal({
                   ))}
                 </div>
               </div>
+              )}
 
-              {form.centerType === 'custom' && (
+              {form.centerType === 'custom' && !simplifyPdvCreate && (
                 <div>
                   <label className={labelClass}>Nombre del tipo personalizado *</label>
                   <input
@@ -439,7 +542,27 @@ function WorkCenterModal({
                 </div>
               )}
 
-              {pdvLabelPreview && (
+              {pdvLabelPreview && simplifyPdvCreate && (
+                <p className="text-xs text-indigo-800 dark:text-indigo-200 shrink-0">
+                  Vista en caja:{' '}
+                  {pdvLabelPreview.needsName ? (
+                    <span className="text-indigo-700/90 dark:text-indigo-300/90">
+                      escribe el nombre arriba (ej. Badalona)
+                    </span>
+                  ) : (
+                    <span className="font-semibold">{pdvLabelPreview.label}</span>
+                  )}
+                  {!pdvLabelPreview.needsName &&
+                  pdvLabelPreview.displayName !== form.name.trim() &&
+                  form.name.trim() ? (
+                    <span className="block mt-0.5 text-indigo-600/90 dark:text-indigo-300/90">
+                      Se guardará como «{pdvLabelPreview.displayName}»
+                    </span>
+                  ) : null}
+                </p>
+              )}
+
+              {pdvLabelPreview && !simplifyPdvCreate && (
                 <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50/90 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/35">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
                     Cómo se verá en caja, delivery y menús
@@ -452,29 +575,21 @@ function WorkCenterModal({
                       <p className="text-xs text-gray-600 dark:text-gray-400">
                         Código automático{' '}
                         <span className="font-mono font-semibold text-gray-900 dark:text-gray-100">{pdvLabelPreview.code}</span>
-                        {' '}· mismo criterio que al guardar (nombre + PDV ya creados).
                       </p>
-                      <p
-                        className="truncate text-sm font-bold text-gray-900 dark:text-gray-100"
-                        title={pdvLabelPreview.label}
-                      >
+                      <p className="truncate text-sm font-bold text-gray-900 dark:text-gray-100" title={pdvLabelPreview.label}>
                         {pdvLabelPreview.label}
                       </p>
-                      {!form.name.trim() && (
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                          Escribe el nombre de la tienda para ver la etiqueta completa (código · nombre).
-                        </p>
-                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              <div>
+              <div className={simplifyPdvCreate ? 'grid grid-cols-1 sm:grid-cols-3 gap-2' : ''}>
+              <div className={simplifyPdvCreate ? 'sm:col-span-2' : ''}>
                 <label className={labelClass}>Nombre *</label>
                 <input
                   className={inputClass('name')}
-                  placeholder="Ej: Oficina Central, Tienda Gran Vía..."
+                  placeholder={simplifyPdvCreate ? 'Ej: Local Centro' : 'Ej: Oficina Central, Tienda Gran Vía...'}
                   value={form.name}
                   onChange={(e) => {
                     clearFieldError('name');
@@ -483,25 +598,25 @@ function WorkCenterModal({
                   autoFocus
                 />
               </div>
-              {!simplifyPdvCreate && (
-                <div>
-                  <label className={labelClass}>Trabajadores previstos *</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={999}
-                    className={inputClass('expectedStaffCount')}
-                    placeholder="Obligatorio — número de personas (1–999)"
-                    value={form.expectedStaffCount}
-                    onChange={(e) => {
-                      clearFieldError('expectedStaffCount');
-                      setForm(f => ({ ...f, expectedStaffCount: e.target.value }));
-                    }}
-                  />
-                </div>
-              )}
-
               <div>
+                <label className={labelClass}>
+                  Trabajadores{simplifyPdvCreate ? '' : ' previstos'} *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  className={inputClass('expectedStaffCount')}
+                  placeholder={simplifyPdvCreate ? '3' : 'Obligatorio — número de personas (1–999)'}
+                  value={form.expectedStaffCount}
+                  onChange={(e) => {
+                    clearFieldError('expectedStaffCount');
+                    setForm(f => ({ ...f, expectedStaffCount: e.target.value }));
+                  }}
+                />
+              </div>
+
+              <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
                 <label className={labelClass}>Régimen</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['propiedad', 'alquiler'] as OwnershipType[]).map((ow) => (
@@ -520,55 +635,46 @@ function WorkCenterModal({
                           return n;
                         });
                       }}
-                      className={`flex items-center gap-2.5 p-3 rounded-xl border-2 text-left transition-all text-sm ${
+                      className={`flex items-center justify-center gap-1.5 rounded-lg border-2 text-left transition-all text-xs font-semibold ${
+                        simplifyPdvCreate ? 'py-2 px-2' : 'gap-2.5 p-3 text-sm'
+                      } ${
                         form.ownership === ow
                           ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-700'
                           : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
                       }`}
                     >
-                      <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${ow === 'propiedad' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'}`}>
-                        {ow === 'propiedad' ? <Home className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-                      </span>
+                      {!simplifyPdvCreate && (
+                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${ow === 'propiedad' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'}`}>
+                          {ow === 'propiedad' ? <Home className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                        </span>
+                      )}
                       <span className="font-medium text-gray-900 dark:text-gray-100">{OWNERSHIP_LABELS[ow]}</span>
                     </button>
                   ))}
                 </div>
               </div>
-
-              <div>
-                <label className={labelClass}>Notas internas</label>
-                <textarea
-                  rows={2}
-                  className={`${inputClass()} resize-none`}
-                  placeholder="Notas adicionales..."
-                  value={form.notes}
-                  onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
-                />
               </div>
 
-              {!simplifyPdvCreate && (
-                <button
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, active: !f.active }))}
-                  className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
-                    form.active
-                      ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                      : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-gray-900 dark:text-gray-100 text-sm">
-                        {form.active ? 'Activo' : 'Inactivo'}
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        {form.active ? 'Visible en la aplicación' : 'Oculto en los selectores'}
-                      </p>
-                    </div>
-                    {form.active ? <ToggleRight className="w-7 h-7 text-green-600" /> : <ToggleLeft className="w-7 h-7 text-gray-400" />}
-                  </div>
-                </button>
-              )}
+              <div>
+                <label className={labelClass}>Notas internas{simplifyPdvCreate ? ' (opcional)' : ''}</label>
+                {simplifyPdvCreate ? (
+                  <input
+                    className={inputClass()}
+                    placeholder="Notas adicionales..."
+                    value={form.notes}
+                    onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                  />
+                ) : (
+                  <textarea
+                    rows={2}
+                    className={`${inputClass()} resize-none`}
+                    placeholder="Notas adicionales..."
+                    value={form.notes}
+                    onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                  />
+                )}
+              </div>
+
               {!simplifyPdvCreate && (
                 <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
                   <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">
@@ -588,11 +694,45 @@ function WorkCenterModal({
                   </button>
                 </div>
               )}
-            </>
+
+              {simplifyPdvCreate &&
+                renderPdvMore(
+                  'general',
+                  'Más opciones',
+                  <>
+                    {pdvLabelPreview && (
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-2.5 dark:border-indigo-800 dark:bg-indigo-950/30">
+                        <p className="text-[10px] font-bold uppercase text-indigo-700 dark:text-indigo-300">
+                          Vista en caja, delivery y menús
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-gray-700 dark:text-gray-300">
+                          {pdvLabelPreview.needsName
+                            ? 'Indica el nombre en el paso General'
+                            : pdvLabelPreview.label || '—'}
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">Equipo del centro</p>
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400">Invita usuarios desde Equipo</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/saas/team')}
+                        className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2.5 py-1.5 text-[11px] font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                      >
+                        Equipo
+                        <ArrowRight className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </>,
+                )}
+            </div>
           )}
 
           {step === 'ubicacion' && (
-            <>
+            <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
               <div>
                 <label className={labelClass}>Dirección *</label>
                 <input
@@ -605,7 +745,7 @@ function WorkCenterModal({
                   }}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className={simplifyPdvCreate ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-3 gap-3'}>
                 <div>
                   <label className={labelClass}>Ciudad *</label>
                   <input
@@ -619,10 +759,10 @@ function WorkCenterModal({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Provincia</label>
+                  <label className={labelClass}>Provincia{simplifyPdvCreate ? '' : ''}</label>
                   <input
                     className={inputClass()}
-                    placeholder="Provincia"
+                    placeholder="Prov."
                     value={form.province}
                     onChange={(e) => setForm(f => ({ ...f, province: e.target.value }))}
                   />
@@ -631,7 +771,7 @@ function WorkCenterModal({
                   <label className={labelClass}>C.P. *</label>
                   <input
                     className={inputClass('postalCode')}
-                    placeholder="Código postal"
+                    placeholder="CP"
                     value={form.postalCode}
                     onChange={(e) => {
                       clearFieldError('postalCode');
@@ -640,7 +780,7 @@ function WorkCenterModal({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className={simplifyPdvCreate ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-2 gap-4'}>
                 <div>
                   <label className={labelClass}>Teléfono del centro *</label>
                   <input
@@ -654,10 +794,11 @@ function WorkCenterModal({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Email</label>
+                  <label className={labelClass}>Email{simplifyPdvCreate ? ' (opc.)' : ''}</label>
                   <input type="email" className={inputClass()} placeholder="centro@empresa.com" value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
                 </div>
               </div>
+              {!simplifyPdvCreate && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Superficie (m²)</label>
@@ -668,12 +809,39 @@ function WorkCenterModal({
                   <input className={inputClass()} placeholder="Ref. catastral" value={form.cadastralReference} onChange={(e) => setForm(f => ({ ...f, cadastralReference: e.target.value }))} />
                 </div>
               </div>
-            </>
+              )}
+              {simplifyPdvCreate &&
+                renderPdvMore(
+                  'ubicacion',
+                  'Más opciones',
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className={labelClass}>Superficie (m²)</label>
+                      <input
+                        type="number"
+                        className={inputClass()}
+                        placeholder="120"
+                        value={form.squareMeters}
+                        onChange={(e) => setForm(f => ({ ...f, squareMeters: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Ref. catastral</label>
+                      <input
+                        className={inputClass()}
+                        placeholder="Ref. catastral"
+                        value={form.cadastralReference}
+                        onChange={(e) => setForm(f => ({ ...f, cadastralReference: e.target.value }))}
+                      />
+                    </div>
+                  </div>,
+                )}
+            </div>
           )}
 
           {step === 'propiedad' && form.ownership === 'propiedad' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
+            <div className={simplifyPdvCreate ? 'space-y-3' : 'space-y-4'}>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Precio de compra (€) *</label>
                   <input
@@ -701,12 +869,17 @@ function WorkCenterModal({
                   />
                 </div>
               </div>
-            </>
+              {simplifyPdvCreate && (
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Datos mínimos de propiedad. Puedes dejar precio en 0 si no aplica.
+                </p>
+              )}
+            </div>
           )}
 
           {step === 'propiedad' && form.ownership === 'alquiler' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
+            <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelClass}>Inicio del contrato *</label>
                   <input
@@ -719,6 +892,7 @@ function WorkCenterModal({
                     }}
                   />
                 </div>
+                {!simplifyPdvCreate && (
                 <div>
                   <label className={labelClass}>Fin del contrato</label>
                   <input
@@ -728,7 +902,26 @@ function WorkCenterModal({
                     onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))}
                   />
                 </div>
+                )}
+                {simplifyPdvCreate && (
+                <div>
+                  <label className={labelClass}>Precio mensual (€) *</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className={inputClass('monthlyPrice')}
+                    placeholder="1.200"
+                    value={form.monthlyPrice}
+                    onChange={(e) => {
+                      clearFieldError('monthlyPrice');
+                      setForm((f) => ({ ...f, monthlyPrice: formatMoneyAsYouType(e.target.value, true) }));
+                    }}
+                  />
+                </div>
+                )}
               </div>
+              {!simplifyPdvCreate && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Precio mensual (€) *</label>
@@ -760,6 +953,7 @@ function WorkCenterModal({
                   />
                 </div>
               </div>
+              )}
               <div>
                 <label className={labelClass}>Arrendador (nombre) *</label>
                 <input
@@ -772,6 +966,8 @@ function WorkCenterModal({
                   }}
                 />
               </div>
+              {!simplifyPdvCreate && (
+              <>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Teléfono arrendador</label>
@@ -803,38 +999,76 @@ function WorkCenterModal({
                   onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))}
                 />
               </div>
-            </>
-          )}
-        </div>
+              </>
+              )}
 
-        <div className="sticky bottom-0 bg-white dark:bg-gray-800 flex flex-col sm:flex-row gap-2 p-6 border-t border-gray-200 dark:border-gray-700 rounded-b-2xl">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
-          >
-            Cancelar
-          </button>
-          {step !== 'propiedad' && (
-            <button
-              type="button"
-              onClick={() => setStep(step === 'general' ? 'ubicacion' : 'propiedad')}
-              className="flex-1 px-4 py-2.5 border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
-            >
-              Siguiente paso
-            </button>
+              {simplifyPdvCreate &&
+                renderPdvMore(
+                  'contrato',
+                  'Más opciones del contrato',
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className={labelClass}>Fin del contrato</label>
+                        <input
+                          type="date"
+                          className={inputClass()}
+                          value={form.contractEndDate}
+                          onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Fianza (€)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className={inputClass()}
+                          placeholder="2.400"
+                          value={form.deposit}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, deposit: formatMoneyAsYouType(e.target.value, false) }))
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className={labelClass}>Tel. arrendador</label>
+                        <input
+                          className={inputClass()}
+                          placeholder="+34 …"
+                          value={form.landlordPhone}
+                          onChange={(e) => setForm(f => ({ ...f, landlordPhone: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelClass}>Email arrendador</label>
+                        <input
+                          type="email"
+                          className={inputClass()}
+                          placeholder="arrendador@…"
+                          value={form.landlordEmail}
+                          onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Notas del contrato</label>
+                      <textarea
+                        rows={2}
+                        className={`${inputClass()} resize-none`}
+                        placeholder="Condiciones, renovación…"
+                        value={form.contractNotes}
+                        onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))}
+                      />
+                    </div>
+                  </>,
+                )}
+            </div>
           )}
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-          >
-            {saving ? 'Guardando...' : editItem ? 'Guardar cambios' : 'Crear centro de trabajo'}
-          </button>
-        </div>
       </div>
-    </div>
+    </SettingsWizardShell>
   );
 }
 
@@ -844,7 +1078,6 @@ export function SalesPointsTab() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const hasProAccess = useHasProAccess();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -862,12 +1095,12 @@ export function SalesPointsTab() {
   const [deleteTarget, setDeleteTarget] = useState<WorkCenter | null>(null);
   const [deleteConfirmName, setDeleteConfirmName] = useState('');
   const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
-  /** Códigos de PDV en delivery (para previsualizar etiqueta al crear tienda). */
+  /** Códigos y nombres de PDV en delivery (previsualización y sufijos al crear). */
   const [deliveryPdvCodes, setDeliveryPdvCodes] = useState<string[]>([]);
+  const [deliveryPdvNames, setDeliveryPdvNames] = useState<string[]>([]);
   const [deliveryPdvsByWorkCenter, setDeliveryPdvsByWorkCenter] = useState<
     Record<string, { code?: string; name: string }>
   >({});
-
   const loadData = useCallback(async () => {
     if (!dataUserId || !user) return;
     try {
@@ -875,6 +1108,7 @@ export function SalesPointsTab() {
       setWorkCenters(state.workCenters);
       const pdvList = state.pointsOfSale;
       setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
+      setDeliveryPdvNames(pdvList.map((p) => String(p.name || '').trim()).filter(Boolean));
       const byWc: Record<string, { code?: string; name: string }> = {};
       for (const p of pdvList) {
         const wcId = String(p.workCenterId || '').trim();
@@ -929,30 +1163,62 @@ export function SalesPointsTab() {
     [primaryPdvId],
   );
 
-  const requestCreateWorkCenter = (forcePdv = false) => {
-    setEditingItem(null);
-    setForceCreatePdv(forcePdv);
-    if (!canCreateWorkCenter) {
-      setProAccessReason('pro');
-      setShowProAccessModal(true);
-      return;
+  const existingPdvNamesForModal = useMemo(() => {
+    const names = new Set<string>(deliveryPdvNames);
+    for (const wc of workCenters) {
+      if (editingItem?._id === wc._id) continue;
+      if (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') {
+        const n = String(wc.name || '').trim();
+        if (n) names.add(n);
+      }
     }
-    if (forcePdv && !pointOfSaleAccess.canCreatePointOfSale) {
-      setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
-      setShowProAccessModal(true);
-      return;
-    }
-    setShowModal(true);
-  };
+    return Array.from(names);
+  }, [deliveryPdvNames, workCenters, editingItem]);
+
+  const newPdvQueryHandledRef = useRef(false);
+
+  const requestCreateWorkCenter = useCallback(
+    (forcePdv = false) => {
+      setEditingItem(null);
+      setForceCreatePdv(forcePdv);
+      setShowModal(false);
+      setShowProAccessModal(false);
+
+      if (!canCreateWorkCenter) {
+        setProAccessReason('pro');
+        setShowProAccessModal(true);
+        return;
+      }
+      const needsPdvSlot = forcePdv || isDelivery;
+      if (needsPdvSlot && !pointOfSaleAccess.canCreatePointOfSale) {
+        setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
+        setShowProAccessModal(true);
+        return;
+      }
+      setShowModal(true);
+    },
+    [
+      canCreateWorkCenter,
+      isDelivery,
+      pointOfSaleAccess.canCreatePointOfSale,
+      pointOfSaleAccess.needsPointOfSaleAddon,
+    ],
+  );
 
   useEffect(() => {
-    if (loading) return;
-    if (searchParams.get('action') !== 'new-pdv') return;
+    if (searchParams.get('action') !== 'new-pdv') {
+      newPdvQueryHandledRef.current = false;
+      return;
+    }
+    if (loading || newPdvQueryHandledRef.current) return;
+    newPdvQueryHandledRef.current = true;
+
     requestCreateWorkCenter(true);
+
     const next = new URLSearchParams(searchParams);
     next.delete('action');
     setSearchParams(next, { replace: true });
-  }, [loading, searchParams, setSearchParams, pointOfSaleAccess.canCreatePointOfSale]);
+  }, [loading, searchParams, setSearchParams, requestCreateWorkCenter]);
 
   const goToProAccess = () => {
     if (dataUserId) {
@@ -970,14 +1236,15 @@ export function SalesPointsTab() {
     navigate('/saas/settings/facturacion');
   };
 
-  const handleSave = async (data: Partial<WorkCenter>) => {
+  const handleSave = async (data: WorkCenterSaveData) => {
+    const wcData = { ...data };
     if (!dataUserId || !user) {
       toast.error('No hay usuario autenticado para guardar este centro.');
       return;
     }
     const requestedCenterType: WorkCenterType = (pointOfSaleCount === 0 || forceCreatePdv)
       ? 'punto_de_venta'
-      : data.centerType || 'punto_de_venta';
+      : wcData.centerType || 'punto_de_venta';
     if (!editingItem && !canCreateWorkCenter) {
       setProAccessReason('pro');
       setShowProAccessModal(true);
@@ -994,30 +1261,41 @@ export function SalesPointsTab() {
     }
     try {
       if (editingItem) {
-        const updated = await updateWorkCenter({ ...editingItem, ...data } as WorkCenter);
+        const updated = await updateWorkCenter({ ...editingItem, ...wcData } as WorkCenter);
+        if (
+          isDelivery &&
+          (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
+        ) {
+          await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
+            business: currentBusiness ?? null,
+          });
+          notifyDeliveryWorkCentersChanged();
+          notifyDeliveryActiveStoreChanged();
+        }
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
+        void loadData();
         toast.success(`"${updated.name}" actualizado`);
       } else {
         const created = await createWorkCenter(dataUserId, {
-          name: data.name!,
+          name: wcData.name!,
           centerType: requestedCenterType,
-          customTypeName: requestedCenterType === 'custom' ? data.customTypeName : undefined,
-          ownership: data.ownership || 'propiedad',
-          contract: data.contract,
-          purchasePrice: data.purchasePrice,
-          purchaseDate: data.purchaseDate,
-          cadastralReference: data.cadastralReference,
-          active: data.active !== false,
-          address: data.address,
-          city: data.city,
-          postalCode: data.postalCode,
-          province: data.province,
-          phone: data.phone,
-          email: data.email,
-          expectedStaffCount: data.expectedStaffCount ?? 3,
-          squareMeters: data.squareMeters,
-          notes: data.notes,
+          customTypeName: requestedCenterType === 'custom' ? wcData.customTypeName : undefined,
+          ownership: wcData.ownership || 'propiedad',
+          contract: wcData.contract,
+          purchasePrice: wcData.purchasePrice,
+          purchaseDate: wcData.purchaseDate,
+          cadastralReference: wcData.cadastralReference,
+          active: wcData.active !== false,
+          address: wcData.address,
+          city: wcData.city,
+          postalCode: wcData.postalCode,
+          province: wcData.province,
+          phone: wcData.phone,
+          email: wcData.email,
+          expectedStaffCount: wcData.expectedStaffCount ?? 3,
+          squareMeters: wcData.squareMeters,
+          notes: wcData.notes,
           businessId: currentBusiness?.business_id || currentBusiness?.id,
         });
         if (
@@ -1037,6 +1315,7 @@ export function SalesPointsTab() {
         void loadData();
         toast.success(`"${created.name}" creado`);
       }
+
       setShowModal(false);
       setEditingItem(null);
       setForceCreatePdv(false);
@@ -1210,10 +1489,10 @@ export function SalesPointsTab() {
           </select>
         </div>
         <AddButtonDropdown
-          label="Nuevo centro"
-          onQuickAdd={() => requestCreateWorkCenter(false)}
-          quickAddLabel="Alta rápida"
-          quickAddDesc="Formulario de centro de trabajo"
+          label={isDelivery ? 'Nueva tienda' : 'Nuevo centro'}
+          onQuickAdd={() => requestCreateWorkCenter(isDelivery)}
+          quickAddLabel={isDelivery ? 'Nueva tienda / PDV' : 'Alta rápida'}
+          quickAddDesc={isDelivery ? 'Formulario compacto + TPV de caja' : 'Formulario de centro de trabajo'}
         />
       </div>
 
@@ -1236,10 +1515,10 @@ export function SalesPointsTab() {
           </p>
           {workCenters.length === 0 && (
             <button
-              onClick={() => requestCreateWorkCenter(false)}
+              onClick={() => requestCreateWorkCenter(isDelivery)}
               className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
             >
-              + Nuevo centro de trabajo
+              {isDelivery ? '+ Primera tienda / PDV' : '+ Nuevo centro de trabajo'}
             </button>
           )}
         </div>
@@ -1390,11 +1669,12 @@ export function SalesPointsTab() {
         onClose={() => { setShowModal(false); setEditingItem(null); setForceCreatePdv(false); }}
         onSave={handleSave}
         editItem={editingItem}
-        forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv}
+        forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv || (isDelivery && !editingItem)}
         existingPdvCodes={deliveryPdvCodes}
+        existingPdvNames={existingPdvNamesForModal}
       />
 
-      {showProAccessModal && (
+      {showProAccessModal && !showModal && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={() => { setShowProAccessModal(false); setForceCreatePdv(false); }}>
           <div className="w-full max-w-lg rounded-2xl border-2 border-violet-200 bg-white p-5 shadow-2xl dark:border-violet-900 dark:bg-gray-800" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start gap-3">

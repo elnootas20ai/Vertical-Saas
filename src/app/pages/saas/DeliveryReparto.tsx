@@ -6,9 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 import {
   listDeliveryOrdersRequest, updateDeliveryOrderRequest, listDriversRequest,
   createDriverRequest, updateDriverRequest, getDriversStatsRequest,
-  getRepartoConfigRequest,
-  type DeliveryOrder, type Driver, type DriverStats, type RepartoConfig,
+  getRepartoConfigRequest, listPointsOfSaleRequest,
+  type DeliveryOrder, type Driver, type DriverStats, type RepartoConfig, type PointOfSale,
 } from '../../lib/deliveryApi';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import {
   Truck, Package, CheckCircle2, Search, X, Phone, MapPin, User,
   Timer, MessageSquare, ChevronDown, ChevronRight, Users, Navigation,
@@ -47,6 +48,8 @@ export function DeliveryReparto() {
   const isMgr = user?.role === 'Admin' || user?.role === 'Gerente';
 
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
+  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
+  const [filterPdv, setFilterPdv] = useState('');
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [stats, setStats] = useState<DriverStats[]>([]);
   const [cfg, setCfg] = useState<RepartoConfig | null>(null);
@@ -68,26 +71,39 @@ export function DeliveryReparto() {
   const load = useCallback(async () => {
     if (!uid) return;
     try {
-      const [o, d, s, c] = await Promise.all([
+      const [o, d, s, c, pdvs] = await Promise.all([
         listDeliveryOrdersRequest(uid), listDriversRequest(uid),
         getDriversStatsRequest(uid), getRepartoConfigRequest(uid),
+        listPointsOfSaleRequest(uid),
       ]);
       setOrders(o); setDrivers(d); setStats(s); setCfg(c);
+      setPointsOfSale(pdvs.filter((p) => p.active !== false));
     } catch { /* silent */ } finally { setLoading(false); }
   }, [uid]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (!uid) return; const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [uid, load]);
 
+  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
+    setFilterPdv(pdvId || '');
+  }, []);
+
+  useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
+
+  const storeOrders = useMemo(() => {
+    if (!filterPdv) return orders;
+    return orders.filter((o) => o.salesPointId === filterPdv);
+  }, [orders, filterPdv]);
+
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   // "Listos para salir": status 'listo' sin departedAt todavía. Mantengo el
   // fallback de !departedAt para no romper pedidos antiguos en los que la
   // transición 'en_reparto' aún no existía.
-  const ready = useMemo(() => orders.filter(o => o.status === 'listo' && !o.departedAt), [orders]);
+  const ready = useMemo(() => storeOrders.filter(o => o.status === 'listo' && !o.departedAt), [storeOrders]);
   // "En ruta": el repartidor ya salió. Aceptamos tanto el nuevo estado
   // 'en_reparto' como pedidos antiguos en 'listo' con departedAt.
-  const route = useMemo(() => orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt), [orders]);
-  const done = useMemo(() => orders.filter(o => o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today), [orders, today]);
+  const route = useMemo(() => storeOrders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt), [storeOrders]);
+  const done = useMemo(() => storeOrders.filter(o => o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today), [storeOrders, today]);
   const cash = useMemo(() => done.filter(o => !o.paymentCollected && (o.paymentMethod === 'efectivo' || !o.paymentMethod)).reduce((s, o) => s + (o.totalAmount || 0), 0), [done]);
   const actDrv = useMemo(() => drivers.filter(d => d.active && d.status === 'active'), [drivers]);
 
@@ -141,11 +157,11 @@ export function DeliveryReparto() {
 
   const wOrders = useMemo(() => {
     if (!myDrvId) return [];
-    const m = orders.filter(o => o.driverId === myDrvId);
+    const m = storeOrders.filter(o => o.driverId === myDrvId);
     if (wTab === 'pending') return m.filter(o => o.status === 'listo' && !o.departedAt);
     if (wTab === 'route') return m.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && !!o.departedAt)) && !o.deliveredAt);
     return m.filter(o => o.status === 'entregado' && o.deliveredAt && new Date(o.deliveredAt) >= today);
-  }, [orders, myDrvId, wTab, today]);
+  }, [storeOrders, myDrvId, wTab, today]);
 
   const startRoute = async (o: DeliveryOrder) => {
     try {

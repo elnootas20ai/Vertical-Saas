@@ -62,3 +62,30 @@ export function resolvePreferenceToPdvId(
   if (pointsOfSale.some((p) => p._id === r && p.active !== false)) return r;
   return null;
 }
+
+/** PDV por defecto si no hay preferencia guardada: el más antiguo activo (suele ser el principal). */
+export function pickDefaultActivePdvId(
+  pointsOfSale: Array<{ _id: string; active?: boolean; createdAt?: string }>,
+): string | null {
+  const active = pointsOfSale.filter((p) => p.active !== false);
+  if (active.length === 0) return null;
+  const sorted = [...active].sort((a, b) => {
+    const ta = String(a.createdAt || '');
+    const tb = String(b.createdAt || '');
+    if (ta !== tb) return ta.localeCompare(tb);
+    return a._id.localeCompare(b._id);
+  });
+  return sorted[0]._id;
+}
+
+/** Si la preferencia es `wc:…`, devuelve el `_id` del PDV y opcionalmente reescribe storage al id estable. */
+export function normalizeStoredPdvPreference(
+  pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean }>,
+  raw: string | null,
+): string | null {
+  const resolved = resolvePreferenceToPdvId(pointsOfSale, raw);
+  if (!resolved) return null;
+  const r = String(raw || '').trim();
+  if (r && r !== resolved) return resolved;
+  return resolved;
+}

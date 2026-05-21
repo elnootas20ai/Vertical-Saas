@@ -73,6 +73,7 @@ import {
   buildSetupWelcomeEmail,
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
@@ -727,6 +728,25 @@ export async function updateProfile(req, res) {
         : (derivedNames?.lastName || account.lastName);
     const nextFullName = normalizedFullName || `${nextFirstName} ${nextLastName}`.trim();
 
+    let nextSubscription = account.subscription || null;
+    if (subscription !== undefined) {
+      const merged = { ...(account.subscription || {}), ...subscription };
+      const actorEmail = req.authUser?.email || '';
+      if (isVertialSuperAdminEmail(actorEmail)) {
+        if (Object.prototype.hasOwnProperty.call(subscription, 'extraPointOfSaleSlots')) {
+          const extra = Math.floor(Number(subscription.extraPointOfSaleSlots) || 0);
+          merged.extraPointOfSaleSlots = Math.max(0, Math.min(99, extra));
+        }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
+          merged.adminProAccess = Boolean(subscription.adminProAccess);
+        }
+      } else {
+        merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
+        merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
+      }
+      nextSubscription = merged;
+    }
+
     const updatedAccount = {
       ...account,
       firstName: nextFirstName,
@@ -746,7 +766,7 @@ export async function updateProfile(req, res) {
         onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted,
       onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
       paymentSummary: paymentSummary !== undefined ? paymentSummary : account.paymentSummary,
-      subscription: subscription !== undefined ? subscription : account.subscription,
+      subscription: nextSubscription,
       updatedAt: new Date().toISOString(),
     };
 

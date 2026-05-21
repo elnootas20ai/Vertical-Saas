@@ -9,6 +9,7 @@ import {
   putDocument,
   softDeleteDocument,
 } from '../services/couchdb.js';
+import { isDefaultCommercialBrandName } from '../shared/brand/constants.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -103,6 +104,9 @@ export async function deleteBrand(req, res) {
 
     const existing = await ensureBrandOwner(req, businessId, brandId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Marca no encontrada' });
+    if (existing.isDefault || isDefaultCommercialBrandName(existing.name)) {
+      return badRequest(res, 'La línea «General» no se puede eliminar');
+    }
 
     const db = getCatalogDbName();
     await softDeleteDocument(req, db, brandId);

@@ -38,10 +38,19 @@ export interface Brand {
   description: string;
   logo: string;
   website: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  shortCode?: string;
+  salesPointIds?: string[];
+  /** Delivery: tipo de producto (pizza, burger, etc.). */
+  deliveryLineKind?: string;
+  /** Delivery: categorías habituales de catálogo para esta línea. */
+  catalogCategories?: string[];
+  isDefault?: boolean;
   active: boolean;
   createdAt: string;
   updatedAt: string;
-  deletedAt: string | null;
+  deletedAt?: string | null;
 }
 
 export async function listBrandsRequest(businessId: string): Promise<Brand[]> {

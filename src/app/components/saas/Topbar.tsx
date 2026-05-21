@@ -12,10 +12,9 @@ import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 
 interface TopbarProps {
   title: string;
+  /** Ya no se muestra en barra (pestañas estrechas); se mantiene por compatibilidad con Layout */
   subtitle?: string;
-  /** Sustituye el color por defecto del título (ej. marca por pantalla) */
   titleClassName?: string;
-  /** Sustituye el color por defecto del subtítulo */
   subtitleClassName?: string;
   onToggleSidebar: () => void;
   onOpenGlobalSearch?: () => void;
@@ -23,14 +22,11 @@ interface TopbarProps {
 
 export function Topbar({
   title,
-  subtitle,
   titleClassName,
-  subtitleClassName,
   onToggleSidebar,
   onOpenGlobalSearch,
 }: TopbarProps) {
   const { notifications } = useApp();
-  const { user } = useAuth();
   const { setTheme, resolvedTheme } = useTheme();
   const { i18n, t } = useTranslation();
   const [mounted, setMounted] = useState(false);
@@ -63,7 +59,6 @@ export function Topbar({
   const unreadCount = notifications.filter((notification) => !notification.read).length;
 
   const activeStore = useActiveStoreScope();
-  /** Si solo miramos `pointsOfSale.length`, al acabar la carga con lista vacía el bloque desaparece (~2s). Mantenerlo con preferencia guardada o mientras carga. */
   const hasSavedStorePreference = Boolean(activeStore.activePreferenceRaw?.trim());
   const showStoreStrip =
     activeStore.loading ||
@@ -74,8 +69,7 @@ export function Topbar({
     <>
       <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-3 md:px-5 py-3 md:py-4 sticky top-0 z-30">
         <div className="flex items-center justify-between gap-2 md:gap-3">
-          {/* Left: Hamburger + Title */}
-          <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
             <button
               onClick={onToggleSidebar}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors flex-shrink-0"
@@ -83,36 +77,31 @@ export function Topbar({
             >
               <Menu className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
-            <div className="min-w-0">
-              <h1
-                className={`text-lg md:text-2xl font-semibold truncate leading-tight ${
-                  titleClassName ?? 'text-gray-900 dark:text-gray-100'
-                }`}
-              >
-                {title}
-              </h1>
-              {subtitle && (
-                <p
-                  className={`text-xs md:text-sm text-balance block mt-0.5 leading-snug line-clamp-2 ${
-                    subtitleClassName ?? 'text-gray-500 dark:text-gray-400'
-                  }`}
-                >
-                  {subtitle}
-                </p>
-              )}
-            </div>
+            <h1
+              className={`text-base md:text-xl font-semibold truncate min-w-0 ${
+                titleClassName ?? 'text-gray-900 dark:text-gray-100'
+              }`}
+              title={title}
+            >
+              {title}
+            </h1>
           </div>
 
-          {/* Right: Actions */}
           <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
             {showStoreStrip && (
-              <div className="flex items-center gap-2 min-w-0 max-w-[40vw] sm:max-w-[13rem] md:max-w-[15rem] mr-0.5 md:mr-1 border-r border-gray-200 dark:border-gray-700 pr-2 md:pr-3">
+              <div
+                className="flex items-center gap-1.5 min-w-0 max-w-[6.5rem] sm:max-w-[9rem] md:max-w-[12rem] mr-0.5 md:mr-1 border-r border-gray-200 dark:border-gray-700 pr-1.5 sm:pr-2 md:pr-3"
+                title={
+                  activeStore.displayLabelForActive ||
+                  (activeStore.loading ? 'Cargando tienda…' : 'Tienda activa')
+                }
+              >
                 <Store
-                  className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0 hidden sm:block"
+                  className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0"
                   aria-hidden
                 />
-                <div className="flex flex-col min-w-0">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 leading-none">
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="hidden sm:block text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 leading-none">
                     Tienda
                   </span>
                   {activeStore.pointsOfSale.length > 1 ? (
@@ -122,18 +111,15 @@ export function Topbar({
                       </label>
                       <select
                         id="vertial-active-store-select"
-                        className="mt-1 w-full text-xs md:text-sm border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 truncate"
+                        className="mt-1 w-full text-xs border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 truncate"
                         value={activeStore.activeSalesPointId || ''}
                         onChange={(e) => {
                           const v = e.target.value;
                           if (v) activeStore.setActiveSalesPoint(v);
                         }}
-                        title="Tienda / PDV activo (misma selección que en el menú lateral)"
+                        title="Tienda / PDV activo"
                         disabled={activeStore.loading}
                       >
-                        {!activeStore.activeSalesPointId && (
-                          <option value="">Elige tienda…</option>
-                        )}
                         {activeStore.pointsOfSale.map((p) => (
                           <option key={p._id} value={p._id}>
                             {pointOfSaleDisplayLabel(p)}
@@ -142,47 +128,32 @@ export function Topbar({
                       </select>
                     </>
                   ) : (
-                    <span className="mt-1 flex flex-col gap-0.5 min-w-0">
-                      <span
-                        className="text-xs md:text-sm font-semibold text-gray-900 dark:text-gray-100 truncate"
-                        title={
-                          activeStore.displayLabelForActive ||
-                          (activeStore.loading ? 'Cargando…' : 'Tienda / PDV')
-                        }
-                      >
-                        {activeStore.loading
-                          ? '…'
-                          : activeStore.displayLabelForActive ||
-                            (activeStore.pointsOfSale.length === 1
-                              ? pointOfSaleDisplayLabel(activeStore.pointsOfSale[0])
-                              : '—')}
-                      </span>
-                      {!activeStore.loading &&
-                        !activeStore.displayLabelForActive &&
-                        activeStore.pointsOfSale.length === 0 &&
-                        hasSavedStorePreference && (
-                          <button
-                            type="button"
-                            onClick={() => void activeStore.refresh()}
-                            className="text-left text-[10px] font-semibold text-teal-700 dark:text-teal-400 hover:underline shrink-0"
-                          >
-                            Reintentar
-                          </button>
-                        )}
+                    <span
+                      className="mt-1 text-xs font-semibold text-gray-900 dark:text-gray-100 truncate"
+                      title={
+                        activeStore.displayLabelForActive ||
+                        (activeStore.loading ? 'Cargando…' : 'Tienda / PDV')
+                      }
+                    >
+                      {activeStore.loading
+                        ? '…'
+                        : activeStore.displayLabelForActive ||
+                          (activeStore.pointsOfSale.length === 1
+                            ? pointOfSaleDisplayLabel(activeStore.pointsOfSale[0])
+                            : '—')}
                     </span>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Search trigger — desktop only */}
             <button
               type="button"
               onClick={onOpenGlobalSearch}
-              className="hidden md:flex items-center gap-2 pl-3 pr-2 py-2 border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 transition-colors w-56 group"
+              className="hidden xl:flex items-center gap-2 pl-3 pr-2 py-2 border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 transition-colors w-48 group"
             >
               <Search className="w-4 h-4 text-gray-400 dark:text-gray-500 flex-shrink-0" />
-              <span className="flex-1 text-left text-sm text-gray-400 dark:text-gray-500">
+              <span className="flex-1 text-left text-sm text-gray-400 dark:text-gray-500 truncate">
                 {t('topbar.search')}
               </span>
               <span className="flex items-center gap-0.5 flex-shrink-0">
@@ -192,9 +163,17 @@ export function Topbar({
               </span>
             </button>
 
-            {/* Language selector */}
+            <button
+              type="button"
+              onClick={onOpenGlobalSearch}
+              className="xl:hidden p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              title={t('topbar.search')}
+            >
+              <Search className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            </button>
+
             {mounted && (
-              <div className="hidden md:block relative">
+              <div className="hidden lg:block relative">
                 <button
                   onClick={() => setShowLangDropdown(v => !v)}
                   className="flex items-center gap-1 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -227,7 +206,6 @@ export function Topbar({
               </div>
             )}
 
-            {/* Dark mode toggle */}
             {mounted && (
               <button
                 onClick={handleThemeToggle}
@@ -244,16 +222,14 @@ export function Topbar({
               </button>
             )}
 
-            {/* Help — desktop only */}
             <button
               onClick={() => setShowHelp(true)}
-              className="hidden md:flex p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="hidden lg:flex p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               title={t('topbar.help')}
             >
               <HelpCircle className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
 
-            {/* Notifications */}
             <button
               onClick={() => setShowNotifications(true)}
               className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -267,7 +243,6 @@ export function Topbar({
               )}
             </button>
 
-            {/* Profile */}
             <button
               onClick={() => setShowProfile(true)}
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
@@ -275,12 +250,10 @@ export function Topbar({
             >
               <User className="w-5 h-5 text-gray-600 dark:text-gray-300" />
             </button>
-
           </div>
         </div>
       </header>
 
-      {/* Modals and Drawers */}
       <SAAS__NotificationsDrawer
         isOpen={showNotifications}
         onClose={() => setShowNotifications(false)}
@@ -295,7 +268,6 @@ export function Topbar({
         isOpen={showHelp}
         onClose={() => setShowHelp(false)}
       />
-
     </>
   );
 }

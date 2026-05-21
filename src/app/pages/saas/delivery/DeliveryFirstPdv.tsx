@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Store, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,9 +10,9 @@ import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import {
   countDeliveryPointsOfSale,
-  isDeliveryBusinessType,
+  isDeliveryAccountFromSources,
+  markDeliveryPdvSessionConfirmed,
   setupDeliveryRetailStore,
-  loadDeliveryStores,
 } from '../../../lib/deliverySetup';
 import { pointOfSaleDisplayLabel } from '../../../lib/deliveryApi';
 
@@ -39,10 +39,17 @@ export function DeliveryFirstPdv() {
   const [saving, setSaving] = useState(false);
   const [nameError, setNameError] = useState('');
   const [addressError, setAddressError] = useState('');
+  const createdAndLeft = useRef(false);
 
   const redirectIfNotNeeded = useCallback(async () => {
+    if (createdAndLeft.current) return;
     if (businessesLoading && !currentBusiness) return;
-    if (!isDeliveryBusinessType(currentBusiness?.businessType)) {
+    if (
+      !isDeliveryAccountFromSources({
+        business: currentBusiness,
+        userOnboarding: user?.onboardingData as { businessType?: string } | undefined,
+      })
+    ) {
       navigate('/saas/dashboard', { replace: true });
       return;
     }
@@ -53,7 +60,7 @@ export function DeliveryFirstPdv() {
     try {
       const count = await countDeliveryPointsOfSale(user, currentBusiness);
       if (count > 0) {
-        navigate('/saas/onboarding', { replace: true });
+        navigate('/saas/dashboard', { replace: true });
         return;
       }
     } catch {
@@ -98,13 +105,12 @@ export function DeliveryFirstPdv() {
         businessId: currentBusiness?.business_id || currentBusiness?.id,
       });
 
-      const verified = await loadDeliveryStores(user, currentBusiness);
-      if (verified.pointsOfSale.length === 0) {
-        throw new Error('El punto de venta no apareció en el sistema. Recarga e inténtalo de nuevo.');
-      }
-
+      const uid = String(user.user_id || user.id || '').trim();
+      if (uid) markDeliveryPdvSessionConfirmed(uid);
+      createdAndLeft.current = true;
       toast.success(`Punto de venta creado: ${pointOfSaleDisplayLabel(pointOfSale)}`);
-      navigate('/saas/onboarding', { replace: true });
+      navigate('/saas/dashboard', { replace: true });
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo crear el punto de venta');
     } finally {

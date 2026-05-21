@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useModalClose } from '../../hooks/useModalClose';
-import { useAuth } from '../../context/AuthContext';
-import { useBusiness } from '../../context/BusinessContext';
-import { countDeliveryPointsOfSale, isDeliveryBusinessType } from '../../lib/deliverySetup';
 import {
   Building2, Users, Package, TrendingUp,
   X, ChevronRight, ChevronLeft, Sparkles, CheckCircle2, Rocket,
@@ -40,7 +37,7 @@ const TOUR_STEPS: TourStep[] = [
     title: 'Configura tu negocio',
     description: 'Empieza completando los datos de tu empresa: nombre comercial, datos fiscales, dirección y contacto. Así tus documentos y facturas saldrán con la información correcta.',
     hint: 'Accede desde Ajustes → Empresa para completar tu perfil.',
-    route: '/saas/settings/empresas',
+    route: '/saas/settings/empresa',
   },
   {
     id: 'clients',
@@ -101,30 +98,6 @@ interface Props {
 
 export function OnboardingTour({ onComplete }: Props) {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
-  const [deliveryPdvReady, setDeliveryPdvReady] = useState<boolean | null>(null);
-
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-
-  useEffect(() => {
-    if (!isDelivery) {
-      setDeliveryPdvReady(true);
-      return;
-    }
-    if (!user) {
-      setDeliveryPdvReady(false);
-      return;
-    }
-    let cancelled = false;
-    void countDeliveryPointsOfSale(user, currentBusiness).then((count) => {
-      if (!cancelled) setDeliveryPdvReady(count > 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [isDelivery, user, currentBusiness]);
-
   const [stepIndex, setStepIndexRaw] = useState(() => {
     const saved = sessionStorage.getItem(STEP_KEY);
     return saved ? Math.min(Number(saved) || 0, TOUR_STEPS.length - 1) : 0;
@@ -141,8 +114,6 @@ export function OnboardingTour({ onComplete }: Props) {
   useEffect(() => {
     const completed = localStorage.getItem(STORAGE_KEY);
     if (completed === STORAGE_VERSION) return;
-    if (isDelivery && deliveryPdvReady !== true) return;
-
     const wasActive = sessionStorage.getItem(ACTIVE_KEY) === '1';
     if (wasActive) {
       setVisible(true);
@@ -153,7 +124,7 @@ export function OnboardingTour({ onComplete }: Props) {
       }, 1200);
       return () => clearTimeout(timer);
     }
-  }, [isDelivery, deliveryPdvReady]);
+  }, []);
 
   const closeTour = useCallback((completed = false) => {
     setExiting(true);
