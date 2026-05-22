@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getApiBase } from './apiBase';
+import type { BusinessHoursConfig } from './settingsApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -62,6 +63,8 @@ export interface WorkCenter {
   expectedStaffCount?: number;
   squareMeters?: number;
   notes?: string;
+  /** Horario de apertura del local (delivery / PDV). */
+  openingHours?: BusinessHoursConfig;
   active: boolean;
   deletedAt?: string | null;
   createdAt: string;
@@ -141,6 +144,10 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     expectedStaffCount: doc.expectedStaffCount != null ? Math.max(1, Math.floor(Number(doc.expectedStaffCount))) : 3,
     squareMeters: doc.squareMeters != null ? Number(doc.squareMeters) : undefined,
     notes: doc.notes ? String(doc.notes) : undefined,
+    openingHours:
+      doc.openingHours && typeof doc.openingHours === 'object'
+        ? (doc.openingHours as BusinessHoursConfig)
+        : undefined,
     active: doc.active !== false,
     deletedAt: (doc as { deletedAt?: string | null }).deletedAt || null,
     createdAt: String(doc.createdAt || new Date().toISOString()),

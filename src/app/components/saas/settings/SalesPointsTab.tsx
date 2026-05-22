@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
@@ -29,6 +29,12 @@ import {
   type ContractInfo,
 } from '../../../lib/workCentersApi';
 import {
+  DEFAULT_BUSINESS_HOURS_CONFIG,
+  hasValidBusinessHoursConfig,
+} from '../../../lib/businessHoursUtils';
+import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/settingsApi';
+import { BusinessHoursEditor } from './BusinessHoursEditor';
+import {
   ensureDeliveryPdvForWorkCenter,
   pointOfSaleDisplayLabel,
   suggestNextPdvCode,
@@ -42,6 +48,11 @@ import {
 import { AddButtonDropdown } from '../AddButtonDropdown';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
+import {
+  settingsOwnershipChoiceClass,
+  settingsOwnershipIconClass,
+  settingsOwnershipRadioClass,
+} from './settingsFormStyles';
 import {
   Search,
   X,
@@ -96,16 +107,42 @@ const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
 
 export type WorkCenterSaveData = Partial<WorkCenter>;
 
+function isRetailWorkCenterType(centerType: WorkCenterType): boolean {
+  return centerType === 'punto_de_venta' || centerType === 'almacen';
+}
+
+/** En delivery, la 2.ª tienda retail entra inactiva si ya hay otra activa. */
+function resolveActiveOnCreate(
+  isDelivery: boolean,
+  existingCenters: WorkCenter[],
+  centerType: WorkCenterType,
+  requestedActive?: boolean,
+): boolean {
+  if (requestedActive === false) return false;
+  if (!isDelivery || !isRetailWorkCenterType(centerType)) return requestedActive !== false;
+  const hasActiveRetail = existingCenters.some(
+    (wc) => wc.active !== false && isRetailWorkCenterType(wc.centerType),
+  );
+  return hasActiveRetail ? false : true;
+}
+
 interface WorkCenterModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (data: WorkCenterSaveData) => Promise<void>;
   editItem?: WorkCenter | null;
   forcePointOfSale?: boolean;
+  /** Paso de horario en wizard (tiendas delivery / retail). */
+  includeOpeningHours?: boolean;
+  /** Migración: horario global legacy si la tienda aún no tiene `openingHours`. */
+  legacyUserId?: string;
+  /** Abrir el wizard directamente en el paso de horarios (checklist / deep link). */
+  initialWizardStep?: 'horarios';
   /** Códigos PDV ya existentes (delivery), para previsualizar el siguiente `PREFIX-01`. */
   existingPdvCodes?: readonly string[];
   /** Nombres de PDV/centros retail ya existentes (para sufijo « - 02 » en el nombre). */
   existingPdvNames?: readonly string[];
+  defaultActiveOnCreate?: boolean;
 }
 
 function WorkCenterModal({
@@ -114,8 +151,12 @@ function WorkCenterModal({
   onSave,
   editItem,
   forcePointOfSale = false,
+  includeOpeningHours = false,
+  legacyUserId,
+  initialWizardStep,
   existingPdvCodes = EMPTY_PDV_CODES,
   existingPdvNames = EMPTY_PDV_CODES,
+  defaultActiveOnCreate = true,
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
 
@@ -146,7 +187,8 @@ function WorkCenterModal({
     contractNotes: '',
   });
   const [saving, setSaving] = useState(false);
-  const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad'>('general');
+  const [openingHours, setOpeningHours] = useState<BusinessHoursConfig>(DEFAULT_BUSINESS_HOURS_CONFIG);
+  const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad' | 'horarios'>('general');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -191,7 +233,29 @@ function WorkCenterModal({
     setStep('general');
     setFieldErrors({});
     setPdvMoreOpen(null);
-  }, [editItem, isOpen]);
+    setOpeningHours(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG);
+    if (isOpen && initialWizardStep === 'horarios' && includeOpeningHours) {
+      setStep('horarios');
+    }
+  }, [editItem, isOpen, initialWizardStep, includeOpeningHours]);
+
+  useEffect(() => {
+    if (!isOpen || !includeOpeningHours) return;
+    if (editItem?.openingHours) {
+      setOpeningHours(editItem.openingHours);
+      return;
+    }
+    if (!editItem || !legacyUserId) return;
+    let cancelled = false;
+    getBusinessHours(legacyUserId)
+      .then((legacy) => {
+        if (!cancelled && legacy) setOpeningHours(legacy);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, includeOpeningHours, editItem, legacyUserId]);
 
   useEffect(() => {
     setPdvMoreOpen(null);
@@ -238,7 +302,9 @@ function WorkCenterModal({
     });
   };
 
-  const stepIds = ['general', 'ubicacion', 'propiedad'] as const;
+  const stepIds = includeOpeningHours
+    ? (['general', 'ubicacion', 'propiedad', 'horarios'] as const)
+    : (['general', 'ubicacion', 'propiedad'] as const);
   type WizardStepId = (typeof stepIds)[number];
 
   const stepHasFieldError = (sid: WizardStepId) => {
@@ -286,6 +352,10 @@ function WorkCenterModal({
       }
     }
 
+    if (includeOpeningHours && !hasValidBusinessHoursConfig(openingHours)) {
+      nextErr.horarios = ' ';
+    }
+
     if (Object.keys(nextErr).length > 0) {
       setFieldErrors(nextErr);
       const s1 = ['name', 'customTypeName', 'expectedStaffCount'].some((k) => nextErr[k]);
@@ -293,7 +363,8 @@ function WorkCenterModal({
       const s3 = ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].some((k) => nextErr[k]);
       if (s1) setStep('general');
       else if (s2) setStep('ubicacion');
-      else setStep('propiedad');
+      else if (s3) setStep('propiedad');
+      else if (nextErr.horarios) setStep('horarios');
       return;
     }
     setFieldErrors({});
@@ -342,7 +413,8 @@ function WorkCenterModal({
         expectedStaffCount: Math.max(1, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: form.notes.trim() || undefined,
-        active: editItem ? editItem.active !== false : true,
+        active: editItem ? editItem.active !== false : defaultActiveOnCreate,
+        openingHours: includeOpeningHours ? openingHours : editItem?.openingHours,
       });
       onClose();
     } catch {
@@ -406,21 +478,32 @@ function WorkCenterModal({
       title: form.ownership === 'alquiler' ? 'Contrato' : 'Propiedad',
       hint: form.ownership === 'alquiler' ? 'Alquiler' : 'Compra',
     },
+    ...(includeOpeningHours
+      ? [{ id: 'horarios' as WizardStepId, n: 4, title: 'Horarios', hint: 'Apertura del local' }]
+      : []),
   ];
 
   const stepOrder = wizardRows.map((r) => r.id);
   const activeStepIndex = stepOrder.indexOf(step);
-  const isLastStep = step === 'propiedad';
+  const isLastStep = includeOpeningHours ? step === 'horarios' : step === 'propiedad';
 
   const goNext = () => {
     if (step === 'general') setStep('ubicacion');
     else if (step === 'ubicacion') setStep('propiedad');
+    else if (step === 'propiedad' && includeOpeningHours) setStep('horarios');
   };
 
   const goBack = () => {
-    if (step === 'propiedad') setStep('ubicacion');
+    if (step === 'horarios') setStep('propiedad');
+    else if (step === 'propiedad') setStep('ubicacion');
     else if (step === 'ubicacion') setStep('general');
   };
+
+  const storeHoursLabel =
+    editItem?.name?.trim() ||
+    (pdvLabelPreview && !pdvLabelPreview.needsName ? pdvLabelPreview.displayName : '') ||
+    form.name.trim() ||
+    'Tu tienda';
 
   const shellSteps: SettingsWizardStep[] = wizardRows.map((row, index) => ({
     id: row.id,
@@ -618,39 +701,63 @@ function WorkCenterModal({
 
               <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
                 <label className={labelClass}>Régimen</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['propiedad', 'alquiler'] as OwnershipType[]).map((ow) => (
-                    <button
-                      key={ow}
-                      type="button"
-                      onClick={() => {
-                        setForm(f => ({ ...f, ownership: ow }));
-                        setFieldErrors((p) => {
-                          const n = { ...p };
-                          ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].forEach(
-                            (k) => {
-                              delete n[k];
-                            },
-                          );
-                          return n;
-                        });
-                      }}
-                      className={`flex items-center justify-center gap-1.5 rounded-lg border-2 text-left transition-all text-xs font-semibold ${
-                        simplifyPdvCreate ? 'py-2 px-2' : 'gap-2.5 p-3 text-sm'
-                      } ${
-                        form.ownership === ow
-                          ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-700'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
-                      }`}
-                    >
-                      {!simplifyPdvCreate && (
-                        <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${ow === 'propiedad' ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-600'}`}>
-                          {ow === 'propiedad' ? <Home className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {(['propiedad', 'alquiler'] as OwnershipType[]).map((ow) => {
+                    const selected = form.ownership === ow;
+                    return (
+                      <button
+                        key={ow}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => {
+                          setForm(f => ({ ...f, ownership: ow }));
+                          setFieldErrors((p) => {
+                            const n = { ...p };
+                            ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].forEach(
+                              (k) => {
+                                delete n[k];
+                              },
+                            );
+                            return n;
+                          });
+                        }}
+                        className={settingsOwnershipChoiceClass(ow, selected, simplifyPdvCreate)}
+                      >
+                        <span className={settingsOwnershipRadioClass(ow, selected)} aria-hidden>
+                          {selected ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
                         </span>
-                      )}
-                      <span className="font-medium text-gray-900 dark:text-gray-100">{OWNERSHIP_LABELS[ow]}</span>
-                    </button>
-                  ))}
+                        <span className={settingsOwnershipIconClass(ow, selected)}>
+                          {ow === 'propiedad' ? <Home className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                        </span>
+                        <span className={`min-w-0 flex-1 ${simplifyPdvCreate ? 'text-center' : ''}`}>
+                          <span
+                            className={`block font-bold leading-tight ${
+                              selected
+                                ? ow === 'propiedad'
+                                  ? 'text-emerald-900 dark:text-emerald-100'
+                                  : 'text-orange-900 dark:text-orange-100'
+                                : 'text-gray-800 dark:text-gray-200'
+                            } ${simplifyPdvCreate ? 'text-xs' : 'text-sm'}`}
+                          >
+                            {OWNERSHIP_LABELS[ow]}
+                          </span>
+                          {!simplifyPdvCreate ? (
+                            <span
+                              className={`mt-0.5 block text-[11px] leading-tight ${
+                                selected
+                                  ? ow === 'propiedad'
+                                    ? 'text-emerald-700/90 dark:text-emerald-200/80'
+                                    : 'text-orange-700/90 dark:text-orange-200/80'
+                                  : 'text-gray-500 dark:text-gray-500'
+                              }`}
+                            >
+                              {ow === 'propiedad' ? 'Local en propiedad' : 'Contrato de alquiler'}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               </div>
@@ -1067,6 +1174,22 @@ function WorkCenterModal({
                 )}
             </div>
           )}
+
+          {step === 'horarios' && includeOpeningHours && (
+            <div className="space-y-3">
+              {fieldErrors.horarios ? (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium">
+                  Indica al menos un día abierto con hora de inicio y fin.
+                </p>
+              ) : null}
+              <BusinessHoursEditor
+                config={openingHours}
+                onChange={setOpeningHours}
+                storeLabel={storeHoursLabel}
+                compact
+              />
+            </div>
+          )}
       </div>
     </SettingsWizardShell>
   );
@@ -1146,6 +1269,17 @@ export function SalesPointsTab() {
   const canCreateWorkCenter = hasProAccess || pointOfSaleCount === 0;
   const forceFirstCenterAsPdv = !hasProAccess && !editingItem && pointOfSaleCount === 0;
 
+  const defaultActiveOnCreate = useMemo(
+    () =>
+      resolveActiveOnCreate(
+        isDelivery,
+        workCenters,
+        'punto_de_venta',
+        true,
+      ),
+    [isDelivery, workCenters],
+  );
+
   const primaryPdvId = useMemo(() => {
     const pdvs = workCenters.filter((wc) => wc.centerType === 'punto_de_venta');
     if (pdvs.length === 0) return null;
@@ -1176,6 +1310,8 @@ export function SalesPointsTab() {
   }, [deliveryPdvNames, workCenters, editingItem]);
 
   const newPdvQueryHandledRef = useRef(false);
+  const horariosQueryHandledRef = useRef(false);
+  const [openModalAtHorarios, setOpenModalAtHorarios] = useState(false);
 
   const requestCreateWorkCenter = useCallback(
     (forcePdv = false) => {
@@ -1219,6 +1355,35 @@ export function SalesPointsTab() {
     next.delete('action');
     setSearchParams(next, { replace: true });
   }, [loading, searchParams, setSearchParams, requestCreateWorkCenter]);
+
+  useEffect(() => {
+    const wantsHorarios =
+      searchParams.get('action') === 'horarios' || searchParams.get('panel') === 'horarios';
+    if (!wantsHorarios) {
+      horariosQueryHandledRef.current = false;
+      return;
+    }
+    if (loading || horariosQueryHandledRef.current) return;
+    horariosQueryHandledRef.current = true;
+
+    const retailActive = workCenters.filter(
+      (wc) => wc.active !== false && isRetailWorkCenterType(wc.centerType),
+    );
+    if (retailActive.length === 0) {
+      requestCreateWorkCenter(true);
+    } else {
+      const target =
+        retailActive.find((wc) => !hasValidBusinessHoursConfig(wc.openingHours)) ?? retailActive[0];
+      setOpenModalAtHorarios(true);
+      setEditingItem(target);
+      setShowModal(true);
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    next.delete('panel');
+    setSearchParams(next, { replace: true });
+  }, [loading, searchParams, setSearchParams, requestCreateWorkCenter, workCenters]);
 
   const goToProAccess = () => {
     if (dataUserId) {
@@ -1277,6 +1442,12 @@ export function SalesPointsTab() {
         void loadData();
         toast.success(`"${updated.name}" actualizado`);
       } else {
+        const createActive = resolveActiveOnCreate(
+          isDelivery,
+          workCenters,
+          requestedCenterType,
+          wcData.active,
+        );
         const created = await createWorkCenter(dataUserId, {
           name: wcData.name!,
           centerType: requestedCenterType,
@@ -1286,7 +1457,7 @@ export function SalesPointsTab() {
           purchasePrice: wcData.purchasePrice,
           purchaseDate: wcData.purchaseDate,
           cadastralReference: wcData.cadastralReference,
-          active: wcData.active !== false,
+          active: createActive,
           address: wcData.address,
           city: wcData.city,
           postalCode: wcData.postalCode,
@@ -1296,6 +1467,7 @@ export function SalesPointsTab() {
           expectedStaffCount: wcData.expectedStaffCount ?? 3,
           squareMeters: wcData.squareMeters,
           notes: wcData.notes,
+          openingHours: wcData.openingHours,
           businessId: currentBusiness?.business_id || currentBusiness?.id,
         });
         if (
@@ -1305,15 +1477,20 @@ export function SalesPointsTab() {
           const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
             business: currentBusiness ?? null,
           });
-          if (pdv) {
+          if (pdv && created.active !== false) {
             selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
           }
         }
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
         notifyDeliveryWorkCentersChanged();
+        notifyDeliveryActiveStoreChanged();
         void loadData();
-        toast.success(`"${created.name}" creado`);
+        toast.success(
+          created.active !== false
+            ? `"${created.name}" creada`
+            : `"${created.name}" creada como inactiva. Actívala cuando quieras usarla.`,
+        );
       }
 
       setShowModal(false);
@@ -1325,20 +1502,33 @@ export function SalesPointsTab() {
     }
   };
 
-  const handleToggleActive = async (wc: WorkCenter) => {
+  const handleToggleActive = async (wc: WorkCenter, e?: MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
     if (!dataUserId) return;
-    if (wc.active && isPrimaryPdv(wc)) {
+    if (wc.active !== false && isPrimaryPdv(wc)) {
       toast.error('No se puede desactivar el PDV principal. Necesitas al menos un PDV activo para operar.');
       return;
     }
     try {
-      const updated = await updateWorkCenter({ ...wc, active: !wc.active });
-      setWorkCenters(prev => prev.map(s => s._id === updated._id ? updated : s));
+      const updated = await updateWorkCenter({ ...wc, active: wc.active === false });
+      setWorkCenters((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
       notifyWorkCentersChanged();
-      toast.success(`"${wc.name}" marcado como ${!wc.active ? 'activo' : 'inactivo'}`);
+      notifyDeliveryWorkCentersChanged();
+      notifyDeliveryActiveStoreChanged();
+      if (isDelivery && updated.active !== false) {
+        const pdv = deliveryPdvsByWorkCenter[updated._id];
+        if (pdv) selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
+      }
+      toast.success(`"${updated.name}" marcada como ${updated.active !== false ? 'activa' : 'inactiva'}`);
     } catch {
       toast.error('Error al actualizar');
     }
+  };
+
+  const openEditWorkCenter = (wc: WorkCenter) => {
+    setEditingItem(wc);
+    setShowModal(true);
   };
 
   const openDeleteDialog = (wc: WorkCenter) => {
@@ -1466,7 +1656,11 @@ export function SalesPointsTab() {
             {(['all', 'active', 'inactive'] as const).map((status) => (
               <button
                 key={status}
-                onClick={() => setFilterActive(status)}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFilterActive(status);
+                }}
                 className={`px-3 py-2 text-xs font-semibold rounded-xl border-2 transition-colors ${
                   filterActive === status
                     ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
@@ -1526,8 +1720,28 @@ export function SalesPointsTab() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map(wc => {
             const primary = isPrimaryPdv(wc);
+            const openEdit = () => openEditWorkCenter(wc);
+
             return (
-            <div key={wc._id} className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-5 transition-all hover:shadow-md ${primary ? 'border-indigo-300 dark:border-indigo-700 ring-1 ring-indigo-100 dark:ring-indigo-900/40' : (wc.active ? 'border-gray-200 dark:border-gray-700' : 'border-dashed border-gray-200 dark:border-gray-700 opacity-70')}`}>
+            <article
+              key={wc._id}
+              role="button"
+              tabIndex={0}
+              onClick={openEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openEdit();
+                }
+              }}
+              className={`cursor-pointer bg-white text-left dark:bg-gray-800 border-2 rounded-xl p-5 transition-all hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 dark:focus-visible:ring-gray-100 ${
+                primary
+                  ? 'border-indigo-300 dark:border-indigo-700 ring-1 ring-indigo-100 dark:ring-indigo-900/40'
+                  : wc.active !== false
+                    ? 'border-gray-200 dark:border-gray-700'
+                    : 'border-dashed border-gray-300 dark:border-gray-600 opacity-80'
+              }`}
+            >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${CENTER_TYPE_COLORS[wc.centerType]}`}>
@@ -1557,19 +1771,26 @@ export function SalesPointsTab() {
                   </div>
                 </div>
                 <button
-                  onClick={() => handleToggleActive(wc)}
-                  disabled={primary && wc.active}
-                  className={`flex-shrink-0 ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold transition-colors ${
-                    primary && wc.active
+                  type="button"
+                  onClick={(e) => void handleToggleActive(wc, e)}
+                  disabled={primary && wc.active !== false}
+                  className={`flex-shrink-0 ml-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
+                    primary && wc.active !== false
                       ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 opacity-70 cursor-not-allowed'
-                      : wc.active
+                      : wc.active !== false
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-200 cursor-pointer'
-                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 cursor-pointer'
+                        : 'bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200 hover:bg-gray-300 cursor-pointer'
                   }`}
-                  title={primary && wc.active ? 'El PDV principal debe permanecer activo' : (wc.active ? 'Clic para desactivar' : 'Clic para activar')}
+                  title={
+                    primary && wc.active !== false
+                      ? 'El PDV principal debe permanecer activo'
+                      : wc.active !== false
+                        ? 'Clic para desactivar'
+                        : 'Clic para activar'
+                  }
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${wc.active ? 'bg-green-500' : 'bg-gray-400'}`} />
-                  {wc.active ? 'Activo' : 'Inactivo'}
+                  <span className={`w-1.5 h-1.5 rounded-full ${wc.active !== false ? 'bg-green-500' : 'bg-gray-500'}`} />
+                  {wc.active !== false ? 'Activo' : 'Inactivo'}
                 </button>
               </div>
 
@@ -1628,7 +1849,11 @@ export function SalesPointsTab() {
 
               <div className="flex items-center gap-2 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
                 <button
-                  onClick={() => { setEditingItem(wc); setShowModal(true); }}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEdit();
+                  }}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
@@ -1638,12 +1863,17 @@ export function SalesPointsTab() {
                   <span
                     className="p-1.5 rounded-lg text-gray-300 dark:text-gray-600 cursor-not-allowed"
                     title="El PDV principal de la cuenta no se puede eliminar"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <Lock className="w-4 h-4" />
                   </span>
                 ) : (
                   <button
-                    onClick={() => openDeleteDialog(wc)}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDeleteDialog(wc);
+                    }}
                     className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
                     title="Eliminar"
                   >
@@ -1651,7 +1881,7 @@ export function SalesPointsTab() {
                   </button>
                 )}
               </div>
-            </div>
+            </article>
             );
           })}
         </div>
@@ -1666,12 +1896,27 @@ export function SalesPointsTab() {
 
       <WorkCenterModal
         isOpen={showModal}
-        onClose={() => { setShowModal(false); setEditingItem(null); setForceCreatePdv(false); }}
+        onClose={() => {
+          setShowModal(false);
+          setEditingItem(null);
+          setForceCreatePdv(false);
+          setOpenModalAtHorarios(false);
+        }}
         onSave={handleSave}
         editItem={editingItem}
         forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv || (isDelivery && !editingItem)}
+        includeOpeningHours={
+          isDelivery &&
+          (forceFirstCenterAsPdv ||
+            forceCreatePdv ||
+            !editingItem ||
+            isRetailWorkCenterType(editingItem.centerType))
+        }
+        legacyUserId={dataUserId || undefined}
+        initialWizardStep={openModalAtHorarios ? 'horarios' : undefined}
         existingPdvCodes={deliveryPdvCodes}
         existingPdvNames={existingPdvNamesForModal}
+        defaultActiveOnCreate={defaultActiveOnCreate}
       />
 
       {showProAccessModal && !showModal && (

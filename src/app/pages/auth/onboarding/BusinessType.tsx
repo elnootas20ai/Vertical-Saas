@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Car, Wrench, Truck, SprayCan, Dumbbell, Stethoscope,
@@ -7,43 +7,50 @@ import {
   Pill, Droplets, PawPrint, Cigarette, Beef,
 } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
-import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
 import { ACCESO__SelectableCard } from '../../../components/design-system/ACCESO__SelectableCard';
-import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  OnboardingStepHeading,
+  OnboardingStepShell,
+} from '../../../components/auth/onboarding/OnboardingStepShell';
+import { useOnboarding } from '../../../context/OnboardingContext';
 
 const STEP_INDEX = 0;
 
 const ENABLED_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
 
 const BUSINESS_TYPES = [
-  { id: 'events',        icon: PartyPopper,   title: 'Eventos',              description: 'Organización y gestión de eventos' },
-  { id: 'carDealership', icon: Car,           title: 'Compraventa de coches', description: 'Gestión completa para tu compraventa' },
-  { id: 'workshop',      icon: Wrench,        title: 'Taller',                description: 'Gestión de taller mecánico' },
-  { id: 'delivery',      icon: Truck,         title: 'Delivery',              description: 'Logística y entregas' },
-  { id: 'cleaning',      icon: SprayCan,      title: 'Limpieza',             description: 'Gestión de empresa de limpieza' },
-  { id: 'hairSalon',     icon: Scissors,      title: 'Peluquería',           description: 'Gestión de salón de belleza' },
-  { id: 'gym',           icon: Dumbbell,      title: 'Gimnasio',             description: 'Gestión de gimnasio y fitness' },
-  { id: 'clinic',        icon: Stethoscope,   title: 'Clínica',              description: 'Gestión de clínica y consultas' },
-  { id: 'hotel',         icon: Hotel,         title: 'Hotel',                description: 'Gestión hotelera completa' },
-  { id: 'construction',  icon: HardHat,       title: 'Constructora',         description: 'Gestión de obras y proyectos' },
-  { id: 'academy',       icon: GraduationCap, title: 'Academia',             description: 'Gestión educativa y formación' },
-  { id: 'realEstate',    icon: Building2,     title: 'Inmobiliaria',         description: 'Gestión inmobiliaria integral' },
-  { id: 'lawyer',        icon: Scale,         title: 'Abogados',             description: 'Gestión de despacho jurídico' },
-  { id: 'nightclub',     icon: Music,         title: 'Discoteca',            description: 'Gestión de ocio nocturno' },
-  { id: 'scrapyard',     icon: Container,     title: 'Desguace',             description: 'Gestión de desguace de vehículos' },
-  { id: 'spareParts',    icon: Cog,           title: 'Recambios',            description: 'Venta de recambios y repuestos' },
-  { id: 'taxi',          icon: CarTaxiFront,  title: 'Taxi',                 description: 'Gestión de flota de taxis' },
-  { id: 'pharmacy',      icon: Pill,          title: 'Farmacia',             description: 'Gestión de farmacia y parafarmacia' },
-  { id: 'carWash',       icon: Droplets,      title: 'Lavadero de coches',   description: 'Gestión de centro de lavado' },
-  { id: 'vet',           icon: PawPrint,      title: 'Veterinario',          description: 'Gestión de clínica veterinaria' },
-  { id: 'tobaccoShop',   icon: Cigarette,     title: 'Estanco',              description: 'Gestión de estanco y expendeduría' },
-  { id: 'butcherShop',   icon: Beef,          title: 'Carnicería',           description: 'Gestión de carnicería y charcutería' },
+  { id: 'events',        icon: PartyPopper,   title: 'Eventos',              description: 'Eventos' },
+  { id: 'carDealership', icon: Car,           title: 'Compraventa',          description: 'Coches' },
+  { id: 'workshop',      icon: Wrench,        title: 'Taller',                description: 'Mecánico' },
+  { id: 'delivery',      icon: Truck,         title: 'Delivery',              description: 'Entregas' },
+  { id: 'cleaning',      icon: SprayCan,      title: 'Limpieza',             description: 'Limpieza' },
+  { id: 'hairSalon',     icon: Scissors,      title: 'Peluquería',           description: 'Salón' },
+  { id: 'gym',           icon: Dumbbell,      title: 'Gimnasio',             description: 'Fitness' },
+  { id: 'clinic',        icon: Stethoscope,   title: 'Clínica',              description: 'Salud' },
+  { id: 'hotel',         icon: Hotel,         title: 'Hotel',                description: 'Hotel' },
+  { id: 'construction',  icon: HardHat,       title: 'Constructora',         description: 'Obras' },
+  { id: 'academy',       icon: GraduationCap, title: 'Academia',             description: 'Formación' },
+  { id: 'realEstate',    icon: Building2,     title: 'Inmobiliaria',         description: 'Inmuebles' },
+  { id: 'lawyer',        icon: Scale,         title: 'Abogados',             description: 'Legal' },
+  { id: 'nightclub',     icon: Music,         title: 'Discoteca',            description: 'Ocio' },
+  { id: 'scrapyard',     icon: Container,     title: 'Desguace',             description: 'Desguace' },
+  { id: 'spareParts',    icon: Cog,           title: 'Recambios',            description: 'Repuestos' },
+  { id: 'taxi',          icon: CarTaxiFront,  title: 'Taxi',                 description: 'Flota' },
+  { id: 'pharmacy',      icon: Pill,          title: 'Farmacia',             description: 'Farmacia' },
+  { id: 'carWash',       icon: Droplets,      title: 'Lavadero',             description: 'Lavado' },
+  { id: 'vet',           icon: PawPrint,      title: 'Veterinario',          description: 'Veterinaria' },
+  { id: 'tobaccoShop',   icon: Cigarette,     title: 'Estanco',              description: 'Estanco' },
+  { id: 'butcherShop',   icon: Beef,          title: 'Carnicería',           description: 'Carnicería' },
 ] as const;
 
 export function BusinessType() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
   const [selectedType, setSelectedType] = useState(data.businessType || 'events');
+
+  useEffect(() => {
+    setSelectedType(data.businessType || 'events');
+  }, [data.businessType]);
 
   const handleContinue = () => {
     if (selectedType !== 'carDealership') {
@@ -59,65 +66,40 @@ export function BusinessType() {
   };
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
-      {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-4 pb-1 shrink-0">
-        <div className="w-full max-w-5xl mx-auto">
-          <ACCESO__Stepper
-            steps={[...ONBOARDING_STEPS]}
-            currentStep={STEP_INDEX}
-            compact
-            onStepClick={(i) => {
-              if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Contenido scrollable */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="w-full max-w-5xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-              ¿Qué tipo de negocio tienes?
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Selecciona el sector que mejor describa tu actividad principal.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {BUSINESS_TYPES.map((bt) => {
-              const Icon = bt.icon;
-              const enabled = ENABLED_TYPES.has(bt.id);
-              return (
-                <ACCESO__SelectableCard
-                  key={bt.id}
-                  icon={<Icon className="w-8 h-8 text-amber-600" />}
-                  title={bt.title}
-                  description={bt.description}
-                  selected={selectedType === bt.id}
-                  disabled={!enabled}
-                  onClick={() => setSelectedType(bt.id)}
-                />
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Botones sticky abajo */}
-      <div className="sticky bottom-0 z-20 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 shrink-0">
-        <div className="w-full max-w-5xl mx-auto flex justify-end">
-          <ACCESO__Button
-            onClick={handleContinue}
-            variant="primary"
-            icon="next"
-          >
+    <OnboardingStepShell
+      stepIndex={STEP_INDEX}
+      maxWidth="max-w-6xl"
+      footer={
+        <div className="flex justify-end">
+          <ACCESO__Button onClick={handleContinue} variant="primary" icon="next">
             Continuar
           </ACCESO__Button>
         </div>
+      }
+    >
+      <OnboardingStepHeading
+        title="¿Qué tipo de negocio tienes?"
+        subtitle="Selecciona el sector que mejor describa tu actividad principal."
+      />
+
+      <div className="flex-1 min-h-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 auto-rows-fr content-stretch">
+        {BUSINESS_TYPES.map((bt) => {
+          const Icon = bt.icon;
+          const enabled = ENABLED_TYPES.has(bt.id);
+          return (
+            <ACCESO__SelectableCard
+              key={bt.id}
+              compact
+              icon={<Icon className="w-6 h-6 text-amber-600" />}
+              title={bt.title}
+              description={bt.description}
+              selected={selectedType === bt.id}
+              disabled={!enabled}
+              onClick={() => setSelectedType(bt.id)}
+            />
+          );
+        })}
       </div>
-    </div>
+    </OnboardingStepShell>
   );
 }

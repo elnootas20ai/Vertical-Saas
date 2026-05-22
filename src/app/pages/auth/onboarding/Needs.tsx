@@ -1,22 +1,79 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
-import { Car, TrendingUp, Users, FileText, BarChart3, Wrench } from 'lucide-react';
+import {
+  BarChart3,
+  Car,
+  FileText,
+  Monitor,
+  Package,
+  TrendingUp,
+  Truck,
+  Users,
+  Wrench,
+  ClipboardList,
+  UserCog,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
-import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
 import { ACCESO__SelectableCard } from '../../../components/design-system/ACCESO__SelectableCard';
-import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  OnboardingStepHeading,
+  OnboardingStepShell,
+} from '../../../components/auth/onboarding/OnboardingStepShell';
+import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  DELIVERY_NEED_OPTIONS,
+  deliveryNeedsToModules,
+  getNeedsOptionsForBusinessType,
+  isDeliveryBusinessType,
+  modulesToDeliveryNeeds,
+  type DeliveryNeedKey,
+  type DeliveryNeedsSelection,
+  type RequestedModuleKey,
+} from '../../../lib/onboardingPlanRecommendation';
 
 const STEP_INDEX = 3;
+
+const MODULE_ICONS: Record<RequestedModuleKey, LucideIcon> = {
+  inventory: Package,
+  sales: Monitor,
+  crm: Users,
+  documentation: FileText,
+  analytics: BarChart3,
+  workshop: Wrench,
+};
+
+const MODULE_ICONS_DEALERSHIP: Record<RequestedModuleKey, LucideIcon> = {
+  inventory: Car,
+  sales: TrendingUp,
+  crm: Users,
+  documentation: FileText,
+  analytics: BarChart3,
+  workshop: Wrench,
+};
+
+const DELIVERY_ICONS: Record<DeliveryNeedKey, LucideIcon> = {
+  tpv: Monitor,
+  catalogStock: Package,
+  deliveryOrders: ClipboardList,
+  autoShipping: Truck,
+  clients: Users,
+  team: UserCog,
+  invoicing: FileText,
+  reports: BarChart3,
+};
 
 export function Needs() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
+  const isDelivery = isDeliveryBusinessType(data.businessType);
 
   useEffect(() => {
     if (data.completedStep < STEP_INDEX - 1) {
       navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
     }
   }, [data.completedStep, navigate]);
+
   const [needs, setNeeds] = useState({
     inventory: data.requestedModules.inventory,
     sales: data.requestedModules.sales,
@@ -26,126 +83,99 @@ export function Needs() {
     workshop: data.requestedModules.workshop,
   });
 
-  const toggleNeed = (key: keyof typeof needs) => {
+  const [deliveryNeeds, setDeliveryNeeds] = useState<DeliveryNeedsSelection>(() =>
+    data.deliveryNeeds ?? modulesToDeliveryNeeds(data.requestedModules),
+  );
+
+  const needsOptions = useMemo(
+    () => getNeedsOptionsForBusinessType(data.businessType),
+    [data.businessType],
+  );
+
+  const iconSet =
+    data.businessType === 'carDealership' || data.businessType === 'workshop'
+      ? MODULE_ICONS_DEALERSHIP
+      : MODULE_ICONS;
+
+  const toggleNeed = (key: RequestedModuleKey) => {
     setNeeds({ ...needs, [key]: !needs[key] });
   };
 
+  const toggleDeliveryNeed = (key: DeliveryNeedKey) => {
+    setDeliveryNeeds({ ...deliveryNeeds, [key]: !deliveryNeeds[key] });
+  };
+
   const handleContinue = () => {
-    updateData('requestedModules', needs);
+    if (isDelivery) {
+      updateData('deliveryNeeds', deliveryNeeds);
+      updateData('requestedModules', deliveryNeedsToModules(deliveryNeeds));
+    } else {
+      updateData('requestedModules', needs);
+    }
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/recommendation');
   };
 
-  const handleBack = () => {
-    navigate('/auth/onboarding/structure');
-  };
-
-  const needsOptions = [
-    {
-      key: 'inventory' as keyof typeof needs,
-      icon: <Car className="w-6 h-6" />,
-      title: 'Gestión de stock',
-      description: 'Control de vehículos y ubicaciones',
-    },
-    {
-      key: 'sales' as keyof typeof needs,
-      icon: <TrendingUp className="w-6 h-6" />,
-      title: 'Ventas y operaciones',
-      description: 'Pipeline de compras y ventas',
-    },
-    {
-      key: 'crm' as keyof typeof needs,
-      icon: <Users className="w-6 h-6" />,
-      title: 'CRM / Clientes',
-      description: 'Gestión de leads y seguimiento',
-    },
-    {
-      key: 'documentation' as keyof typeof needs,
-      icon: <FileText className="w-6 h-6" />,
-      title: 'Documentación',
-      description: 'Contratos, facturas y gestoría',
-    },
-    {
-      key: 'analytics' as keyof typeof needs,
-      icon: <BarChart3 className="w-6 h-6" />,
-      title: 'Métricas y KPIs',
-      description: 'Dashboards y analíticas',
-    },
-    {
-      key: 'workshop' as keyof typeof needs,
-      icon: <Wrench className="w-6 h-6" />,
-      title: 'Taller',
-      description: 'Gestión de reparaciones',
-    },
-  ];
-
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
-      {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-6 pb-2 shrink-0">
-        <div className="w-full max-w-3xl mx-auto">
-          <ACCESO__Stepper
-            steps={[...ONBOARDING_STEPS]}
-            currentStep={STEP_INDEX}
-            onStepClick={(i) => {
-              if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Contenido scrollable */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-              ¿Qué necesitas gestionar?
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Selecciona las áreas que quieres controlar (puedes elegir varias)
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            {needsOptions.map((option) => (
-              <ACCESO__SelectableCard
-                key={option.key}
-                icon={option.icon}
-                title={option.title}
-                description={option.description}
-                selected={needs[option.key]}
-                onClick={() => toggleNeed(option.key)}
-              />
-            ))}
-          </div>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <p className="text-sm text-blue-900">
-              💡 <strong>Consejo:</strong> Puedes activar o desactivar módulos en cualquier momento desde Configuración
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Botones sticky abajo */}
-      <div className="sticky bottom-0 z-20 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 shrink-0">
-        <div className="w-full max-w-3xl mx-auto flex justify-between">
-          <ACCESO__Button
-            type="button"
-            onClick={handleBack}
-            variant="outline"
-          >
+    <OnboardingStepShell
+      stepIndex={STEP_INDEX}
+      footer={
+        <div className="flex justify-between gap-3">
+          <ACCESO__Button type="button" onClick={() => navigate('/auth/onboarding/structure')} variant="outline">
             ← Atrás
           </ACCESO__Button>
-          <ACCESO__Button
-            type="button"
-            onClick={handleContinue}
-            variant="primary"
-          >
-            Ver recomendación →
+          <ACCESO__Button type="button" onClick={handleContinue} variant="primary">
+            Ver precio recomendado →
           </ACCESO__Button>
         </div>
+      }
+    >
+      <OnboardingStepHeading
+        title={isDelivery ? '¿Qué quieres usar?' : '¿Qué vas a usar en Vertial?'}
+        subtitle={
+          isDelivery
+            ? 'Marca lo que necesitas. Con esto calculamos el plan y el precio mensual recomendado.'
+            : 'Indica tu operativa. Con esto calculamos el plan y el precio mensual recomendado.'
+        }
+      />
+
+      <div className="flex-1 min-h-0 grid grid-cols-2 lg:grid-cols-4 gap-2 auto-rows-fr">
+        {isDelivery
+          ? DELIVERY_NEED_OPTIONS.map((option) => {
+              const Icon = DELIVERY_ICONS[option.key];
+              return (
+                <ACCESO__SelectableCard
+                  key={option.key}
+                  compact
+                  icon={<Icon className="w-5 h-5" />}
+                  title={option.title}
+                  description={option.description}
+                  selected={deliveryNeeds[option.key]}
+                  onClick={() => toggleDeliveryNeed(option.key)}
+                />
+              );
+            })
+          : needsOptions.map((option) => {
+              const Icon = iconSet[option.key];
+              return (
+                <ACCESO__SelectableCard
+                  key={option.key}
+                  compact
+                  icon={<Icon className="w-5 h-5" />}
+                  title={option.title}
+                  description={option.description}
+                  selected={needs[option.key]}
+                  onClick={() => toggleNeed(option.key)}
+                />
+              );
+            })}
       </div>
-    </div>
+
+      <p className="shrink-0 mt-2 text-xs text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 leading-snug">
+        {isDelivery
+          ? 'Puedes elegir varias. En el siguiente paso verás el precio según usuarios, locales y lo que marques aquí.'
+          : 'En el siguiente paso verás el plan sugerido. Podrás cambiar módulos después en Configuración.'}
+      </p>
+    </OnboardingStepShell>
   );
 }

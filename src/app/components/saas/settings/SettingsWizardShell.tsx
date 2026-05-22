@@ -12,6 +12,55 @@ export type SettingsWizardStep = {
   completed?: boolean;
 };
 
+export type SettingsWizardSize = 'default' | 'large';
+
+const SHELL_SIZE_STYLES: Record<
+  SettingsWizardSize,
+  {
+    panel: string;
+    overlay: string;
+    header: string;
+    title: string;
+    subtitle: string;
+    icon: string;
+    steps: string;
+    stepNum: string;
+    stepTitle: string;
+    preview: string;
+    body: string;
+    footer: string;
+  }
+> = {
+  default: {
+    panel: 'max-w-2xl rounded-2xl',
+    overlay: 'p-3 sm:p-4',
+    header: 'px-4 py-4 sm:px-5',
+    title: 'text-lg',
+    subtitle: 'text-xs',
+    icon: 'h-10 w-10 rounded-xl',
+    steps: 'px-3 py-2.5 sm:px-4',
+    stepNum: 'h-7 w-7 text-xs',
+    stepTitle: 'text-xs',
+    preview: 'hidden w-36 shrink-0 p-3 sm:block md:w-40',
+    body: 'p-4 sm:p-5',
+    footer: 'px-4 py-3 sm:px-5',
+  },
+  large: {
+    panel: 'max-w-6xl rounded-3xl',
+    overlay: 'p-4 sm:p-6 lg:p-8',
+    header: 'px-6 py-5 sm:px-8',
+    title: 'text-xl sm:text-2xl',
+    subtitle: 'text-sm',
+    icon: 'h-12 w-12 rounded-2xl',
+    steps: 'px-4 py-3.5 sm:px-6',
+    stepNum: 'h-8 w-8 text-sm',
+    stepTitle: 'text-sm',
+    preview: 'hidden w-52 shrink-0 p-5 sm:block lg:w-64 lg:p-6',
+    body: 'p-6 sm:p-8',
+    footer: 'px-6 py-4 sm:px-8',
+  },
+};
+
 export type SettingsWizardShellProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -26,6 +75,10 @@ export type SettingsWizardShellProps = {
   /** Panel lateral (vista previa en vivo, resumen…). */
   preview?: ReactNode;
   maxHeight?: string;
+  /** `large` para wizards de configuración (marca, etc.). */
+  size?: SettingsWizardSize;
+  /** Si el contenido del paso cabe sin desplazamiento (p. ej. grid de presets). */
+  bodyOverflow?: 'auto' | 'hidden';
 };
 
 export function SettingsWizardShell({
@@ -40,8 +93,12 @@ export function SettingsWizardShell({
   children,
   footer,
   preview,
-  maxHeight = 'min(90dvh,720px)',
+  maxHeight,
+  size = 'default',
+  bodyOverflow = 'auto',
 }: SettingsWizardShellProps) {
+  const ui = SHELL_SIZE_STYLES[size];
+  const resolvedMaxHeight = maxHeight ?? (size === 'large' ? 'min(92dvh, 900px)' : 'min(90dvh, 720px)');
   useModalClose(isOpen, onClose);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -68,23 +125,25 @@ export function SettingsWizardShell({
   return (
     <div className="fixed inset-0 z-50 overflow-hidden" role="dialog" aria-modal="true" aria-labelledby="settings-wizard-title">
       <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div className="relative flex h-full min-h-0 items-center justify-center p-3 sm:p-4 pointer-events-none">
+      <div className={`relative flex h-full min-h-0 items-center justify-center pointer-events-none ${ui.overlay}`}>
         <div
-          className="pointer-events-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800"
-          style={{ maxHeight }}
+          className={`pointer-events-auto flex w-full flex-col overflow-hidden border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800 ${ui.panel}`}
+          style={{ maxHeight: resolvedMaxHeight }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex shrink-0 items-start gap-3 border-b border-gray-200 px-4 py-4 sm:px-5 dark:border-gray-700">
+          <div className={`flex shrink-0 items-start gap-4 border-b border-gray-200 dark:border-gray-700 ${ui.header}`}>
             {icon ? (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900">
+              <div
+                className={`flex shrink-0 items-center justify-center bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900 ${ui.icon}`}
+              >
                 {icon}
               </div>
             ) : null}
-            <div className="min-w-0 flex-1 pr-8">
-              <h2 id="settings-wizard-title" className="text-lg font-bold text-gray-900 dark:text-gray-100">
+            <div className="min-w-0 flex-1 pr-10 sm:pr-12">
+              <h2 id="settings-wizard-title" className={`font-bold text-gray-900 dark:text-gray-100 ${ui.title}`}>
                 {title}
               </h2>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <p className={`mt-1 text-gray-500 dark:text-gray-400 ${ui.subtitle}`}>
                 {subtitle ?? (
                   <>
                     Paso {activeIndex + 1} de {steps.length}
@@ -101,22 +160,22 @@ export function SettingsWizardShell({
             <button
               type="button"
               onClick={onClose}
-              className="absolute right-3 top-3 rounded-xl p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 sm:right-4 sm:top-4"
+              className="absolute right-4 top-4 rounded-xl p-2 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 sm:right-6 sm:top-5"
               aria-label="Cerrar"
             >
-              <X className="h-5 w-5 text-gray-500" />
+              <X className={`text-gray-500 ${size === 'large' ? 'h-6 w-6' : 'h-5 w-5'}`} />
             </button>
           </div>
 
-          <div className="h-1 shrink-0 bg-gray-100 dark:bg-gray-900" aria-hidden>
+          <div className={`shrink-0 bg-gray-100 dark:bg-gray-900 ${size === 'large' ? 'h-1.5' : 'h-1'}`} aria-hidden>
             <div
               className="h-full bg-gray-900 transition-[width] duration-300 ease-out dark:bg-gray-100"
               style={{ width: `${progressPct}%` }}
             />
           </div>
 
-          <div className="shrink-0 border-b border-gray-200 bg-gray-50/90 px-3 py-2.5 dark:border-gray-700 dark:bg-gray-900/50 sm:px-4">
-            <div className="flex gap-1 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className={`shrink-0 border-b border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-900/50 ${ui.steps}`}>
+            <div className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {steps.map((step, index) => {
                 const active = step.id === activeStepId;
                 const completed = step.completed ?? index < activeIndex;
@@ -126,7 +185,9 @@ export function SettingsWizardShell({
                     key={step.id}
                     type="button"
                     onClick={() => onStepChange(step.id)}
-                    className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-left transition-all ${
+                    className={`flex shrink-0 items-center gap-2.5 rounded-xl border text-left transition-all ${
+                      size === 'large' ? 'px-4 py-2.5' : 'px-3 py-2'
+                    } ${
                       active
                         ? 'border-gray-900 bg-white shadow-sm dark:border-gray-100 dark:bg-gray-800'
                         : completed
@@ -135,7 +196,7 @@ export function SettingsWizardShell({
                     } ${err ? 'ring-2 ring-red-400 ring-offset-1 dark:ring-offset-gray-900' : ''}`}
                   >
                     <span
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                      className={`flex shrink-0 items-center justify-center rounded-full font-bold transition-colors ${ui.stepNum} ${
                         active
                           ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                           : completed
@@ -147,14 +208,20 @@ export function SettingsWizardShell({
                     </span>
                     <span className="min-w-0">
                       <span
-                        className={`block text-xs font-bold leading-tight ${
+                        className={`block font-bold leading-tight ${ui.stepTitle} ${
                           active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'
                         }`}
                       >
                         {step.title}
                       </span>
                       {step.hint ? (
-                        <span className="block text-[10px] leading-tight text-gray-500 dark:text-gray-500">{step.hint}</span>
+                        <span
+                          className={`block leading-tight text-gray-500 dark:text-gray-500 ${
+                            size === 'large' ? 'text-xs' : 'text-[10px]'
+                          }`}
+                        >
+                          {step.hint}
+                        </span>
                       ) : null}
                     </span>
                   </button>
@@ -165,16 +232,23 @@ export function SettingsWizardShell({
 
           <div className="flex min-h-0 flex-1">
             {preview ? (
-              <aside className="hidden w-36 shrink-0 border-r border-gray-100 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40 sm:block md:w-40">
+              <aside
+                className={`border-r border-gray-100 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40 ${ui.preview}`}
+              >
                 {preview}
               </aside>
             ) : null}
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
+            <div
+              ref={scrollRef}
+              className={`min-h-0 flex-1 overscroll-contain ${ui.body} ${
+                bodyOverflow === 'hidden' ? 'overflow-hidden' : 'overflow-y-auto'
+              }`}
+            >
               <div key={activeStepId} className="animate-in fade-in duration-200">{children}</div>
             </div>
           </div>
 
-          <div className="shrink-0 border-t border-gray-200 bg-gray-50/90 px-4 py-3 dark:border-gray-700 dark:bg-gray-900/40 sm:px-5">
+          <div className={`shrink-0 border-t border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-900/40 ${ui.footer}`}>
             {footer}
           </div>
         </div>

@@ -86,6 +86,10 @@ import { AlertsTab } from '../../components/saas/settings/AlertsTab';
 import { SalesPointsTab } from '../../components/saas/settings/SalesPointsTab';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { useModalClose } from '../../hooks/useModalClose';
+import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { DELIVERY_TIENDA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
+import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -3368,8 +3372,27 @@ export function Settings() {
   const { parkingZones, addParkingZone } = useApp();
   const { templates, upsertTemplate, duplicateTemplate } = useDocumentTemplates();
   const { currentBusiness } = useBusiness();
+  const deliveryNav = useDeliveryActivationNav();
+  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const activeTab: TabId = (tabSlug && SLUG_TO_TAB[tabSlug]) || DEFAULT_TAB;
-  const setActiveTab = useCallback((id: TabId) => navigate(`/saas/settings/${TAB_TO_SLUG[id]}`), [navigate]);
+  const setActiveTab = useCallback(
+    (id: TabId) => {
+      if (isDelivery && id === 'brands' && !deliveryNav.pdvReady) {
+        toast.error('Primero crea tu tienda y un PDV en Tienda');
+        navigate(DELIVERY_TIENDA_SETTINGS_PATH);
+        return;
+      }
+      navigate(`/saas/settings/${TAB_TO_SLUG[id]}`);
+    },
+    [navigate, isDelivery, deliveryNav.pdvReady],
+  );
+
+  useEffect(() => {
+    if (!isDelivery || deliveryNav.loading) return;
+    if (activeTab === 'brands' && !deliveryNav.pdvReady) {
+      navigate(DELIVERY_TIENDA_SETTINGS_PATH, { replace: true });
+    }
+  }, [activeTab, isDelivery, deliveryNav.loading, deliveryNav.pdvReady, navigate]);
 
   /** URLs antiguas → slug canónico (solo navegación). */
   useEffect(() => {
@@ -3642,16 +3665,28 @@ export function Settings() {
                                 : ''
                             }`
                           : null;
+                      const tabLockedByDelivery =
+                        isDelivery &&
+                        tab.id === 'brands' &&
+                        !deliveryNav.pdvReady;
                       return (
                         <button
                           key={tab.id}
                           type="button"
-                          onClick={() => navigate(`/saas/settings/${tab.slug}`)}
+                          disabled={tabLockedByDelivery}
+                          title={
+                            tabLockedByDelivery
+                              ? 'Primero crea tu tienda y un PDV en Tienda'
+                              : undefined
+                          }
+                          onClick={() => setActiveTab(tab.id)}
                           className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                             activeTab === tab.id
                               ? 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-gray-100'
                               : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-                          } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[9.5rem]' : ''}`}
+                          } ${tab.id === 'users' && usersTabMeta ? 'text-left min-w-[9.5rem]' : ''} ${
+                            tabLockedByDelivery ? 'opacity-50 cursor-not-allowed' : ''
+                          }`}
                         >
                           {tab.id === 'users' && usersTabMeta ? (
                             <span className="flex flex-col items-start gap-0.5 leading-tight">

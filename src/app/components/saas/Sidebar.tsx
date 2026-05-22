@@ -1,4 +1,5 @@
 import { useNavigate, useLocation } from 'react-router';
+import { toast } from 'sonner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
@@ -129,8 +130,14 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
+import { pointOfSaleDisplayLabel, pointOfSaleSidebarLines } from '../../lib/deliveryApi';
+import {
+  filterWorkCentersForBusinessScope,
+  resolveBusinessScopeId,
+} from '../../lib/deliverySetup';
 import { ActivationChecklist } from './ActivationChecklist';
+import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
 const CALENDAR_V2_VISUAL = true;
@@ -138,10 +145,14 @@ const CALENDAR_V2_VISUAL = true;
 interface SidebarItem {
   id: string;
   label: string;
+  /** Segunda línea (p. ej. código PDV en monospace). */
+  subLabel?: string;
   icon: React.ReactNode;
   path: string;
   pro?: boolean;
   disabled?: boolean;
+  /** Tooltip cuando está bloqueado por alta delivery. */
+  lockTitle?: string;
   upcoming?: boolean;
   isNew?: boolean;
 }
@@ -557,8 +568,10 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     if (!dataUserId) return;
     try {
       const sps = await listSalesPoints(dataUserId);
+      const businessId = resolveBusinessScopeId(currentBusiness);
+      const scoped = filterWorkCentersForBusinessScope(sps, businessId);
       setSalesPoints(
-        sps.filter(
+        scoped.filter(
           (sp) =>
             sp.active &&
             (vertical !== 'delivery' ||
@@ -638,10 +651,29 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const navScrollMobileRef = useRef<HTMLElement>(null);
   const pendingNavScrollRestore = useRef<number | null>(null);
 
-  const menuItems: SidebarItem[] = menuItemDefs.map(item => ({
-    ...item,
-    label: t(`nav.${item.navKey}`),
-  }));
+  const deliveryNav = useDeliveryActivationNav();
+
+  const menuItems: SidebarItem[] = useMemo(() => {
+    return menuItemDefs.map((item) => {
+      const base: SidebarItem = {
+        ...item,
+        label: t(`nav.${item.navKey}`),
+      };
+      if (!deliveryNav.isDelivery || item.disabled) {
+        return base;
+      }
+      const lock = getDeliverySidebarItemLock(item.id, {
+        pdvReady: deliveryNav.pdvReady,
+        brandReady: deliveryNav.brandReady,
+      });
+      if (!lock.disabled) return base;
+      return {
+        ...base,
+        disabled: true,
+        lockTitle: lock.title,
+      };
+    });
+  }, [t, deliveryNav.isDelivery, deliveryNav.pdvReady, deliveryNav.brandReady]);
 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => ({
     id: g.id,
@@ -690,6 +722,9 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const handleMenuItemClick = (item: SidebarItem) => {
     if (item.disabled) {
+      if (item.lockTitle) {
+        toast.error(item.lockTitle);
+      }
       return;
     }
     if (item.isNew && !seenNewItems.has(item.id)) {
@@ -899,12 +934,16 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       : null;
 
   const salesPointRows: SidebarItem[] = deliverySidebarPdvs
-    ? deliverySidebarPdvs.map((pdv) => ({
-        id: `sp-${pdv._id}`,
-        label: pointOfSaleDisplayLabel(pdv),
-        icon: <Store className="w-3.5 h-3.5" />,
-        path: '#',
-      }))
+    ? deliverySidebarPdvs.map((pdv) => {
+        const lines = pointOfSaleSidebarLines(pdv);
+        return {
+          id: `sp-${pdv._id}`,
+          label: lines.title,
+          subLabel: lines.code || undefined,
+          icon: <Store className="w-3.5 h-3.5" />,
+          path: '#',
+        };
+      })
     : salesPoints.map((sp) => ({
         id: `sp-${sp._id}`,
         label: sp.name,
@@ -1242,7 +1281,10 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                             itemDimmed ? 'opacity-30' : ''
                           }`}
                           disabled={item.disabled}
-                          title={!isMobile && collapsed ? item.label : undefined}
+                          title={
+                            item.lockTitle ??
+                            (!isMobile && collapsed ? item.label : undefined)
+                          }
                         >
                           <span className={
                             isActive
@@ -1251,10 +1293,35 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                                 : (isCalendar ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600')
                               : (calendarV2 ? 'text-violet-600/80 dark:text-violet-400/90' : isDeliveryOpsHub ? 'text-teal-600 dark:text-teal-400' : isSalesPointSubItem ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400')
                           }>
-                            {item.icon}
+                            {item.lockTitle ? <Lock className="w-5 h-5" /> : item.icon}
                           </span>
                           {(isMobile || !collapsed) && (
-                            <span className={`flex-1 text-left ${isSalesPointSubItem ? 'text-[12px] font-normal truncate' : 'font-medium'}`}>{item.label}</span>
+                            <span
+                              className={`flex-1 min-w-0 text-left ${
+                                isSalesPointSubItem && item.subLabel ? 'flex flex-col gap-0.5' : ''
+                              }`}
+                            >
+                              <span
+                                className={`block truncate ${
+                                  isSalesPointSubItem
+                                    ? `text-[12px] ${isActive ? 'font-semibold' : 'font-medium'}`
+                                    : 'font-medium'
+                                }`}
+                              >
+                                {item.label}
+                              </span>
+                              {isSalesPointSubItem && item.subLabel ? (
+                                <span
+                                  className={`block truncate font-mono text-[10px] leading-none ${
+                                    isActive
+                                      ? 'text-amber-700/90 dark:text-amber-300/90'
+                                      : 'text-gray-400 dark:text-gray-500'
+                                  }`}
+                                >
+                                  {item.subLabel}
+                                </span>
+                              ) : null}
+                            </span>
                           )}
                           {(isMobile || !collapsed) && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0 animate-pulse">

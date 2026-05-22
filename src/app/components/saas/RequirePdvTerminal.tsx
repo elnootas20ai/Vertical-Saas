@@ -5,16 +5,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listPointsOfSaleRequest, type PointOfSale } from '../../lib/deliveryApi';
-import { getBusinessHours, type BusinessHoursConfig } from '../../lib/settingsApi';
+import { anyActiveRetailStoreHasOpeningHours } from '../../lib/businessHoursUtils';
+import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
+import { workCentersStrictlyForBusiness } from '../../lib/deliverySetup';
 
 function hasActiveTerminal(pdvs: PointOfSale[]): boolean {
   return (pdvs || []).some((p) => Boolean(p.active) && (p.terminals || []).some((t) => Boolean(t.active)));
-}
-
-function hasValidBusinessHours(hours: BusinessHoursConfig | null): boolean {
-  if (!hours?.schedule) return false;
-  const days = Object.values(hours.schedule);
-  return days.some((d) => d && d.open && typeof d.from === 'string' && typeof d.to === 'string' && d.from.trim() && d.to.trim() && d.from !== d.to);
 }
 
 /**
@@ -36,8 +32,9 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
   );
   const navigate = useNavigate();
   const [pdvs, setPdvs] = useState<PointOfSale[] | null>(null);
-  const [hours, setHours] = useState<BusinessHoursConfig | null>(null);
+  const [retailStoresOk, setRetailStoresOk] = useState<boolean | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const businessId = currentBusiness?.business_id || currentBusiness?.id || '';
 
   useEffect(() => {
     let cancelled = false;
@@ -51,17 +48,47 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     let cancelled = false;
-    if (businessLoading || !dataUserId) return;
-    setHours(null);
-    getBusinessHours(dataUserId)
-      .then((h) => { if (!cancelled) setHours(h || null); })
-      .catch(() => { if (!cancelled) setHours(null); });
+    if (businessLoading || !dataUserId || !user?.user_id) return;
+    setRetailStoresOk(null);
+    listWorkCentersForDelivery(dataUserId, currentBusiness ?? null)
+      .then((all) => {
+        if (cancelled) return;
+        const scoped = workCentersStrictlyForBusiness(all, businessId);
+        const retailActive = scoped.filter(
+          (wc) =>
+            wc.active !== false &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
+        setRetailStoresOk(anyActiveRetailStoreHasOpeningHours(retailActive));
+      })
+      .catch(() => {
+        if (!cancelled) setRetailStoresOk(null);
+      });
     return () => { cancelled = true; };
-  }, [businessLoading, dataUserId]);
+  }, [businessLoading, dataUserId, user?.user_id, currentBusiness, businessId]);
+
+  useEffect(() => {
+    const onChanged = () => {
+      if (businessLoading || !dataUserId || !user?.user_id) return;
+      listWorkCentersForDelivery(dataUserId, currentBusiness ?? null)
+        .then((all) => {
+          const scoped = workCentersStrictlyForBusiness(all, businessId);
+          const retailActive = scoped.filter(
+            (wc) =>
+              wc.active !== false &&
+              (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+          );
+          setRetailStoresOk(anyActiveRetailStoreHasOpeningHours(retailActive));
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener('work-centers:changed', onChanged);
+    return () => window.removeEventListener('work-centers:changed', onChanged);
+  }, [businessLoading, dataUserId, user?.user_id, currentBusiness, businessId]);
 
   const okPdv = pdvs ? hasActiveTerminal(pdvs) : true;
-  const okHours = hours ? hasValidBusinessHours(hours) : true;
-  const missing = !okHours; // PDV ya lo gestiona TpvRegisterGate; solo avisamos por horarios.
+  const okHours = retailStoresOk !== false;
+  const missing = okPdv && retailStoresOk === false;
 
   if (businessLoading) return null;
 
@@ -72,13 +99,13 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
           <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200 min-w-0">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
             <span className="truncate">
-              Configura los horarios del negocio para que las métricas y alertas funcionen al 100 %.
+              Configura el horario de apertura de tu tienda para que las métricas y alertas funcionen al 100 %.
             </span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
-              onClick={() => navigate('/saas/settings/horarios')}
+              onClick={() => navigate('/saas/settings/tienda?action=horarios')}
               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 text-white font-semibold hover:bg-amber-700 transition-colors"
             >
               Configurar <ArrowRight className="w-3 h-3" />

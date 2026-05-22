@@ -1,52 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowRight, Check, CheckCircle, MapPin, Users } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
-import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
 import { ACCESO__Modal } from '../../../components/design-system/ACCESO__Modal';
-import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  OnboardingStepHeading,
+  OnboardingStepShell,
+} from '../../../components/auth/onboarding/OnboardingStepShell';
+import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  calculateOnboardingPricing,
+  estimateSubscriptionTotals,
+  getPlansForBusinessType,
+  getSelectedDeliveryNeedLabels,
+  getSelectedModuleLabels,
+  isDeliveryBusinessType,
+  recommendOnboardingPlan,
+} from '../../../lib/onboardingPlanRecommendation';
 
 const STEP_INDEX = 4;
-
-interface Plan {
-  id: string;
-  name: string;
-  priceMonthly: number;
-  priceAnnual: number;
-  maxUsers: number;
-  maxLocations: number;
-  features: string[];
-}
-
-const plans: Plan[] = [
-  {
-    id: 'basic',
-    name: 'BASIC',
-    priceMonthly: 49,
-    priceAnnual: 39,
-    maxUsers: 2,
-    maxLocations: 1,
-    features: ['Hasta 2 usuarios', '1 ubicación', 'Stock ilimitado', 'Operaciones y CRM', 'Documentos básicos'],
-  },
-  {
-    id: 'normal',
-    name: 'NORMAL',
-    priceMonthly: 149,
-    priceAnnual: 119,
-    maxUsers: 5,
-    maxLocations: 1,
-    features: ['Hasta 5 usuarios', '1 ubicación', 'Firma digital', 'Gestoría integrada', 'KPIs avanzados'],
-  },
-  {
-    id: 'pro',
-    name: 'PRO',
-    priceMonthly: 349,
-    priceAnnual: 279,
-    maxUsers: 12,
-    maxLocations: 2,
-    features: ['Hasta 12 usuarios', 'Hasta 2 ubicaciones', 'API y Webhooks', 'Soporte prioritario', 'Onboarding personalizado'],
-  },
-];
 
 export function Recommendation() {
   const navigate = useNavigate();
@@ -54,230 +26,172 @@ export function Recommendation() {
   const [billingMode, setBillingMode] = useState<'monthly' | 'annual'>(data.subscriptionSelection.billingMode);
   const [showComparison, setShowComparison] = useState(false);
 
+  const plans = useMemo(() => getPlansForBusinessType(data.businessType), [data.businessType]);
+
   useEffect(() => {
     if (data.completedStep < STEP_INDEX - 1) {
       navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
     }
   }, [data.completedStep, navigate]);
 
-  const selectedModules = useMemo(() => {
-    const labels = {
-      inventory: 'Inventory',
-      sales: 'Sales',
-      crm: 'CRM',
-      documentation: 'Documentation',
-      analytics: 'Analytics',
-      workshop: 'Workshop',
-    } as const;
-
-    return Object.entries(data.requestedModules)
-      .filter(([, enabled]) => enabled)
-      .map(([key]) => labels[key as keyof typeof labels]);
-  }, [data.requestedModules]);
-
-  const recommendation = useMemo(() => {
-    const userCount = data.businessMetrics.userCount;
-    const locationCount = data.businessMetrics.locationCount;
-
-    if (userCount > 12 || locationCount > 2) {
-      return {
-        plan: plans[2],
-        reason: `Con ${userCount} usuarios y ${locationCount} ubicaciones, lo más cercano es PRO y luego se puede ampliar a medida.`,
-      };
+  const selectedLabels = useMemo(() => {
+    if (isDeliveryBusinessType(data.businessType) && data.deliveryNeeds) {
+      return getSelectedDeliveryNeedLabels(data.deliveryNeeds);
     }
+    return getSelectedModuleLabels(data.businessType, data.requestedModules);
+  }, [data.businessType, data.deliveryNeeds, data.requestedModules]);
 
-    let planId = 'basic';
-    if (userCount > 2 || locationCount > 1) {
-      planId = 'normal';
-    }
-    if (userCount > 5 || locationCount > 1) {
-      planId = 'pro';
-    }
-    if ((data.requestedModules.analytics || data.requestedModules.documentation) && planId === 'basic') {
-      planId = 'normal';
-    }
+  const recommendation = useMemo(
+    () =>
+      recommendOnboardingPlan({
+        businessType: data.businessType,
+        userCount: data.businessMetrics.userCount,
+        locationCount: data.businessMetrics.locationCount,
+        modules: data.requestedModules,
+      }),
+    [
+      data.businessType,
+      data.businessMetrics.locationCount,
+      data.businessMetrics.userCount,
+      data.requestedModules,
+    ],
+  );
 
-    return {
-      plan: plans.find((plan) => plan.id === planId) || plans[0],
-      reason: `Con ${userCount} usuario${userCount !== 1 ? 's' : ''}, ${locationCount} ubicación${locationCount !== 1 ? 'es' : ''} y ${selectedModules.length || 1} área${selectedModules.length === 1 ? '' : 's'} a gestionar, este plan encaja mejor con tu operativa.`,
-    };
-  }, [data.businessMetrics.locationCount, data.businessMetrics.userCount, data.requestedModules, selectedModules.length]);
-
-  const pricing = useMemo(() => {
-    const extraUsers = Math.max(0, data.businessMetrics.userCount - recommendation.plan.maxUsers);
-    const extraLocations = Math.max(0, data.businessMetrics.locationCount - recommendation.plan.maxLocations);
-    const extraUsersCost = extraUsers * 5;
-    const extraLocationsCost = extraLocations * 25;
-    const baseCost = billingMode === 'monthly' ? recommendation.plan.priceMonthly : recommendation.plan.priceAnnual;
-    const total = baseCost + extraUsersCost + extraLocationsCost;
-
-    return {
-      baseCost,
-      extraUsers,
-      extraLocations,
-      extraUsersCost,
-      extraLocationsCost,
-      total,
-    };
-  }, [billingMode, data.businessMetrics.locationCount, data.businessMetrics.userCount, recommendation.plan]);
+  const pricing = useMemo(
+    () =>
+      calculateOnboardingPricing({
+        plan: recommendation.plan,
+        billingMode,
+        userCount: data.businessMetrics.userCount,
+        locationCount: data.businessMetrics.locationCount,
+      }),
+    [billingMode, data.businessMetrics, recommendation.plan],
+  );
 
   const handleStartTrial = () => {
+    const totals = estimateSubscriptionTotals({
+      plan: recommendation.plan,
+      userCount: data.businessMetrics.userCount,
+      locationCount: data.businessMetrics.locationCount,
+    });
+
     updateData('subscriptionSelection', {
       recommendedPlanId: recommendation.plan.id,
       billingMode,
-      estimatedMonthlyTotal:
-        recommendation.plan.priceMonthly +
-        Math.max(0, data.businessMetrics.userCount - recommendation.plan.maxUsers) * 5 +
-        Math.max(0, data.businessMetrics.locationCount - recommendation.plan.maxLocations) * 25,
-      estimatedAnnualTotal:
-        recommendation.plan.priceAnnual +
-        Math.max(0, data.businessMetrics.userCount - recommendation.plan.maxUsers) * 5 +
-        Math.max(0, data.businessMetrics.locationCount - recommendation.plan.maxLocations) * 25,
+      estimatedMonthlyTotal: totals.estimatedMonthlyTotal,
+      estimatedAnnualTotal: totals.estimatedAnnualTotal,
     });
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/payment-info');
   };
 
-  const handleBack = () => {
-    navigate('/auth/onboarding/needs');
-  };
-
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
-      {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-6 pb-2 shrink-0">
-        <div className="w-full max-w-3xl mx-auto">
-          <ACCESO__Stepper
-            steps={[...ONBOARDING_STEPS]}
-            currentStep={STEP_INDEX}
-            onStepClick={(i) => {
-              if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Contenido scrollable */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-3">Tu plan recomendado</h1>
-            <p className="text-gray-600 dark:text-gray-400">Basándonos en tus respuestas, te recomendamos empezar con:</p>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 border-2 border-amber-500 rounded-2xl p-8 mb-6 shadow-lg">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-bold mb-3">
-              <CheckCircle className="w-4 h-4" />
-              Recomendado para ti
-            </div>
-
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">Plan {recommendation.plan.name}</h2>
-            <p className="text-gray-600 dark:text-gray-400 mb-4">{recommendation.reason}</p>
-
-            <div className="flex flex-wrap gap-4 text-sm mb-6">
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <Users className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                <span>{data.businessMetrics.userCount} usuarios</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                <span>{data.businessMetrics.locationCount} ubicaciones</span>
-              </div>
-              {selectedModules.length > 0 && (
-                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                  <Check className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                  <span>{selectedModules.join(', ')}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="mb-6">
-              <div className="flex items-center gap-3 mb-4">
-                <button
-                  onClick={() => setBillingMode('monthly')}
-                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                    billingMode === 'monthly' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
-                  }`}
-                >
-                  Mensual
-                </button>
-                <button
-                  onClick={() => setBillingMode('annual')}
-                  className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                    billingMode === 'annual' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
-                  }`}
-                >
-                  Anual <span className="ml-2 text-xs text-green-600 font-bold">Ahorra 20%</span>
-                </button>
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 mb-4">
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600 dark:text-gray-400">Plan {recommendation.plan.name}</span>
-                    <span className="font-medium text-gray-900 dark:text-gray-100">{pricing.baseCost}€/mes</span>
-                  </div>
-                  {pricing.extraUsers > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">+ {pricing.extraUsers} usuarios extra</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">{pricing.extraUsersCost}€/mes</span>
-                    </div>
-                  )}
-                  {pricing.extraLocations > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600 dark:text-gray-400">+ {pricing.extraLocations} ubicaciones extra</span>
-                      <span className="font-medium text-gray-900 dark:text-gray-100">{pricing.extraLocationsCost}€/mes</span>
-                    </div>
-                  )}
-                  <div className="pt-2 border-t border-gray-300 flex justify-between">
-                    <span className="font-bold text-gray-900 dark:text-gray-100">Total estimado</span>
-                    <span className="font-bold text-gray-900 dark:text-gray-100">{pricing.total}€/mes</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-gray-900 dark:text-gray-100">{pricing.total}€</span>
-                <span className="text-gray-600 dark:text-gray-400">/mes</span>
-              </div>
-            </div>
-
-            <ul className="space-y-3 mb-6">
-              {recommendation.plan.features.map((feature) => (
-                <li key={feature} className="flex items-start gap-2">
-                  <Check className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
-                  <span className="text-gray-700 dark:text-gray-300">{feature}</span>
-                </li>
-              ))}
-            </ul>
-
-            <ACCESO__Button onClick={handleStartTrial} variant="primary" fullWidth size="lg">
-              Continuar
-              <ArrowRight className="w-5 h-5 ml-2" />
-            </ACCESO__Button>
-          </div>
-
-          <div className="text-center mb-4">
-            <button onClick={() => setShowComparison(true)} className="text-gray-600 dark:text-gray-400 hover:text-gray-900 underline text-sm">
-              Ver comparación de todos los planes
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Botón sticky abajo */}
-      <div className="sticky bottom-0 z-20 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 shrink-0">
-        <div className="w-full max-w-3xl mx-auto flex justify-start">
-          <ACCESO__Button variant="outline" onClick={handleBack}>
+    <OnboardingStepShell
+      stepIndex={STEP_INDEX}
+      footer={
+        <div className="flex justify-between items-center gap-3">
+          <ACCESO__Button variant="outline" onClick={() => navigate('/auth/onboarding/needs')}>
             ← Volver
           </ACCESO__Button>
+          <button
+            type="button"
+            onClick={() => setShowComparison(true)}
+            className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 underline"
+          >
+            Comparar planes
+          </button>
+        </div>
+      }
+    >
+      <OnboardingStepHeading title="Tu precio recomendado" subtitle={recommendation.reason} />
+
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 bg-white dark:bg-gray-800 border-2 border-amber-500 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col overflow-hidden">
+          <div className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold mb-2 w-fit">
+            <CheckCircle className="w-3.5 h-3.5" />
+            Recomendado
+          </div>
+
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
+            Plan {recommendation.plan.name}
+          </h2>
+
+          <div className="shrink-0 flex flex-wrap gap-3 text-xs text-gray-700 dark:text-gray-300 my-2">
+            <span className="inline-flex items-center gap-1">
+              <Users className="w-3.5 h-3.5" />
+              {data.businessMetrics.userCount} usuarios
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5" />
+              {data.businessMetrics.locationCount} locales
+            </span>
+            {selectedLabels.length > 0 && (
+              <span className="text-gray-500 dark:text-gray-400">
+                · {selectedLabels.join(', ')}
+              </span>
+            )}
+          </div>
+
+          <div className="shrink-0 flex items-center gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setBillingMode('monthly')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                billingMode === 'monthly' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700'
+              }`}
+            >
+              Mensual
+            </button>
+            <button
+              type="button"
+              onClick={() => setBillingMode('annual')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                billingMode === 'annual' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700'
+              }`}
+            >
+              Anual <span className="text-green-600 font-bold">-20%</span>
+            </button>
+            <span className="ml-auto text-2xl font-bold text-gray-900 dark:text-gray-100">
+              {pricing.total}€<span className="text-sm font-normal text-gray-500">/mes</span>
+            </span>
+          </div>
+
+          {(pricing.extraUsers > 0 || pricing.extraLocations > 0) && (
+            <p className="shrink-0 text-xs text-gray-600 dark:text-gray-400 mb-2">
+              Base {pricing.baseCost}€
+              {pricing.extraUsers > 0 && ` + ${pricing.extraUsers} usuario(s) extra (${pricing.extraUsersCost}€)`}
+              {pricing.extraLocations > 0 &&
+                ` + ${pricing.extraLocations} local(es) extra (${pricing.extraLocationsCost}€)`}
+            </p>
+          )}
+
+          <ul className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 content-start text-xs sm:text-sm text-gray-700 dark:text-gray-300 overflow-hidden">
+            {recommendation.plan.features.map((feature) => (
+              <li key={feature} className="flex items-start gap-1.5">
+                <Check className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="shrink-0 pt-3">
+            <ACCESO__Button onClick={handleStartTrial} variant="primary" fullWidth>
+              Continuar
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </ACCESO__Button>
+          </div>
         </div>
       </div>
 
       <ACCESO__Modal open={showComparison} onClose={() => setShowComparison(false)} title="Comparación de planes">
         <div className="grid md:grid-cols-3 gap-4">
           {plans.map((plan) => (
-            <div key={plan.id} className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-4 ${plan.id === recommendation.plan.id ? 'border-amber-500' : 'border-gray-200 dark:border-gray-700'}`}>
+            <div
+              key={plan.id}
+              className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-4 ${
+                plan.id === recommendation.plan.id ? 'border-amber-500' : 'border-gray-200 dark:border-gray-700'
+              }`}
+            >
               <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{plan.name}</h3>
               <div className="mb-3">
                 <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -297,6 +211,6 @@ export function Recommendation() {
           ))}
         </div>
       </ACCESO__Modal>
-    </div>
+    </OnboardingStepShell>
   );
 }

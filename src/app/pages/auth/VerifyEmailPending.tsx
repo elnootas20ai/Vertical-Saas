@@ -5,6 +5,11 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useAuth } from '../../context/AuthContext';
 import { broadcastEmailVerified, subscribeEmailVerified } from '../../lib/emailVerifyBroadcast';
+import {
+  clearPendingVerifyEmail,
+  getPendingVerifyEmail,
+  setPendingVerifyEmail,
+} from '../../lib/onboardingLocalKeys';
 
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
@@ -41,7 +46,21 @@ export function VerifyEmailPending() {
   const redirectScheduledRef = useRef(false);
   const autoSendAttemptedRef = useRef(false);
 
-  const targetEmail = (emailFromUrl || routeState?.email || user?.email || '').trim();
+  const targetEmail = (
+    emailFromUrl ||
+    routeState?.email ||
+    getPendingVerifyEmail() ||
+    user?.email ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  useEffect(() => {
+    if (targetEmail && !emailFromUrl) {
+      setPendingVerifyEmail(targetEmail);
+    }
+  }, [targetEmail, emailFromUrl]);
   const openedFromEmailLink = Boolean(tokenFromUrl && emailFromUrl);
 
   const goAfterVerify = useCallback(
@@ -87,6 +106,7 @@ export function VerifyEmailPending() {
       setVerifyState('loading');
       verifyEmail(tokenFromUrl, emailFromUrl).then((result) => {
         if (result.success) {
+          clearPendingVerifyEmail();
           broadcastEmailVerified(emailFromUrl);
           setVerifyState('success');
           window.setTimeout(() => {
@@ -161,6 +181,7 @@ export function VerifyEmailPending() {
     if (!user?.emailVerified) return;
     if (verifyState === 'loading') return;
     if (verifyState === 'success') return;
+    clearPendingVerifyEmail();
     setCheckState('success');
   }, [user?.emailVerified, verifyState]);
 
@@ -177,11 +198,18 @@ export function VerifyEmailPending() {
     setCheckState('checking');
     const result = await refreshCurrentUser();
     if (result.emailVerified) {
+      clearPendingVerifyEmail();
       if (targetEmail) broadcastEmailVerified(targetEmail);
       setCheckState('success');
       return;
     }
     setCheckState('idle');
+    if (result.sessionInvalid) {
+      setCheckMessage(
+        'Esta sesión ya no es válida (cuenta eliminada o distinta). Regístrate de nuevo con tu email o inicia sesión.',
+      );
+      return;
+    }
     setCheckMessage(
       result.ok
         ? 'Aún no detectamos la verificación. Abre el enlace del correo e inténtalo de nuevo.'
@@ -193,10 +221,19 @@ export function VerifyEmailPending() {
     if (!targetEmail || countdown > 0) return;
     setResendState('loading');
     setResendError('');
+    setDeliveryNotice(null);
     const result = await resendVerificationEmail(targetEmail);
+    if (result.success && result.info) {
+      setResendState('idle');
+      setDeliveryNotice(null);
+      setResendError('');
+      setCheckMessage(result.info);
+      return;
+    }
     if (result.success) {
       setResendState('sent');
       setDeliveryNotice('sent');
+      setCheckMessage('');
       localStorage.setItem(RESEND_COOLDOWN_KEY, String(Date.now()));
       startCountdown(COOLDOWN_SECONDS);
     } else {
@@ -316,42 +353,43 @@ export function VerifyEmailPending() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3 text-center">Enlace inválido</h1>
             <p className="text-gray-600 dark:text-gray-400 mb-6 text-center">{verifyError}</p>
-            {targetEmail && (
+            {targetEmail ? (
               <div className="space-y-3">
-                {resendState === 'sent' ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-                      <CheckCircle className="w-4 h-4 shrink-0" />
-                      <span>Nuevo enlace enviado a <strong>{targetEmail}</strong></span>
-                    </div>
-                    {countdown > 0 && (
-                      <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
-                        <span>Reenviar en {countdown}s</span>
-                      </div>
-                    )}
+                {resendState === 'sent' && countdown > 0 && (
+                  <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    <span>Nuevo enlace enviado a <strong>{targetEmail}</strong></span>
                   </div>
-                ) : (
-                  <ACCESO__Button
-                    variant="primary"
-                    fullWidth
-                    disabled={resendState === 'loading' || countdown > 0}
-                    onClick={handleResend}
-                  >
-                    {resendState === 'loading' ? (
-                      <span className="flex items-center gap-2 justify-center">
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Enviando...
-                      </span>
-                    ) : countdown > 0 ? (
-                      <span className="flex items-center gap-2 justify-center">
-                        Espera {countdown}s
-                      </span>
-                    ) : (
-                      'Solicitar nuevo enlace'
-                    )}
-                  </ACCESO__Button>
+                )}
+                <ACCESO__Button
+                  variant="primary"
+                  fullWidth
+                  disabled={resendState === 'loading' || countdown > 0}
+                  onClick={handleResend}
+                >
+                  {resendState === 'loading' ? (
+                    <span className="flex items-center gap-2 justify-center">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Enviando...
+                    </span>
+                  ) : countdown > 0 ? (
+                    <span className="flex items-center gap-2 justify-center">
+                      Reenviar en {countdown}s
+                    </span>
+                  ) : resendState === 'sent' ? (
+                    'Solicitar otro enlace'
+                  ) : (
+                    'Solicitar nuevo enlace'
+                  )}
+                </ACCESO__Button>
+                {resendState === 'error' && resendError && (
+                  <p className="text-sm text-red-600 text-center">{resendError}</p>
                 )}
               </div>
+            ) : (
+              <p className="text-sm text-amber-700 text-center">
+                No tenemos tu email en esta pantalla. Vuelve a registrarte o inicia sesión para reenviar el enlace.
+              </p>
             )}
             <div className="mt-4 text-center">
               <button
@@ -389,10 +427,14 @@ export function VerifyEmailPending() {
               Hemos enviado un enlace de confirmación. Ábrelo para activar tu cuenta y, cuando lo hayas
               hecho, vuelve a esta pantalla y pulsa «Ya he confirmado el email».
             </p>
-            {targetEmail && (
+            {targetEmail ? (
               <p className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 dark:bg-gray-700/80 text-sm font-medium text-gray-900 dark:text-gray-100">
                 <Mail className="w-4 h-4 text-gray-500 shrink-0" />
                 {targetEmail}
+              </p>
+            ) : (
+              <p className="mt-4 text-sm text-amber-700 dark:text-amber-300">
+                No encontramos el email de la cuenta. Inicia sesión de nuevo o repite el registro.
               </p>
             )}
             {(deliveryNotice === 'retrying' || resendState === 'loading') && (

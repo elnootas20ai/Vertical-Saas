@@ -426,6 +426,18 @@ export async function authFetch(
 
 // ── Cliente HTTP con renovación automática de token ───────────────────────────
 
+function extractApiErrorMessage(payload: Record<string, unknown> | ApiEnvelope<unknown>): string {
+  const err = payload.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+    if (typeof obj.reason === 'string' && obj.reason.trim()) return obj.reason.trim();
+  }
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return '';
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
@@ -467,8 +479,9 @@ async function request<T>(
   }
 
   if (response.status === 401) {
-    if (typeof payload.error === 'string' && payload.error.trim()) {
-      throw new Error(payload.error.trim());
+    const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
+    if (authErr) {
+      throw new Error(authErr);
     }
     if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
       const refreshed = await tryRefreshToken();
@@ -481,10 +494,7 @@ async function request<T>(
   }
 
   if (!response.ok || payload.ok === false) {
-    const fromPayload =
-      (typeof payload.error === 'string' && payload.error.trim())
-      || (typeof payload.message === 'string' && payload.message.trim())
-      || '';
+    const fromPayload = extractApiErrorMessage(payload as Record<string, unknown>);
     if (fromPayload) {
       throw new Error(fromPayload);
     }
@@ -834,10 +844,13 @@ export async function verifyEmailRequest(token: string, email: string) {
 
 // AUTH-02: Reenviar email de verificación
 export async function resendVerificationEmailRequest(email: string) {
-  return request<AuthUser>('/api/auth/resend-verification', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
+  return request<AuthUser & { emailSent?: boolean; alreadyVerified?: boolean }>(
+    '/api/auth/resend-verification',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    },
+  );
 }
 
 // AUTH-03: Obtener progreso de onboarding desde backend
@@ -897,8 +910,9 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
     const { response, payload, rawText } = await doFetch();
 
     if (response.status === 401) {
-      if (typeof payload.error === 'string' && payload.error.trim()) {
-        throw new Error(payload.error.trim());
+      const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
+      if (authErr) {
+        throw new Error(authErr);
       }
       if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
         const refreshed = await tryRefreshToken();
@@ -907,11 +921,12 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
       return { ok: false, error: 'No se pudo sincronizar el perfil; se mantiene la sesión en caché.' };
     }
 
+    if (response.status === 404) {
+      return { ok: false, error: extractApiErrorMessage(payload as Record<string, unknown>) || 'Usuario no encontrado' };
+    }
+
     if (!response.ok || payload.ok === false) {
-      const fromPayload =
-        (typeof payload.error === 'string' && payload.error.trim())
-        || (typeof payload.message === 'string' && payload.message.trim())
-        || '';
+      const fromPayload = extractApiErrorMessage(payload as Record<string, unknown>);
       if (fromPayload) {
         throw new Error(fromPayload);
       }

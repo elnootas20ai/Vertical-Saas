@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import { Mail, Lock, User, Phone, CheckCircle, Eye, EyeOff, Sparkles, Building2, Gift } from 'lucide-react';
 import { validateReferralCode } from '../../lib/affiliatesApi';
@@ -10,6 +10,8 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import type { GoogleUserProfile } from '../../lib/authApi';
+import { LegalAgreementsModal } from '../../components/legal/LegalAgreementsModal';
+import { clearLegacyOnboardingDraft, setPendingVerifyEmail } from '../../lib/onboardingLocalKeys';
 
 type AccountType = 'user' | 'company';
 
@@ -87,6 +89,7 @@ export function Register() {
   const [referralInfo, setReferralInfo] = useState<{ valid: boolean; name?: string } | null>(null);
   const [validatingReferral, setValidatingReferral] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
+  const [legalModalOpen, setLegalModalOpen] = useState(false);
   const referralTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const checkReferralCode = useCallback((code: string) => {
@@ -108,6 +111,11 @@ export function Register() {
   useEffect(() => {
     if (initialReferral) checkReferralCode(initialReferral);
   }, [initialReferral, checkReferralCode]);
+
+  /** Mismo PC: no reutilizar borrador de empresa/tarjeta de otro registro. */
+  useEffect(() => {
+    clearLegacyOnboardingDraft();
+  }, []);
 
   const isGoogleFlow = Boolean(googleCredential);
 
@@ -185,7 +193,7 @@ export function Register() {
       newErrors.confirmPassword = 'Las contraseñas no coinciden';
     }
     if (!formData.acceptTerms) {
-      newErrors.acceptTerms = 'Debes aceptar los términos y condiciones';
+      newErrors.acceptTerms = 'Debes aceptar los acuerdos legales';
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -212,6 +220,9 @@ export function Register() {
         redirectTo: result.redirectTo,
         isUserAccount,
       });
+      if (path === '/auth/verify-email-pending') {
+        setPendingVerifyEmail(formData.email);
+      }
       navigate(path, {
         replace: true,
         state:
@@ -473,18 +484,41 @@ export function Register() {
             </div>
 
             <div>
-              <ACCESO__Checkbox
-                label="Acepto los términos y condiciones, la política de privacidad y el tratamiento de mis datos según el RGPD"
-                checked={formData.acceptTerms}
-                onChange={(e) => {
-                  setFormData({ ...formData, acceptTerms: e.target.checked });
-                  setErrors({ ...errors, acceptTerms: '' });
-                }}
-              />
+              <div className="flex items-start gap-2">
+                <ACCESO__Checkbox
+                  checked={formData.acceptTerms}
+                  onChange={(e) => {
+                    setFormData({ ...formData, acceptTerms: e.target.checked });
+                    setErrors({ ...errors, acceptTerms: '' });
+                  }}
+                  aria-label="He leído y acepto los acuerdos legales"
+                />
+                <p className="text-sm leading-snug text-gray-700 dark:text-gray-300">
+                  He leído y acepto los{' '}
+                  <Link
+                    to="/legal"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    acuerdos legales
+                  </Link>{' '}
+                  (términos, privacidad, aviso legal y cookies).{' '}
+                  <button
+                    type="button"
+                    onClick={() => setLegalModalOpen(true)}
+                    className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Ver más
+                  </button>
+                </p>
+              </div>
               {errors.acceptTerms && (
                 <p className="mt-1 text-sm text-red-600">{errors.acceptTerms}</p>
               )}
             </div>
+
+            <LegalAgreementsModal isOpen={legalModalOpen} onClose={() => setLegalModalOpen(false)} />
 
             <ACCESO__Button
               type="submit"

@@ -22,6 +22,19 @@ export type DeliveryBrandLinePreset = {
   typicalCategories: string[];
 };
 
+/** Pastel + icono (misma línea que tipos de centro en Ajustes → Tienda). */
+export const DELIVERY_BRAND_LINE_ICON_BOX: Record<DeliveryBrandLineKindId, string> = {
+  prepared_meals: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400',
+  pizza: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',
+  burger_fastfood: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  sushi_asian: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
+  cafe_bakery: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  drinks_desserts: 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
+  groceries: 'bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300',
+  mixed_restaurant: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/40 dark:text-indigo-400',
+  other: 'bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400',
+};
+
 export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
   {
     id: 'prepared_meals',

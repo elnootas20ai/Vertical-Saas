@@ -94,8 +94,16 @@ function ActiveStoreScopeProviderImpl({
   }, [dataUserId, currentBusiness, user]);
 
   useEffect(() => {
+    setPointsOfSale([]);
     void load();
   }, [load]);
+
+  /** Al cambiar de empresa, vaciar lista hasta recargar (evita flash de PDV de otra empresa). */
+  useEffect(() => {
+    if (!businessId) return;
+    setPointsOfSale([]);
+    bump();
+  }, [businessId, bump]);
 
   useEffect(() => {
     const onWorkCenters = () => {

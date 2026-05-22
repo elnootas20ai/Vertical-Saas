@@ -18,6 +18,7 @@ import { PeriodBadge } from '../../components/ui/PeriodBadge';
 import { subDays, eachDayOfInterval, startOfDay, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { BusinessType } from '../../lib/businessApi';
+import { clientsRouteForVertical, DELIVERY_CRM_UI_ENABLED } from '../../lib/deliveryCrmFeature';
 
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { GymDashboard } from './dashboards/GymDashboard';
@@ -378,7 +379,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
       { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Centro ops', icon: <LayoutGrid className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
       { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
-      { label: 'CRM delivery', icon: <Users className="w-5 h-5" />, route: '/saas/delivery-crm', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
+      { label: 'Clientes', icon: <Users className="w-5 h-5" />, route: '/saas/clients', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
       { label: 'Equipo', icon: <UserCheck className="w-5 h-5" />, route: '/saas/team', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
       { label: 'Finanzas', icon: <Wallet className="w-5 h-5" />, route: '/saas/finance', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
       { label: 'Documentos', icon: <FileText className="w-5 h-5" />, route: '/saas/documents', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
@@ -1277,7 +1278,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
         )}
 
         {/* ═══ EMBUDO DE VENTAS CRM ═══ */}
-        {isVisible('funnel') && (
+        {isVisible('funnel') && vertical !== 'delivery' && DELIVERY_CRM_UI_ENABLED && (
           <div style={{ order: getWidgetOrder('funnel') }}>
             <DraggableWidget id="funnel" {...dragProps}>
               <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -1289,7 +1290,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                       {overallConversion}% conversión
                     </span>
                   </div>
-                  <button onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm')}
+                  <button onClick={() => navigate(clientsRouteForVertical(vertical))}
                     className="flex items-center gap-1 text-xs font-semibold text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
                     Ver CRM <ArrowRight className="w-3.5 h-3.5" />
                   </button>
@@ -1302,7 +1303,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                     </div>
                     <p className="text-sm font-semibold text-gray-400 dark:text-gray-500">Sin leads aún</p>
                     <p className="text-xs text-gray-300 dark:text-gray-600 mt-0.5">Los leads aparecerán aquí</p>
-                    <button onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm')}
+                    <button onClick={() => navigate(clientsRouteForVertical(vertical))}
                       className="mt-4 px-4 py-2 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-xs font-semibold transition-colors">
                       Ir al CRM
                     </button>
@@ -1544,9 +1545,9 @@ function OperativeBlock({
   const navigate = useNavigate();
 
   const items = useMemo(() => {
-    const crmRoute = vertical === 'delivery' ? '/saas/delivery-crm' : '/saas/vertical/compraventa/crm';
-    const crmTitle = vertical === 'delivery' ? 'CRM delivery' : 'Oportunidades CRM';
-    const crmSub = vertical === 'delivery' ? 'Seguimiento pedidos' : 'Leads activos';
+    const crmRoute = clientsRouteForVertical(vertical);
+    const crmTitle = vertical === 'delivery' ? 'Clientes' : 'Oportunidades CRM';
+    const crmSub = vertical === 'delivery' ? 'Fichas de cliente' : 'Leads activos';
 
     const base = [
       { title: crmTitle, value: String(oportunidades), sub: crmSub, icon: <ShoppingCart className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: crmRoute },

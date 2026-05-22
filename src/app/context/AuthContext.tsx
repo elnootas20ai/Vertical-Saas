@@ -63,8 +63,8 @@ interface AuthContextType {
   updateOnboardingData: (data: Record<string, unknown>) => Promise<void>;
   verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
   /** Sincroniza usuario con /api/auth/me (p. ej. verificación hecha en otra pestaña). */
-  refreshCurrentUser: () => Promise<{ ok: boolean; emailVerified: boolean }>;
-  resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
+  refreshCurrentUser: () => Promise<{ ok: boolean; emailVerified: boolean; sessionInvalid?: boolean }>;
+  resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string; info?: string }>;
   googleLogin: (credential: string) => Promise<{
     success: boolean;
     redirectTo?: string;
@@ -237,6 +237,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // S-01: Cookies establecidas por el backend
       setSessionUser(response.user);
+      const newUserId = String(response.user.user_id || response.user.id || '').trim();
+      if (newUserId) {
+        const { clearOnboardingDraftForNewAccount } = await import('../lib/onboardingLocalKeys');
+        clearOnboardingDraftForNewAccount(newUserId);
+      }
       return {
         success: true,
         redirectTo: response.redirectTo,
@@ -672,10 +677,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refreshCurrentUser = useCallback(async (): Promise<{ ok: boolean; emailVerified: boolean }> => {
+  const refreshCurrentUser = useCallback(async (): Promise<{ ok: boolean; emailVerified: boolean; sessionInvalid?: boolean }> => {
     try {
       const response = await fetchCurrentUserRequest();
       if (!response.ok || !response.user) {
+        const err = String(response.error || '');
+        if (/no encontrado|not found/i.test(err)) {
+          persistSession(null);
+          setUser(null);
+          setIsAuthenticated(false);
+          return { ok: false, emailVerified: false, sessionInvalid: true };
+        }
         return { ok: false, emailVerified: false };
       }
       const next = response.user;
@@ -697,10 +709,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string }> => {
+  const resendVerificationEmail = async (email: string): Promise<{ success: boolean; error?: string; info?: string }> => {
     try {
-      await resendVerificationEmailRequest(email);
-      return { success: true };
+      const target = (user?.email || email).trim().toLowerCase();
+      if (!target) {
+        return { success: false, error: 'Indica el email con el que te registraste' };
+      }
+      const response = await resendVerificationEmailRequest(target);
+      if (response.alreadyVerified) {
+        return {
+          success: true,
+          info: response.message || 'Este email ya está verificado. Puedes iniciar sesión.',
+        };
+      }
+      if (response.emailSent === false) {
+        return {
+          success: false,
+          error: response.message || 'No se pudo enviar el correo de verificación',
+        };
+      }
+      return { success: true, info: response.message };
     } catch (error) {
       return {
         success: false,

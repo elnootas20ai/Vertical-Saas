@@ -720,6 +720,18 @@ export function pointOfSaleDisplayLabel(p: Pick<PointOfSale, 'name' | 'code'>): 
   return name || code;
 }
 
+/** Nombre + código en dos líneas (sidebar, listas compactas). */
+export function pointOfSaleSidebarLines(p: Pick<PointOfSale, 'name' | 'code'>): {
+  title: string;
+  code: string | null;
+} {
+  const code = String(p.code || '').trim();
+  const name = String(p.name || '').trim();
+  if (!name && !code) return { title: 'Punto de venta', code: null };
+  if (name && code) return { title: name, code };
+  return { title: name || code, code: null };
+}
+
 /** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */
 import {
   derivePdvCodePrefix,

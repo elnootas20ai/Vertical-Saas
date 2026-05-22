@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { DeliveryActivationGatePanel } from '../../components/saas/DeliveryActivationGatePanel';
+import { useDeliveryStorePdvGate } from '../../hooks/useDeliveryStorePdvGate';
+import { isBrandSetupComplete, isDefaultCommercialBrand } from '../../lib/brandUtils';
+import { isDeliveryBusinessType } from '../../lib/deliverySetup';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -1316,6 +1320,8 @@ export function CatalogPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const pdvGate = useDeliveryStorePdvGate();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -2533,6 +2539,39 @@ export function CatalogPage() {
     { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
   ];
+
+  const brandReady = useMemo(() => {
+    if (!isDelivery || brands.length === 0) return !isDelivery;
+    const primary =
+      brands.find((b) => isDefaultCommercialBrand(b)) ??
+      brands.find((b) => b.active !== false) ??
+      brands[0];
+    return primary ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount: 1 }) : false;
+  }, [isDelivery, brands]);
+
+  if (isDelivery && pdvGate.loading) {
+    return (
+      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+        <div className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">Comprobando tienda y PDV…</div>
+      </Layout>
+    );
+  }
+
+  if (isDelivery && !pdvGate.ready) {
+    return (
+      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+        <DeliveryActivationGatePanel kind="store_pdv" />
+      </Layout>
+    );
+  }
+
+  if (isDelivery && !loading && !brandReady) {
+    return (
+      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+        <DeliveryActivationGatePanel kind="brand" />
+      </Layout>
+    );
+  }
 
   return (
     <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">

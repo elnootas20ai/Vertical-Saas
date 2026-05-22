@@ -5,8 +5,13 @@ import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button
 import { ACCESO__Input } from '../../../components/design-system/ACCESO__Input';
 import { ACCESO__AddressAutocomplete } from '../../../components/design-system/ACCESO__AddressAutocomplete';
 import { ACCESO__Checkbox } from '../../../components/design-system/ACCESO__Checkbox';
-import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
-import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { OnboardingCompanyVerification } from '../../../components/auth/onboarding/OnboardingCompanyVerification';
+import {
+  OnboardingStepHeading,
+  OnboardingStepShell,
+} from '../../../components/auth/onboarding/OnboardingStepShell';
+import type { OnboardingVerificationDocument } from '../../../lib/onboardingCompanyVerification';
+import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import { getNifOrCifError, getNifOrCifErrorWhileTyping } from '../../../lib/dniCifValidator';
 
 const STEP_INDEX = 1;
@@ -16,6 +21,14 @@ export function Company() {
   const { data, updateData, advanceStep } = useOnboarding();
   const [formData, setFormData] = useState(data.companyProfile);
   const [taxIdError, setTaxIdError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFormData({
+      ...data.companyProfile,
+      verificationDocuments: data.companyProfile.verificationDocuments ?? [],
+      verificationNote: data.companyProfile.verificationNote ?? '',
+    });
+  }, [data.companyProfile]);
 
   useEffect(() => {
     if (data.completedStep < STEP_INDEX - 1) {
@@ -75,33 +88,31 @@ export function Company() {
   };
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
-      {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-6 pb-2 shrink-0">
-        <div className="w-full max-w-3xl mx-auto">
-          <ACCESO__Stepper
-            steps={[...ONBOARDING_STEPS]}
-            currentStep={STEP_INDEX}
-            onStepClick={(i) => {
-              if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
-            }}
-          />
+    <OnboardingStepShell
+      stepIndex={STEP_INDEX}
+      footer={
+        <div className="flex justify-between gap-3">
+          <ACCESO__Button type="button" onClick={handleBack} variant="outline">
+            ← Atrás
+          </ACCESO__Button>
+          <ACCESO__Button type="submit" form="company-form" variant="primary">
+            Continuar →
+          </ACCESO__Button>
         </div>
-      </div>
+      }
+    >
+      <OnboardingStepHeading
+        title="Datos de tu empresa"
+        subtitle="Esta información nos ayudará a configurar tu espacio de trabajo"
+      />
 
-      {/* Contenido scrollable */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-              Datos de tu empresa
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Esta información nos ayudará a configurar tu espacio de trabajo
-            </p>
-          </div>
-
-          <form id="company-form" onSubmit={handleContinue} autoComplete="off" className="space-y-5">
+      <form
+        id="company-form"
+        onSubmit={handleContinue}
+        autoComplete="off"
+        className="flex-1 min-h-0 overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 content-start [&_.acceso-field]:!mb-0"
+      >
+            <div className="md:col-span-2">
             <ACCESO__Input
               label="Nombre comercial *"
               type="text"
@@ -112,7 +123,9 @@ export function Company() {
               autoComplete="off"
               required
             />
+            </div>
 
+            <div className="md:col-span-2">
             <ACCESO__Input
               label="Razón social"
               type="text"
@@ -122,8 +135,8 @@ export function Company() {
               onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
               autoComplete="off"
             />
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ACCESO__Input
                 label="CIF/NIF *"
                 type="text"
@@ -134,11 +147,7 @@ export function Company() {
                 maxLength={14}
                 inputMode="text"
                 error={taxIdError ?? undefined}
-                helperText={
-                  taxIdError
-                    ? undefined
-                    : '9 caracteres (DNI/NIE/CIF). El aviso de control solo aparece al terminar o al salir del campo.'
-                }
+                helperText={taxIdError ? undefined : 'DNI, NIE o CIF (9 caracteres)'}
                 autoComplete="off"
                 required
               />
@@ -152,8 +161,21 @@ export function Company() {
                 autoComplete="off"
                 required
               />
+
+            <div className="md:col-span-2">
+              <OnboardingCompanyVerification
+                documents={formData.verificationDocuments ?? []}
+                note={formData.verificationNote ?? ''}
+                onDocumentsChange={(verificationDocuments: OnboardingVerificationDocument[]) =>
+                  setFormData((prev) => ({ ...prev, verificationDocuments }))
+                }
+                onNoteChange={(verificationNote) =>
+                  setFormData((prev) => ({ ...prev, verificationNote }))
+                }
+              />
             </div>
 
+            <div className="md:col-span-2">
             <ACCESO__AddressAutocomplete
               label="Dirección"
               placeholder="Empieza a escribir una dirección…"
@@ -168,8 +190,8 @@ export function Company() {
                 }))
               }
             />
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ACCESO__Input
                 label="Email empresa"
                 type="email"
@@ -188,10 +210,9 @@ export function Company() {
                 onChange={(e) => setFormData({ ...formData, companyPhone: e.target.value })}
                 autoComplete="off"
               />
-            </div>
 
             {data.businessType === 'carDealership' && (
-              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="md:col-span-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                 <ACCESO__Checkbox
                   label="Soy socio ANCOVE"
                   checked={formData.isAncovePartner}
@@ -208,36 +229,14 @@ export function Company() {
                       value={formData.ancoveMemberNumber}
                       onChange={(e) => setFormData({ ...formData, ancoveMemberNumber: e.target.value })}
                     />
-                    <p className="text-sm text-gray-600 dark:text-gray-400 bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      ✨ Activaremos configuración y ventajas ANCOVE cuando esté validado.
+                    <p className="text-xs text-gray-600 dark:text-gray-400 bg-blue-50 border border-blue-200 rounded-lg p-2">
+                      Activaremos ventajas ANCOVE cuando esté validado.
                     </p>
                   </div>
                 )}
               </div>
             )}
           </form>
-        </div>
-      </div>
-
-      {/* Botones sticky abajo */}
-      <div className="sticky bottom-0 z-20 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 shrink-0">
-        <div className="w-full max-w-3xl mx-auto flex justify-between">
-          <ACCESO__Button
-            type="button"
-            onClick={handleBack}
-            variant="outline"
-          >
-            ← Atrás
-          </ACCESO__Button>
-          <ACCESO__Button
-            type="submit"
-            form="company-form"
-            variant="primary"
-          >
-            Continuar →
-          </ACCESO__Button>
-        </div>
-      </div>
-    </div>
+    </OnboardingStepShell>
   );
 }

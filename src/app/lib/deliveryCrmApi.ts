@@ -1,5 +1,6 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
+import { DELIVERY_CRM_UI_ENABLED } from './deliveryCrmFeature';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -17,6 +18,9 @@ function getCouchHeaders(): Record<string, string> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!DELIVERY_CRM_UI_ENABLED) {
+    throw new Error('El módulo CRM Delivery no está activo en la interfaz.');
+  }
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {

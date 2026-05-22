@@ -3,7 +3,7 @@ import { useSSE } from '../hooks/useSSE';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
-import { useBusiness } from './BusinessContext';
+import { useBusinessOptional } from './BusinessContext';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
 import { logActivityRequest } from '../lib/authApi';
 import {
@@ -784,7 +784,7 @@ function deserializeSubscription(subscription?: PersistedBillingSubscription | n
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user: authUser } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const scopeKey = currentBusiness?.business_id
     ? `b:${currentBusiness.business_id}`
     : authUser?.user_id

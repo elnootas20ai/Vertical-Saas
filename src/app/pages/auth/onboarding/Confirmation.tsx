@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { CheckCircle, Calendar, CreditCard, ArrowRight, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import { useAuth } from '../../../context/AuthContext';
+import { isDeliveryBusinessType } from '../../../lib/onboardingPlanRecommendation';
 
 const stepKeys = [
   { id: 1, key: 'workspace', duration: 1000 },
@@ -34,6 +35,26 @@ export function Confirmation() {
     ...s,
     label: t(`onboarding.confirmation.steps.${s.key}`),
   }));
+
+  const tradeName = data.companyProfile.tradeName?.trim() || '';
+  const isDelivery = isDeliveryBusinessType(data.businessType);
+
+  const { headingTitle, headingSubtitle } = useMemo(() => {
+    if (isDelivery) {
+      return {
+        headingTitle: tradeName
+          ? `¡${tradeName} ya está en Vertial Delivery!`
+          : '¡Tu espacio en Vertial Delivery está listo!',
+        headingSubtitle: tradeName
+          ? `Estamos activando el panel de ${tradeName}: plan, prueba gratuita y acceso a locales, caja y pedidos.`
+          : 'Estamos activando tu plan, la prueba gratuita y el acceso a locales, caja y pedidos.',
+      };
+    }
+    return {
+      headingTitle: t('onboarding.confirmation.title'),
+      headingSubtitle: t('onboarding.confirmation.subtitle'),
+    };
+  }, [isDelivery, tradeName, t]);
 
   useEffect(() => {
     if (currentStep >= steps.length) return;
@@ -81,10 +102,10 @@ export function Confirmation() {
       <div className="w-full max-w-3xl">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-            {t('onboarding.confirmation.title')}
+            {headingTitle}
           </h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            {t('onboarding.confirmation.subtitle')}
+          <p className="text-gray-600 dark:text-gray-400 max-w-xl mx-auto leading-relaxed">
+            {headingSubtitle}
           </p>
         </div>
 

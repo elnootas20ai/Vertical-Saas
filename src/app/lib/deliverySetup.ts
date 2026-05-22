@@ -1,4 +1,15 @@
 import {
+  createBrandRequest,
+  listBrandsRequest,
+  updateBrandRequest,
+  type Brand,
+} from './brandApi';
+import {
+  DEFAULT_COMMERCIAL_BRAND_NAME,
+  isDefaultBrandNamePlaceholder,
+  isDefaultCommercialBrand,
+} from './brandUtils';
+import {
   dedupePointsOfSale,
   ensureDeliveryPdvForWorkCenter,
   listPointsOfSaleRequest,
@@ -26,13 +37,17 @@ export const DELIVERY_FIRST_PDV_PATH = '/saas/settings/tienda';
 /** Tras crear PDV en sesión (evita parpadeos al revalidar listas). */
 export const DELIVERY_PDV_SESSION_KEY = 'vertial_delivery_has_pdv';
 
-const ONBOARDING_STORAGE_KEY = 'vertial_onboarding_data';
+import { ONBOARDING_DATA_LEGACY_KEY, onboardingDataStorageKey } from './onboardingStorage';
 
 /** Tipo de negocio guardado en onboarding (local) antes de que el user en API esté al día. */
-export function readStoredOnboardingBusinessType(): string | null {
+export function readStoredOnboardingBusinessType(userId?: string | null): string | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    const key = userId ? onboardingDataStorageKey(String(userId)) : ONBOARDING_DATA_LEGACY_KEY;
+    let raw = localStorage.getItem(key);
+    if (!raw && userId) {
+      raw = localStorage.getItem(ONBOARDING_DATA_LEGACY_KEY);
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { businessType?: string };
     const bt = String(parsed?.businessType || '').trim();
@@ -145,6 +160,53 @@ export interface DeliveryStoresState {
   pointsOfSale: PointOfSale[];
 }
 
+/** Id estable de la empresa activa (selector superior). */
+export function resolveBusinessScopeId(business?: Business | null): string {
+  return String(business?.business_id || (business as { id?: string } | null)?.id || '').trim();
+}
+
+/**
+ * Centros de trabajo visibles solo para la empresa activa.
+ * Si ya hay centros con `businessId`, cada empresa ve solo los suyos.
+ * Si ninguno tiene `businessId` (datos antiguos), se muestran todos (comportamiento legacy).
+ */
+export function filterWorkCentersForBusinessScope(
+  workCenters: WorkCenter[],
+  businessId: string,
+): WorkCenter[] {
+  const bid = String(businessId || '').trim();
+  if (!bid) return workCenters;
+
+  const scoped = workCenters.filter((wc) => String(wc.businessId || '').trim() === bid);
+  const anyScoped = workCenters.some((wc) => String(wc.businessId || '').trim());
+  if (scoped.length > 0) return scoped;
+  if (!anyScoped) return workCenters;
+  return [];
+}
+
+/** Solo centros con `businessId` de esta empresa (sin mezclar legacy ni otras empresas). */
+export function workCentersStrictlyForBusiness(
+  workCenters: WorkCenter[],
+  businessId: string,
+): WorkCenter[] {
+  const bid = String(businessId || '').trim();
+  if (!bid) return [];
+  return workCenters.filter((wc) => String(wc.businessId || '').trim() === bid);
+}
+
+/** PDV de caja enlazados a centros de la empresa activa (evita mezclar tiendas entre empresas). */
+export function filterPointsOfSaleForWorkCenters(
+  pointsOfSale: PointOfSale[],
+  workCenters: WorkCenter[],
+): PointOfSale[] {
+  const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
+  if (wcIds.size === 0) return [];
+  return pointsOfSale.filter((p) => {
+    const wcId = String(p.workCenterId || '').trim();
+    return wcId && wcIds.has(wcId);
+  });
+}
+
 /** Fuente única: centros de trabajo + PDV de caja enlazados y deduplicados. */
 export async function loadDeliveryStores(
   authUser: AuthLike,
@@ -155,17 +217,72 @@ export async function loadDeliveryStores(
     return { dataUserId: '', workCenters: [], pointsOfSale: [] };
   }
 
-  const [workCenters, rawPdvs] = await Promise.all([
+  const businessId = resolveBusinessScopeId(business);
+
+  const [allWorkCenters, rawPdvs] = await Promise.all([
     listWorkCentersForDelivery(dataUserId, business ?? null),
     listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]),
   ]);
+
+  const workCenters = filterWorkCentersForBusinessScope(allWorkCenters, businessId);
 
   let pointsOfSale = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, rawPdvs, {
     business: business ?? null,
   });
   pointsOfSale = dedupePointsOfSale(pointsOfSale).filter((p) => p.active !== false);
+  pointsOfSale = filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters);
 
   return { dataUserId, workCenters, pointsOfSale };
+}
+
+/**
+ * Marca por defecto de la empresa + enlace a tiendas retail (alta delivery).
+ * Idempotente: no duplica «General» ni re-vincula tiendas ya asignadas.
+ */
+export async function ensureDeliveryDefaultBrand(
+  businessId: string,
+  options?: { workCenterId?: string; preferredName?: string },
+): Promise<Brand | null> {
+  const bid = String(businessId || '').trim();
+  if (!bid) return null;
+
+  let brands = await listBrandsRequest(bid).catch(() => [] as Brand[]);
+  let defaultBrand = brands.find((b) => isDefaultCommercialBrand(b)) ?? null;
+
+  if (!defaultBrand) {
+    const preferred = String(options?.preferredName || '').trim();
+    defaultBrand = await createBrandRequest(bid, {
+      name: preferred || DEFAULT_COMMERCIAL_BRAND_NAME,
+      description: '',
+      active: true,
+      isDefault: true,
+      primaryColor: '#6366F1',
+      salesPointIds: [],
+    });
+    brands = [defaultBrand, ...brands];
+  } else if (options?.preferredName) {
+    const preferred = options.preferredName.trim();
+    if (preferred && isDefaultBrandNamePlaceholder(defaultBrand.name)) {
+      defaultBrand = await updateBrandRequest(bid, {
+        ...defaultBrand,
+        name: preferred,
+      });
+    }
+  }
+
+  const wcId = String(options?.workCenterId || '').trim();
+  if (wcId) {
+    const current = new Set((defaultBrand.salesPointIds ?? []).map((id) => String(id).trim()).filter(Boolean));
+    if (!current.has(wcId)) {
+      current.add(wcId);
+      defaultBrand = await updateBrandRequest(bid, {
+        ...defaultBrand,
+        salesPointIds: Array.from(current),
+      });
+    }
+  }
+
+  return defaultBrand;
 }
 
 /**
@@ -179,8 +296,8 @@ export async function countDeliveryPointsOfSale(
   const dataUserId = resolveDeliveryDataUserId(authUser, business);
   if (!dataUserId) return 0;
 
-  const pdvs = await listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]);
-  const active = pdvs.filter((p) => p.active !== false).length;
+  const state = await loadDeliveryStores(authUser, business);
+  const active = state.pointsOfSale.length;
   if (active > 0) {
     markDeliveryPdvSessionConfirmed(dataUserId);
     return active;
@@ -251,6 +368,18 @@ export async function setupDeliveryRetailStore(
 
   notifyDeliveryWorkCentersChanged();
   markDeliveryPdvSessionConfirmed(dataUserId);
+
+  const businessIdForBrand = String(business?.business_id || business?.id || payload.businessId || '').trim();
+  if (businessIdForBrand) {
+    try {
+      await ensureDeliveryDefaultBrand(businessIdForBrand, {
+        workCenterId: wc._id,
+        preferredName: trimmedName,
+      });
+    } catch {
+      /* la marca se puede completar en Ajustes → Marca */
+    }
+  }
 
   return { workCenter: wc, pointOfSale: pdv };
 }

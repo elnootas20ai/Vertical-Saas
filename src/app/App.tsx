@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { ThemeProvider, useTheme } from 'next-themes';
-import { router } from './routes';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+/** Antes que `./routes`: evita ciclo routes → SaasRoot → AppContext → BusinessContext. */
 import { BusinessProvider } from './context/BusinessContext';
+import { router } from './routes';
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
   const { user } = useAuth();

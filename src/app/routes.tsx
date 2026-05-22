@@ -17,6 +17,7 @@ import { PaymentInfo } from './pages/auth/onboarding/PaymentInfo';
 import { Confirmation } from './pages/auth/onboarding/Confirmation';
 import { Gate } from './pages/auth/Gate';
 import { RequireEmailVerified } from './components/RequireEmailVerified';
+import { DELIVERY_CRM_REDIRECT_PATH } from './lib/deliveryCrmFeature';
 import { VerifyEmailPending } from './pages/auth/VerifyEmailPending';
 import { SaasRoot } from './pages/SaasRoot';
 import { Dashboard } from './pages/saas/Dashboard';
@@ -85,7 +86,8 @@ import { BookingPage } from './pages/public/BookingPage';
 import { GdprPanel } from './pages/saas/GdprPanel';
 import { VehiclePublic } from './pages/public/VehiclePublic';
 import { SignaturePublic } from './pages/public/SignaturePublic';
-import { LegalInfoPage } from './pages/public/LegalInfoPage';
+import { LegalHubPage } from './pages/public/LegalHubPage';
+import { LegalDocumentPage } from './pages/public/LegalDocumentPage';
 import { Workshop } from './pages/saas/Workshop';
 import { WorkOrderDetail } from './pages/saas/WorkOrderDetail';
 import { Parts } from './pages/saas/Parts';
@@ -95,8 +97,6 @@ import { PayrollPage } from './pages/saas/PayrollPage';
 import { Delivery } from './pages/saas/Delivery';
 import { SalaPage } from './pages/saas/SalaPage';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
-import { DeliveryCrm } from './pages/saas/DeliveryCrm';
-import { DeliveryCrmWorker } from './pages/saas/DeliveryCrmWorker';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { CatalogPage } from './pages/saas/DeliveryCatalog';
@@ -522,12 +522,13 @@ export const router = createBrowserRouter([
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
           { path: 'vertical/delivery/tpv', element: <RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal> },
           { path: 'vertical/delivery/caja', element: <RequirePdvTerminal><CajaPage /></RequirePdvTerminal> },
-          { path: 'delivery-crm', Component: DeliveryCrm },
-          { path: 'delivery-crm/worker', Component: DeliveryCrmWorker },
+          { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
+          { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },
           { path: 'admin', element: <RequireBusinessOwner><RequireSuperAdmin><AdminPanel /></RequireSuperAdmin></RequireBusinessOwner> },
           { path: 'gdpr', element: <RequireBusinessOwner><GdprPanel /></RequireBusinessOwner> },
           { path: 'settings', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
+          { path: 'settings/horarios', element: <Navigate to="/saas/settings/tienda?action=horarios" replace /> },
           { path: 'settings/:tab', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'billing', element: <RequireBusinessOwner><Billing /></RequireBusinessOwner> },
           { path: 'help', Component: HelpCenter },
@@ -865,8 +866,12 @@ export const router = createBrowserRouter([
         Component: QuotePublicResponse,
       },
       {
+        path: 'legal/:docSlug',
+        Component: LegalDocumentPage,
+      },
+      {
         path: 'legal',
-        Component: LegalInfoPage,
+        Component: LegalHubPage,
       },
       {
         path: '*',

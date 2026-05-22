@@ -29,6 +29,46 @@ export function isDefaultCommercialBrand(brand: Pick<Brand, 'name' | 'isDefault'
   return Boolean(brand.isDefault) || normalizeBrandNameKey(brand.name) === normalizeBrandNameKey(DEFAULT_COMMERCIAL_BRAND_NAME);
 }
 
+export function isBrandActive(brand: Pick<Brand, 'active'>): boolean {
+  return brand.active !== false;
+}
+
+/** Al menos una marca activa debe quedar en la empresa. */
+export function canDeactivateBrand(
+  brand: Pick<Brand, '_id' | 'active'>,
+  brands: Array<Pick<Brand, '_id' | 'active'>>,
+): boolean {
+  if (!isBrandActive(brand)) return true;
+  const activeCount = brands.filter((b) => isBrandActive(b)).length;
+  return activeCount > 1;
+}
+
+/** Nueva línea comercial: inactiva si ya hay otra marca activa (como la 2.ª tienda). */
+export function resolveBrandActiveOnCreate(
+  existingBrands: Array<Pick<Brand, 'active'>>,
+  requestedActive?: boolean,
+): boolean {
+  if (requestedActive === false) return false;
+  const hasActive = existingBrands.some((b) => isBrandActive(b));
+  return hasActive ? false : true;
+}
+
+/** Fondo de vista previa / cabecera según color de marca. */
+export function brandPreviewGradient(primaryColor: string): string {
+  const hex = String(primaryColor || '').trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+    return 'linear-gradient(145deg, #6366f1 0%, #4f46e5 100%)';
+  }
+  return `linear-gradient(145deg, ${hex} 0%, ${hex}dd 48%, ${hex}b3 100%)`;
+}
+
+/** Color de marca con alpha en hex (#RRGGBB + AA). */
+export function brandTint(primaryColor: string, alphaSuffix = '18'): string {
+  const hex = String(primaryColor || '').trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return `#6366f1${alphaSuffix}`;
+  return `${hex}${alphaSuffix}`;
+}
+
 export function sortBrandsForDisplay(brands: Brand[]): Brand[] {
   return [...brands].sort((a, b) => {
     const aDef = isDefaultCommercialBrand(a) ? 0 : 1;

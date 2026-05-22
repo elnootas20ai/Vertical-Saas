@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
-import { useBusiness } from './BusinessContext';
+import { useBusinessOptional } from './BusinessContext';
 import type { ScrapyardVehicle, ScrapyardHistoryEntry, ScrapyardAlert } from '../lib/scrapyardTypes';
 import {
   listScrapyardVehicles,
@@ -142,12 +142,13 @@ function computeAlerts(vehicles: ScrapyardVehicle[]): ScrapyardAlert[] {
 
 export function ScrapyardProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const { activeBusiness } = useBusiness();
+  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const [vehicles, setVehicles] = useState<ScrapyardVehicle[]>([]);
   const [loading, setLoading] = useState(false);
 
   const userId = (user as any)?.id || (user as any)?.uid || '';
-  const businessId = (activeBusiness as any)?.id || null;
+  const businessId =
+    currentBusiness?.business_id || (currentBusiness as { id?: string } | null)?.id || null;
 
   const refresh = useCallback(async () => {
     if (!userId) return;

@@ -1,5 +1,4 @@
 import React, {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -7,6 +6,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
+import { BusinessContext, type BusinessContextType } from './businessContextRef';
 import { useAuth } from './AuthContext';
 import {
   type Business,
@@ -21,28 +21,9 @@ import {
   updateBusinessMemberRequest,
   updateBusinessRequest,
 } from '../lib/businessApi';
+import { notifyDeliveryWorkCentersChanged } from '../lib/deliverySetup';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface BusinessContextType {
-  businesses: Business[];
-  currentBusiness: Business | null;
-  isLoading: boolean;
-  /** Primera carga de empresas terminada (éxito o error). Evita mandar a Gate antes de tiempo. */
-  businessesFetchSettled: boolean;
-  switchBusiness: (businessId: string) => void;
-  createBusiness: (data: CreateBusinessPayload) => Promise<{ success: boolean; business?: Business; error?: string }>;
-  updateBusiness: (businessId: string, data: UpdateBusinessPayload) => Promise<{ success: boolean; business?: Business; error?: string }>;
-  deleteBusiness: (businessId: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  addMember: (businessId: string, member: Omit<BusinessMember, 'joinedAt'>) => Promise<{ success: boolean; business?: Business; error?: string }>;
-  updateMember: (businessId: string, memberId: string, updates: Pick<BusinessMember, 'role' | 'permissions'>) => Promise<{ success: boolean; business?: Business; error?: string }>;
-  removeMember: (businessId: string, memberId: string) => Promise<{ success: boolean; business?: Business; error?: string }>;
-  reloadBusinesses: () => Promise<void>;
-}
-
-// ─── Context ──────────────────────────────────────────────────────────────────
-
-const BusinessContext = createContext<BusinessContextType | undefined>(undefined);
+export type { BusinessContextType } from './businessContextRef';
 
 function getStoredBusinessId(userId: string): string | null {
   try {
@@ -178,6 +159,16 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     void reloadBusinesses();
   }, [reloadBusinesses]);
 
+  useEffect(() => {
+    if (!user?.user_id || businesses.length === 0) return;
+    void import('../lib/onboardingLocalKeys').then(({ migrateLegacyOnboardingGuidesForBusinesses }) => {
+      migrateLegacyOnboardingGuidesForBusinesses(
+        user.user_id,
+        businesses.map((b) => b.business_id).filter(Boolean),
+      );
+    });
+  }, [user?.user_id, businesses]);
+
   const switchBusiness = useCallback(
     (businessId: string) => {
       const found = businesses.find((b) => b.business_id === businessId);
@@ -186,6 +177,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       if (user?.user_id) {
         storeBusinessId(user.user_id, businessId);
       }
+      notifyDeliveryWorkCentersChanged();
     },
     [businesses, user?.user_id],
   );
@@ -201,9 +193,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         setBusinesses(newList);
         if (user?.user_id) writeBusinessesCache(user.user_id, newList);
 
-        if (!currentBusiness) {
-          setCurrentBusiness(response.business);
-          storeBusinessId(user.user_id, response.business.business_id);
+        setCurrentBusiness(response.business);
+        storeBusinessId(user.user_id, response.business.business_id);
+        notifyDeliveryWorkCentersChanged();
+
+        const newBusinessId = String(response.business.business_id || '').trim();
+        if (newBusinessId) {
+          void import('../lib/onboardingLocalKeys').then(
+            ({ armOnboardingTourForBusiness, resetActivationGuidesForBusiness }) => {
+              armOnboardingTourForBusiness(user.user_id, newBusinessId);
+              resetActivationGuidesForBusiness(user.user_id, newBusinessId);
+            },
+          );
         }
 
         return { success: true, business: response.business };

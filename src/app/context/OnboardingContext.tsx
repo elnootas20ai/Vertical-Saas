@@ -1,12 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getOnboardingProgressRequest, saveOnboardingProgressRequest } from '../lib/authApi';
+import type { OnboardingVerificationDocument } from '../lib/onboardingCompanyVerification';
+import type { DeliveryNeedsSelection } from '../lib/onboardingPlanRecommendation';
+import {
+  ONBOARDING_DATA_LEGACY_KEY,
+  ONBOARDING_RESET_EVENT,
+  onboardingDataStorageKey,
+} from '../lib/onboardingStorage';
 
 export const ONBOARDING_STEPS = [
   'Tipo de negocio',
   'Empresa',
   'Estructura',
-  'Necesidades',
-  'Recomendación',
+  'Operativa',
+  'Precio',
   'Pago',
 ] as const;
 
@@ -27,13 +34,15 @@ export interface OnboardingData {
     legalName: string;
     taxId: string;
     province: string;
-    /** Localidad (p. ej. desde autocompletado de dirección); si falta, SaaS usa provincia como respaldo para el negocio. */
     city?: string;
     address: string;
     companyEmail: string;
     companyPhone: string;
     isAncovePartner: boolean;
     ancoveMemberNumber: string;
+    /** Documentos opcionales (CIF, licencia, etc.) para revisión de acceso */
+    verificationDocuments?: OnboardingVerificationDocument[];
+    verificationNote?: string;
   };
   businessMetrics: {
     userCount: number;
@@ -52,6 +61,8 @@ export interface OnboardingData {
     analytics: boolean;
     workshop: boolean;
   };
+  /** Solo delivery: las 8 cartas del paso Operativa (se guardan tal cual). */
+  deliveryNeeds?: DeliveryNeedsSelection;
   subscriptionSelection: {
     recommendedPlanId: string;
     billingMode: 'monthly' | 'annual';
@@ -81,9 +92,7 @@ interface OnboardingContextType {
   advanceStep: (stepIndex: number) => void;
 }
 
-const STORAGE_KEY = 'vertial_onboarding_data';
-
-const initialData: OnboardingData = {
+export const initialOnboardingData: OnboardingData = {
   completedStep: -1,
   businessType: 'events',
   companyProfile: {
@@ -96,6 +105,8 @@ const initialData: OnboardingData = {
     companyPhone: '',
     isAncovePartner: false,
     ancoveMemberNumber: '',
+    verificationDocuments: [],
+    verificationNote: '',
   },
   businessMetrics: {
     userCount: 1,
@@ -135,48 +146,124 @@ const initialData: OnboardingData = {
 
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
+function parseStoredOnboarding(raw: string | null): Partial<OnboardingData> | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Partial<OnboardingData>;
+  } catch {
+    return null;
+  }
+}
+
+function mergeOnboardingData(partial?: Partial<OnboardingData> | null): OnboardingData {
+  const p = partial ?? {};
+  return {
+    ...initialOnboardingData,
+    ...p,
+    companyProfile: {
+      ...initialOnboardingData.companyProfile,
+      ...(p.companyProfile ?? {}),
+      verificationDocuments: p.companyProfile?.verificationDocuments ?? [],
+      verificationNote: p.companyProfile?.verificationNote ?? '',
+    },
+    businessMetrics: { ...initialOnboardingData.businessMetrics, ...(p.businessMetrics ?? {}) },
+    requestedModules: { ...initialOnboardingData.requestedModules, ...(p.requestedModules ?? {}) },
+    deliveryNeeds: p.deliveryNeeds,
+    subscriptionSelection: {
+      ...initialOnboardingData.subscriptionSelection,
+      ...(p.subscriptionSelection ?? {}),
+    },
+    paymentDetails: { ...initialOnboardingData.paymentDetails, ...(p.paymentDetails ?? {}) },
+    trial: { ...initialOnboardingData.trial, ...(p.trial ?? {}) },
+  };
+}
+
 export function OnboardingProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<OnboardingData>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      return initialData;
-    }
-
-    try {
-      return { ...initialData, ...JSON.parse(stored) };
-    } catch {
-      return initialData;
-    }
-  });
-
+  const [data, setData] = useState<OnboardingData>(initialOnboardingData);
   const [userId, setUserId] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedForUserRef = useRef<string | null>(null);
 
-  // Cargar progreso desde el backend cuando se identifica al usuario
+  const persistLocal = useCallback((uid: string | null, next: OnboardingData) => {
+    if (!uid) return;
+    try {
+      localStorage.setItem(onboardingDataStorageKey(uid), JSON.stringify(next));
+      localStorage.removeItem(ONBOARDING_DATA_LEGACY_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const applyFreshDraft = useCallback((uid: string | null) => {
+    setData(initialOnboardingData);
+    if (uid) {
+      try {
+        localStorage.removeItem(onboardingDataStorageKey(uid));
+      } catch {
+        /* ignore */
+      }
+    }
+    localStorage.removeItem(ONBOARDING_DATA_LEGACY_KEY);
+  }, []);
+
   useEffect(() => {
-    if (!userId) return;
+    const onReset = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ userId?: string }>).detail;
+      const uid = String(detail?.userId || userId || '').trim() || null;
+      loadedForUserRef.current = uid;
+      applyFreshDraft(uid);
+    };
+    window.addEventListener(ONBOARDING_RESET_EVENT, onReset);
+    return () => window.removeEventListener(ONBOARDING_RESET_EVENT, onReset);
+  }, [userId, applyFreshDraft]);
+
+  useEffect(() => {
+    if (!userId) {
+      loadedForUserRef.current = null;
+      return;
+    }
+    if (loadedForUserRef.current === userId) return;
+
+    const legacy = parseStoredOnboarding(localStorage.getItem(ONBOARDING_DATA_LEGACY_KEY));
+    if (legacy) {
+      localStorage.removeItem(ONBOARDING_DATA_LEGACY_KEY);
+    }
+
+    const local = parseStoredOnboarding(localStorage.getItem(onboardingDataStorageKey(userId)));
 
     getOnboardingProgressRequest(userId)
       .then((response) => {
-        if (response.onboardingData && Object.keys(response.onboardingData).length > 0) {
-          setData((prev) => ({
-            ...initialData,
-            ...prev,
-            ...(response.onboardingData as Partial<OnboardingData>),
-          }));
+        const fromBackend =
+          response.onboardingData && Object.keys(response.onboardingData).length > 0
+            ? (response.onboardingData as Partial<OnboardingData>)
+            : null;
+
+        if (fromBackend) {
+          const merged = mergeOnboardingData(fromBackend);
+          setData(merged);
+          persistLocal(userId, merged);
+        } else if (local && (local.companyProfile?.tradeName || local.completedStep >= 0)) {
+          setData(mergeOnboardingData(local));
+        } else {
+          setData(initialOnboardingData);
+          localStorage.removeItem(onboardingDataStorageKey(userId));
         }
+        loadedForUserRef.current = userId;
       })
       .catch(() => {
-        // Si falla, el estado local (localStorage) ya está cargado como fallback
+        if (local && (local.companyProfile?.tradeName || local.completedStep >= 0)) {
+          setData(mergeOnboardingData(local));
+        } else {
+          setData(initialOnboardingData);
+        }
+        loadedForUserRef.current = userId;
       });
-  }, [userId]);
+  }, [userId, persistLocal]);
 
-  // Sincronizar con localStorage en cada cambio
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+    persistLocal(userId, data);
+  }, [data, userId, persistLocal]);
 
-  // Guardar en backend con debounce de 800ms para no saturar
   const syncToBackend = useCallback(
     (nextData: OnboardingData) => {
       if (!userId) return;
@@ -185,7 +272,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         saveOnboardingProgressRequest(userId, {
           onboardingData: nextData as unknown as Record<string, unknown>,
         }).catch(() => {
-          // Silenciar errores de red; localStorage ya actuó como fallback
+          /* localStorage ya guardó */
         });
       }, 800);
     },
@@ -210,8 +297,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   };
 
   const resetData = () => {
-    setData(initialData);
-    localStorage.removeItem(STORAGE_KEY);
+    applyFreshDraft(userId);
+    loadedForUserRef.current = userId;
   };
 
   const initializeTrial = () => {

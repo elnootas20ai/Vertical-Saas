@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Users, MapPin, Minus, Plus } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
-import { ACCESO__Stepper } from '../../../components/design-system/ACCESO__Stepper';
-import { useOnboarding, ONBOARDING_STEPS, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  OnboardingStepHeading,
+  OnboardingStepShell,
+} from '../../../components/auth/onboarding/OnboardingStepShell';
+import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 
 const STEP_INDEX = 2;
 
@@ -27,9 +30,9 @@ function NumberStepper({
         aria-label="Disminuir"
         onClick={() => onChange(Math.max(min, value - 1))}
         disabled={value <= min}
-        className="px-3 py-3 shrink-0 bg-gray-100 dark:bg-gray-700/80 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:pointer-events-none transition-colors border-r border-gray-200 dark:border-gray-600"
+        className="px-3 py-2 shrink-0 bg-gray-100 dark:bg-gray-700/80 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:pointer-events-none transition-colors border-r border-gray-200 dark:border-gray-600"
       >
-        <Minus className="w-5 h-5 mx-auto" />
+        <Minus className="w-4 h-4 mx-auto" />
       </button>
       <input
         id={id}
@@ -42,7 +45,7 @@ function NumberStepper({
           if (Number.isNaN(n)) return;
           onChange(Math.min(max, Math.max(min, n)));
         }}
-        className="flex-1 min-w-0 px-2 py-3 border-0 bg-transparent text-center font-medium text-lg focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="flex-1 min-w-0 px-2 py-2 border-0 bg-transparent text-center font-medium text-base focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         required
       />
       <button
@@ -50,9 +53,9 @@ function NumberStepper({
         aria-label="Aumentar"
         onClick={() => onChange(Math.min(max, value + 1))}
         disabled={value >= max}
-        className="px-3 py-3 shrink-0 bg-gray-100 dark:bg-gray-700/80 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:pointer-events-none transition-colors border-l border-gray-200 dark:border-gray-600"
+        className="px-3 py-2 shrink-0 bg-gray-100 dark:bg-gray-700/80 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:pointer-events-none transition-colors border-l border-gray-200 dark:border-gray-600"
       >
-        <Plus className="w-5 h-5 mx-auto" />
+        <Plus className="w-4 h-4 mx-auto" />
       </button>
     </div>
   );
@@ -67,6 +70,7 @@ export function Structure() {
       navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
     }
   }, [data.completedStep, navigate]);
+
   const [formData, setFormData] = useState({
     userCount: data.businessMetrics.userCount,
     locationCount: data.businessMetrics.locationCount,
@@ -84,99 +88,71 @@ export function Structure() {
     navigate('/auth/onboarding/needs');
   };
 
-  const handleBack = () => {
-    navigate('/auth/onboarding/company');
-  };
-
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col overflow-hidden">
-      {/* Stepper sticky arriba */}
-      <div className="sticky top-0 z-20 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 pt-6 pb-2 shrink-0">
-        <div className="w-full max-w-3xl mx-auto">
-          <ACCESO__Stepper
-            steps={[...ONBOARDING_STEPS]}
-            currentStep={STEP_INDEX}
-            onStepClick={(i) => {
-              if (i !== STEP_INDEX) navigate(ONBOARDING_ROUTES[i]);
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Contenido scrollable */}
-      <div className="flex-1 overflow-y-auto px-6 py-8">
-        <div className="w-full max-w-3xl mx-auto">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-              Estructura de tu negocio
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Ayúdanos a conocer tu operación para recomendarte el mejor plan
-            </p>
-          </div>
-
-          <form id="structure-form" onSubmit={handleContinue} className="space-y-6">
-            {/* Campos OBLIGATORIOS */}
-            <div className="p-6 bg-amber-50 border-2 border-amber-200 rounded-2xl space-y-4">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-6 h-6 bg-amber-600 rounded-full flex items-center justify-center text-white text-xs font-bold">!</div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100">Información clave para tu plan</h3>
-              </div>
-
-              <div className="space-y-6">
-                <div>
-                  <label className="flex items-start gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    <Users className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>¿Cuántos usuarios/trabajadores van a usar Vertial? *</span>
-                  </label>
-                  <NumberStepper
-                    min={1}
-                    max={50}
-                    value={formData.userCount}
-                    onChange={(n) => setFormData({ ...formData, userCount: n })}
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Incluye administradores, comerciales, mecánicos, etc.</p>
-                </div>
-
-                <div>
-                  <label className="flex items-start gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
-                    <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>¿Cuántas ubicaciones/exposiciones tienes? *</span>
-                  </label>
-                  <NumberStepper
-                    min={1}
-                    max={10}
-                    value={formData.locationCount}
-                    onChange={(n) => setFormData({ ...formData, locationCount: n })}
-                  />
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Oficinas, establecimientos, almacenes, etc.</p>
-                </div>
-              </div>
-            </div>
-
-          </form>
-        </div>
-      </div>
-
-      {/* Botones sticky abajo */}
-      <div className="sticky bottom-0 z-20 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-6 py-4 shrink-0">
-        <div className="w-full max-w-3xl mx-auto flex justify-between">
-          <ACCESO__Button
-            type="button"
-            onClick={handleBack}
-            variant="outline"
-          >
+    <OnboardingStepShell
+      stepIndex={STEP_INDEX}
+      footer={
+        <div className="flex justify-between gap-3">
+          <ACCESO__Button type="button" onClick={() => navigate('/auth/onboarding/company')} variant="outline">
             ← Atrás
           </ACCESO__Button>
-          <ACCESO__Button
-            type="submit"
-            form="structure-form"
-            variant="primary"
-          >
+          <ACCESO__Button type="submit" form="structure-form" variant="primary">
             Continuar →
           </ACCESO__Button>
         </div>
-      </div>
-    </div>
+      }
+    >
+      <OnboardingStepHeading
+        title="Estructura de tu negocio"
+        subtitle="Ayúdanos a conocer tu operación para recomendarte el mejor plan"
+      />
+
+      <form
+        id="structure-form"
+        onSubmit={handleContinue}
+        className="flex-1 min-h-0 flex flex-col justify-center"
+      >
+        <div className="p-4 sm:p-5 bg-amber-50 dark:bg-amber-950/30 border-2 border-amber-200 dark:border-amber-800 rounded-xl space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-amber-600 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
+              !
+            </div>
+            <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100">
+              Información clave para tu plan
+            </h3>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="flex items-start gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                <Users className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Usuarios en Vertial *</span>
+              </label>
+              <NumberStepper
+                min={1}
+                max={50}
+                value={formData.userCount}
+                onChange={(n) => setFormData({ ...formData, userCount: n })}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Admin, comercial, taller…</p>
+            </div>
+
+            <div>
+              <label className="flex items-start gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-2">
+                <MapPin className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>Ubicaciones / locales *</span>
+              </label>
+              <NumberStepper
+                min={1}
+                max={10}
+                value={formData.locationCount}
+                onChange={(n) => setFormData({ ...formData, locationCount: n })}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Oficinas, tiendas, almacenes…</p>
+            </div>
+          </div>
+        </div>
+      </form>
+    </OnboardingStepShell>
   );
 }

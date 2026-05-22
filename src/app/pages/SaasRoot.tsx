@@ -8,7 +8,7 @@ import { AppProvider, useApp } from '../context/AppContext';
 
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 
-import { useBusiness } from '../context/BusinessContext';
+import { BusinessProvider, useBusinessOptional } from '../context/BusinessContext';
 
 import { GroupProvider } from '../context/GroupContext';
 
@@ -20,7 +20,11 @@ import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
 
-import { readStoredOnboardingBusinessType } from '../lib/deliverySetup';
+import {
+  ensureDeliveryDefaultBrand,
+  isDeliveryBusinessType,
+  readStoredOnboardingBusinessType,
+} from '../lib/deliverySetup';
 
 
 
@@ -62,12 +66,11 @@ function SaasContent() {
 
   const { isAuthenticated, isInitializing, user } = useAuth();
 
-  const {
-    businesses,
-    isLoading: isLoadingBusinesses,
-    businessesFetchSettled,
-    createBusiness,
-  } = useBusiness();
+  const businessCtx = useBusinessOptional();
+  const businesses = businessCtx?.businesses ?? [];
+  const isLoadingBusinesses = businessCtx?.isLoading ?? true;
+  const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
+  const createBusiness = businessCtx?.createBusiness;
 
   const location = useLocation();
 
@@ -112,27 +115,17 @@ function SaasContent() {
   useEffect(() => {
 
     if (
-
       isInitializing ||
-
       !isAuthenticated ||
-
+      !createBusiness ||
       !businessesFetchSettled ||
-
       isLoadingBusinesses ||
-
       businesses.length > 0 ||
-
       isAutoCreating ||
-
       autoCreateAttempted.current ||
-
       isUserAccount
-
     ) {
-
       return;
-
     }
 
 
@@ -153,7 +146,7 @@ function SaasContent() {
 
       const bt = (onboarding?.businessType ||
 
-        readStoredOnboardingBusinessType()) as import('../lib/businessApi').BusinessType | undefined;
+        readStoredOnboardingBusinessType(user?.user_id)) as import('../lib/businessApi').BusinessType | undefined;
 
       createBusiness({
 
@@ -175,11 +168,35 @@ function SaasContent() {
 
       })
 
-        .then((result) => {
+        .then(async (result) => {
 
           if (!result.success) {
 
             navigate('/auth/gate', { replace: true });
+
+            return;
+
+          }
+
+          const created = result.business;
+
+          const createdType = String(created?.businessType || bt || '').trim();
+
+          if (created?.business_id && isDeliveryBusinessType(createdType)) {
+
+            try {
+
+              await ensureDeliveryDefaultBrand(created.business_id, {
+
+                preferredName: companyName,
+
+              });
+
+            } catch {
+
+              /* Marca se crea al abrir Ajustes → Marca */
+
+            }
 
           }
 
@@ -269,10 +286,8 @@ function SaasContent() {
 
   }, [subscription.status, location.pathname, navigate]);
 
-
-
   const isInitialBusinessLoad =
-    businesses.length === 0 && (!businessesFetchSettled || isLoadingBusinesses);
+    !businessCtx || (businesses.length === 0 && (!businessesFetchSettled || isLoadingBusinesses));
 
   if (isInitializing || isInitialBusinessLoad || isAutoCreating) {
 
@@ -337,37 +352,29 @@ function SaasContent() {
 
 
 export function SaasRoot() {
-
   return (
-
-    <SetupProgressProvider>
-
-      <ActiveStoreScopeProvider>
-
-        <GroupProvider>
-
-          <AppProvider>
-
-            <ScrapyardProvider>
-
-              <ActivationChecklistProvider>
-
-                <SaasContent />
-
-              </ActivationChecklistProvider>
-
-            </ScrapyardProvider>
-
-          </AppProvider>
-
-        </GroupProvider>
-
-      </ActiveStoreScopeProvider>
-
-    </SetupProgressProvider>
-
+    <BusinessProvider>
+      <SaasRootProviders />
+    </BusinessProvider>
   );
+}
 
+function SaasRootProviders() {
+  return (
+    <SetupProgressProvider>
+      <ActiveStoreScopeProvider>
+        <GroupProvider>
+          <AppProvider>
+            <ScrapyardProvider>
+              <ActivationChecklistProvider>
+                <SaasContent />
+              </ActivationChecklistProvider>
+            </ScrapyardProvider>
+          </AppProvider>
+        </GroupProvider>
+      </ActiveStoreScopeProvider>
+    </SetupProgressProvider>
+  );
 }
 
 
