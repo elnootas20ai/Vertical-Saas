@@ -18,6 +18,7 @@ COPY public ./public
 COPY index.js index-huella.js ./
 COPY config ./config
 COPY controllers ./controllers
+COPY utils ./utils
 COPY middleware ./middleware
 COPY routers ./routers
 COPY services ./services
