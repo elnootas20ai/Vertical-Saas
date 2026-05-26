@@ -76,33 +76,64 @@ let upload = spawnSync('rsync', rsyncArgs, {
   stdio: 'inherit',
 });
 
-if (upload.status === 0) {
-  console.log('[deploy:frontend] Listo. Prueba: https://vertialapp.com/health');
-  process.exit(0);
+if (upload.status !== 0) {
+  console.warn('[deploy:frontend] rsync no disponible o falló; probando scp...');
+
+  const scpArgs = [];
+  if (identity) {
+    scpArgs.push('-i', identity);
+  }
+  scpArgs.push('-r', 'dist/.', target);
+  upload = spawnSync('scp', scpArgs, {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+
+  if (upload.status !== 0) {
+    console.error(
+      '[deploy:frontend] Falló la subida. Instala rsync (Git Bash) o cliente OpenSSH (scp).',
+    );
+    process.exit(upload.status ?? 1);
+  }
+  console.warn(
+    '[deploy:frontend] Subido con scp. Si algo "viejo" sigue en el servidor, borra archivos huérfanos en el VPS o usa rsync --delete.',
+  );
 }
 
-console.warn('[deploy:frontend] rsync no disponible o falló; probando scp...');
+// scp/rsync deja los archivos con el dueño del usuario SSH (root) y, si el
+// directorio padre no tiene permisos de "search" para www-data, nginx devuelve
+// 403 Forbidden en /. Reajustamos dueño y permisos automáticamente para evitar
+// tener que ejecutar `npm run deploy:fix-dist` a mano tras cada deploy.
+const permsScript = `set -e
+DIST=${shellQuote(remotePath.replace(/\/+$/, ''))}
+chown -R www-data:www-data "$DIST"
+find "$DIST" -type d -exec chmod 755 {} +
+find "$DIST" -type f -exec chmod 644 {} +
+nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+echo "[deploy:frontend] permisos OK + nginx reload"
+`;
 
-const scpArgs = [];
+const sshArgs = ['-o', 'BatchMode=yes'];
 if (identity) {
-  scpArgs.push('-i', identity);
+  sshArgs.push('-i', identity);
 }
-scpArgs.push('-r', 'dist/.', target);
-upload = spawnSync('scp', scpArgs, {
-  cwd: REPO_ROOT,
-  stdio: 'inherit',
-  shell: process.platform === 'win32',
+sshArgs.push(`${user}@${host}`, 'bash -s');
+
+const fix = spawnSync('ssh', sshArgs, {
+  stdio: ['pipe', 'inherit', 'inherit'],
+  input: permsScript.replace(/\r/g, ''),
 });
 
-if (upload.status !== 0) {
-  console.error(
-    '[deploy:frontend] Falló la subida. Instala rsync (Git Bash) o cliente OpenSSH (scp).',
+if (fix.status !== 0) {
+  console.warn(
+    '[deploy:frontend] No se pudieron ajustar permisos automáticamente; si la web da 403, lanza `npm run deploy:fix-dist`.',
   );
-  process.exit(upload.status ?? 1);
 }
 
-console.warn(
-  '[deploy:frontend] Subido con scp. Si algo “viejo” sigue en el servidor, borra archivos huérfanos en el VPS o usa rsync --delete.',
-);
-console.log('[deploy:frontend] Listo. Prueba: https://vertialapp.com/health');
+console.log('[deploy:frontend] Listo. Prueba: https://vertialapp.com/');
 process.exit(0);
+
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
