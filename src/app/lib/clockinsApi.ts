@@ -253,6 +253,24 @@ export async function updateNotes(record: ClockinRecord, notes: string): Promise
   return { ...updated, _rev: result.rev };
 }
 
+/**
+ * Reasigna la fecha de un fichaje (campo `date`). Necesario para "Fichar en
+ * nombre de…" cuando la jornada es de un día anterior: el `clockIn` original
+ * siempre crea el doc con `date = hoy`, y el endpoint /adjust del backend solo
+ * mueve las horas de los entries, no el campo `date`. Si no actualizamos el
+ * `date`, el fichaje no aparece en la tabla del día correcto y descuadra
+ * estadísticas/absentismo.
+ */
+export async function updateClockinDate(record: ClockinRecord, newDate: string): Promise<ClockinRecord> {
+  if (record.date === newDate) return record;
+  const updated: ClockinRecord = { ...record, date: newDate, updatedAt: new Date().toISOString() };
+  const result = await req<{ rev: string }>(
+    `/api/couch/doc/${encodeURIComponent(DB)}/${encodeURIComponent(record._id)}`,
+    { method: 'PUT', body: JSON.stringify(updated) },
+  );
+  return { ...updated, _rev: result.rev };
+}
+
 export async function deleteClockin(record: ClockinRecord): Promise<void> {
   if (!record._rev) return;
   await req(
@@ -612,6 +630,75 @@ export async function fetchPayrollSummary(
 }
 
 // ─── Export ──────────────────────────────────────────────────────────────────
+
+// ─── Notificar al equipo de gestión un evento de fichaje ─────────────────────
+
+export type ClockinEventType = 'clock_in' | 'clock_out' | 'break_start' | 'break_end';
+
+/**
+ * Avisa al backend de que se acaba de producir un fichaje (entrada, salida,
+ * inicio o fin de descanso). El backend resuelve a quién notificar
+ * (Admin/Gerente del business + owner, excluyendo al propio trabajador) y emite
+ * notificación in-app + SSE en tiempo real + Web Push si procede.
+ *
+ * Idempotente desde el punto de vista del cliente: si falla se ignora porque la
+ * UI ya refleja el cambio de estado del fichaje en local.
+ */
+export async function notifyClockinEvent(
+  businessId: string,
+  data: {
+    memberId: string;
+    memberName: string;
+    eventType: ClockinEventType;
+    time?: string;
+    device?: ClockinDeviceType;
+    lateMinutes?: number;
+    workedMinutes?: number;
+    breakMinutes?: number;
+    hasGeo?: boolean;
+  },
+): Promise<{ ok: boolean; recipients: number }> {
+  return req(`/api/clockins/${encodeURIComponent(businessId)}/notify`, {
+    method: 'POST',
+    body: JSON.stringify({
+      memberId: data.memberId,
+      memberName: data.memberName,
+      eventType: data.eventType,
+      time: data.time || new Date().toISOString(),
+      device: data.device || '',
+      lateMinutes: data.lateMinutes ?? 0,
+      workedMinutes: data.workedMinutes ?? 0,
+      breakMinutes: data.breakMinutes ?? 0,
+      hasGeo: Boolean(data.hasGeo),
+    }),
+  });
+}
+
+// ─── Resumen diario para dashboards de gerente ────────────────────────────────
+
+export interface DailySummary {
+  ok: boolean;
+  date: string;
+  scheduled: number;
+  clocked: number;
+  noShow: number;
+  noShowMembers: Array<{ memberId: string; memberName: string; role: string }>;
+  onTime: number;
+  late: number;
+  earlyEntry: number;
+  completed: number;
+  totalWorkedMinutes: number;
+  avgLateMinutes: number;
+  lateMembers: Array<{ memberId: string; memberName: string; lateMinutes: number }>;
+}
+
+export async function fetchDailySummary(
+  businessId: string,
+  date?: string,
+): Promise<DailySummary> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  return req<DailySummary>(`/api/clockins/${encodeURIComponent(businessId)}/daily-summary${qs}`);
+}
 
 export async function exportClockinsCsv(
   businessId: string,

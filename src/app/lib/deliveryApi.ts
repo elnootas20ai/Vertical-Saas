@@ -411,6 +411,25 @@ export async function updateCatalogItemRequest(userId: string, item: CatalogItem
   return result.item;
 }
 
+/**
+ * Marca un artículo del catálogo como disponible o no disponible sin tener que
+ * enviar el objeto completo. El backend hace merge con el documento existente.
+ * Útil para que cocina deshabilite rápidamente un producto agotado.
+ */
+export async function setCatalogItemAvailabilityRequest(
+  userId: string,
+  itemId: string,
+  available: boolean,
+): Promise<CatalogItem> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; item: CatalogItem }>(
+    `/api/delivery/catalog/${encodeURIComponent(id)}/${encodeURIComponent(itemId)}`,
+    { method: 'PUT', body: JSON.stringify({ item: { available } }) },
+  );
+  if (!result.item) throw new Error('Respuesta inválida del servidor');
+  return result.item;
+}
+
 export async function deleteCatalogItemRequest(userId: string, itemId: string): Promise<void> {
   const id = normalizeUserId(userId);
   await request(

@@ -745,6 +745,86 @@ export async function inviteUserRequest(data: {
   });
 }
 
+export interface InviteLookupResult {
+  exists: boolean;
+  email?: string;
+  fullName?: string;
+  alreadyMember?: boolean;
+  isOwner?: boolean;
+  ownsOtherBusinessName?: string;
+  code?: string;
+}
+
+/**
+ * Comprueba en vivo si un email está registrado en Vertial antes de invitarlo.
+ * Devuelve también si esa cuenta ya es miembro/propietario del negocio o de otro,
+ * para mostrar el feedback adecuado en el modal de invitación.
+ */
+export async function lookupInviteEmailRequest(
+  email: string,
+  businessId?: string,
+): Promise<InviteLookupResult> {
+  const response = await request<AuthUser>('/api/auth/invite/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ email, businessId: businessId || '' }),
+  });
+  const data = response as ApiEnvelope<AuthUser> & InviteLookupResult;
+  return {
+    exists: Boolean(data.exists),
+    email: data.email,
+    fullName: data.fullName,
+    alreadyMember: Boolean(data.alreadyMember),
+    isOwner: Boolean(data.isOwner),
+    ownsOtherBusinessName: data.ownsOtherBusinessName || '',
+    code: data.code,
+  };
+}
+
+// ─── Preferencias personales de notificación ────────────────────────────────
+
+export interface ClockinNotificationPreferences {
+  onEntry: boolean;
+  onLate: boolean;
+  onEarlyEntry: boolean;
+  onExit: boolean;
+  onEarlyExit: boolean;
+  onBreaks: boolean;
+  onLongBreak: boolean;
+}
+
+export interface NotificationPreferences {
+  clockin: ClockinNotificationPreferences;
+}
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  clockin: {
+    onEntry: true,
+    onLate: true,
+    onEarlyEntry: false,
+    onExit: true,
+    onEarlyExit: true,
+    onBreaks: false,
+    onLongBreak: true,
+  },
+};
+
+export async function getNotificationPreferencesRequest(): Promise<NotificationPreferences> {
+  const response = await request<unknown>('/api/auth/preferences');
+  const data = response as ApiEnvelope<unknown> & { notificationPreferences?: NotificationPreferences };
+  return data.notificationPreferences || DEFAULT_NOTIFICATION_PREFERENCES;
+}
+
+export async function updateNotificationPreferencesRequest(
+  prefs: Partial<NotificationPreferences>,
+): Promise<NotificationPreferences> {
+  const response = await request<unknown>('/api/auth/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify({ notificationPreferences: prefs }),
+  });
+  const data = response as ApiEnvelope<unknown> & { notificationPreferences?: NotificationPreferences };
+  return data.notificationPreferences || DEFAULT_NOTIFICATION_PREFERENCES;
+}
+
 export async function listMyInvitationsRequest() {
   return request<AuthUser>('/api/auth/invitations/mine');
 }

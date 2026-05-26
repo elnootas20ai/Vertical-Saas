@@ -3,19 +3,18 @@ import { useModalClose } from '../../hooks/useModalClose';
 import {
   X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
   ArrowLeft, ArrowRight, LayoutDashboard, Car, Users, TrendingUp, FileText,
-  DollarSign, CalendarDays, Copy, AlertTriangle, Key, Briefcase,
+  DollarSign, CalendarDays, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
+  Truck, ChefHat, Activity,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { RoleDefinition } from '../../lib/authApi';
+import type { InviteLookupResult, RoleDefinition } from '../../lib/authApi';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import type { Business } from '../../lib/businessApi';
 
 // --- Types ---
 
 interface InviteResult {
-  generatedPassword?: string;
-  emailSent?: boolean;
   isExistingUser?: boolean;
   inviteExpiresAt?: string;
 }
@@ -36,11 +35,26 @@ export interface InviteUserPayload {
 interface InviteUserModalProps {
   onClose: () => void;
   onInvite?: (data: InviteUserPayload) => Promise<InviteResult | void> | InviteResult | void;
+  /** Comprueba en vivo si el email está registrado en Vertial (y si es invitable). */
+  onLookupEmail?: (
+    email: string,
+    businessId?: string,
+  ) => Promise<InviteLookupResult & { success: boolean; error?: string }>;
   roles?: RoleDefinition[];
   workCenters?: WorkCenter[];
   businesses?: Business[];
   currentBusinessId?: string;
 }
+
+type EmailStatus =
+  | 'idle'
+  | 'invalid'
+  | 'checking'
+  | 'ready'
+  | 'not_registered'
+  | 'already_member'
+  | 'owns_other'
+  | 'error';
 
 // --- Constants ---
 
@@ -103,6 +117,10 @@ const LANDING_PAGES = [
   { id: '/saas/workshop', icon: <Wrench className="w-3.5 h-3.5" /> },
   { id: '/saas/documents', icon: <FileText className="w-3.5 h-3.5" /> },
   { id: '/saas/calendar', icon: <CalendarDays className="w-3.5 h-3.5" /> },
+  // Vertical delivery: pantallas operativas para invitar a repartidor / cocinero / encargado.
+  { id: '/saas/delivery-reparto', icon: <Truck className="w-3.5 h-3.5" /> },
+  { id: '/saas/delivery-kitchen', icon: <ChefHat className="w-3.5 h-3.5" /> },
+  { id: '/saas/delivery-ops', icon: <Activity className="w-3.5 h-3.5" /> },
 ] as const;
 
 // --- Worker Function Config ---
@@ -373,7 +391,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 
 // --- Main Modal ---
 
-export function InviteUserModal({ onClose, onInvite, roles, workCenters, businesses, currentBusinessId }: InviteUserModalProps) {
+export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workCenters, businesses, currentBusinessId }: InviteUserModalProps) {
   useModalClose(true, onClose);
   const { t } = useTranslation();
   void roles;
@@ -390,6 +408,12 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   const [phonePrefix, setPhonePrefix] = useState('+34');
   const [phoneNumber, setPhoneNumber] = useState('');
 
+  // Lookup en vivo: solo se permite invitar a cuentas que ya existen en Vertial.
+  const [emailStatus, setEmailStatus] = useState<EmailStatus>('idle');
+  const [lookupResult, setLookupResult] = useState<InviteLookupResult | null>(null);
+  const lookupSeqRef = useRef(0);
+  const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Step 2
   const [contractType, setContractType] = useState<string | null>(null);
   const [grossSalary, setGrossSalary] = useState('');
@@ -404,7 +428,75 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
   const [success, setSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [inviteResult, setInviteResult] = useState<InviteResult | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // ── Lookup del email en Vertial ──────────────────────────────────────────────
+  useEffect(() => {
+    if (lookupTimerRef.current) {
+      clearTimeout(lookupTimerRef.current);
+      lookupTimerRef.current = null;
+    }
+
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setEmailStatus('idle');
+      setLookupResult(null);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailStatus('invalid');
+      setLookupResult(null);
+      return;
+    }
+    if (!onLookupEmail) {
+      setEmailStatus('ready');
+      setLookupResult(null);
+      return;
+    }
+
+    setEmailStatus('checking');
+    const seq = lookupSeqRef.current + 1;
+    lookupSeqRef.current = seq;
+
+    lookupTimerRef.current = setTimeout(async () => {
+      const result = await onLookupEmail(trimmed, selectedBusinessId || currentBusinessId || '');
+      if (seq !== lookupSeqRef.current) return;
+
+      if (!result.success) {
+        setEmailStatus('error');
+        setLookupResult(null);
+        return;
+      }
+      if (!result.exists) {
+        setEmailStatus('not_registered');
+        setLookupResult(result);
+        return;
+      }
+      if (result.alreadyMember || result.isOwner) {
+        setEmailStatus('already_member');
+        setLookupResult(result);
+        return;
+      }
+      if (result.ownsOtherBusinessName) {
+        setEmailStatus('owns_other');
+        setLookupResult(result);
+        return;
+      }
+      setEmailStatus('ready');
+      setLookupResult(result);
+      if (result.fullName && !name.trim()) {
+        setName(result.fullName);
+      }
+    }, 450);
+
+    return () => {
+      if (lookupTimerRef.current) {
+        clearTimeout(lookupTimerRef.current);
+        lookupTimerRef.current = null;
+      }
+    };
+    // Intencional: no incluimos `name` para no relanzar el lookup al autocompletarlo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email, selectedBusinessId, currentBusinessId, onLookupEmail]);
 
   function validateStep1(): Record<string, string> {
     const e: Record<string, string> = {};
@@ -412,6 +504,10 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
     else if (name.trim().length < 2) e.name = t('team.inviteModal.nameMinLength', 'Minimo 2 caracteres');
     if (!email.trim()) e.email = t('team.inviteModal.emailRequired', 'El email es obligatorio');
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = t('team.inviteModal.emailInvalid', 'Email no valido');
+    else if (emailStatus === 'not_registered') e.email = 'Este email no está registrado en Vertial. La persona debe crearse una cuenta antes de poder ser invitada.';
+    else if (emailStatus === 'already_member') e.email = 'Esta persona ya forma parte del equipo de esta empresa.';
+    else if (emailStatus === 'owns_other') e.email = `Esta persona administra otra empresa (${lookupResult?.ownsOtherBusinessName || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`;
+    else if (emailStatus === 'checking') e.email = 'Comprobando el email en Vertial…';
     return e;
   }
 
@@ -432,6 +528,11 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
     const errs = validateStep1();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
+      setTouched({ name: true, email: true });
+      return;
+    }
+    if (emailStatus !== 'ready') {
+      setErrors({ email: 'Espera a que terminemos de comprobar el email en Vertial.' });
       setTouched({ name: true, email: true });
       return;
     }
@@ -478,14 +579,6 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
     }
   }
 
-  async function copyToClipboard(text: string, field: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), 2000);
-    } catch { /* noop */ }
-  }
-
   const selectedRoleConfig = role ? getRoleConfig(roleOptions.find((r) => r.id === role) || { id: role, description: '', permissions: [], users: 0 }) : null;
   const selectedContract = contractType ? CONTRACT_TYPES.find((c) => c.id === contractType) : null;
 
@@ -495,7 +588,8 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
     setRole(null); setLandingPage('/saas/worker');
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
-    setInviteResult(null); setCopiedField(null); setStep(1);
+    setInviteResult(null); setStep(1);
+    setEmailStatus('idle'); setLookupResult(null);
   }
 
   const filteredWorkCenters = (workCenters || []).filter((wc) => {
@@ -526,24 +620,20 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                 <CheckCircle2 className="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
               </div>
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">
-                {inviteResult?.isExistingUser
-                  ? 'Invitación enviada al usuario existente'
-                  : 'Invitación creada'}
+                Invitación enviada
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-xs">
-                {inviteResult?.isExistingUser
-                  ? 'Este email ya tiene cuenta en Vertial. Verá tu invitación la próxima vez que inicie sesión y podrá aceptarla desde dentro de la app.'
-                  : 'Cuando esta persona se registre en Vertial con este email, verá tu invitación y podrá unirse al equipo en un clic.'}
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-sm">
+                <strong className="text-gray-700 dark:text-gray-200">{(lookupResult?.fullName || name).trim() || email.trim()}</strong> verá tu invitación al entrar a Vertial. Al aceptarla, se unirá automáticamente a tu equipo con la función y permisos asignados.
               </p>
 
               {/* Summary card */}
               <div className="w-full bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 mb-4">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-10 h-10 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-full flex items-center justify-center text-sm font-bold text-gray-500">
-                    {name.trim().charAt(0).toUpperCase()}
+                    {(lookupResult?.fullName || name).trim().charAt(0).toUpperCase() || email.trim().charAt(0).toUpperCase()}
                   </div>
                   <div className="text-left min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{name.trim()}</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{(lookupResult?.fullName || name).trim() || email.trim()}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{email.trim()}</p>
                   </div>
                 </div>
@@ -564,36 +654,6 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                   </span>
                 </div>
               </div>
-
-              {/* Credentials */}
-              {inviteResult?.generatedPassword && (
-                <div className="w-full bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-2xl p-4 mb-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Key className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Credenciales de acceso</p>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-xl px-3 py-2 border border-amber-200 dark:border-amber-700">
-                      <div className="text-left min-w-0">
-                        <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Email</p>
-                        <p className="text-sm text-gray-900 dark:text-gray-100 font-mono truncate">{email.trim()}</p>
-                      </div>
-                      <button type="button" onClick={() => copyToClipboard(email.trim(), 'email')} className="ml-2 p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-lg transition-colors flex-shrink-0">
-                        {copiedField === 'email' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-amber-500" />}
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-xl px-3 py-2 border border-amber-200 dark:border-amber-700">
-                      <div className="text-left min-w-0">
-                        <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Contrasena temporal</p>
-                        <p className="text-sm text-gray-900 dark:text-gray-100 font-mono truncate">{inviteResult.generatedPassword}</p>
-                      </div>
-                      <button type="button" onClick={() => copyToClipboard(inviteResult.generatedPassword!, 'password')} className="ml-2 p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded-lg transition-colors flex-shrink-0">
-                        {copiedField === 'password' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-amber-500" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 w-full text-left">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-3 py-2.5">
@@ -630,9 +690,9 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
               <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
                 <Mail className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed text-left">
-                  La invitación queda registrada para <strong>{email.trim()}</strong>.
+                  Le aparecerá una notificación dentro de Vertial para <strong>{email.trim()}</strong>.
                   {inviteResult?.inviteExpiresAt
-                    ? ` Caduca el ${new Date(inviteResult.inviteExpiresAt).toLocaleDateString()}.`
+                    ? ` La invitación caduca el ${new Date(inviteResult.inviteExpiresAt).toLocaleDateString()}.`
                     : ''}
                 </p>
               </div>
@@ -706,8 +766,8 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       Email <span className="text-red-400">*</span>
                     </label>
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-1.5">
-                      Usa el email personal del trabajador. Recibira las credenciales para acceder y completar su perfil.
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-1.5">
+                      La persona debe tener cuenta en Vertial. Verá tu invitación al iniciar sesión y podrá aceptarla con un clic.
                     </p>
                     <div className="relative">
                       <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300 pointer-events-none" />
@@ -715,13 +775,64 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                         onChange={(e) => { setEmail(e.target.value); clearFieldError('email'); }}
                         onBlur={() => setTouched((p) => ({ ...p, email: true }))}
                         placeholder="maria@gmail.com"
-                        className={`w-full pl-10 pr-4 py-2.5 border-2 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 ${
-                          errors.email ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
-                            : touched.email && email && !errors.email ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:border-blue-500'
+                        className={`w-full pl-10 pr-10 py-2.5 border-2 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 ${
+                          emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || (errors.email && touched.email)
+                            ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
+                            : emailStatus === 'ready'
+                              ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
+                              : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:border-blue-500'
                         }`} />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
+                        {emailStatus === 'checking' && <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />}
+                        {emailStatus === 'ready' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                        {(emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other') && (
+                          <X className="w-4 h-4 text-red-500" />
+                        )}
+                      </span>
                     </div>
-                    {errors.email && <p className="text-xs text-red-500 mt-1 flex items-center gap-1"><span>&#x2715;</span>{errors.email}</p>}
+
+                    {/* Feedback contextual del lookup */}
+                    {emailStatus === 'ready' && lookupResult?.fullName && (
+                      <div className="mt-2 flex items-center gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-3 py-2">
+                        <UserCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 truncate">
+                            {lookupResult.fullName}
+                          </p>
+                          <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                            Cuenta verificada en Vertial · puedes invitarla
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {emailStatus === 'not_registered' && (
+                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2">
+                        <FileWarning className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] leading-relaxed text-red-700 dark:text-red-300">
+                          Este email no está registrado en Vertial. Pídele a la persona que se cree una cuenta en{' '}
+                          <span className="font-mono font-semibold">vertial.com</span> y vuelve aquí para invitarla.
+                        </p>
+                      </div>
+                    )}
+                    {emailStatus === 'already_member' && (
+                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2">
+                        <UserCheck className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                          {lookupResult?.fullName ? `${lookupResult.fullName} ya forma parte` : 'Esta persona ya forma parte'} del equipo de esta empresa.
+                        </p>
+                      </div>
+                    )}
+                    {emailStatus === 'owns_other' && (
+                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2">
+                        <Building2 className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                          Esta persona administra otra empresa{lookupResult?.ownsOtherBusinessName ? ` (${lookupResult.ownsOtherBusinessName})` : ''}. Por ahora no puede unirse a un segundo equipo.
+                        </p>
+                      </div>
+                    )}
+                    {errors.email && emailStatus !== 'not_registered' && emailStatus !== 'already_member' && emailStatus !== 'owns_other' && (
+                      <p className="text-xs text-red-500 mt-1 flex items-center gap-1"><span>&#x2715;</span>{errors.email}</p>
+                    )}
                   </div>
 
                   {/* Telefono */}
@@ -889,7 +1000,7 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                   <div className="flex items-start gap-2.5 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-900/20">
                     <Mail className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
                     <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
-                      {t('team.inviteModal.emailInfo', 'Se enviara un correo al trabajador con las credenciales de acceso para que complete su perfil.')}
+                      Verá tu invitación dentro de Vertial al iniciar sesión. Al aceptarla cambiará automáticamente a esta empresa con la función seleccionada.
                     </p>
                   </div>
 
@@ -912,9 +1023,19 @@ export function InviteUserModal({ onClose, onInvite, roles, workCenters, busines
                     {t('common.cancel', 'Cancelar')}
                   </button>
                   <button type="button" onClick={handleNext}
-                    className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 hover:bg-black dark:hover:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold transition-colors">
-                    Siguiente
-                    <ArrowRight className="w-4 h-4" />
+                    disabled={emailStatus === 'checking' || emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other'}
+                    className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 hover:bg-black dark:hover:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-900 dark:disabled:hover:bg-gray-100">
+                    {emailStatus === 'checking' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Comprobando…
+                      </>
+                    ) : (
+                      <>
+                        Siguiente
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </>
               ) : (

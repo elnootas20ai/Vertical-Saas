@@ -4,12 +4,19 @@ import {
   listClockinsByBusiness,
   listSalesByUser,
   findBusinessById,
+  findAccountByUserId,
   ensureDatabase,
   getAllDocuments,
   getDocument,
   putDocument,
   BUSINESSES_DB,
+  buildNotificationDocument,
+  normalizeNotificationPreferences,
+  saveNotification,
+  sanitizeNotification,
 } from '../services/couchdb.js';
+import { broadcastToUser } from '../services/sseService.js';
+import { sendPushToUser } from '../services/pushService.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -1049,6 +1056,492 @@ async function loadScheduleDocs(req, businessId) {
     return docs.filter((d) => d?.business_id === businessId && !d?.deletedAt);
   } catch {
     return [];
+  }
+}
+
+// ─── Resumen diario ────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/clockins/:businessId/daily-summary?date=YYYY-MM-DD
+ *
+ * Devuelve un resumen del día solicitado (por defecto hoy en hora local del
+ * servidor). Pensado para mostrar en el dashboard del gerente:
+ *  - `scheduled`: trabajadores con turno asignado ese día
+ *  - `clocked`: cuántos llegaron a fichar entrada
+ *  - `noShow`: scheduled − clocked
+ *  - `onTime` / `late` / `earlyEntry`: desglose de las entradas
+ *  - `completed`: cuántos ya cerraron salida
+ *  - `totalWorkedMinutes`: suma de minutos trabajados del día
+ *  - `avgLateMinutes`: media de minutos de retraso entre los que llegaron tarde
+ *
+ * Respeta la visibilidad por orgchart: solo cuenta a la gente que el solicitante
+ * puede ver según su rol y posición jerárquica.
+ */
+export async function getDailySummary(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const requesterId = req.authUser?.user_id;
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const date = (req.query?.date ? String(req.query.date) : new Date().toISOString()).slice(0, 10);
+    const orgchart = await loadOrgChart(req, businessId);
+    const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
+
+    // Trabajadores con turno habilitado para el día solicitado.
+    const schedules = await loadScheduleDocs(req, businessId);
+    const targetTime = new Date(`${date}T00:00:00`).getTime();
+    const weekday = WEEKDAYS_BY_INDEX[new Date(`${date}T00:00:00`).getDay()];
+
+    const scheduledByMember = new Map();
+    for (const doc of schedules) {
+      if (!visibleIds.includes(doc.member_id)) continue;
+      const ws = new Date(`${doc.week_start}T00:00:00`).getTime();
+      if (Number.isNaN(ws) || ws > targetTime) continue;
+      const existing = scheduledByMember.get(doc.member_id);
+      if (!existing || ws > new Date(`${existing.week_start}T00:00:00`).getTime()) {
+        scheduledByMember.set(doc.member_id, doc);
+      }
+    }
+    const scheduledIds = [];
+    for (const [memberId, doc] of scheduledByMember) {
+      if (doc.weekly?.[weekday]?.enabled) scheduledIds.push(memberId);
+    }
+
+    // Fichajes del día (solo visibles).
+    const allClockins = await listClockinsByBusiness(req, businessId);
+    const dayClockins = allClockins.filter(
+      (r) => r.date === date && visibleIds.includes(r.member_id),
+    );
+
+    let onTime = 0;
+    let late = 0;
+    let earlyEntry = 0;
+    let completed = 0;
+    let totalWorkedMinutes = 0;
+    let totalLateMinutes = 0;
+    let lateCount = 0;
+    const offenders = [];
+
+    for (const rec of dayClockins) {
+      const entry = (rec.entries || []).find((e) => e.type === 'clock_in');
+      if (!entry) continue;
+      const shift = scheduledByMember.get(rec.member_id)?.weekly?.[weekday];
+      const scheduledMs = shift?.enabled ? scheduleTimeToEpoch(date, shift.start) : null;
+      const actualMs = new Date(entry.time).getTime();
+      const diffMin = scheduledMs ? Math.round((actualMs - scheduledMs) / 60000) : 0;
+
+      if (scheduledMs && diffMin <= -CLOCKIN_THRESHOLDS_MIN.EARLY_ENTRY) {
+        earlyEntry += 1;
+      } else if (diffMin >= CLOCKIN_THRESHOLDS_MIN.LATE) {
+        late += 1;
+        totalLateMinutes += diffMin;
+        lateCount += 1;
+        offenders.push({
+          memberId: rec.member_id,
+          memberName: rec.member_name || '',
+          lateMinutes: diffMin,
+        });
+      } else {
+        onTime += 1;
+      }
+
+      if (rec.status === 'completed') completed += 1;
+      totalWorkedMinutes += rec.totalMinutes || 0;
+    }
+
+    const clockedIds = new Set(dayClockins.map((r) => r.member_id));
+    const noShow = scheduledIds.filter((id) => !clockedIds.has(id));
+    const memberMap = buildMemberMap(business);
+
+    return res.json({
+      ok: true,
+      date,
+      scheduled: scheduledIds.length,
+      clocked: clockedIds.size,
+      noShow: noShow.length,
+      noShowMembers: noShow.map((id) => ({
+        memberId: id,
+        memberName: memberMap[id]?.fullName || '',
+        role: memberMap[id]?.role || '',
+      })),
+      onTime,
+      late,
+      earlyEntry,
+      completed,
+      totalWorkedMinutes,
+      avgLateMinutes: lateCount > 0 ? Math.round(totalLateMinutes / lateCount) : 0,
+      lateMembers: offenders
+        .sort((a, b) => b.lateMinutes - a.lateMinutes)
+        .slice(0, 5),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error generando el resumen diario',
+    });
+  }
+}
+
+// ─── Clockin notifications: notify managers when a worker clocks ──────────────
+
+/**
+ * Umbrales (en minutos) que disparan las reglas de horario.
+ *
+ * - LATE: entrada después del inicio del turno → warning "llegó tarde"
+ * - EARLY_ENTRY: entrada mucho antes del turno → info de aviso
+ * - EARLY_EXIT: salida antes de fin de turno → warning "se fue antes"
+ * - LATE_EXIT: salida muy posterior al fin de turno → info (horas extra)
+ * - LONG_BREAK: duración del descanso > previsto + margen → warning
+ *
+ * Si no hay schedule asignado al trabajador, ninguna de estas reglas se aplica
+ * y la notificación se emite como info neutra.
+ */
+const CLOCKIN_THRESHOLDS_MIN = {
+  LATE: 5,
+  EARLY_ENTRY: 30,
+  EARLY_EXIT: 10,
+  LATE_EXIT: 30,
+  LONG_BREAK: 15,
+};
+
+const CLOCKIN_EVENT_LABELS = {
+  clock_in: { verb: 'fichó entrada' },
+  clock_out: { verb: 'fichó salida' },
+  break_start: { verb: 'inició un descanso' },
+  break_end: { verb: 'volvió del descanso' },
+};
+
+/** Convierte una hora "HH:MM" + fecha YYYY-MM-DD en ms epoch hora local. */
+function scheduleTimeToEpoch(date, timeHHMM) {
+  if (!date || !timeHHMM) return null;
+  const [h, m] = String(timeHHMM).split(':').map((v) => Number(v));
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  const dt = new Date(`${date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+  return dt.getTime();
+}
+
+const WEEKDAYS_BY_INDEX = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+/**
+ * Devuelve el turno asignado al trabajador para la fecha del fichaje, leyendo
+ * el documento de schedule que cubra esa semana. Devuelve null si no hay turno
+ * (libre, sin schedule, día sin enabled, etc.).
+ */
+async function getMemberShiftForDate(req, businessId, memberId, isoDate) {
+  if (!isoDate) return null;
+  const docs = await loadScheduleDocs(req, businessId);
+  if (!docs.length) return null;
+  const target = String(isoDate).slice(0, 10);
+  const sameMember = docs.filter((d) => d.member_id === memberId);
+  if (!sameMember.length) return null;
+
+  // Elegimos el schedule cuyo week_start es el lunes ≤ target más reciente.
+  const targetTime = new Date(`${target}T00:00:00`).getTime();
+  let candidate = null;
+  for (const d of sameMember) {
+    const ws = new Date(`${d.week_start}T00:00:00`).getTime();
+    if (Number.isNaN(ws) || ws > targetTime) continue;
+    if (!candidate || ws > new Date(`${candidate.week_start}T00:00:00`).getTime()) {
+      candidate = d;
+    }
+  }
+  if (!candidate) return null;
+
+  const weekday = WEEKDAYS_BY_INDEX[new Date(`${target}T00:00:00`).getDay()];
+  const shift = candidate.weekly?.[weekday];
+  if (!shift?.enabled) return null;
+  return shift;
+}
+
+/** Formatea un timestamp ISO como HH:MM en hora local (es-ES). */
+function formatTimeEs(iso) {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch {
+    return '';
+  }
+}
+
+/** Convierte minutos en cadena legible: 65 → "1h 05m". */
+function formatMinutesEs(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m}m`;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+/**
+ * Mapea un `flag` (sub-evento producido por las reglas de horario) a la clave
+ * de preferencia personal que decide si debe llegar al gerente. Si el gerente
+ * tiene la categoría desactivada, no recibe la notificación.
+ *
+ * Defaults a `true` si el flag no está mapeado (más vale notificar que perder
+ * eventos importantes).
+ */
+function shouldNotifyForFlag(flag, clockinPrefs) {
+  if (!clockinPrefs || typeof clockinPrefs !== 'object') return true;
+  switch (flag) {
+    case 'clock_in':
+      return clockinPrefs.onEntry !== false;
+    case 'clock_in_late':
+      return clockinPrefs.onLate !== false;
+    case 'clock_in_early':
+      return clockinPrefs.onEarlyEntry === true;
+    case 'clock_out':
+    case 'clock_out_late':
+      return clockinPrefs.onExit !== false;
+    case 'clock_out_early':
+      return clockinPrefs.onEarlyExit !== false;
+    case 'break_start':
+    case 'break_end':
+      return clockinPrefs.onBreaks === true;
+    case 'break_long':
+      return clockinPrefs.onLongBreak !== false;
+    default:
+      return true;
+  }
+}
+
+/**
+ * Resuelve a quién hay que avisar cuando un trabajador ficha:
+ * Admin/Gerente del negocio + el owner (excluyendo al propio fichador).
+ * Devuelve una lista única de user_ids.
+ */
+function resolveClockinNotificationRecipients(business, memberId) {
+  const recipients = new Set();
+  if (business?.owner_user_id && business.owner_user_id !== memberId) {
+    recipients.add(business.owner_user_id);
+  }
+  for (const m of business?.members || []) {
+    if (!m.user_id || m.user_id === memberId) continue;
+    if (ADMIN_ROLES.has(m.role)) recipients.add(m.user_id);
+  }
+  return Array.from(recipients);
+}
+
+/**
+ * Endpoint POST /api/clockins/:businessId/notify
+ *
+ * Body: { memberId, memberName, eventType, time, device?, lateMinutes?, workedMinutes? }
+ *
+ * Notifica al equipo de gestión (Admin/Gerente + owner) que un trabajador ha
+ * fichado. Si la entrada llega tarde se eleva el nivel a `warning`. La salida
+ * lleva los minutos trabajados. El descanso y la vuelta de descanso son `info`
+ * discretos. Cada notificación enlaza al detalle del trabajador en la pestaña
+ * de fichajes para que el gerente pueda revisar.
+ */
+export async function notifyClockinEvent(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const requesterId = req.authUser?.user_id;
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const {
+      memberId,
+      memberName,
+      eventType,
+      time,
+      device = '',
+      lateMinutes = 0,
+      workedMinutes = 0,
+      hasGeo = false,
+    } = req.body || {};
+
+    if (!memberId || !eventType) {
+      return badRequest(res, 'memberId y eventType son obligatorios');
+    }
+    if (!CLOCKIN_EVENT_LABELS[eventType]) {
+      return badRequest(res, 'eventType inválido');
+    }
+    // Solo el propio trabajador puede emitir su evento de fichaje.
+    if (memberId !== requesterId) {
+      return res.status(403).json({ ok: false, error: 'Solo puedes notificar tus propios fichajes.' });
+    }
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    // El trabajador tiene que ser miembro del business.
+    const member = getMember(business, memberId);
+    if (!member) {
+      return res.status(403).json({ ok: false, error: 'No eres miembro de este equipo.' });
+    }
+
+    const recipients = resolveClockinNotificationRecipients(business, memberId);
+    if (recipients.length === 0) {
+      return res.json({ ok: true, recipients: 0 });
+    }
+
+    const displayName = String(memberName || member.fullName || 'Un trabajador').trim();
+    const eventTime = time || new Date().toISOString();
+    const displayTime = formatTimeEs(eventTime) || formatTimeEs(new Date().toISOString());
+    const labels = CLOCKIN_EVENT_LABELS[eventType];
+    const isoDate = String(eventTime).slice(0, 10);
+    const shift = await getMemberShiftForDate(req, businessId, memberId, isoDate);
+
+    // ── Aplicar reglas de horario ────────────────────────────────────────────
+    // `flag` identifica la sub-regla disparada y sirve para filtrar destinatarios
+    // según las preferencias del gerente (entradas tarde, descansos largos, etc.)
+    let level = 'info';
+    let title = `${displayName} ${labels.verb}`;
+    let message = `Registrado a las ${displayTime}.`;
+    let flag = eventType;
+
+    if (eventType === 'clock_in') {
+      const actualMs = new Date(eventTime).getTime();
+      const scheduledMs = shift ? scheduleTimeToEpoch(isoDate, shift.start) : null;
+      const diffMin = scheduledMs ? Math.round((actualMs - scheduledMs) / 60000) : 0;
+
+      // Si el cliente envía lateMinutes lo respetamos; si no, lo derivamos.
+      const reportedLate = Math.max(0, Math.round(Number(lateMinutes) || 0));
+      const effectiveLate = reportedLate || Math.max(0, diffMin);
+
+      if (effectiveLate >= CLOCKIN_THRESHOLDS_MIN.LATE) {
+        flag = 'clock_in_late';
+        level = 'warning';
+        title = `${displayName} llegó tarde`;
+        message = `Fichó entrada a las ${displayTime} (${effectiveLate} min de retraso).`;
+      } else if (scheduledMs && diffMin <= -CLOCKIN_THRESHOLDS_MIN.EARLY_ENTRY) {
+        flag = 'clock_in_early';
+        title = `${displayName} fichó entrada anticipada`;
+        message = `Entró ${Math.abs(diffMin)} min antes del turno (${displayTime}).`;
+      } else {
+        title = `${displayName} fichó entrada`;
+        message = `Fichaje de entrada registrado a las ${displayTime}.`;
+      }
+    } else if (eventType === 'clock_out') {
+      const actualMs = new Date(eventTime).getTime();
+      const scheduledMs = shift ? scheduleTimeToEpoch(isoDate, shift.end) : null;
+      const diffMin = scheduledMs ? Math.round((actualMs - scheduledMs) / 60000) : 0;
+      const worked = Math.max(0, Math.round(Number(workedMinutes) || 0));
+      const workedTail = worked > 0 ? ` · ${formatMinutesEs(worked)} trabajadas` : '';
+
+      if (scheduledMs && diffMin <= -CLOCKIN_THRESHOLDS_MIN.EARLY_EXIT) {
+        flag = 'clock_out_early';
+        level = 'warning';
+        title = `${displayName} salió antes`;
+        message = `Fichó salida ${Math.abs(diffMin)} min antes del turno (${displayTime})${workedTail}.`;
+      } else if (scheduledMs && diffMin >= CLOCKIN_THRESHOLDS_MIN.LATE_EXIT) {
+        flag = 'clock_out_late';
+        level = 'success';
+        title = `${displayName} terminó tarde`;
+        message = `Salió ${diffMin} min después del turno (${displayTime})${workedTail}.`;
+      } else {
+        flag = 'clock_out';
+        level = 'success';
+        title = `${displayName} fichó salida`;
+        message = `Fichó salida a las ${displayTime}${workedTail}.`;
+      }
+    } else if (eventType === 'break_start') {
+      flag = 'break_start';
+      title = `${displayName} inició un descanso`;
+      message = `Pausa iniciada a las ${displayTime}.`;
+    } else if (eventType === 'break_end') {
+      const breakMin = Math.max(0, Math.round(Number(req.body?.breakMinutes) || 0));
+      const expected = (() => {
+        if (!shift?.breakStart || !shift?.breakEnd) return 0;
+        const s = scheduleTimeToEpoch(isoDate, shift.breakStart);
+        const e = scheduleTimeToEpoch(isoDate, shift.breakEnd);
+        if (!s || !e || e < s) return 0;
+        return Math.round((e - s) / 60000);
+      })();
+      const tolerance = expected > 0 ? expected + CLOCKIN_THRESHOLDS_MIN.LONG_BREAK : 60 + CLOCKIN_THRESHOLDS_MIN.LONG_BREAK;
+      if (breakMin > 0 && breakMin > tolerance) {
+        flag = 'break_long';
+        level = 'warning';
+        title = `${displayName} hizo un descanso largo`;
+        message = `Descanso de ${formatMinutesEs(breakMin)} (volvió a las ${displayTime}).`;
+      } else {
+        flag = 'break_end';
+        title = `${displayName} volvió del descanso`;
+        const tail = breakMin > 0 ? ` tras ${formatMinutesEs(breakMin)}` : '';
+        message = `De vuelta a las ${displayTime}${tail}.`;
+      }
+    }
+
+    const route = `/saas/equipo/fichajes?memberId=${encodeURIComponent(memberId)}`;
+    const metadata = {
+      businessId,
+      memberId,
+      memberName: displayName,
+      eventType,
+      flag,
+      time: eventTime,
+      device: device || '',
+      hasGeo: Boolean(hasGeo),
+      lateMinutes: Math.max(0, Math.round(Number(lateMinutes) || 0)),
+      workedMinutes: Math.max(0, Math.round(Number(workedMinutes) || 0)),
+    };
+
+    // Filtrar destinatarios según sus preferencias personales.
+    // Cada gerente decide si quiere recibir cada categoría: entradas, retrasos,
+    // entradas anticipadas, salidas (puntual o tardía), salidas anticipadas,
+    // descansos normales o descansos largos.
+    const filteredRecipients = [];
+    for (const userId of recipients) {
+      try {
+        const account = await findAccountByUserId(req, userId);
+        const prefs = normalizeNotificationPreferences(account?.notificationPreferences).clockin;
+        if (shouldNotifyForFlag(flag, prefs)) {
+          filteredRecipients.push(userId);
+        }
+      } catch (prefErr) {
+        // Si no se puede leer la preferencia (cuenta corrupta, BD caída) seguimos
+        // notificando para no perder eventos importantes.
+        console.warn('[Clockin notify] no se pudieron leer preferencias de', userId, prefErr?.message);
+        filteredRecipients.push(userId);
+      }
+    }
+
+    let createdCount = 0;
+    for (const userId of filteredRecipients) {
+      try {
+        const doc = buildNotificationDocument({
+          userId,
+          level,
+          category: 'clockin',
+          title,
+          message,
+          entityId: memberId,
+          entityType: 'team',
+          route,
+          metadata,
+          read: false,
+        });
+        const saved = await saveNotification(req, doc);
+        const sanitized = sanitizeNotification(saved);
+        try {
+          broadcastToUser(userId, 'notification', sanitized);
+        } catch (sseErr) {
+          console.warn('[Clockin notify] SSE error:', sseErr?.message);
+        }
+        sendPushToUser(req, userId, {
+          title: sanitized.title,
+          body: sanitized.message,
+          data: { route: sanitized.route, notificationId: sanitized.id },
+        }).catch((pushErr) => console.warn('[Clockin notify] Push error:', pushErr?.message));
+        createdCount += 1;
+      } catch (notifyErr) {
+        console.error('[Clockin notify] error creando notificación:', notifyErr?.message);
+      }
+    }
+
+    return res.json({ ok: true, recipients: createdCount });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error notificando fichaje',
+    });
   }
 }
 

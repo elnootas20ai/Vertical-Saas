@@ -8,11 +8,13 @@ import {
   getBusinessJoinRequests,
   getBillingCard,
   getMyJoinRequests,
+  getNotificationPreferences,
   getOnboarding,
   getMe,
   getUserActivity,
   googleLogin,
   inviteUser,
+  lookupInviteEmail,
   listAllActivities,
   listBusinessInvitations,
   listMyInvitations,
@@ -40,6 +42,7 @@ import {
   saveBillingCard,
   searchBusinesses,
   teamLogin,
+  updateNotificationPreferences,
   updatePassword,
   updateProfile,
   verifyEmail,
@@ -92,6 +95,8 @@ authRouter.get('/me', requireAuth, getMe);
 
 // Rutas protegidas con JWT y validación de input
 authRouter.post('/invite', requireAuthAndEmailVerified, validate(inviteUserSchema), inviteUser);
+// Lookup ligero para previsualizar a quién estás invitando antes de enviar la invitación.
+authRouter.post('/invite/lookup', requireAuthAndEmailVerified, lookupInviteEmail);
 authRouter.post('/activity', requireAuthAndEmailVerified, logActivity);
 authRouter.get('/activities', requireAuthAndEmailVerified, listAllActivities);
 authRouter.get('/users', requireAuthAndEmailVerified, listUsers);
@@ -131,5 +136,9 @@ authRouter.post('/invitations/:invitationId/reject', requireAuth, validateParams
 authRouter.post('/invitations/:invitationId/resend', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), resendInvitation);
 authRouter.delete('/invitations/:invitationId', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), revokeInvitation);
 authRouter.get('/businesses/:businessId/invitations', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), listBusinessInvitations);
+
+// Preferencias personales de notificación (silenciar categorías concretas)
+authRouter.get('/preferences', requireAuth, getNotificationPreferences);
+authRouter.patch('/preferences', requireAuth, updateNotificationPreferences);
 
 export { authRouter };

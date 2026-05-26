@@ -1630,6 +1630,43 @@ export function sanitizeAccount(account) {
     username: account.username || '',
     referralCode: account.referralCode || '',
     referredByAffiliateId: account.referredByAffiliateId || '',
+    notificationPreferences: normalizeNotificationPreferences(account.notificationPreferences),
+  };
+}
+
+/**
+ * Preferencias personales de notificación. El gerente puede silenciar
+ * categorías concretas (por ejemplo recibir solo retrasos y no entradas
+ * puntuales) sin que ese filtro afecte a otros gerentes del mismo business.
+ */
+export function defaultNotificationPreferences() {
+  return {
+    clockin: {
+      onEntry: true,        // entrada puntual
+      onLate: true,         // retraso
+      onEarlyEntry: false,  // entrada anticipada sospechosa
+      onExit: true,         // salida puntual o tardía
+      onEarlyExit: true,    // salida anticipada
+      onBreaks: false,      // inicio/fin de descanso (puede ser ruidoso)
+      onLongBreak: true,    // descanso prolongado
+    },
+  };
+}
+
+export function normalizeNotificationPreferences(prefs) {
+  const defaults = defaultNotificationPreferences();
+  if (!prefs || typeof prefs !== 'object') return defaults;
+  const clockin = prefs.clockin && typeof prefs.clockin === 'object' ? prefs.clockin : {};
+  return {
+    clockin: {
+      onEntry: clockin.onEntry !== undefined ? Boolean(clockin.onEntry) : defaults.clockin.onEntry,
+      onLate: clockin.onLate !== undefined ? Boolean(clockin.onLate) : defaults.clockin.onLate,
+      onEarlyEntry: clockin.onEarlyEntry !== undefined ? Boolean(clockin.onEarlyEntry) : defaults.clockin.onEarlyEntry,
+      onExit: clockin.onExit !== undefined ? Boolean(clockin.onExit) : defaults.clockin.onExit,
+      onEarlyExit: clockin.onEarlyExit !== undefined ? Boolean(clockin.onEarlyExit) : defaults.clockin.onEarlyExit,
+      onBreaks: clockin.onBreaks !== undefined ? Boolean(clockin.onBreaks) : defaults.clockin.onBreaks,
+      onLongBreak: clockin.onLongBreak !== undefined ? Boolean(clockin.onLongBreak) : defaults.clockin.onLongBreak,
+    },
   };
 }
 

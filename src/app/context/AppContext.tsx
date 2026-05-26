@@ -1964,6 +1964,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (prev.some((x) => x.id === n.id)) return prev;
       return [deserializeNotification(n), ...prev];
     });
+    // Evento DOM para que cualquier pantalla pueda reaccionar al SSE sin tener
+    // que enchufarse al provider. Se usa, por ejemplo, en Clockins para
+    // refrescar el resumen diario en vivo cuando un trabajador ficha.
+    try {
+      window.dispatchEvent(new CustomEvent('vertial:notification', { detail: n }));
+    } catch {
+      // Silenciado: dispatchEvent no debe romper el flujo de SSE.
+    }
   }, []);
 
   const handleVehicleUpdated = useCallback((data: unknown) => {

@@ -34,37 +34,34 @@ import {
 type ViewTab = 'kitchen' | 'assembly' | 'delivery' | 'all';
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  pending:   { label: 'Pendiente',   color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   icon: <Clock className="w-4 h-4" /> },
-  preparing: { label: 'Preparando',  color: 'text-blue-700',    bg: 'bg-blue-50 border-blue-200',     icon: <Package className="w-4 h-4" /> },
-  kitchen:   { label: 'En cocina',   color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', icon: <ChefHat className="w-4 h-4" /> },
-  assembly:  { label: 'Montaje',     color: 'text-indigo-700',  bg: 'bg-indigo-50 border-indigo-200', icon: <Package className="w-4 h-4" /> },
-  delivery:  { label: 'En reparto',  color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',     icon: <Truck className="w-4 h-4" /> },
-  delivered: { label: 'Entregado',   color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   icon: <CheckCircle2 className="w-4 h-4" /> },
-  cancelled: { label: 'Cancelado',   color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     icon: <X className="w-4 h-4" /> },
-  incident:  { label: 'Incidencia',  color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       icon: <AlertTriangle className="w-4 h-4" /> },
+  nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   icon: <Clock className="w-4 h-4" /> },
+  cocina:     { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', icon: <ChefHat className="w-4 h-4" /> },
+  listo:      { label: 'Montaje',    color: 'text-indigo-700',  bg: 'bg-indigo-50 border-indigo-200', icon: <Package className="w-4 h-4" /> },
+  en_reparto: { label: 'En reparto', color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',     icon: <Truck className="w-4 h-4" /> },
+  entregado:  { label: 'Entregado',  color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   icon: <CheckCircle2 className="w-4 h-4" /> },
+  cancelled:  { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     icon: <X className="w-4 h-4" /> },
+  incident:   { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       icon: <AlertTriangle className="w-4 h-4" /> },
 };
 
 const NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
-  pending: 'preparing',
-  preparing: 'kitchen',
-  kitchen: 'assembly',
-  assembly: 'delivery',
-  delivery: 'delivered',
+  nuevo: 'cocina',
+  cocina: 'listo',
+  listo: 'en_reparto',
+  en_reparto: 'entregado',
 };
 
 const NEXT_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
-  pending: 'Preparar',
-  preparing: 'Enviar a cocina',
-  kitchen: 'Listo para montaje',
-  assembly: 'Salir a reparto',
-  delivery: 'Marcar entregado',
+  nuevo: 'A cocina',
+  cocina: 'Listo para montaje',
+  listo: 'Salir a reparto',
+  en_reparto: 'Marcar entregado',
 };
 
 const TAB_CONFIG: { id: ViewTab; label: string; icon: React.ReactNode; statuses: DeliveryOrderStatus[] }[] = [
-  { id: 'kitchen',  label: 'Cocina',  icon: <ChefHat className="w-4 h-4" />,     statuses: ['pending', 'preparing', 'kitchen'] },
-  { id: 'assembly', label: 'Montaje', icon: <Package className="w-4 h-4" />,      statuses: ['assembly'] },
-  { id: 'delivery', label: 'Reparto', icon: <Truck className="w-4 h-4" />,        statuses: ['delivery'] },
-  { id: 'all',      label: 'Todos',   icon: <ShoppingBag className="w-4 h-4" />,  statuses: [] },
+  { id: 'kitchen',  label: 'Cocina',  icon: <ChefHat className="w-4 h-4" />,     statuses: ['nuevo', 'cocina'] },
+  { id: 'assembly', label: 'Montaje', icon: <Package className="w-4 h-4" />,     statuses: ['listo'] },
+  { id: 'delivery', label: 'Reparto', icon: <Truck className="w-4 h-4" />,       statuses: ['en_reparto'] },
+  { id: 'all',      label: 'Todos',   icon: <ShoppingBag className="w-4 h-4" />, statuses: [] },
 ];
 
 function formatCurrency(n: number) {
@@ -138,10 +135,10 @@ function OrderCard({
         </div>
       )}
 
-      {order.deliveryAddress && (
+      {order.customerAddress && (
         <div className="flex items-center gap-2 mb-2 text-xs text-gray-500">
           <MapPin className="w-3 h-3 shrink-0" />
-          <span className="truncate">{order.deliveryAddress}</span>
+          <span className="truncate">{order.customerAddress}</span>
         </div>
       )}
 
@@ -164,7 +161,7 @@ function OrderCard({
         <div className="text-sm">
           <span className="text-gray-500">{itemCount} uds</span>
           <span className="mx-1.5 text-gray-300">·</span>
-          <span className="font-bold text-gray-900 dark:text-gray-100">{formatCurrency(order.total)}</span>
+          <span className="font-bold text-gray-900 dark:text-gray-100">{formatCurrency(order.totalAmount)}</span>
         </div>
         <div className="flex gap-2">
           <button
@@ -227,7 +224,7 @@ function OrderDetail({ order, onClose, onAdvance, advancing }: {
               <div>
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.customerName}</p>
                 {order.customerPhone && <p className="text-xs text-gray-500">{order.customerPhone}</p>}
-                {order.deliveryAddress && <p className="text-xs text-gray-500 mt-0.5">{order.deliveryAddress}</p>}
+                {order.customerAddress && <p className="text-xs text-gray-500 mt-0.5">{order.customerAddress}</p>}
               </div>
             </div>
           )}
@@ -260,7 +257,7 @@ function OrderDetail({ order, onClose, onAdvance, advancing }: {
           <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
             <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-              {formatCurrency(order.total)}
+              {formatCurrency(order.totalAmount)}
             </span>
           </div>
 
@@ -349,10 +346,10 @@ export function WorkerTpvDelivery() {
   }, [orders, activeTab, tabConfig, search]);
 
   const stats = useMemo(() => ({
-    kitchen: orders.filter(o => ['pending', 'preparing', 'kitchen'].includes(o.status)).length,
-    assembly: orders.filter(o => o.status === 'assembly').length,
-    delivery: orders.filter(o => o.status === 'delivery').length,
-    delivered: orders.filter(o => o.status === 'delivered').length,
+    kitchen: orders.filter(o => o.status === 'nuevo' || o.status === 'cocina').length,
+    assembly: orders.filter(o => o.status === 'listo').length,
+    delivery: orders.filter(o => o.status === 'en_reparto').length,
+    delivered: orders.filter(o => o.status === 'entregado').length,
   }), [orders]);
 
   return (
@@ -376,7 +373,7 @@ export function WorkerTpvDelivery() {
             <div>
               <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Mi Puesto - Cocina</h1>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {orders.filter(o => !['delivered', 'cancelled'].includes(o.status)).length} pedidos activos
+                {orders.filter(o => o.status !== 'entregado' && o.status !== 'cancelled').length} pedidos activos
               </p>
             </div>
           </div>

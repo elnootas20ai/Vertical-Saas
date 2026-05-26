@@ -4,8 +4,11 @@ import {
   RefreshCw, ChevronDown, Phone, Mail, MapPin, FileText,
   ChefHat, PackageCheck, AlertCircle, Plug, Save,
   Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink,
+  Copy, Check,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useBusiness } from '../../context/BusinessContext';
+import { getApiBase } from '../../lib/apiBase';
 import {
   listWebOrdersRequest,
   updateWebOrderRequest,
@@ -51,6 +54,23 @@ export function WebOrders() {
   const [intLoading, setIntLoading] = useState(false);
   const [intSaving, setIntSaving] = useState(false);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const apiBase = useMemo(() => getApiBase(), []);
+  const buildWebhookUrl = useCallback(
+    (urlSlug: string): string => `${apiBase}/api/delivery-webhooks/${urlSlug}/${businessId}`,
+    [apiBase, businessId],
+  );
+  const copyWebhookUrl = useCallback(async (key: string, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedKey(key);
+      toast.success('URL copiada al portapapeles');
+      window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 2000);
+    } catch {
+      toast.error('No se pudo copiar la URL');
+    }
+  }, []);
 
   const businessId = currentBusiness?.business_id || '';
 
@@ -441,10 +461,13 @@ export function WebOrders() {
           ) : (
             <div className="space-y-4">
               {([
-                { key: 'uber' as const, name: 'Uber Eats', color: 'bg-black text-white', accent: 'border-black/20', devUrl: 'https://developer.uber.com/docs/eats' },
-                { key: 'globo' as const, name: 'Glovo', color: 'bg-[#00A082] text-white', accent: 'border-[#00A082]/20', devUrl: 'https://developers.glovoapp.com/' },
-                { key: 'justead' as const, name: 'Just Eat', color: 'bg-[#FF8000] text-white', accent: 'border-[#FF8000]/20', devUrl: 'https://developers.just-eat.com/' },
-              ]).map(({ key, name, color, accent, devUrl }) => (
+                { key: 'uber' as const, urlSlug: 'ubereats', name: 'Uber Eats', color: 'bg-black text-white', accent: 'border-black/20', devUrl: 'https://developer.uber.com/docs/eats' },
+                { key: 'globo' as const, urlSlug: 'glovo', name: 'Glovo', color: 'bg-[#00A082] text-white', accent: 'border-[#00A082]/20', devUrl: 'https://developers.glovoapp.com/' },
+                { key: 'justead' as const, urlSlug: 'justeat', name: 'Just Eat', color: 'bg-[#FF8000] text-white', accent: 'border-[#FF8000]/20', devUrl: 'https://developers.just-eat.com/' },
+              ]).map(({ key, urlSlug, name, color, accent, devUrl }) => {
+                const webhookUrl = buildWebhookUrl(urlSlug);
+                const isCopied = copiedKey === key;
+                return (
                 <div key={key} className={`rounded-xl border ${accent} p-4 space-y-3`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
@@ -466,25 +489,55 @@ export function WebOrders() {
                       }
                     </button>
                   </div>
-                  <div className="relative">
-                    <input
-                      type={showTokens[key] ? 'text' : 'password'}
-                      placeholder={`Token de ${name}`}
-                      value={integrations[key].token}
-                      onChange={(e) => setIntegrations((prev) => ({
-                        ...prev,
-                        [key]: { ...prev[key], token: e.target.value },
-                      }))}
-                      className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-400 transition-colors"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowTokens((prev) => ({ ...prev, [key]: !prev[key] }))}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                    >
-                      {showTokens[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                      URL de webhook (registra esta URL en {name})
+                    </label>
+                    <div className="flex items-stretch gap-2">
+                      <code className="flex-1 px-3 py-2 text-[11px] font-mono break-all border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300 select-all">
+                        {businessId ? webhookUrl : 'Selecciona un negocio activo para ver la URL'}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyWebhookUrl(key, webhookUrl)}
+                        disabled={!businessId}
+                        className="shrink-0 inline-flex items-center justify-center w-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Copiar URL"
+                      >
+                        {isCopied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                      Las plataformas autentican con el header <code className="text-[10px]">x-webhook-token</code> o el query <code className="text-[10px]">?token=</code>.
+                    </p>
                   </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
+                      Token secreto
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showTokens[key] ? 'text' : 'password'}
+                        placeholder={`Token de ${name}`}
+                        value={integrations[key].token}
+                        onChange={(e) => setIntegrations((prev) => ({
+                          ...prev,
+                          [key]: { ...prev[key], token: e.target.value },
+                        }))}
+                        className="w-full px-3 py-2 pr-10 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-400 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowTokens((prev) => ({ ...prev, [key]: !prev[key] }))}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                      >
+                        {showTokens[key] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
                   <a
                     href={devUrl}
                     target="_blank"
@@ -495,7 +548,8 @@ export function WebOrders() {
                     Obtener token de {name}
                   </a>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

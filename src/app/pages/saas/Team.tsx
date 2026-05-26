@@ -2728,6 +2728,7 @@ export function Team() {
     listUsers,
     listRoles,
     inviteUser,
+    lookupInviteEmail,
     listBusinessInvitations,
     resendInvitation,
     revokeInvitation,
@@ -3594,6 +3595,7 @@ export function Team() {
           onInvite={async (payload) => {
             return await handleInvite(payload);
           }}
+          onLookupEmail={lookupInviteEmail}
         />
       )}
 

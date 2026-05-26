@@ -20,9 +20,9 @@ import {
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
-import { useApp } from '../../../context/AppContext';
 import {
   type ClockinRecord,
+  type ClockinEventType,
   type GeoLocation,
   getTodayClockin,
   listClockins,
@@ -32,6 +32,7 @@ import {
   endBreak,
   formatMinutes,
   getDisplayTime,
+  notifyClockinEvent,
 } from '../../../lib/clockinsApi';
 import { useGeolocation, isMobileDevice } from '../../../hooks/useGeolocation';
 
@@ -115,10 +116,55 @@ export function WorkerClock() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const { createNotification } = useApp();
   const businessId = currentBusiness?.business_id || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
+
+  /**
+   * Notifica al equipo de gestión un evento de fichaje. Es fire-and-forget:
+   * si falla la red la UI ya muestra el cambio de estado y el documento de
+   * fichaje ya se ha persistido en CouchDB. El backend resuelve los
+   * destinatarios (Admin/Gerente + owner) y emite SSE + push.
+   */
+  const fireClockinNotification = useCallback(
+    (eventType: ClockinEventType, record: ClockinRecord | null, hasGeo: boolean) => {
+      if (!businessId || !memberId) return;
+      const lateMinutes = (() => {
+        if (eventType !== 'clock_in' || !record?.scheduled_start) return 0;
+        const entry = record.entries.find((e) => e.type === 'clock_in');
+        if (!entry) return 0;
+        const [h, m] = record.scheduled_start.split(':').map(Number);
+        const scheduled = new Date(`${record.date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
+        const actual = new Date(entry.time).getTime();
+        return Math.max(0, Math.round((actual - scheduled) / 60000));
+      })();
+      // Duración del descanso recién cerrado (último break_start → break_end actual)
+      const breakMinutes = (() => {
+        if (eventType !== 'break_end' || !record?.entries?.length) return 0;
+        const entries = record.entries;
+        const lastEndIdx = entries.map((e) => e.type).lastIndexOf('break_end');
+        const lastStartIdx = entries.map((e) => e.type).lastIndexOf('break_start');
+        if (lastStartIdx < 0 || lastEndIdx < 0 || lastStartIdx > lastEndIdx) return 0;
+        const start = new Date(entries[lastStartIdx].time).getTime();
+        const end = new Date(entries[lastEndIdx].time).getTime();
+        return Math.max(0, Math.round((end - start) / 60000));
+      })();
+      void notifyClockinEvent(businessId, {
+        memberId,
+        memberName,
+        eventType,
+        time: new Date().toISOString(),
+        device: isMobileDevice() ? 'mobile' : 'desktop',
+        lateMinutes,
+        workedMinutes: eventType === 'clock_out' ? record?.totalMinutes || 0 : 0,
+        breakMinutes,
+        hasGeo,
+      }).catch((err) => {
+        console.error('Error notificando fichaje:', err);
+      });
+    },
+    [businessId, memberId, memberName],
+  );
 
   const [record, setRecord] = useState<ClockinRecord | null>(null);
   const [history, setHistory] = useState<ClockinRecord[]>([]);
@@ -201,20 +247,7 @@ export function WorkerClock() {
         device_type: isMobile ? 'mobile' : 'desktop',
       });
       setRecord(rec);
-      // Notificación para el campanario: visibilidad inmediata del fichaje al
-      // resto del equipo / encargados. Si falla la creación se ignora porque la
-      // UI ya refleja el cambio de estado del trabajador.
-      const displayTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-      void createNotification({
-        level: 'success',
-        category: 'clockin',
-        title: 'Fichaje realizado',
-        message: `${memberName || 'El trabajador'} ha fichado entrada a las ${displayTime}`,
-        entityId: memberId,
-        entityType: 'team',
-        route: `/saas/team/${encodeURIComponent(memberId)}`,
-        metadata: { device: isMobile ? 'mobile' : 'desktop', hasGeo: Boolean(geo) },
-      }).catch((error) => { console.error('Error creating clockin notification:', error); });
+      fireClockinNotification('clock_in', rec, Boolean(geo));
     } catch (e: any) {
       setError(e.message || 'Error al fichar entrada');
     } finally {
@@ -231,6 +264,7 @@ export function WorkerClock() {
       const rec = await clockOut(record, geo);
       setRecord(rec);
       setHistory((prev) => [rec, ...prev].slice(0, 10));
+      fireClockinNotification('clock_out', rec, Boolean(geo));
     } catch (e: any) {
       setError(e.message || 'Error al fichar salida');
     } finally {
@@ -244,8 +278,10 @@ export function WorkerClock() {
     setError('');
     try {
       const geo = await getGeoForAction();
-      const rec = isOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
+      const wasOnBreak = isOnBreak;
+      const rec = wasOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
       setRecord(rec);
+      fireClockinNotification(wasOnBreak ? 'break_end' : 'break_start', rec, Boolean(geo));
     } catch (e: any) {
       setError(e.message || 'Error al gestionar descanso');
     } finally {

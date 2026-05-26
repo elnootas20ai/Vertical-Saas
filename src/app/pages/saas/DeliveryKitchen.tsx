@@ -8,6 +8,7 @@ import {
   listDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
   listPointsOfSaleRequest,
+  setCatalogItemAvailabilityRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryOrderItem,
@@ -807,7 +808,12 @@ export function DeliveryKitchen() {
 
   const markOutOfStock = useCallback(async (order: DeliveryOrder, item: DeliveryOrderItem) => {
     if (!userId || !item.catalogItemId) return;
-    const confirmed = window.confirm(`¿Marcar "${item.name}" como agotado?\nSe reflejará en todos los pedidos abiertos.`);
+    const confirmed = window.confirm(
+      `¿Marcar "${item.name}" como agotado?\n\n` +
+      `• Se marcará agotado en todos los pedidos abiertos.\n` +
+      `• Se deshabilitará en el catálogo para que no entren nuevos pedidos.\n\n` +
+      `Cuando lo repongas, vuelve a activarlo en el catálogo.`,
+    );
     if (!confirmed) return;
     setActingId(order._id);
     try {
@@ -834,7 +840,15 @@ export function DeliveryKitchen() {
           return o;
         }),
       );
-      toast.success(`"${item.name}" marcado como agotado`);
+      // Deshabilitar el artículo en el catálogo para que no entren nuevos pedidos
+      // mientras la cocina no haya repuesto stock. Si falla, no rompemos la
+      // acción principal — al menos los pedidos en curso ya se marcaron.
+      try {
+        await setCatalogItemAvailabilityRequest(userId, item.catalogItemId, false);
+      } catch {
+        toast.warning('Marcado en pedidos pero no se pudo deshabilitar en el catálogo');
+      }
+      toast.success(`"${item.name}" marcado como agotado y deshabilitado del catálogo`);
     } catch {
       toast.error('Error al marcar producto agotado');
     } finally {

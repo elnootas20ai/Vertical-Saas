@@ -941,6 +941,10 @@ app.use('/api/quotes', quoteRouter);
 // API-03: Webhooks salientes (requiere JWT)
 app.use('/api/webhooks', requireAuthAndEmailVerified, webhooksRouter);
 
+// Webhooks ENTRANTES de plataformas delivery (Glovo, Just Eat, Uber Eats).
+// SIN auth JWT: las plataformas autentican por `x-webhook-token` o `?token=` por negocio.
+app.use('/api/delivery-webhooks', burstLimiter, webhookRouter);
+
 // API pública v1 (requiere API Token Bearer)
 app.use('/api/tokens', requireAuthAndEmailVerified, tokenRouter);
 app.use('/api/v1', apiLimiter, publicApiRouter);

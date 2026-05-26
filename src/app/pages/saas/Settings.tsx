@@ -52,6 +52,7 @@ import {
   Smartphone,
   SprayCan,
   Stethoscope,
+  Store,
   Table2,
   Tablet,
   Trash2,
@@ -72,6 +73,7 @@ import {
   Globe,
   Cigarette,
   Beef,
+  Layers,
 } from 'lucide-react';
 import { WysiwygTemplateEditor } from '../../components/saas/WysiwygTemplateEditor';
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
@@ -83,6 +85,7 @@ import { EmailTemplatesTab } from '../../components/saas/settings/EmailTemplates
 import { BusinessHoursTab } from '../../components/saas/settings/BusinessHoursTab';
 import { DataPortabilityTab } from '../../components/saas/settings/DataPortabilityTab';
 import { AlertsTab } from '../../components/saas/settings/AlertsTab';
+import { MyNotificationsTab } from '../../components/saas/settings/MyNotificationsTab';
 import { SalesPointsTab } from '../../components/saas/settings/SalesPointsTab';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -92,6 +95,10 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type { Business } from '../../lib/businessApi';
+import { listBrandsRequest } from '../../lib/brandApi';
+import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
+import { filterWorkCentersForBusinessScope } from '../../lib/deliverySetup';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useDocumentTemplates } from '../../hooks/useDocumentTemplates';
 import { SAAS__CreateZoneModal } from '../../components/design-system/SAAS__CreateZoneModal';
 import { IntegrationsPanel } from '../../components/saas/IntegrationsPanel';
@@ -153,6 +160,7 @@ type TabId =
   | 'horarios'
   | 'datos'
   | 'alertas'
+  | 'misNotificaciones'
   | 'apariencia'
   | 'salesPoints';
 
@@ -173,6 +181,7 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'horarios', slug: 'horarios', label: 'Horarios' },
   { id: 'datos', slug: 'datos', label: 'Datos' },
   { id: 'alertas', slug: 'alertas', label: 'Alertas' },
+  { id: 'misNotificaciones', slug: 'mis-notificaciones', label: 'Mis notificaciones' },
   { id: 'apariencia', slug: 'apariencia', label: 'Apariencia' },
   { id: 'salesPoints', slug: 'tienda', label: 'Tienda' },
 ];
@@ -209,7 +218,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
   },
   { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
   { id: 'config', label: 'Configuración', icon: SettingsIcon, tabs: ['templates', 'integrations', 'pipeline', 'emails', 'datos'] },
-  { id: 'alerts', label: 'Alertas', icon: Bell, tabs: ['alertas'] },
+  { id: 'alerts', label: 'Alertas', icon: Bell, tabs: ['alertas', 'misNotificaciones'] },
 ];
 
 const TAB_TO_SECTION: Record<TabId, SectionId> = Object.fromEntries(
@@ -1633,6 +1642,54 @@ function TabBusinesses() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list');
 
+  type BusinessStats = { brands: number; stores: number; loading: boolean };
+  const [businessStats, setBusinessStats] = useState<Record<string, BusinessStats>>({});
+
+  useEffect(() => {
+    if (!user || businesses.length === 0) {
+      setBusinessStats({});
+      return;
+    }
+
+    let cancelled = false;
+    setBusinessStats((prev) => {
+      const next: Record<string, BusinessStats> = {};
+      for (const b of businesses) {
+        next[b.business_id] = prev[b.business_id] || { brands: 0, stores: 0, loading: true };
+      }
+      return next;
+    });
+
+    void Promise.all(
+      businesses.map(async (business) => {
+        const dataUserId = resolveBusinessDataUserId(user, business);
+        const [brands, workCenters] = await Promise.all([
+          listBrandsRequest(business.business_id).catch(() => []),
+          dataUserId
+            ? listWorkCentersForDelivery(dataUserId, business).catch(() => [])
+            : Promise.resolve([]),
+        ]);
+        const scopedStores = filterWorkCentersForBusinessScope(workCenters, business.business_id);
+        return {
+          businessId: business.business_id,
+          brands: brands.filter((b) => !b.deletedAt).length,
+          stores: scopedStores.filter((wc) => !wc.deletedAt).length,
+        };
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, BusinessStats> = {};
+      for (const r of results) {
+        next[r.businessId] = { brands: r.brands, stores: r.stores, loading: false };
+      }
+      setBusinessStats(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businesses, user]);
+
   const filteredBusinesses = useMemo(() => {
     let result = [...businesses];
 
@@ -2075,9 +2132,6 @@ function TabBusinesses() {
                           {business.city}
                         </span>
                       )}
-                      <span className="text-xs text-gray-400 dark:text-gray-500">
-                        {business.members.length} miembro{business.members.length !== 1 ? 's' : ''}
-                      </span>
                     </div>
                   </div>
 
@@ -2113,6 +2167,78 @@ function TabBusinesses() {
                         </button>
                       </>
                     )}
+                  </div>
+                </div>
+
+                {/* Stats: Marcas · Tiendas · Sedes · Miembros */}
+                <div className="px-5 pb-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(() => {
+                      const stats = businessStats[business.business_id];
+                      const loadingStats = !stats || stats.loading;
+                      const items = [
+                        {
+                          key: 'brands',
+                          label: 'Marcas',
+                          icon: <Tag className="w-3.5 h-3.5" />,
+                          value: stats?.brands ?? 0,
+                          color: 'text-purple-600 dark:text-purple-400',
+                          bg: 'bg-purple-50 dark:bg-purple-900/20',
+                          border: 'border-purple-100 dark:border-purple-900/40',
+                          loading: loadingStats,
+                        },
+                        {
+                          key: 'stores',
+                          label: 'Tiendas',
+                          icon: <Store className="w-3.5 h-3.5" />,
+                          value: stats?.stores ?? 0,
+                          color: 'text-emerald-600 dark:text-emerald-400',
+                          bg: 'bg-emerald-50 dark:bg-emerald-900/20',
+                          border: 'border-emerald-100 dark:border-emerald-900/40',
+                          loading: loadingStats,
+                        },
+                        {
+                          key: 'branches',
+                          label: 'Sedes',
+                          icon: <Layers className="w-3.5 h-3.5" />,
+                          value: business.branches?.length ?? 0,
+                          color: 'text-amber-600 dark:text-amber-400',
+                          bg: 'bg-amber-50 dark:bg-amber-900/20',
+                          border: 'border-amber-100 dark:border-amber-900/40',
+                          loading: false,
+                        },
+                        {
+                          key: 'members',
+                          label: 'Miembros',
+                          icon: <Users className="w-3.5 h-3.5" />,
+                          value: business.members.length,
+                          color: 'text-blue-600 dark:text-blue-400',
+                          bg: 'bg-blue-50 dark:bg-blue-900/20',
+                          border: 'border-blue-100 dark:border-blue-900/40',
+                          loading: false,
+                        },
+                      ];
+                      return items.map((it) => (
+                        <div
+                          key={it.key}
+                          className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 ${it.bg} ${it.border}`}
+                        >
+                          <span className={`flex-shrink-0 ${it.color}`}>{it.icon}</span>
+                          <div className="min-w-0 leading-tight">
+                            <div className={`text-sm font-bold ${it.color}`}>
+                              {it.loading ? (
+                                <span className="inline-block w-4 h-3 rounded bg-gray-200 dark:bg-gray-700 animate-pulse align-middle" />
+                              ) : (
+                                it.value
+                              )}
+                            </div>
+                            <div className="text-[10px] font-medium text-gray-500 dark:text-gray-400 truncate">
+                              {it.label}
+                            </div>
+                          </div>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </div>
 
@@ -2158,6 +2284,8 @@ function TabBusinesses() {
                   <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Tipo</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider hidden md:table-cell">CIF</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider hidden lg:table-cell">Ciudad</th>
+                  <th className="text-center px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider hidden md:table-cell">Marcas</th>
+                  <th className="text-center px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider hidden md:table-cell">Tiendas</th>
                   <th className="text-center px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Miembros</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider hidden sm:table-cell">Estado</th>
                   <th className="text-right px-4 py-3 font-semibold text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wider">Acciones</th>
@@ -2226,6 +2354,38 @@ function TabBusinesses() {
                         ) : (
                           <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
                         )}
+                      </td>
+
+                      {/* Marcas */}
+                      <td className="px-4 py-3 text-center hidden md:table-cell">
+                        {(() => {
+                          const stats = businessStats[business.business_id];
+                          if (!stats || stats.loading) {
+                            return <span className="inline-block w-5 h-3 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />;
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 text-xs font-semibold">
+                              <Tag className="w-3 h-3" />
+                              {stats.brands}
+                            </span>
+                          );
+                        })()}
+                      </td>
+
+                      {/* Tiendas */}
+                      <td className="px-4 py-3 text-center hidden md:table-cell">
+                        {(() => {
+                          const stats = businessStats[business.business_id];
+                          if (!stats || stats.loading) {
+                            return <span className="inline-block w-5 h-3 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />;
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+                              <Store className="w-3 h-3" />
+                              {stats.stores}
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Miembros */}
@@ -4291,6 +4451,8 @@ export function Settings() {
         {activeTab === 'alertas' && currentBusiness && (
           <AlertsTab businessId={currentBusiness.business_id} />
         )}
+
+        {activeTab === 'misNotificaciones' && <MyNotificationsTab />}
 
         {activeTab === 'apariencia' && <TabApariencia />}
 

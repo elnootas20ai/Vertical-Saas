@@ -1,10 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useModalClose } from '../../hooks/useModalClose';
 import { X, ChevronRight, ChevronLeft, Sparkles, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
-import { ONBOARDING_TOUR_ARM_EVENT } from '../../lib/onboardingLocalKeys';
+import {
+  clearOnboardingTourForBusiness,
+  isOnboardingTourCompleted,
+  markOnboardingTourCompleted,
+  ONBOARDING_TOUR_ARM_EVENT,
+} from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
 
 function resolveAccountUserId(user: { user_id?: string; id?: string } | null | undefined): string {
@@ -48,9 +53,21 @@ export function OnboardingTour({ onComplete }: Props) {
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
   const [closedThisSession, setClosedThisSession] = useState(false);
+  // Recordamos a quién pertenece la sesión actual para evitar carry-over entre logins.
+  const ownerRef = useRef<string>('');
 
   useEffect(() => {
-    if (!accountUserId || !businessId || !businessesFetchSettled || closedThisSession) return;
+    if (!accountUserId || !businessId || !businessesFetchSettled) return;
+
+    const ownerKey = `${accountUserId}::${businessId}`;
+    // Al cambiar de empresa / sesión, reiniciamos el estado de cierre local.
+    if (ownerRef.current !== ownerKey) {
+      ownerRef.current = ownerKey;
+      setClosedThisSession(false);
+      setStepIndex(0);
+    }
+
+    const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
 
     const openTour = () => setVisible(true);
 
@@ -64,10 +81,15 @@ export function OnboardingTour({ onComplete }: Props) {
     };
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-    const timer = setTimeout(openTour, 800);
+
+    // Auto-apertura SOLO la primera vez (no tras saltar/completar ni en recargas posteriores).
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (!alreadySeen && !closedThisSession) {
+      timer = setTimeout(openTour, 800);
+    }
 
     return () => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
     };
   }, [accountUserId, businessId, businessesFetchSettled, closedThisSession]);
@@ -78,6 +100,13 @@ export function OnboardingTour({ onComplete }: Props) {
 
   const closeTour = useCallback(
     (completed = false) => {
+      // Persistimos «ya visto» de forma SÍNCRONA al pulsar (no dentro del timeout de
+      // la animación) para que, si el usuario recarga durante la salida, ya quede
+      // guardado en localStorage según contrato del checklist:
+      // «al saltar o terminar no vuelve al recargar».
+      if (accountUserId && businessId) {
+        markOnboardingTourCompleted(accountUserId, businessId);
+      }
       setExiting(true);
       setTimeout(() => {
         setVisible(false);
@@ -86,7 +115,7 @@ export function OnboardingTour({ onComplete }: Props) {
         if (completed) onComplete?.();
       }, 250);
     },
-    [onComplete],
+    [onComplete, accountUserId, businessId],
   );
 
   const handleNext = useCallback(() => {
@@ -240,6 +269,9 @@ export function useRestartTour() {
     const accountUserId = resolveAccountUserId(user);
     const businessId = String(currentBusiness?.business_id || '').trim();
     if (!accountUserId || !businessId) return;
+    // Borramos cualquier marca de «ya visto» para que el evento ARM pueda reabrirlo
+    // y para que tampoco se considere completado tras cerrar (relanzamos de cero).
+    clearOnboardingTourForBusiness(accountUserId, businessId);
     window.dispatchEvent(
       new CustomEvent(ONBOARDING_TOUR_ARM_EVENT, {
         detail: { userId: accountUserId, businessId },

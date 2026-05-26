@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import {
   CalendarRange, Users, Save, X, Loader2, AlertCircle, Pencil, Timer, Plus,
   Copy, Trash2, Zap, LayoutTemplate, Settings2, ChevronLeft, ChevronRight,
@@ -150,6 +151,28 @@ export function SchedulesVacations() {
   }, [businessId, canManage, currentWeekStart, weekEnd, currentYear]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Deep-link desde Fichajes (?member=<id>) ────────────────────────────────
+  // Cuando el admin pulsa "Editar horario" en la pestaña de Fichajes le
+  // llevamos aquí con el id del miembro. Al terminar de cargar miembros
+  // abrimos directamente su editor de horario en la pestaña Calendario.
+  // Usamos un ref para no reabrirlo si el usuario lo cierra y recarga.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkMemberRef = useRef<string | null>(null);
+  useEffect(() => {
+    const memberParam = searchParams.get('member');
+    if (!memberParam || loading) return;
+    if (deepLinkMemberRef.current === memberParam) return;
+    if (!members.some(m => m.user_id === memberParam)) return;
+    deepLinkMemberRef.current = memberParam;
+    setTab('calendar');
+    openEditor(memberParam);
+    // Limpiamos el query param para que un refresh no vuelva a forzar la apertura.
+    const next = new URLSearchParams(searchParams);
+    next.delete('member');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, members, searchParams]);
 
   useEffect(() => {
     if (!loading && members.length > 0) {

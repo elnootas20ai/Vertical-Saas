@@ -35,6 +35,7 @@ import {
   listPendingInvitationsByEmail,
   logAccountActivity,
   listAccounts,
+  normalizeNotificationPreferences,
   normalizePermissionMatrix,
   resetFailedLoginAttempts,
   revokeAllSessions,
@@ -987,8 +988,17 @@ export async function inviteUser(req, res) {
     const resolvedCompanyName = business?.name || companyName;
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    // Bloqueos previos (válidos tanto si la cuenta existe como si no).
-    if (existingAccount && business) {
+    // Nuevo flujo: solo se puede invitar a personas que ya tengan cuenta en Vertial.
+    // El invitado verá la invitación dentro de la app al iniciar sesión y la aceptará en un clic.
+    if (!existingAccount) {
+      return res.status(404).json({
+        ok: false,
+        code: 'USER_NOT_REGISTERED',
+        error: 'Este email no está registrado en Vertial. La persona debe crearse una cuenta antes de poder ser invitada al equipo.',
+      });
+    }
+
+    if (business) {
       const isOwnerOfThis = business.owner_user_id === existingAccount.user_id;
       const isAlreadyMember = Array.isArray(business.members)
         && business.members.some((m) => m.user_id === existingAccount.user_id);
@@ -1001,22 +1011,20 @@ export async function inviteUser(req, res) {
       }
     }
 
-    if (existingAccount) {
-      try {
-        const allBusinesses = await listAllBusinesses(req);
-        const ownsOtherBusiness = allBusinesses.find(
-          (b) => b.owner_user_id === existingAccount.user_id && b.business_id !== (business?.business_id || ''),
-        );
-        if (ownsOtherBusiness) {
-          return res.status(409).json({
-            ok: false,
-            code: 'OWNER_OF_OTHER_BUSINESS',
-            error: `Este usuario administra otra empresa (${ownsOtherBusiness.name || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`,
-          });
-        }
-      } catch (lookupErr) {
-        console.error('[AUTH] Error comprobando empresas del invitado:', lookupErr?.message);
+    try {
+      const allBusinesses = await listAllBusinesses(req);
+      const ownsOtherBusiness = allBusinesses.find(
+        (b) => b.owner_user_id === existingAccount.user_id && b.business_id !== (business?.business_id || ''),
+      );
+      if (ownsOtherBusiness) {
+        return res.status(409).json({
+          ok: false,
+          code: 'OWNER_OF_OTHER_BUSINESS',
+          error: `Este usuario administra otra empresa (${ownsOtherBusiness.name || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`,
+        });
       }
+    } catch (lookupErr) {
+      console.error('[AUTH] Error comprobando empresas del invitado:', lookupErr?.message);
     }
 
     // ¿Ya hay una invitación pendiente igual? La reutilizamos en lugar de crear duplicados.
@@ -1092,6 +1100,71 @@ export async function inviteUser(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al invitar usuario',
+    });
+  }
+}
+
+/**
+ * Lookup ligero para el modal de invitación.
+ * Devuelve si el email está registrado en Vertial y, si lo está, su nombre y si ya es
+ * miembro/propietario del negocio que se está invitando. Permite validar en vivo antes
+ * de pulsar "Enviar invitación".
+ */
+export async function lookupInviteEmail(req, res) {
+  try {
+    const rawEmail = String((req.body && req.body.email) || req.query.email || '').trim().toLowerCase();
+    const businessId = String((req.body && req.body.businessId) || req.query.businessId || '').trim();
+
+    if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+      return res.json({ ok: true, exists: false });
+    }
+
+    await ensureDatabase(req, ACCOUNTS_DB);
+    const account = await findAccountByEmail(req, rawEmail);
+
+    if (!account) {
+      return res.json({
+        ok: true,
+        exists: false,
+        code: 'USER_NOT_REGISTERED',
+      });
+    }
+
+    let alreadyMember = false;
+    let isOwner = false;
+    if (businessId) {
+      const business = await findBusinessById(req, businessId);
+      if (business) {
+        isOwner = business.owner_user_id === account.user_id;
+        alreadyMember = Array.isArray(business.members)
+          && business.members.some((m) => m.user_id === account.user_id);
+      }
+    }
+
+    let ownsOtherBusinessName = '';
+    try {
+      const allBusinesses = await listAllBusinesses(req);
+      const other = allBusinesses.find(
+        (b) => b.owner_user_id === account.user_id && b.business_id !== businessId,
+      );
+      if (other) ownsOtherBusinessName = other.name || '';
+    } catch {
+      /* noop */
+    }
+
+    return res.json({
+      ok: true,
+      exists: true,
+      email: account.email,
+      fullName: account.fullName || '',
+      alreadyMember,
+      isOwner,
+      ownsOtherBusinessName,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error consultando el email',
     });
   }
 }
@@ -2713,6 +2786,76 @@ export async function posSwitchUser(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al cambiar de usuario',
+    });
+  }
+}
+
+// ─── Preferencias de notificación (personales del usuario) ──────────────────────
+
+/**
+ * GET /api/auth/preferences
+ *
+ * Devuelve las preferencias personales de notificación del usuario autenticado.
+ * Si nunca las ha tocado, devuelve los defaults (clockin entradas/retrasos
+ * activados, descansos silenciados, etc.).
+ */
+export async function getNotificationPreferences(req, res) {
+  try {
+    const userId = req.authUser?.user_id;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+
+    return res.json({
+      ok: true,
+      notificationPreferences: normalizeNotificationPreferences(account.notificationPreferences),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al obtener preferencias',
+    });
+  }
+}
+
+/**
+ * PATCH /api/auth/preferences
+ *
+ * Actualiza las preferencias personales de notificación. Solo el propio usuario
+ * puede modificarlas. Acepta una mezcla parcial del objeto (merge profundo
+ * con los defaults para garantizar consistencia).
+ */
+export async function updateNotificationPreferences(req, res) {
+  try {
+    const userId = req.authUser?.user_id;
+    if (!userId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
+
+    const incoming = req.body?.notificationPreferences || req.body || {};
+    const current = normalizeNotificationPreferences(account.notificationPreferences);
+    const merged = normalizeNotificationPreferences({
+      ...current,
+      ...incoming,
+      clockin: { ...current.clockin, ...(incoming.clockin || {}) },
+    });
+
+    const saved = await saveAccount(req, {
+      ...account,
+      notificationPreferences: merged,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.json({
+      ok: true,
+      notificationPreferences: normalizeNotificationPreferences(saved.notificationPreferences),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar preferencias',
     });
   }
 }

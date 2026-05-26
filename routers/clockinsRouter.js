@@ -11,6 +11,8 @@ import {
   getPayrollSummary,
   exportClockins,
   crossCheck,
+  notifyClockinEvent,
+  getDailySummary,
 } from '../controllers/clockinsController.js';
 
 const clockinsRouter = Router();
@@ -26,5 +28,10 @@ clockinsRouter.get('/:businessId/payroll-summary', getPayrollSummary);
 clockinsRouter.get('/:businessId/export', exportClockins);
 clockinsRouter.get('/:businessId/cross-check', crossCheck);
 clockinsRouter.put('/:businessId/adjust', adjustClockinEntry);
+// El propio trabajador notifica al equipo de gestión cuando ficha (entrada,
+// salida, descanso). El backend resuelve a quién avisar y emite SSE + push.
+clockinsRouter.post('/:businessId/notify', notifyClockinEvent);
+// Resumen del día (scheduled vs clocked, retrasos, no-shows...) para dashboards.
+clockinsRouter.get('/:businessId/daily-summary', getDailySummary);
 
 export { clockinsRouter };

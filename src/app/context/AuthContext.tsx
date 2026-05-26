@@ -17,6 +17,8 @@ import {
   getUserActivityRequest,
   googleLoginRequest,
   inviteUserRequest,
+  lookupInviteEmailRequest,
+  type InviteLookupResult,
   listBusinessInvitationsRequest,
   listMyInvitationsRequest,
   listRolesRequest,
@@ -120,6 +122,10 @@ interface AuthContextType {
     companyCode?: string;
     error?: string;
   }>;
+  lookupInviteEmail: (
+    email: string,
+    businessId?: string,
+  ) => Promise<InviteLookupResult & { success: boolean; error?: string }>;
   listMyInvitations: () => Promise<TeamInvitation[]>;
   listBusinessInvitations: (businessId: string, includeAll?: boolean) => Promise<TeamInvitation[]>;
   acceptInvitation: (invitationId: string) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
@@ -508,6 +514,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const lookupInviteEmail = async (
+    email: string,
+    businessId?: string,
+  ): Promise<InviteLookupResult & { success: boolean; error?: string }> => {
+    try {
+      const result = await lookupInviteEmailRequest(email, businessId);
+      return { success: true, ...result };
+    } catch (error) {
+      return {
+        success: false,
+        exists: false,
+        error: error instanceof Error ? error.message : 'Error consultando el email',
+      };
+    }
+  };
+
   const listMyInvitations = async (): Promise<TeamInvitation[]> => {
     try {
       const response = await listMyInvitationsRequest();
@@ -828,6 +850,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         listUsers,
         listRoles,
         inviteUser,
+        lookupInviteEmail,
         listMyInvitations,
         listBusinessInvitations,
         acceptInvitation,
