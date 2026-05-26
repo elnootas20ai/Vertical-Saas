@@ -307,11 +307,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, [steps]);
 
   useEffect(() => {
+    if (isDelivery) return;
     if (completionPct === 100 && accountUserId && businessId) {
       setIsDismissed(true);
       setActivationChecklistDismissed(accountUserId, businessId, true);
     }
-  }, [completionPct, accountUserId, businessId]);
+  }, [completionPct, accountUserId, businessId, isDelivery]);
 
   const dismiss = useCallback(() => {
     if (isDelivery) return;
@@ -342,11 +343,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     setTimeout(() => setIsLoadingSample(false), 1500);
   }, []);
 
-  const deliveryStepsIncomplete =
-    isDelivery && totalSteps > 0 && completedSteps < totalSteps;
-
   const isVisible = isDelivery
-    ? deliveryStepsIncomplete
+    ? totalSteps > 0
     : completionPct < 100 && steps.length > 0 && !isDismissed;
 
   return (

@@ -3,7 +3,13 @@ import logger from './logger.js';
 import { sendAdminAlert } from './adminAlerts.js';
 
 function getAppBaseUrl() {
-  return (process.env.APP_URL || `http://localhost:${process.env.PORT || 3001}`).replace(/\/+$/, '');
+  const explicit = String(process.env.APP_URL || process.env.VITE_APP_URL || '').trim();
+  if (explicit) return explicit.replace(/\/+$/, '');
+  if (process.env.NODE_ENV === 'development') {
+    const devPort = process.env.VITE_PORT || '3015';
+    return `http://localhost:${devPort}`;
+  }
+  return `http://localhost:${process.env.PORT || 3001}`.replace(/\/+$/, '');
 }
 
 function getFromAddress() {
@@ -58,6 +64,11 @@ async function sendViaResend(to, subject, html, replyTo) {
 async function sendViaSMTP(to, subject, html, replyTo) {
   const smtpUser = String(process.env.SMTP_USER || '').trim();
   const smtpPass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  if (!smtpPass) {
+    throw new Error(
+      'SMTP_PASS no está configurado en el servidor (.env). No se puede enviar el correo.',
+    );
+  }
   const transporter = nodemailer.createTransport({
     host: String(process.env.SMTP_HOST || '').trim(),
     port: Number(process.env.SMTP_PORT || 587),

@@ -130,6 +130,23 @@ export const recoverLimiter = rateLimit({
   message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiadas solicitudes de recuperación. Inténtalo en una hora.' } },
 });
 
+/** Verificación de email y reenvío (no compartir cupo con recuperación de contraseña). */
+export const emailVerificationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: getClientIp,
+  message: {
+    ok: false,
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Demasiadas solicitudes de verificación de email. Inténtalo en una hora.',
+    },
+  },
+});
+
 // ─── I-06: Burst limiter (todos los usuarios autenticados) ────────────────────
 
 /**

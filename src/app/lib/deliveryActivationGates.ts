@@ -92,38 +92,19 @@ export const DELIVERY_SIDEBAR_REQUIRES_BRAND = new Set([
 ]);
 
 export function getDeliverySidebarItemLock(
-  itemId: string,
-  flags: { pdvReady: boolean; brandReady: boolean },
+  _itemId: string,
+  _flags: { pdvReady: boolean; brandReady: boolean },
 ): { disabled: boolean; title?: string } {
-  if (!DELIVERY_SIDEBAR_REQUIRES_PDV.has(itemId)) {
-    return { disabled: false };
-  }
-  if (!flags.pdvReady) {
-    return {
-      disabled: true,
-      title: 'Primero crea tu tienda y un PDV en Ajustes → Tienda',
-    };
-  }
-  if (DELIVERY_SIDEBAR_REQUIRES_BRAND.has(itemId) && !flags.brandReady) {
-    return {
-      disabled: true,
-      title: 'Configura tu marca en Ajustes → Marca antes del catálogo',
-    };
-  }
   return { disabled: false };
 }
 
 export function applyDeliveryStepLocks(
   steps: DeliveryActivationStepDef[],
-  flags: DeliveryActivationFlags,
+  _flags: DeliveryActivationFlags,
 ): Array<DeliveryActivationStepDef & { locked: boolean; lockedReason?: string; unlockRoute: string }> {
-  return steps.map((step) => {
-    const lock = getDeliveryStepLock(step.id, flags);
-    return {
-      ...step,
-      locked: lock.locked,
-      lockedReason: lock.lockedReason,
-      unlockRoute: lock.unlockRoute || step.route,
-    };
-  });
+  return steps.map((step) => ({
+    ...step,
+    locked: false,
+    unlockRoute: step.route,
+  }));
 }

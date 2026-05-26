@@ -4,19 +4,22 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { X, ChevronRight, ChevronLeft, Sparkles, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
-import {
-  armOnboardingTourForBusiness,
-  clearOnboardingTourForUser,
-  isOnboardingTourCompleted,
-  markOnboardingTourCompleted,
-  ONBOARDING_TOUR_ARM_EVENT,
-  onboardingTourActiveKey,
-  onboardingTourStepKey,
-} from '../../lib/onboardingLocalKeys';
+import { ONBOARDING_TOUR_ARM_EVENT } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
 
 function resolveAccountUserId(user: { user_id?: string; id?: string } | null | undefined): string {
   return String(user?.user_id || user?.id || '').trim();
+}
+
+function tourRouteNavigate(navigate: ReturnType<typeof useNavigate>, route?: string) {
+  const raw = String(route || '').trim();
+  if (!raw) return;
+  const qIdx = raw.indexOf('?');
+  if (qIdx === -1) {
+    navigate(raw);
+    return;
+  }
+  navigate({ pathname: raw.slice(0, qIdx), search: raw.slice(qIdx) });
 }
 
 interface Props {
@@ -26,7 +29,9 @@ interface Props {
 export function OnboardingTour({ onComplete }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  const businessCtx = useBusinessOptional();
+  const currentBusiness = businessCtx?.currentBusiness ?? null;
+  const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
 
   const steps = useMemo(
     () =>
@@ -39,65 +44,37 @@ export function OnboardingTour({ onComplete }: Props) {
 
   const accountUserId = resolveAccountUserId(user);
   const businessId = String(currentBusiness?.business_id || '').trim();
-  const stepKey =
-    accountUserId && businessId ? onboardingTourStepKey(accountUserId, businessId) : '';
-  const activeKey =
-    accountUserId && businessId ? onboardingTourActiveKey(accountUserId, businessId) : '';
-
-  const [stepIndex, setStepIndexRaw] = useState(0);
-
-  const setStepIndex = useCallback(
-    (idx: number) => {
-      const clamped = Math.max(0, Math.min(idx, steps.length - 1));
-      setStepIndexRaw(clamped);
-      if (stepKey) sessionStorage.setItem(stepKey, String(clamped));
-    },
-    [stepKey, steps.length],
-  );
-
+  const [stepIndex, setStepIndex] = useState(0);
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
+  const [closedThisSession, setClosedThisSession] = useState(false);
 
   useEffect(() => {
-    if (!accountUserId || !businessId) {
-      setVisible(false);
-      return;
-    }
-    const saved = sessionStorage.getItem(stepKey);
-    setStepIndexRaw(saved ? Math.min(Number(saved) || 0, steps.length - 1) : 0);
-  }, [accountUserId, businessId, stepKey, steps.length]);
+    if (!accountUserId || !businessId || !businessesFetchSettled || closedThisSession) return;
 
-  useEffect(() => {
-    if (!accountUserId || !businessId) return;
-    if (isOnboardingTourCompleted(accountUserId, businessId)) return;
-
-    const openTour = () => {
-      sessionStorage.setItem(activeKey, '1');
-      setVisible(true);
-    };
+    const openTour = () => setVisible(true);
 
     const onArmed = (event: Event) => {
       const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
       if (detail?.userId === accountUserId && detail?.businessId === businessId) {
         setStepIndex(0);
+        setClosedThisSession(false);
         openTour();
       }
     };
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-
-    if (sessionStorage.getItem(activeKey) === '1') {
-      openTour();
-      return () => window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-    }
-
-    const timer = setTimeout(openTour, 1200);
+    const timer = setTimeout(openTour, 800);
 
     return () => {
       clearTimeout(timer);
       window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
     };
-  }, [accountUserId, businessId, activeKey, setStepIndex]);
+  }, [accountUserId, businessId, businessesFetchSettled, closedThisSession]);
+
+  useEffect(() => {
+    setStepIndex((idx) => Math.max(0, Math.min(idx, steps.length - 1)));
+  }, [steps.length]);
 
   const closeTour = useCallback(
     (completed = false) => {
@@ -105,13 +82,11 @@ export function OnboardingTour({ onComplete }: Props) {
       setTimeout(() => {
         setVisible(false);
         setExiting(false);
-        if (accountUserId && businessId) {
-          markOnboardingTourCompleted(accountUserId, businessId);
-        }
+        setClosedThisSession(true);
         if (completed) onComplete?.();
       }, 250);
     },
-    [accountUserId, businessId, onComplete],
+    [onComplete],
   );
 
   const handleNext = useCallback(() => {
@@ -124,27 +99,25 @@ export function OnboardingTour({ onComplete }: Props) {
     }
 
     setStepIndex(next);
-    if (step?.route) {
-      navigate(step.route);
-    }
-  }, [stepIndex, closeTour, navigate, setStepIndex, steps]);
+    tourRouteNavigate(navigate, step?.route);
+  }, [stepIndex, closeTour, navigate, steps]);
 
   const handlePrev = useCallback(() => {
     if (stepIndex > 0) {
       const prev = stepIndex - 1;
       const step = steps[prev];
       setStepIndex(prev);
-      if (step?.route) navigate(step.route);
+      tourRouteNavigate(navigate, step?.route);
     }
-  }, [stepIndex, navigate, setStepIndex, steps]);
+  }, [stepIndex, navigate, steps]);
 
   const handleDotClick = useCallback(
     (idx: number) => {
       const step = steps[idx];
       setStepIndex(idx);
-      if (step?.route) navigate(step.route);
+      tourRouteNavigate(navigate, step?.route);
     },
-    [navigate, setStepIndex, steps],
+    [navigate, steps],
   );
 
   useModalClose(visible, closeTour);
@@ -266,11 +239,12 @@ export function useRestartTour() {
   const restart = useCallback(() => {
     const accountUserId = resolveAccountUserId(user);
     const businessId = String(currentBusiness?.business_id || '').trim();
-    if (accountUserId && businessId) {
-      clearOnboardingTourForUser(accountUserId, businessId);
-      armOnboardingTourForBusiness(accountUserId, businessId);
-    }
-    localStorage.removeItem('vertial_onboarding_completed');
-    window.location.reload();
+    if (!accountUserId || !businessId) return;
+    window.dispatchEvent(
+      new CustomEvent(ONBOARDING_TOUR_ARM_EVENT, {
+        detail: { userId: accountUserId, businessId },
+      }),
+    );
   }, [user, currentBusiness?.business_id]);
+  return restart;
 }

@@ -45,7 +45,7 @@ import {
   verifyEmail,
 } from '../controllers/authController.js';
 import { requireAuth, requireAuthAndEmailVerified } from '../middleware/auth.js';
-import { authLimiter, registerLimiter, recoverLimiter } from '../middleware/rateLimiter.js';
+import { authLimiter, emailVerificationLimiter, registerLimiter, recoverLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
   validateParams,
@@ -78,8 +78,8 @@ authRouter.post('/logout', authLimiter, logout);
 authRouter.post('/recover', recoverLimiter, validate(recoverSchema), recoverPassword);
 authRouter.post('/reset-password', recoverLimiter, validate(resetPasswordSchema), resetPasswordWithToken);
 authRouter.post('/refresh', authLimiter, validate(refreshTokenSchema), refreshToken);
-authRouter.get('/verify-email', recoverLimiter, verifyEmail);
-authRouter.post('/resend-verification', recoverLimiter, validate(recoverSchema), resendVerificationEmail);
+authRouter.get('/verify-email', emailVerificationLimiter, verifyEmail);
+authRouter.post('/resend-verification', emailVerificationLimiter, validate(recoverSchema), resendVerificationEmail);
 // A-04: Aceptación de invitación de miembro
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
 // Team login: miembros entran con código de empresa + usuario + contraseña

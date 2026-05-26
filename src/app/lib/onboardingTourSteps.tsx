@@ -199,7 +199,7 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
     description:
       'Al crear o editar tu tienda, define el horario de apertura en el mismo asistente. Con local, marca y carta listos, ya puedes cobrar en el TPV.',
     hint: 'El horario queda guardado en cada local; el TPV se abre desde el dashboard.',
-    route: '/saas/settings/tienda?action=horarios',
+    route: '/saas/settings/horarios',
   },
   {
     id: 'done',

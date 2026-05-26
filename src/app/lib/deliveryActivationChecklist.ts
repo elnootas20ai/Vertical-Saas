@@ -108,7 +108,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     number: 5,
     label: 'Listo para vender',
     description: 'Horario en tienda y primer TPV',
-    route: '/saas/settings/tienda?action=horarios',
+    route: '/saas/settings/horarios',
     icon: 'clock',
     subSteps: [
       { id: 'business_hours', label: 'Horario de apertura', completed: flags.hasBusinessHours },

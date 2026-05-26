@@ -1976,11 +1976,23 @@ export async function resendVerificationEmail(req, res) {
     const account = await findAccountByEmail(req, email);
 
     if (!account) {
-      return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+      if (process.env.NODE_ENV === 'development') {
+        return res.status(404).json({
+          ok: false,
+          error: 'No hay ninguna cuenta con este email. Regístrate de nuevo o comprueba que escribiste el mismo correo.',
+          emailSent: false,
+        });
+      }
+      return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve', emailSent: false });
     }
 
     if (account.emailVerified) {
-      return res.json({ ok: true, message: 'El email ya está verificado' });
+      return res.json({
+        ok: true,
+        message: 'Este email ya está verificado. Puedes iniciar sesión.',
+        emailSent: false,
+        alreadyVerified: true,
+      });
     }
 
     if (account.lastVerificationEmailSentAt) {
@@ -1997,11 +2009,20 @@ export async function resendVerificationEmail(req, res) {
 
     await sendAccountVerificationEmail(req, account);
 
-    return res.json({ ok: true, message: 'Si el email existe, recibirás un enlace en breve' });
+    return res.json({
+      ok: true,
+      message: 'Correo de verificación enviado. Revisa tu bandeja y la carpeta de spam.',
+      emailSent: true,
+    });
   } catch (error) {
+    logger.error(
+      { tag: 'AUTH_RESEND_VERIFY', email: req.body?.email, err: error?.message || error },
+      'Error al reenviar verificación',
+    );
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al reenviar el email de verificación',
+      emailSent: false,
     });
   }
 }
