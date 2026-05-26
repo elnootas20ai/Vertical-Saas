@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -207,7 +208,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureDb() {
-  await req(`/api/couch/db/${encodeURIComponent(QUOTES_DB)}`, { method: 'PUT' });
+  await ensureCouchDb(QUOTES_DB, () => req(`/api/couch/db/${encodeURIComponent(QUOTES_DB)}`, { method: 'PUT' }));
 }
 
 export async function listQuotes(userId: string): Promise<QuoteRecord[]> {

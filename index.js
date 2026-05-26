@@ -7,6 +7,29 @@ import os from 'node:os';
 import fs from 'node:fs';
 import logger from './services/logger.js';
 import { runHuellaIndexer } from './index-huella.js';
+
+// SEC-02: Red de seguridad para que un fallo aislado no tumbe el proceso.
+// Antes de esto, una promesa rechazada sin .catch() o un throw fuera de try
+// hacía que Node se reiniciara (o, peor, se quedara en estado indefinido)
+// y el VPS dejaba de aceptar `/api/*`. Ahora se loguea y se sigue sirviendo.
+process.on('unhandledRejection', (reason) => {
+  logger.error(
+    { tag: 'PROCESS', kind: 'unhandledRejection', reason: reason?.stack || reason?.message || String(reason) },
+    'Promise rechazada sin .catch — el proceso continúa',
+  );
+});
+process.on('uncaughtException', (err) => {
+  logger.error(
+    { tag: 'PROCESS', kind: 'uncaughtException', err: err?.message, stack: err?.stack },
+    'Excepción no capturada — el proceso continúa',
+  );
+});
+process.on('warning', (warning) => {
+  logger.warn(
+    { tag: 'PROCESS', name: warning?.name, message: warning?.message },
+    'process warning',
+  );
+});
 import { authRouter } from './routers/authRouter.js';
 import { businessRouter } from './routers/businessRouter.js';
 import { groupRouter } from './routers/groupRouter.js';
@@ -234,6 +257,19 @@ app.use(correlationIdMiddleware);
 // Liveness mínima (Docker/proxy): sin CouchDB ni chequeos pesados — evita RST si /health tarda o falla.
 app.get('/live', (_req, res) => {
   res.status(200).json({ ok: true, service: 'express-backend', time: new Date().toISOString() });
+});
+
+// I-03b: Health "exterior" servido a través de nginx (/api/*). Igual de barato que /live
+// (no toca CouchDB) pero accesible desde fuera del VPS: lo usa UptimeRobot/BetterStack
+// y cualquier monitor externo para detectar caídas como la del invite+team-login.
+// Para health profundo (CouchDB, latencia, disco…) sigue usándose /health internamente.
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'vertial-backend',
+    uptime: Number(process.uptime().toFixed(2)),
+    time: new Date().toISOString(),
+  });
 });
 
 // B-02: Cabecera de versión de API en todas las respuestas.

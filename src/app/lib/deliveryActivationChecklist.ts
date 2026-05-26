@@ -65,14 +65,14 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
   {
     id: 'delivery_brand',
     number: 2,
-    label: 'Marca',
-    description: 'Línea de carta, categorías y tiendas',
+    label: 'Personaliza tu marca',
+    description: 'Tu carta ya viene creada — personaliza nombre, categorías y tiendas',
     route: '/saas/settings/marca',
     icon: 'brand',
     subSteps: [
       {
         id: 'brand_ready',
-        label: 'Marca principal configurada',
+        label: 'Marca principal personalizada',
         completed: flags.brandSetupComplete,
       },
     ],

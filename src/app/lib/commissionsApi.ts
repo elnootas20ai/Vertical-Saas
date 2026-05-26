@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { SaleRecord } from './salesTypes';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -265,7 +266,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureDb(name: string) {
-  await req(`/api/couch/db/${encodeURIComponent(name)}`, { method: 'PUT' });
+  await ensureCouchDb(name, () => req(`/api/couch/db/${encodeURIComponent(name)}`, { method: 'PUT' }));
 }
 
 // Commission Rules

@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { ParkingZone, CreateParkingZoneInput } from './parkingZones';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -64,7 +65,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureLocationsDatabase() {
-  await request(`/api/couch/db/${encodeURIComponent(LOCATIONS_DB_NAME)}`, { method: 'PUT' });
+  await ensureCouchDb(LOCATIONS_DB_NAME, () => request(`/api/couch/db/${encodeURIComponent(LOCATIONS_DB_NAME)}`, { method: 'PUT' }));
 }
 
 export async function listParkingZonesRequest(userId: string): Promise<ParkingZone[]> {

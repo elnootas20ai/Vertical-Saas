@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -107,7 +108,7 @@ export const STAFF_EXPENSE_STATUS_LABELS: Record<StaffExpenseStatus, string> = {
 };
 
 async function ensureDatabase() {
-  await request(`/api/couch/db/${encodeURIComponent(STAFF_EXPENSES_DB_NAME)}`, { method: 'PUT' });
+  await ensureCouchDb(STAFF_EXPENSES_DB_NAME, () => request(`/api/couch/db/${encodeURIComponent(STAFF_EXPENSES_DB_NAME)}`, { method: 'PUT' }));
 }
 
 export async function listStaffExpensesRequest(workerId?: string): Promise<StaffExpense[]> {

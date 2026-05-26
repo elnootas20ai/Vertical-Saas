@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createClientInvoiceRequest } from './clientInvoicesApi';
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 interface CouchEnvelope {
   error?: string;
@@ -90,7 +91,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureDatabase(dbName: string) {
-  await request(`/api/couch/db/${encodeURIComponent(dbName)}`, { method: 'PUT' });
+  await ensureCouchDb(dbName, () => request(`/api/couch/db/${encodeURIComponent(dbName)}`, { method: 'PUT' }));
 }
 
 export const CONTRACTS_DB_NAME = normalizeDbName(

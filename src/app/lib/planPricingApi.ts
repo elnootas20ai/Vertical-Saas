@@ -1,5 +1,6 @@
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -111,7 +112,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const CONFIG_DB = (env.VITE_COUCHDB_DB || 'vertial') + '-config';
 
 async function ensureDb() {
-  await req(`/api/couch/db/${encodeURIComponent(CONFIG_DB)}`, { method: 'PUT' });
+  await ensureCouchDb(CONFIG_DB, () => req(`/api/couch/db/${encodeURIComponent(CONFIG_DB)}`, { method: 'PUT' }));
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

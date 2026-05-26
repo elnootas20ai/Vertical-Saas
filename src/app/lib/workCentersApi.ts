@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 import type { BusinessHoursConfig } from './settingsApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
@@ -96,7 +97,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureDb() {
-  await req(`/api/couch/db/${encodeURIComponent(WORK_CENTERS_DB)}`, { method: 'PUT' });
+  await ensureCouchDb(WORK_CENTERS_DB, () => req(`/api/couch/db/${encodeURIComponent(WORK_CENTERS_DB)}`, { method: 'PUT' }));
 }
 
 function normalizeWorkCenter(value: unknown): WorkCenter | null {

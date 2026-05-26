@@ -6,6 +6,8 @@ const LOGS_DB = 'activity-logs';
 const SKIP_PATH_PREFIXES = [
   '/health',
   '/metrics',
+  '/live',
+  '/api/health',
   '/api/plugin/',
   '/api/sse',
   '/api/stats',
@@ -55,6 +57,20 @@ const RESOURCE_LABELS = {
 
 let _dbEnsured = false;
 let _designEnsured = false;
+let _retentionTimer = null;
+
+// Retención por defecto: 30 días. Antes la DB activity-logs crecía sin límite
+// (vimos `GET /activity-logs/_all_docs?include_docs=true` tardando 1,4–2,4 s
+// con tendencia a empeorar) y el log de CouchDB se iba a varios GB.
+// Configurable vía env: ACTIVITY_LOG_RETENTION_DAYS.
+const RETENTION_DAYS = Math.max(
+  1,
+  Number.parseInt(String(process.env.ACTIVITY_LOG_RETENTION_DAYS || '30'), 10) || 30,
+);
+const RETENTION_INTERVAL_MS = Math.max(
+  60_000,
+  Number.parseInt(String(process.env.ACTIVITY_LOG_RETENTION_INTERVAL_MS || ''), 10) || 6 * 60 * 60 * 1000,
+);
 
 async function ensureLogsDb() {
   if (_dbEnsured) return;
@@ -143,6 +159,99 @@ async function saveLog(doc) {
   } catch {
     // Silenciar errores de escritura para no afectar la respuesta
   }
+}
+
+/**
+ * Borra entradas de activity-logs anteriores a RETENTION_DAYS.
+ *
+ * Estrategia conservadora:
+ *   1. Consulta la vista by_timestamp del design doc ya existente (clave = timestamp)
+ *      pidiendo solo IDs/revs de entradas con `key <= cutoff`.
+ *   2. Si no responde la vista (por cualquier motivo), cae a `_all_docs?include_docs=true`
+ *      filtrando en memoria — lo que evita perder la purga si el design doc aún no se
+ *      ha indexado tras un despliegue reciente.
+ *   3. Borra en lotes de 500 con `_bulk_docs` y `_deleted: true`.
+ *
+ * Cuelga del intervalo `RETENTION_INTERVAL_MS` y NUNCA propaga errores — si algo falla,
+ * se intentará otra vez en el siguiente tick.
+ */
+async function pruneOldLogs() {
+  try {
+    const cfg = getCouchConfig(null);
+    if (!cfg.baseUrl) return;
+    const base = cfg.baseUrl.replace(/\/+$/, '');
+    const auth = buildCouchAuthHeader(null);
+    const authHeaders = auth ? { Authorization: auth } : {};
+    const jsonHeaders = { 'Content-Type': 'application/json', ...authHeaders };
+
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    let candidates = [];
+
+    // Intento 1: vista by_timestamp.
+    const viewUrl = `${base}/${LOGS_DB}/_design/logs/_view/by_timestamp?endkey=${encodeURIComponent(JSON.stringify(cutoff))}&inclusive_end=true&include_docs=false&limit=10000`;
+    const viewRes = await fetch(viewUrl, { headers: authHeaders }).catch(() => null);
+    if (viewRes && viewRes.ok) {
+      const view = await viewRes.json().catch(() => ({}));
+      const rows = Array.isArray(view.rows) ? view.rows : [];
+      // by_timestamp emite `null` como value, así que necesitamos las _rev sueltas vía _all_docs en batch.
+      if (rows.length) {
+        const ids = rows.map((r) => r.id).filter(Boolean);
+        const allDocsUrl = `${base}/${LOGS_DB}/_all_docs?include_docs=false`;
+        const allDocsRes = await fetch(allDocsUrl, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify({ keys: ids }),
+        }).catch(() => null);
+        if (allDocsRes && allDocsRes.ok) {
+          const payload = await allDocsRes.json().catch(() => ({}));
+          candidates = (payload.rows || [])
+            .filter((r) => r && r.id && r.value && r.value.rev)
+            .map((r) => ({ _id: r.id, _rev: r.value.rev, _deleted: true }));
+        }
+      }
+    }
+
+    // Intento 2 (fallback): _all_docs?include_docs=true.
+    if (candidates.length === 0) {
+      const fallbackUrl = `${base}/${LOGS_DB}/_all_docs?include_docs=true&limit=10000`;
+      const fallbackRes = await fetch(fallbackUrl, { headers: authHeaders }).catch(() => null);
+      if (!fallbackRes || !fallbackRes.ok) return;
+      const payload = await fallbackRes.json().catch(() => ({}));
+      candidates = (payload.rows || [])
+        .map((r) => r && r.doc)
+        .filter((d) => d && d.type === 'activity-log' && typeof d.timestamp === 'string' && d.timestamp <= cutoff)
+        .map((d) => ({ _id: d._id, _rev: d._rev, _deleted: true }));
+    }
+
+    if (!candidates.length) return;
+
+    // Borrado en lotes de 500 para no inflar el cuerpo de la petición.
+    const CHUNK = 500;
+    for (let i = 0; i < candidates.length; i += CHUNK) {
+      const chunk = candidates.slice(i, i + CHUNK);
+      await fetch(`${base}/${LOGS_DB}/_bulk_docs`, {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ docs: chunk }),
+      }).catch(() => null);
+    }
+  } catch {
+    // Nunca propagar errores de la purga.
+  }
+}
+
+function startRetentionLoop() {
+  if (_retentionTimer) return;
+  // Primera pasada con pequeño retardo para no chocar con el ensureLogsDb inicial.
+  const initialDelay = 30_000;
+  setTimeout(() => {
+    pruneOldLogs().catch(() => null);
+    _retentionTimer = setInterval(() => {
+      pruneOldLogs().catch(() => null);
+    }, RETENTION_INTERVAL_MS);
+    if (typeof _retentionTimer.unref === 'function') _retentionTimer.unref();
+  }, initialDelay);
 }
 
 function detectCategory(method, path) {
@@ -251,6 +360,7 @@ function getClientIp(req) {
 Promise.resolve()
   .then(() => ensureLogsDb())
   .then(() => ensureDesignDoc())
+  .then(() => startRetentionLoop())
   .catch(() => null);
 
 export function activityLogger(req, res, next) {

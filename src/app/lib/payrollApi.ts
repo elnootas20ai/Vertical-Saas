@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -138,7 +139,7 @@ export function getDocumentExpiryStatus(doc: PayrollDocument): DocumentExpirySta
 }
 
 async function ensurePayrollDatabase() {
-  await request(`/api/couch/db/${encodeURIComponent(PAYROLL_DB_NAME)}`, { method: 'PUT' });
+  await ensureCouchDb(PAYROLL_DB_NAME, () => request(`/api/couch/db/${encodeURIComponent(PAYROLL_DB_NAME)}`, { method: 'PUT' }));
 }
 
 export async function listPayrollDocumentsRequest(workerId?: string): Promise<PayrollDocument[]> {

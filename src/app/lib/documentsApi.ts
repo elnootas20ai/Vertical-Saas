@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -142,7 +143,7 @@ export interface DocumentRecord {
 }
 
 async function ensureDocumentsDatabase() {
-  await request(`/api/couch/db/${encodeURIComponent(DOCUMENTS_DB_NAME)}`, { method: 'PUT' });
+  await ensureCouchDb(DOCUMENTS_DB_NAME, () => request(`/api/couch/db/${encodeURIComponent(DOCUMENTS_DB_NAME)}`, { method: 'PUT' }));
 }
 
 export async function listDocumentsRequest(userId: string): Promise<DocumentRecord[]> {

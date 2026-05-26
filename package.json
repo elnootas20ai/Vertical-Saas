@@ -23,6 +23,7 @@
     "couch:check": "node scripts/verify-couch.mjs",
     "couch:up": "docker compose -f deploy/docker-compose.couch-local.yml --env-file .env up -d",
     "couch:recover-admin": "node scripts/create-admin.js",
+    "couch:bootstrap-system": "node scripts/couch-bootstrap-system.mjs",
     "saas:bootstrap": "node scripts/bootstrap-saas-login.js",
     "create-admin": "node scripts/create-admin.js",
     "accounts:delete": "node scripts/delete-test-accounts.mjs",

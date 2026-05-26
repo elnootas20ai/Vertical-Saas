@@ -1,4 +1,5 @@
 import { getApiBase } from './apiBase';
+import { ensureCouchDb } from './ensureCouchDb';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 
@@ -22,7 +23,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function ensureDb() {
-  await req(`/api/couch/db/${encodeURIComponent(DB)}`, { method: 'PUT' });
+  await ensureCouchDb(DB, () => req(`/api/couch/db/${encodeURIComponent(DB)}`, { method: 'PUT' }));
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
