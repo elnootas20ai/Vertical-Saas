@@ -63,6 +63,6 @@ jobs:
             echo ">>> reset to ${{ github.sha }} (ref ${{ github.ref }})"
             git reset --hard "${{ github.sha }}"
             docker compose version || true
-            docker compose -f deploy/docker-compose.scaleway.yml --env-file .env build
-            docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d
+            docker compose -f deploy/docker-compose.scaleway.yml --env-file .env build app
+            docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d --wait app
             docker compose -f deploy/docker-compose.scaleway.yml ps

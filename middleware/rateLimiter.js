@@ -9,12 +9,11 @@
  *      Recuperación   → 5 solicitudes / 1 h
  *
  *   2. Burst por usuario autenticado (I-06):
- *      Todos los planes → 30 req / 10 s
- *      Frena ráfagas de automatización aunque el usuario tenga cuota diaria disponible.
- *      Uso: app.use('/api/...', requireAuth, burstLimiter, planAwareLimiter, router)
+ *      Por defecto → 150 req / 10 s (ajustable: BURST_LIMIT_MAX)
+ *      El dashboard dispara 40–80 peticiones al cargar; 30/10s bloqueaba uso normal.
  *
  *   3. Cuota por plan (por usuario autenticado o IP si no hay auth):
- *      Trial / Basic  → 100 req / min
+ *      Trial / Basic  → 400 req / min (PLAN_TRIAL_MAX_PER_MIN)
  *      Pro / Business → 1 000 req / min
  *      Enterprise     → 2 000 req / min
  *
@@ -150,16 +149,16 @@ export const emailVerificationLimiter = rateLimit({
 // ─── I-06: Burst limiter (todos los usuarios autenticados) ────────────────────
 
 /**
- * Limiter de ráfaga corto: 30 requests en 10 segundos por usuario/IP.
- * Evita que un usuario, aunque tenga cuota de plan suficiente,
- * dispare decenas de requests en paralelo de forma abusiva.
- *
+ * Limiter de ráfaga corto por usuario/IP autenticado.
  * Montar ANTES de planAwareLimiter:
  *   app.use('/api/...', requireAuth, burstLimiter, planAwareLimiter, router)
  */
+const BURST_WINDOW_MS = Number(process.env.BURST_LIMIT_WINDOW_MS || 10_000);
+const BURST_MAX = Number(process.env.BURST_LIMIT_MAX || 150);
+
 export const burstLimiter = rateLimit({
-  windowMs: 10 * 1000,
-  max: 30,
+  windowMs: BURST_WINDOW_MS,
+  max: BURST_MAX,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserKey,
@@ -178,10 +177,14 @@ export const burstLimiter = rateLimit({
 });
 
 // ─── Plan limiters (por usuario o IP) ────────────────────────────────────────
+// Trial: 400/min soporta navegar 4–5 pantallas/min + polling sin 429.
+const TRIAL_MAX_PER_MIN = Number(process.env.PLAN_TRIAL_MAX_PER_MIN || 400);
+const PRO_MAX_PER_MIN = Number(process.env.PLAN_PRO_MAX_PER_MIN || 1000);
+const ENTERPRISE_MAX_PER_MIN = Number(process.env.PLAN_ENTERPRISE_MAX_PER_MIN || 2000);
 
 const _trialLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: TRIAL_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserKey,
@@ -189,14 +192,14 @@ const _trialLimiter = rateLimit({
     trackViolation(req);
     res.status(options.statusCode).json({
       ok: false, success: false,
-      error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Límite del plan Trial alcanzado: 100 peticiones/min. Actualiza a Pro para mayor capacidad.' },
+      error: { code: 'RATE_LIMIT_EXCEEDED', message: `Límite del plan Trial alcanzado: ${TRIAL_MAX_PER_MIN} peticiones/min.` },
     });
   },
 });
 
 const _proLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 1000,
+  max: PRO_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserKey,
@@ -211,7 +214,7 @@ const _proLimiter = rateLimit({
 
 const _enterpriseLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 2000,
+  max: ENTERPRISE_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getUserKey,
@@ -224,10 +227,11 @@ const _enterpriseLimiter = rateLimit({
   },
 });
 
-// API pública v1 (legacy, por IP)
+// API pública v1 (legacy, por IP) — no compartir con rutas autenticadas SaaS
+const PUBLIC_API_MAX_PER_MIN = Number(process.env.PUBLIC_API_MAX_PER_MIN || 200);
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: PUBLIC_API_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientIp,

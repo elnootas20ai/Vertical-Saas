@@ -55,6 +55,7 @@ Variables habituales:
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (login Google en backend)
 - Opcional bootstrap: `SAAS_AUTO_BOOTSTRAP`, `SAAS_LOGIN_*`, `SAAS_BOOTSTRAP_FORCE_SYNC`
 - Opcional: `OPENAI_*`, email (`RESEND_*` / `SMTP_*`), `MONEI_*`, etc.
+- Estabilidad (5+ usuarios concurrentes): `NODE_MAX_OLD_SPACE_MB=1024`, `BURST_LIMIT_MAX=150`, `PLAN_TRIAL_MAX_PER_MIN=400`, `SSE_MAX_CONNECTIONS_PER_USER=3`
 
 ## Qué va en el **build** del frontend (solo variables `VITE_*`)
 

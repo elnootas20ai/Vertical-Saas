@@ -138,6 +138,7 @@ import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 import { activityLogger } from './middleware/activityLogger.js';
 import { runHealthCheck, recordLatency } from './services/healthService.js';
 import { sendAdminAlert } from './services/adminAlerts.js';
+import { closeAllSSEClients } from './services/sseService.js';
 
 const _5xxTimes = [];
 function track5xxAndMaybeAlert(url) {
@@ -1060,9 +1061,9 @@ app.use('/api/sse', sseRouter);
 // vapid-public-key se gestiona dentro del pushRouter sin requireAuth
 app.use('/api/push', pushRouter);
 
-// S-04: Rate limiting general + S-05: JWT en rutas CouchDB y llamadas
-app.use('/api/couch', apiLimiter, requireAuthAndEmailVerified);
-app.use('/api/calls', apiLimiter, requireAuthAndEmailVerified);
+// S-04: Rate limiting por usuario autenticado (no por IP — varios usuarios en la misma red).
+app.use('/api/couch', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter);
+app.use('/api/calls', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter);
 
 // I-06: sensitiveOpLimiter — procesamiento de llamadas con IA es costoso (10/min por usuario)
 app.post('/api/calls/process/:callId', sensitiveOpLimiter, async (req, res) => {
@@ -2839,6 +2840,32 @@ const server = app.listen(PORT, () => {
     `Backend Express escuchando en http://localhost:${PORT}`);
   logger.info({ tag: 'BOOT' }, 'Endpoints: /live, /health, /metrics, /api/stats');
 });
+
+// SSE y proxies: sin timeout de request (Node 20+ default 5 min cortaría streams largos).
+server.requestTimeout = 0;
+server.headersTimeout = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 3_600_000);
+server.keepAliveTimeout = Number(process.env.HTTP_KEEPALIVE_TIMEOUT_MS || 65_000);
+server.maxConnections = Number(process.env.HTTP_MAX_CONNECTIONS || 500);
+
+// Docker envía SIGTERM al recrear el contenedor. Cerrar conexiones SSE y el listener
+// evita RST abruptos y "connection refused" en Nginx durante el swap de deploy.
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ tag: 'BOOT', signal }, 'Apagado graceful iniciado');
+  closeAllSSEClients();
+  server.close(() => {
+    logger.info({ tag: 'BOOT' }, 'Servidor HTTP cerrado');
+    process.exit(0);
+  });
+  setTimeout(() => {
+    logger.warn({ tag: 'BOOT' }, 'Timeout apagado graceful — forzando salida');
+    process.exit(1);
+  }, Number(process.env.SHUTDOWN_TIMEOUT_MS || 15_000)).unref();
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 server.on('connection', (socket) => {
   activeSockets.add(socket);

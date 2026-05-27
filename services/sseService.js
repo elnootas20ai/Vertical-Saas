@@ -11,6 +11,9 @@ import logger from './logger.js';
 /** @type {Map<string, Set<import('http').ServerResponse>>} */
 const clientsByUser = new Map();
 
+/** Máx. conexiones SSE por usuario (pestañas duplicadas). Ajustable: SSE_MAX_CONNECTIONS_PER_USER */
+const MAX_SSE_PER_USER = Number(process.env.SSE_MAX_CONNECTIONS_PER_USER || 3);
+
 /** @type {Map<string, Set<string>>} userId → Set<businessId> */
 const businessByUser = new Map();
 
@@ -24,7 +27,18 @@ export function addSSEClient(userId, businessId, res) {
   if (!clientsByUser.has(userId)) {
     clientsByUser.set(userId, new Set());
   }
-  clientsByUser.get(userId).add(res);
+  const conns = clientsByUser.get(userId);
+
+  // Evita acumular conexiones huérfanas si hay varias pestañas o hooks duplicados.
+  if (conns.size >= MAX_SSE_PER_USER) {
+    const oldest = conns.values().next().value;
+    if (oldest) {
+      try { oldest.end(); } catch { /* ya cerrada */ }
+      conns.delete(oldest);
+    }
+  }
+
+  conns.add(res);
 
   if (businessId) {
     if (!businessByUser.has(businessId)) {
@@ -105,6 +119,17 @@ export function countClients() {
     total += conns.size;
   }
   return total;
+}
+
+/** Cierra todas las conexiones SSE (apagado graceful del servidor). */
+export function closeAllSSEClients() {
+  for (const conns of clientsByUser.values()) {
+    for (const res of conns) {
+      try { res.end(); } catch { /* noop */ }
+    }
+  }
+  clientsByUser.clear();
+  businessByUser.clear();
 }
 
 /**

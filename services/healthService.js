@@ -127,25 +127,39 @@ async function probeDb(baseUrl, authHeader, dbName) {
 }
 
 // ── System checks ─────────────────────────────────────────────────────────────
+function parseMaxOldSpaceMb() {
+  const raw = process.env.NODE_OPTIONS || '';
+  const m = raw.match(/--max-old-space-size=(\d+)/);
+  if (m) return Number(m[1]);
+  return Number(process.env.NODE_MAX_OLD_SPACE_MB || 768);
+}
+
 function checkMemory() {
   const mem      = process.memoryUsage();
   const totalSys = os.totalmem();
   const freeSys  = os.freemem();
   const sysPct   = Number((((totalSys - freeSys) / totalSys) * 100).toFixed(1));
   const heapPct  = Number(((mem.heapUsed  / mem.heapTotal) * 100).toFixed(1));
+  const rssMB    = bytesToMB(mem.rss);
+  const heapLimitMB = parseMaxOldSpaceMb();
+  // RSS frente al límite de heap configurado (no heapUsed/heapTotal: V8 crece el heap
+  // dinámicamente y un 89% de 53 MB no significa que el proceso vaya a petar).
+  const rssPctOfLimit = Number(((rssMB / heapLimitMB) * 100).toFixed(1));
 
   let state = 'ok';
-  if (sysPct >= MEMORY_CRIT_PCT || heapPct >= MEMORY_CRIT_PCT) state = 'critical';
-  else if (sysPct >= MEMORY_WARN_PCT || heapPct >= MEMORY_WARN_PCT)  state = 'warn';
+  if (sysPct >= MEMORY_CRIT_PCT || rssPctOfLimit >= MEMORY_CRIT_PCT) state = 'critical';
+  else if (sysPct >= MEMORY_WARN_PCT || rssPctOfLimit >= MEMORY_WARN_PCT) state = 'warn';
 
   return {
     ok: state !== 'critical',
     state,
     systemUsedPct:  sysPct,
     heapUsedPct:    heapPct,
+    rssPctOfLimit,
     heapUsedMB:     bytesToMB(mem.heapUsed),
     heapTotalMB:    bytesToMB(mem.heapTotal),
-    rssMB:          bytesToMB(mem.rss),
+    rssMB,
+    heapLimitMB,
     externalMB:     bytesToMB(mem.external),
     freeSystemMB:   bytesToMB(freeSys),
     totalSystemMB:  bytesToMB(totalSys),

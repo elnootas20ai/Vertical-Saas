@@ -75,7 +75,8 @@ if [ "$MODE" = "docker" ]; then
   if [ ! -f .env ]; then
     echo "[deploy:backend] WARNING: no existe .env en ${repo}; docker compose puede no inyectar variables."
   fi
-  docker compose -f ${sq(composeFile)} --env-file .env up -d --build ${sq(composeService)}
+  docker compose -f ${sq(composeFile)} --env-file .env build ${sq(composeService)}
+  docker compose -f ${sq(composeFile)} --env-file .env up -d --wait ${sq(composeService)}
   echo "[deploy:backend] docker ps:"
   docker ps --format 'table {{.Names}}\\t{{.Image}}\\t{{.Status}}'
 else

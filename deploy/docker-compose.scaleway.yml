@@ -52,7 +52,7 @@ services:
       NODE_ENV: production
       PORT: "3000"
       COUCHDB_URL: ${COUCHDB_URL_APP:-http://couchdb:5984}
-      NODE_OPTIONS: "--max-old-space-size=${NODE_MAX_OLD_SPACE_MB:-768}"
+      NODE_OPTIONS: "--max-old-space-size=${NODE_MAX_OLD_SPACE_MB:-1024}"
     healthcheck:
       test:
         [
@@ -67,6 +67,15 @@ services:
       start_period: 45s
     ports:
       - "127.0.0.1:3000:3000"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    # Reserva mínima; el VPS tiene ~8 GB — no limitar fuerte para 5–20 usuarios concurrentes.
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
 
 volumes:
   couchdb_data:
