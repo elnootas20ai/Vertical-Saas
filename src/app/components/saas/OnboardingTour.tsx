@@ -6,9 +6,13 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   clearOnboardingTourForBusiness,
+  getOnboardingTourStep,
+  isOnboardingTourActive,
   isOnboardingTourCompleted,
   markOnboardingTourCompleted,
   ONBOARDING_TOUR_ARM_EVENT,
+  setOnboardingTourActive,
+  setOnboardingTourStep,
 } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
 
@@ -60,21 +64,30 @@ export function OnboardingTour({ onComplete }: Props) {
     if (!accountUserId || !businessId || !businessesFetchSettled) return;
 
     const ownerKey = `${accountUserId}::${businessId}`;
-    // Al cambiar de empresa / sesión, reiniciamos el estado de cierre local.
+    // Al cambiar de empresa / sesión (o al montar tras refresh), restauramos el
+    // progreso persistido en sessionStorage para no perder el paso actual.
     if (ownerRef.current !== ownerKey) {
       ownerRef.current = ownerKey;
       setClosedThisSession(false);
-      setStepIndex(0);
+      const savedStep = getOnboardingTourStep(accountUserId, businessId);
+      setStepIndex(savedStep);
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
+    const wasActive = isOnboardingTourActive(accountUserId, businessId);
 
-    const openTour = () => setVisible(true);
+    const openTour = () => {
+      // Marcamos «activo» para que un refresh posterior reabra el tour de inmediato
+      // en el paso guardado, sin esperar al timer de bienvenida.
+      setOnboardingTourActive(accountUserId, businessId, true);
+      setVisible(true);
+    };
 
     const onArmed = (event: Event) => {
       const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
       if (detail?.userId === accountUserId && detail?.businessId === businessId) {
         setStepIndex(0);
+        setOnboardingTourStep(accountUserId, businessId, 0);
         setClosedThisSession(false);
         openTour();
       }
@@ -82,10 +95,17 @@ export function OnboardingTour({ onComplete }: Props) {
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
 
-    // Auto-apertura SOLO la primera vez (no tras saltar/completar ni en recargas posteriores).
+    // Auto-apertura:
+    //  - Si el tour estaba activo (p. ej. tras un refresh a mitad del recorrido),
+    //    lo reabrimos al instante en el paso guardado.
+    //  - Si no, sólo la primera vez (no tras saltar/completar).
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (!alreadySeen && !closedThisSession) {
-      timer = setTimeout(openTour, 800);
+      if (wasActive) {
+        openTour();
+      } else {
+        timer = setTimeout(openTour, 800);
+      }
     }
 
     return () => {
@@ -128,25 +148,28 @@ export function OnboardingTour({ onComplete }: Props) {
     }
 
     setStepIndex(next);
+    setOnboardingTourStep(accountUserId, businessId, next);
     tourRouteNavigate(navigate, step?.route);
-  }, [stepIndex, closeTour, navigate, steps]);
+  }, [stepIndex, closeTour, navigate, steps, accountUserId, businessId]);
 
   const handlePrev = useCallback(() => {
     if (stepIndex > 0) {
       const prev = stepIndex - 1;
       const step = steps[prev];
       setStepIndex(prev);
+      setOnboardingTourStep(accountUserId, businessId, prev);
       tourRouteNavigate(navigate, step?.route);
     }
-  }, [stepIndex, navigate, steps]);
+  }, [stepIndex, navigate, steps, accountUserId, businessId]);
 
   const handleDotClick = useCallback(
     (idx: number) => {
       const step = steps[idx];
       setStepIndex(idx);
+      setOnboardingTourStep(accountUserId, businessId, idx);
       tourRouteNavigate(navigate, step?.route);
     },
-    [navigate, steps],
+    [navigate, steps, accountUserId, businessId],
   );
 
   useModalClose(visible, closeTour);

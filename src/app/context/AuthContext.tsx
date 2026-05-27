@@ -466,6 +466,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
       }
       setSessionUser(response.user);
+      // Mismo motivo que en acceptInvitation: el usuario acaba de unirse a un
+      // negocio nuevo, hay que disparar la recarga para que el sidebar reciba
+      // el currentBusiness correcto y, con él, la vertical (delivery, comercial…).
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vertial:invitation-accepted'));
+      }
       return {
         success: true,
         redirectTo: response.redirectTo || '/saas/dashboard',
@@ -553,6 +559,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await acceptInvitationRequest(invitationId);
       if (response.user) {
         setSessionUser(response.user);
+      }
+      // Tras aceptar, el usuario ya es miembro de un negocio nuevo. Notificamos al
+      // BusinessProvider para que recargue la lista; si no, el sidebar queda con
+      // currentBusiness obsoleto (o vacío) y la vertical (delivery, comercial,
+      // limpieza…) no aparece o aparece la del fallback 'carDealership'.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('vertial:invitation-accepted'));
       }
       return { success: true, redirectTo: response.redirectTo };
     } catch (error) {

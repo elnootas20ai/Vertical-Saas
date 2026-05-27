@@ -159,6 +159,22 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     void reloadBusinesses();
   }, [reloadBusinesses]);
 
+  // Cuando el usuario acepta una invitación de equipo (por banner o por email),
+  // su user_id no cambia pero su lista de negocios sí: ahora es miembro de otro
+  // negocio (posiblemente de otra vertical). Sin este listener, el sidebar
+  // conserva el currentBusiness obsoleto y muestra la vertical equivocada
+  // (o el fallback 'carDealership') hasta el siguiente refresh manual.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onInvitationAccepted = () => {
+      void reloadBusinesses();
+    };
+    window.addEventListener('vertial:invitation-accepted', onInvitationAccepted);
+    return () => {
+      window.removeEventListener('vertial:invitation-accepted', onInvitationAccepted);
+    };
+  }, [reloadBusinesses]);
+
   useEffect(() => {
     if (!user?.user_id || businesses.length === 0) return;
     void import('../lib/onboardingLocalKeys').then(({ migrateLegacyOnboardingGuidesForBusinesses }) => {

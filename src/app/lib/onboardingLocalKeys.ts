@@ -200,6 +200,63 @@ export function isOnboardingTourCompleted(userId: string, businessId: string): b
   }
 }
 
+/**
+ * Paso actual del tour persistido en sessionStorage (sobrevive al refresh dentro
+ * de la misma pestaña). Devuelve 0 si no hay valor o es inválido.
+ */
+export function getOnboardingTourStep(userId: string, businessId: string): number {
+  if (!userId || !businessId) return 0;
+  try {
+    const raw = sessionStorage.getItem(onboardingTourStepKey(userId, businessId));
+    if (!raw) return 0;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function setOnboardingTourStep(
+  userId: string,
+  businessId: string,
+  step: number,
+): void {
+  if (!userId || !businessId) return;
+  try {
+    sessionStorage.setItem(
+      onboardingTourStepKey(userId, businessId),
+      String(Math.max(0, Math.floor(step))),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Flag "tour abierto en esta sesión": permite reabrirlo en el paso guardado tras un refresh. */
+export function isOnboardingTourActive(userId: string, businessId: string): boolean {
+  if (!userId || !businessId) return false;
+  try {
+    return sessionStorage.getItem(onboardingTourActiveKey(userId, businessId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setOnboardingTourActive(
+  userId: string,
+  businessId: string,
+  active: boolean,
+): void {
+  if (!userId || !businessId) return;
+  try {
+    const key = onboardingTourActiveKey(userId, businessId);
+    if (active) sessionStorage.setItem(key, '1');
+    else sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function markOnboardingTourCompleted(userId: string, businessId: string): void {
   if (!userId || !businessId) return;
   try {

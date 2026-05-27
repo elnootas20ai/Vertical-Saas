@@ -931,7 +931,12 @@ export function buildDefaultPermissionMatrix(role = 'Usuario') {
     Comercial: ['vehicles', 'clients', 'sales', 'documents'],
     Administración: ['clients', 'documents', 'finance', 'ancove'],
     Taller: ['vehicles'],
-    Usuario: ['vehicles', 'clients'],
+    // "Usuario" es el rol por defecto cuando se invita a un trabajador sin elegir
+    // rol específico. Le damos visibilidad operativa básica multi-vertical
+    // (sales/delivery/cash_register) para que un trabajador delivery, peluquería,
+    // limpieza, etc. tenga al menos algo que hacer al entrar. El owner puede
+    // restringir más tarde desde Ajustes → Equipo.
+    Usuario: ['vehicles', 'clients', 'sales', 'delivery', 'cash_register'],
     'Mostrador / Atención': ['clients', 'sales', 'delivery', 'cash_register', 'documents'],
     Cocina: ['delivery', 'documents'],
     Reparto: ['delivery', 'fleet'],

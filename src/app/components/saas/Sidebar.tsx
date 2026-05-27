@@ -781,7 +781,11 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     'suppliers', 'orders', 'purchase-orders', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
-    'delivery-ops', 'clockins', 'groups', 'web-config', 'web-orders',
+    // 'delivery' apunta a /saas/delivery que requiere RequireBusinessOwner: si lo viese
+    // un worker y clicase, se chocaría con el guard. Mejor ocultarlo (ya tiene worker-tpv
+    // y los items operativos sala/caja/tpv-rapido para su día a día).
+    // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
+    'delivery', 'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders',
     'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
     'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents',
     'gym-classes', 'gym-memberships', 'gym-routines', 'gym-access',
@@ -825,11 +829,23 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     if (item.id === 'chat') {
       return true;
     }
+    // Mapeo item.id → clave de permiso (TEAM_PERMISSION_KEYS). Sin esto, los items
+    // operativos de delivery (tpv, tpv-rapido, tpv-locales, caja, sala, delivery-clients)
+    // caían al fallback `return !isWorker → false`, y un trabajador delivery NO VEÍA
+    // nada en su vertical (aunque tuviera permisos de delivery/cash_register).
+    const tpvLike =
+      item.id === 'tpv' ||
+      item.id === 'tpv-rapido' ||
+      item.id === 'tpv-locales' ||
+      item.id === 'caja';
+    const deliveryOperational =
+      item.id === 'sala' || item.id === 'delivery-clients';
     const permission = permissionMap[item.id]
       || (item.id === 'leads' ? permissionMap.clients : undefined)
       || (item.id === 'billing' ? permissionMap.finance : undefined)
       || (item.id === 'client-billing' ? permissionMap.finance : undefined)
-      || (item.id === 'tpv-locales' ? permissionMap.tpv : undefined)
+      || (tpvLike ? (permissionMap.cash_register || permissionMap.sales) : undefined)
+      || (deliveryOperational ? permissionMap.delivery : undefined)
       || (item.id.startsWith('doc-') ? permissionMap.documents : undefined);
     if (!permission) {
       // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).

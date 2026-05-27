@@ -302,10 +302,10 @@ export function buildEmailVerificationEmail(email, token) {
             Gracias por registrarte. Para activar tu cuenta y acceder al panel, confirma que este email
             te pertenece haciendo clic en el botón de abajo.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td>
+          <table cellpadding="0" cellspacing="0"><tr><td style="background:#FF5E00;border-radius:8px;">
             <a href="${verifyUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Verificar mi email
+               style="display:inline-block;background:#FF5E00;color:#ffffff;padding:16px 36px;text-decoration:none;border-radius:8px;font-weight:700;font-size:16px;letter-spacing:0.2px;border:1px solid #E55400;box-shadow:0 2px 0 #C24700;mso-padding-alt:0;">
+              <span style="color:#ffffff;">Verificar mi email →</span>
             </a>
           </td></tr></table>
           <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">

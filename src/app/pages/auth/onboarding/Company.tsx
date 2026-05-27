@@ -110,7 +110,7 @@ export function Company() {
         id="company-form"
         onSubmit={handleContinue}
         autoComplete="off"
-        className="flex-1 min-h-0 overflow-hidden grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 content-start [&_.acceso-field]:!mb-0"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 content-start [&_.acceso-field]:!mb-0"
       >
             <div className="md:col-span-2">
             <ACCESO__Input
