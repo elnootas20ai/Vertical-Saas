@@ -11,15 +11,28 @@ function getHeaders(): Record<string, string> {
 }
 
 const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-clockins';
+const REQ_TIMEOUT_MS = 20_000;
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${getApiBase()}${path}`, {
-    headers: { ...getHeaders(), ...(init?.headers || {}) },
-    ...init,
-  });
-  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data?.error || 'Error en fichajes');
-  return data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQ_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${getApiBase()}${path}`, {
+      headers: { ...getHeaders(), ...(init?.headers || {}) },
+      ...init,
+      signal: controller.signal,
+    });
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    if (!res.ok) throw new Error(data?.error || 'Error en fichajes');
+    return data;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error('La operación de fichaje tardó demasiado. Comprueba la conexión e inténtalo de nuevo.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function ensureDb() {
@@ -171,16 +184,23 @@ export async function clockIn(
   let scheduled_start: string | undefined;
   let scheduled_end: string | undefined;
   try {
-    const { getSchedule, getScheduleForDate } = await import('./schedulesApi');
-    const schedule = await getSchedule(businessId, memberId);
-    if (schedule) {
+    const scheduleLookup = (async () => {
+      const { getSchedule, getScheduleForDate } = await import('./schedulesApi');
+      const schedule = await getSchedule(businessId, memberId);
+      if (!schedule) return;
       const shift = getScheduleForDate(schedule, new Date());
       if (shift) {
         scheduled_start = shift.start;
         scheduled_end = shift.end;
       }
-    }
-  } catch { /* schedule not available */ }
+    })();
+    await Promise.race([
+      scheduleLookup,
+      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+    ]);
+  } catch {
+    /* horario no disponible: el fichaje sigue sin bloquear */
+  }
 
   const id = `clockin:${businessId}:${memberId}:${date}:${Date.now()}`;
   const entry: ClockEntry = { type: 'clock_in', time: now, geo: options?.geo };

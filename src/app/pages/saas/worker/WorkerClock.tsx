@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Play,
@@ -174,12 +174,13 @@ export function WorkerClock() {
   const [, setTick] = useState(0);
 
   const isMobile = isMobileDevice();
-  const { location: geoLocation, status: geoStatus, error: geoError, requestLocation } = useGeolocation();
+  const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
+  const autoClockOutTriggered = useRef(false);
 
   const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await requestLocation();
+    const loc = await requestLocationForClock();
     return loc || undefined;
-  }, [requestLocation]);
+  }, [requestLocationForClock]);
 
   const isClockedIn = record?.status === 'active' || record?.status === 'break';
   const isOnBreak = record?.status === 'break';
@@ -188,12 +189,14 @@ export function WorkerClock() {
   const continuousMs = getContinuousMs(record);
 
   const loadData = useCallback(async () => {
-    if (!businessId || !memberId) return;
+    if (!businessId || !memberId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError('');
     try {
-      const [today, all] = await Promise.all([
-        getTodayClockin(businessId, memberId),
-        listClockins(businessId, { memberId }),
-      ]);
+      const today = await getTodayClockin(businessId, memberId);
 
       if (today && today.status !== 'completed') {
         const contMs = getContinuousMs(today);
@@ -210,13 +213,18 @@ export function WorkerClock() {
       } else {
         setRecord(today);
       }
-
-      setHistory(all.filter((r) => r.status === 'completed'));
-    } catch (e: any) {
-      setError(e.message || 'Error cargando fichajes');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error cargando fichajes');
     } finally {
       setLoading(false);
     }
+
+    // Historial en segundo plano: no bloquear la pantalla de fichar.
+    void listClockins(businessId, { memberId })
+      .then((all) => setHistory(all.filter((r) => r.status === 'completed')))
+      .catch(() => {
+        /* historial opcional */
+      });
   }, [businessId, memberId]);
 
   useEffect(() => {
@@ -229,12 +237,31 @@ export function WorkerClock() {
     return () => clearInterval(interval);
   }, [isClockedIn]);
 
-  useEffect(() => {
-    if (!isClockedIn || !record) return;
-    if (continuousMs >= MAX_CONTINUOUS_MS && record.status !== 'break') {
-      handleClockOut();
+  const handleClockOut = useCallback(async () => {
+    if (acting || !record) return;
+    setActing(true);
+    setError('');
+    try {
+      const geo = await getGeoForAction();
+      const rec = await clockOut(record, geo);
+      setRecord(rec);
+      setHistory((prev) => [rec, ...prev].slice(0, 10));
+      fireClockinNotification('clock_out', rec, Boolean(geo));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al fichar salida');
+    } finally {
+      setActing(false);
     }
-  }, [continuousMs, isClockedIn]);
+  }, [acting, record, getGeoForAction, fireClockinNotification]);
+
+  useEffect(() => {
+    if (!isClockedIn || !record || acting) return;
+    if (record.status === 'break') return;
+    if (continuousMs < MAX_CONTINUOUS_MS) return;
+    if (autoClockOutTriggered.current) return;
+    autoClockOutTriggered.current = true;
+    void handleClockOut();
+  }, [continuousMs, isClockedIn, record, acting, handleClockOut]);
 
   const handleClockIn = async () => {
     if (acting || !businessId || !memberId) return;
@@ -248,25 +275,8 @@ export function WorkerClock() {
       });
       setRecord(rec);
       fireClockinNotification('clock_in', rec, Boolean(geo));
-    } catch (e: any) {
-      setError(e.message || 'Error al fichar entrada');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleClockOut = async () => {
-    if (acting || !record) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = await clockOut(record, geo);
-      setRecord(rec);
-      setHistory((prev) => [rec, ...prev].slice(0, 10));
-      fireClockinNotification('clock_out', rec, Boolean(geo));
-    } catch (e: any) {
-      setError(e.message || 'Error al fichar salida');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al fichar entrada');
     } finally {
       setActing(false);
     }
@@ -282,8 +292,8 @@ export function WorkerClock() {
       const rec = wasOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
       setRecord(rec);
       fireClockinNotification(wasOnBreak ? 'break_end' : 'break_start', rec, Boolean(geo));
-    } catch (e: any) {
-      setError(e.message || 'Error al gestionar descanso');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al gestionar descanso');
     } finally {
       setActing(false);
     }
@@ -306,6 +316,16 @@ export function WorkerClock() {
       <Layout title={t('worker.clock.title')} subtitle={t('worker.clock.subtitle')}>
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!businessId || !memberId) {
+    return (
+      <Layout title={t('worker.clock.title')} subtitle={t('worker.clock.subtitle')}>
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
+          No hay empresa activa. Si acabas de aceptar una invitación, espera unos segundos o recarga la página.
         </div>
       </Layout>
     );

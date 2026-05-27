@@ -110,6 +110,12 @@ export function Header() {
                 Iniciar sesión
               </button>
               <button
+                onClick={() => navigate('/auth/worker-login')}
+                className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
+              >
+                Soy trabajador
+              </button>
+              <button
                 onClick={() => scrollToSection('planes')}
                 className="px-4 py-2 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-medium text-sm"
               >
@@ -182,6 +188,12 @@ export function Header() {
                 className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
               >
                 Iniciar sesión
+              </button>
+              <button
+                onClick={() => { navigate('/auth/worker-login'); setMobileMenuOpen(false); }}
+                className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
+              >
+                Soy trabajador
               </button>
             </div>
           </div>

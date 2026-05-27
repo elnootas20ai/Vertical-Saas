@@ -4,6 +4,7 @@ import { LandingNew } from './pages/LandingNew';
 import { Entry } from './pages/auth/Entry';
 import { Login } from './pages/auth/Login';
 import { TeamLogin } from './pages/auth/TeamLogin';
+import { WorkerLogin } from './pages/auth/WorkerLogin';
 import { Recover } from './pages/auth/Recover';
 import { ResetPassword } from './pages/auth/ResetPassword';
 import { AcceptInvite } from './pages/auth/AcceptInvite';
@@ -348,6 +349,10 @@ export const router = createBrowserRouter([
       {
         path: 'auth/team-login',
         Component: TeamLogin,
+      },
+      {
+        path: 'auth/worker-login',
+        Component: WorkerLogin,
       },
       {
         path: 'auth/recover',

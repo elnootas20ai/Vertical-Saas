@@ -217,14 +217,14 @@ export function Entry() {
           </button>
 
           <button
-            onClick={() => navigate('/auth/team-login')}
+            onClick={() => navigate('/auth/worker-login')}
             className="group p-8 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl hover:border-blue-600 transition-all text-left"
           >
             <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4 group-hover:bg-blue-600 transition-colors">
               <Users className="w-7 h-7 text-blue-600 dark:text-blue-400 group-hover:text-white transition-colors" />
             </div>
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Equipo / Empleado
+              Trabajador / Empleado
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               Para personal operativo del día a día.
@@ -232,15 +232,15 @@ export function Entry() {
             <ul className="space-y-1.5 text-xs text-gray-500 dark:text-gray-400">
               <li className="flex items-center gap-2">
                 <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-                Acceso por código de empresa + usuario
+                Inicio con correo y contraseña
               </li>
               <li className="flex items-center gap-2">
                 <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-                Tareas y módulos según permisos asignados
+                Acceso directo a tu panel de trabajador
               </li>
               <li className="flex items-center gap-2">
                 <ClipboardList className="w-3.5 h-3.5 shrink-0" />
-                Acceso a TPV
+                TPV, fichajes y tareas asignadas
               </li>
             </ul>
           </button>

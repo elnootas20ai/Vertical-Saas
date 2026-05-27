@@ -128,12 +128,12 @@ export function WorkerHome() {
   const [, setTick] = useState(0);
 
   const isMobile = isMobileDevice();
-  const { location: geoLocation, status: geoStatus, requestLocation } = useGeolocation();
+  const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
 
   const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await requestLocation();
+    const loc = await requestLocationForClock();
     return loc || undefined;
-  }, [requestLocation]);
+  }, [requestLocationForClock]);
 
   const isClockedIn = record?.status === 'active' || record?.status === 'break';
   const isOnBreak = record?.status === 'break';
@@ -152,8 +152,8 @@ export function WorkerHome() {
       try {
         const today = await getTodayClockin(businessId, memberId);
         setRecord(today);
-      } catch (e: any) {
-        setError(e.message || 'Error cargando fichaje');
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Error cargando fichaje');
       } finally {
         setLoading(false);
       }
@@ -177,8 +177,8 @@ export function WorkerHome() {
         device_type: isMobile ? 'mobile' : 'desktop',
       });
       setRecord(rec);
-    } catch (e: any) {
-      setError(e.message || 'Error al fichar entrada');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al fichar entrada');
     } finally {
       setActing(false);
     }
@@ -192,8 +192,8 @@ export function WorkerHome() {
       const geo = await getGeoForAction();
       const rec = await clockOut(record, geo);
       setRecord(rec);
-    } catch (e: any) {
-      setError(e.message || 'Error al fichar salida');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al fichar salida');
     } finally {
       setActing(false);
     }
@@ -207,8 +207,8 @@ export function WorkerHome() {
       const geo = await getGeoForAction();
       const rec = isOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
       setRecord(rec);
-    } catch (e: any) {
-      setError(e.message || 'Error al gestionar descanso');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error al gestionar descanso');
     } finally {
       setActing(false);
     }

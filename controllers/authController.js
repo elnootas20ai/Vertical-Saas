@@ -87,6 +87,44 @@ function getClientIp(req) {
   return extractIp(req);
 }
 
+const ADMIN_ONLY_LANDINGS = new Set([
+  '/saas/dashboard',
+  '/saas/finance',
+  '/saas/reports',
+  '/saas/team',
+  '/saas/billing',
+]);
+
+/** Destino tras login con email según tipo de cuenta (gerente vs trabajador). */
+function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {}) {
+  if (!account.emailVerified) {
+    return '/auth/verify-email-pending';
+  }
+  if (pendingInvitationsCount > 0) {
+    return '/saas/invitations';
+  }
+
+  const isUserAccount = account.accountType === 'user';
+  const isInvitedWorker = Boolean(String(account.invitedBy || '').trim());
+  const landing = String(account.landingPage || '').trim();
+  const linkedBusiness = String(account.linkedBusinessId || '').trim();
+  const hasWorkerLanding = landing.startsWith('/saas/worker');
+  const isWorker = isUserAccount || isInvitedWorker || (hasWorkerLanding && Boolean(linkedBusiness));
+
+  if (isUserAccount && !String(account.linkedBusinessId || '').trim()) {
+    return '/saas/user-dashboard';
+  }
+
+  if (isWorker) {
+    if (landing && !ADMIN_ONLY_LANDINGS.has(landing)) {
+      return landing;
+    }
+    return '/saas/worker';
+  }
+
+  return '/auth/gate';
+}
+
 // S-01 + S-07: Emite tokens JWT, crea sesión y establece httpOnly cookies
 async function issueTokens(req, res, account) {
   const sessionId = uuidv4();
@@ -582,7 +620,6 @@ export async function login(req, res) {
     });
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
-    const isUserAccount = savedAccount.accountType === 'user';
 
     let pendingInvitationsCount = 0;
     try {
@@ -592,14 +629,7 @@ export async function login(req, res) {
       console.error('[AUTH] Error consultando invitaciones pendientes en login:', invErr?.message);
     }
 
-    let redirectTo;
-    if (!savedAccount.emailVerified) {
-      redirectTo = '/auth/verify-email-pending';
-    } else if (pendingInvitationsCount > 0) {
-      redirectTo = '/saas/invitations';
-    } else {
-      redirectTo = isUserAccount ? '/saas/worker' : '/auth/gate';
-    }
+    const redirectTo = resolvePostLoginRedirect(savedAccount, { pendingInvitationsCount });
 
     return res.json({
       ok: true,
