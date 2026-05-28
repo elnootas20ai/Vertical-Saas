@@ -48,7 +48,16 @@ import {
   listBrandsByBusiness,
 } from '../services/couchdb.js';
 import { randomUUID } from 'node:crypto';
-import { suggestNextPdvCode, suggestNextPdvDisplayName } from '../shared/naming/deliveryPointOfSaleCode.js';
+import {
+  isPdvCodeAlreadyUsed,
+  PDV_RETAIL_LIMITS,
+  sanitizePdvCodeInput,
+  sanitizeStoreDisplayName,
+  suggestNextPdvCode,
+  suggestNextPdvDisplayName,
+  validatePdvCodeInput,
+  validateStoreDisplayName,
+} from '../shared/naming/deliveryPointOfSaleCode.js';
 import {
   accumulateDeliveredOrderLines,
   roundRevenueMap,
@@ -71,12 +80,15 @@ function validatePointOfSaleTerminals(terminals) {
 }
 
 function validatePointOfSaleCreateBody(body) {
-  const name = String(body.name || '').trim();
-  if (!name) return 'El nombre del punto de venta es obligatorio';
-  const code = String(body.code || '').trim();
-  if (!code) return 'El código del PDV es obligatorio';
+  const nameErr = validateStoreDisplayName(body.name);
+  if (nameErr) return nameErr;
+  const codeErr = validatePdvCodeInput(body.code);
+  if (codeErr) return codeErr;
   const addr = String(body.address || '').trim();
   if (addr.length < 5) return 'La dirección del local es obligatoria (calle y referencia, mínimo 5 caracteres)';
+  if (addr.length > PDV_RETAIL_LIMITS.addressMax) {
+    return `La dirección no puede superar ${PDV_RETAIL_LIMITS.addressMax} caracteres`;
+  }
   return validatePointOfSaleTerminals(body.terminals);
 }
 
@@ -1430,19 +1442,19 @@ export async function createPointOfSale(req, res) {
     const existing = await listPointsOfSaleByUser(req, userId);
     const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
     const names = existing.map((d) => String(d.name || '').trim()).filter(Boolean);
-    const codeStr = String(body.code || '').trim();
+    const rawName = sanitizeStoreDisplayName(body.name) || 'PDV';
+    let codeStr = sanitizePdvCodeInput(String(body.code || '').trim());
     if (!codeStr) {
-      body = { ...body, code: suggestNextPdvCode(String(body.name || '').trim() || 'PDV', codes) };
+      codeStr = suggestNextPdvCode(rawName, codes);
     }
-    body = {
-      ...body,
-      name: suggestNextPdvDisplayName(
-        String(body.name || '').trim() || 'PDV',
-        names,
-        codes,
-        body.code,
-      ),
-    };
+    if (isPdvCodeAlreadyUsed(codeStr, codes)) {
+      return badRequest(res, `Ya existe un punto de venta con el código «${codeStr}». Elige otro código.`);
+    }
+    const finalName = body.preserveDisplayName
+      ? rawName
+      : suggestNextPdvDisplayName(rawName, names, codes, codeStr);
+    body = { ...body, code: codeStr, name: finalName };
+    delete body.preserveDisplayName;
     if (!Array.isArray(body.terminals) || body.terminals.length === 0) {
       body = {
         ...body,
@@ -1494,6 +1506,25 @@ export async function updatePointOfSale(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    if (Object.prototype.hasOwnProperty.call(pointOfSale, 'code')) {
+      const codeErr = validatePdvCodeInput(pointOfSale.code);
+      if (codeErr) return badRequest(res, codeErr);
+      const nextCode = sanitizePdvCodeInput(String(pointOfSale.code || '').trim());
+      const allPdvs = await listPointsOfSaleByUser(req, userId);
+      const otherCodes = allPdvs
+        .filter((p) => p._id !== pdvId)
+        .map((d) => String(d.code || '').trim())
+        .filter(Boolean);
+      if (isPdvCodeAlreadyUsed(nextCode, otherCodes)) {
+        return badRequest(res, `Ya existe un punto de venta con el código «${nextCode}». Elige otro código.`);
+      }
+      pointOfSale = { ...pointOfSale, code: nextCode };
+    }
+    if (Object.prototype.hasOwnProperty.call(pointOfSale, 'name')) {
+      const nameErr = validateStoreDisplayName(pointOfSale.name);
+      if (nameErr) return badRequest(res, nameErr);
+      pointOfSale = { ...pointOfSale, name: sanitizeStoreDisplayName(pointOfSale.name) };
+    }
     const db = getDeliveryDbName();
     const doc = buildPointOfSaleDocument(userId, { ...existing, ...pointOfSale }, existing);
     const saved = await putDocument(req, db, doc._id, doc);

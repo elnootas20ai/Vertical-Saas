@@ -20,10 +20,16 @@ import {
   writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
 import { pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
-import { loadDeliveryStores } from '../lib/deliverySetup';
+import { isDeliveryBusinessType, loadDeliveryStores } from '../lib/deliverySetup';
+import type { WorkCenter } from '../lib/workCentersApi';
 
 export interface ActiveStoreScopeValue {
+  /** PDV activos (filtro operativo / pedidos / caja). */
   pointsOfSale: PointOfSale[];
+  /** Todos los PDV de la empresa (sidebar: incluye inactivos). */
+  allPointsOfSale: PointOfSale[];
+  /** Centros retail de la empresa (para sidebar aunque falte PDV). */
+  retailWorkCenters: WorkCenter[];
   /** `_id` del documento PDV delivery (resuelto desde preferencia `wc:` o id). */
   activeSalesPointId: string | null;
   activePreferenceRaw: string | null;
@@ -36,6 +42,8 @@ export interface ActiveStoreScopeValue {
 
 const noopScope: ActiveStoreScopeValue = {
   pointsOfSale: [],
+  allPointsOfSale: [],
+  retailWorkCenters: [],
   activeSalesPointId: null,
   activePreferenceRaw: null,
   setActiveSalesPoint: () => {},
@@ -67,8 +75,10 @@ function ActiveStoreScopeProviderImpl({
   business: BusinessContextType;
 }) {
   const { user } = useAuth();
-  const { currentBusiness } = business;
+  const { currentBusiness, businessesFetchSettled, isLoading: businessLoading } = business;
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
+  const [allPointsOfSale, setAllPointsOfSale] = useState<PointOfSale[]>([]);
+  const [retailWorkCenters, setRetailWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(false);
   const [version, setVersion] = useState(0);
 
@@ -80,30 +90,44 @@ function ActiveStoreScopeProviderImpl({
   const load = useCallback(async () => {
     if (!dataUserId || !user) {
       setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
+      return;
+    }
+    if (!isDeliveryBusinessType(currentBusiness?.businessType)) {
+      setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
       return;
     }
     setLoading(true);
     try {
       const state = await loadDeliveryStores(user, currentBusiness ?? null);
-      setPointsOfSale(state.pointsOfSale);
+      const retail = state.workCenters.filter(
+        (wc) =>
+          !wc.deletedAt &&
+          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+      );
+      setRetailWorkCenters(retail);
+      setAllPointsOfSale(state.pointsOfSale);
+      setPointsOfSale(state.pointsOfSale.filter((p) => p.active !== false));
     } catch {
       setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
     } finally {
       setLoading(false);
     }
   }, [dataUserId, currentBusiness, user]);
 
+  /** Tras cargar negocios: una sola carga de tiendas/PDV (evita competir con listBusinesses). */
   useEffect(() => {
+    if (!businessId || !businessesFetchSettled || businessLoading) return;
     setPointsOfSale([]);
+    setAllPointsOfSale([]);
+    setRetailWorkCenters([]);
     void load();
-  }, [load]);
-
-  /** Al cambiar de empresa, vaciar lista hasta recargar (evita flash de PDV de otra empresa). */
-  useEffect(() => {
-    if (!businessId) return;
-    setPointsOfSale([]);
-    bump();
-  }, [businessId, bump]);
+  }, [businessId, businessesFetchSettled, businessLoading, load]);
 
   useEffect(() => {
     const onWorkCenters = () => {
@@ -116,16 +140,15 @@ function ActiveStoreScopeProviderImpl({
   useEffect(() => {
     const onExt = () => {
       bump();
-      void load();
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
-  }, [bump, load]);
+  }, [bump]);
 
   const activePreferenceRaw = useMemo(() => {
     if (!businessId || !dataUserId) return null;
     return readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-  }, [businessId, dataUserId, version, pointsOfSale.length]);
+  }, [businessId, dataUserId, version, pointsOfSale.length, allPointsOfSale.length]);
 
   const activeSalesPointId = useMemo(() => {
     if (pointsOfSale.length === 0) return null;
@@ -143,7 +166,6 @@ function ActiveStoreScopeProviderImpl({
     if (!targetId) return;
     if (raw !== targetId) {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, targetId);
-      notifyDeliveryActiveStoreChanged();
       bump();
     }
   }, [businessId, dataUserId, pointsOfSale, bump]);
@@ -177,6 +199,8 @@ function ActiveStoreScopeProviderImpl({
   const value = useMemo<ActiveStoreScopeValue>(
     () => ({
       pointsOfSale,
+      allPointsOfSale,
+      retailWorkCenters,
       activeSalesPointId,
       activePreferenceRaw,
       setActiveSalesPoint,
@@ -187,6 +211,8 @@ function ActiveStoreScopeProviderImpl({
     }),
     [
       pointsOfSale,
+      allPointsOfSale,
+      retailWorkCenters,
       activeSalesPointId,
       activePreferenceRaw,
       setActiveSalesPoint,

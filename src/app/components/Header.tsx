@@ -99,12 +99,6 @@ export function Header() {
             {/* Desktop Actions */}
             <div className="hidden lg:flex items-center gap-3">
               <button
-                onClick={() => navigate('/panel-afiliado')}
-                className="text-slate-600 hover:text-violet-700 transition-colors font-medium"
-              >
-                Acceso afiliados
-              </button>
-              <button
                 onClick={() => navigate(AUTH_PATHS.companyLogin)}
                 className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
               >
@@ -178,12 +172,6 @@ export function Header() {
               Contacto
             </button>
             <div className="pt-4 border-t border-blue-100 space-y-2">
-              <button
-                onClick={() => { navigate('/panel-afiliado'); setMobileMenuOpen(false); }}
-                className="w-full px-4 py-3 border-2 border-violet-200 text-violet-700 rounded-xl hover:bg-violet-50 transition-colors font-semibold"
-              >
-                Acceso afiliados
-              </button>
               <button
                 onClick={() => { navigate(AUTH_PATHS.companyLogin); setMobileMenuOpen(false); }}
                 className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"

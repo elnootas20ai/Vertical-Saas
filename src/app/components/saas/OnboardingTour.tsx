@@ -55,29 +55,43 @@ export function OnboardingTour({ onComplete }: Props) {
   const businessId = String(currentBusiness?.business_id || '').trim();
   const businessType = String(currentBusiness?.businessType || '').trim();
   const [stepIndex, setStepIndex] = useState(0);
-  const [visible, setVisible] = useState(false);
+  /** loading = aún no sabemos; hide = no mostrar; show = tour visible */
+  const [tourGate, setTourGate] = useState<'loading' | 'hide' | 'show'>('loading');
   const [exiting, setExiting] = useState(false);
   const [closedThisSession, setClosedThisSession] = useState(false);
   // Recordamos a quién pertenece la sesión actual para evitar carry-over entre logins.
   const ownerRef = useRef<string>('');
 
   useEffect(() => {
-    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) return;
+    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) {
+      setTourGate('loading');
+      return;
+    }
 
     const ownerKey = `${accountUserId}::${businessId}::${businessType || 'unknown'}`;
     if (ownerRef.current !== ownerKey) {
       ownerRef.current = ownerKey;
       setClosedThisSession(false);
+      setTourGate('loading');
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
+    if (alreadySeen) {
+      setOnboardingTourActive(accountUserId, businessId, false);
+      setTourGate('hide');
+      return;
+    }
+
     const wasActive = isOnboardingTourActive(accountUserId, businessId);
 
     const openTour = () => {
-      // Marcamos «activo» para que un refresh posterior reabra el tour de inmediato
-      // en el paso guardado, sin esperar al timer de bienvenida.
+      if (isOnboardingTourCompleted(accountUserId, businessId)) {
+        setOnboardingTourActive(accountUserId, businessId, false);
+        setTourGate('hide');
+        return;
+      }
       setOnboardingTourActive(accountUserId, businessId, true);
-      setVisible(true);
+      setTourGate('show');
     };
 
     const onArmed = (event: Event) => {
@@ -92,17 +106,16 @@ export function OnboardingTour({ onComplete }: Props) {
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
 
-    // Auto-apertura:
-    //  - Si el tour estaba activo (p. ej. tras un refresh a mitad del recorrido),
-    //    lo reabrimos al instante en el paso guardado.
-    //  - Si no, sólo la primera vez (no tras saltar/completar).
     let timer: ReturnType<typeof setTimeout> | null = null;
-    if (!alreadySeen && !closedThisSession) {
+    if (!closedThisSession) {
       if (wasActive) {
         openTour();
       } else {
+        setTourGate('hide');
         timer = setTimeout(openTour, 800);
       }
+    } else {
+      setTourGate('hide');
     }
 
     return () => {
@@ -134,7 +147,7 @@ export function OnboardingTour({ onComplete }: Props) {
       }
       setExiting(true);
       setTimeout(() => {
-        setVisible(false);
+        setTourGate('hide');
         setExiting(false);
         setClosedThisSession(true);
         if (completed) onComplete?.();
@@ -177,9 +190,9 @@ export function OnboardingTour({ onComplete }: Props) {
     [navigate, steps, accountUserId, businessId],
   );
 
-  useModalClose(visible, closeTour);
+  useModalClose(tourGate === 'show', closeTour);
 
-  if (!visible) return null;
+  if (tourGate !== 'show') return null;
 
   const step = steps[stepIndex];
   const isLast = stepIndex === steps.length - 1;

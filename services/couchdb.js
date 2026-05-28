@@ -977,14 +977,17 @@ export function normalizePermissionMatrix(value, role = 'Usuario') {
 
   for (const key of TEAM_PERMISSION_KEYS) {
     const raw = value[key];
-    fallback[key] = {
-      view: Boolean(raw?.view),
-      edit: Boolean(raw?.edit),
-    };
-
-    if (fallback[key].edit) {
-      fallback[key].view = true;
+    // Clave ausente: conservar el preset del rol (Admin/Gerente = todo visible).
+    if (raw === undefined || raw === null) {
+      continue;
     }
+    // Formato legacy { read, write, delete } de cuentas seed / bootstrap antiguas.
+    const view = Boolean(raw.view ?? raw.read);
+    const edit = Boolean(raw.edit ?? raw.write ?? raw.delete);
+    fallback[key] = {
+      view: view || edit,
+      edit,
+    };
   }
 
   return fallback;

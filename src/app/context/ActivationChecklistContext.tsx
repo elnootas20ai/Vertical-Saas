@@ -313,12 +313,10 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, [steps]);
 
   useEffect(() => {
-    if (isDelivery) return;
-    if (completionPct === 100 && accountUserId && businessId) {
-      setIsDismissed(true);
-      setActivationChecklistDismissed(accountUserId, businessId, true);
-    }
-  }, [completionPct, accountUserId, businessId, isDelivery]);
+    if (completionPct !== 100 || !accountUserId || !businessId) return;
+    setIsDismissed(true);
+    setActivationChecklistDismissed(accountUserId, businessId, true);
+  }, [completionPct, accountUserId, businessId]);
 
   const dismiss = useCallback(() => {
     if (isDelivery) return;
@@ -328,14 +326,15 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     }
   }, [accountUserId, businessId, isDelivery]);
 
-  /** Delivery: no respetar un «saltar» guardado antes — el alta es obligatoria. */
+  /** Delivery: ignorar un «saltar» antiguo solo si el alta sigue incompleto. */
   useEffect(() => {
     if (!isDelivery || !accountUserId || !businessId) return;
+    if (completionPct >= 100) return;
     if (isActivationChecklistDismissed(accountUserId, businessId)) {
       setActivationChecklistDismissed(accountUserId, businessId, false);
       setIsDismissed(false);
     }
-  }, [isDelivery, accountUserId, businessId]);
+  }, [isDelivery, accountUserId, businessId, completionPct]);
 
   const restore = useCallback(() => {
     setIsDismissed(false);
@@ -349,9 +348,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     setTimeout(() => setIsLoadingSample(false), 1500);
   }, []);
 
-  const isVisible = isDelivery
-    ? totalSteps > 0
-    : completionPct < 100 && steps.length > 0 && !isDismissed;
+  const isVisible =
+    totalSteps > 0 && completionPct < 100 && !isDismissed;
 
   return (
     <ActivationChecklistContext.Provider

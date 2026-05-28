@@ -5,6 +5,8 @@ export const AUTH_PATHS = {
   workerLogin: '/auth/worker-login',
   teamLogin: '/auth/team-login',
   register: '/auth/register',
+  /** Panel público de afiliados (código de afiliado). */
+  affiliatePortal: '/panel-afiliado',
   /** Alias cortos (redirigen en routes.tsx) */
   companyPortal: '/acceso/empresa',
   workerPortal: '/acceso/trabajador',

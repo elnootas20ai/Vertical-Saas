@@ -59,6 +59,93 @@ export function derivePdvCodePrefix(displayName) {
 
 const PDV_CODE_SEQ_RE = /-(\d+)$/i;
 
+/** Límites compartidos front + API (evitar textos enormes en UI / Couch). */
+export const PDV_RETAIL_LIMITS = {
+  /** Cabe en sidebar, topbar y tarjetas (se trunca en UI si hiciera falta). */
+  storeNameMax: 40,
+  pdvCodeMax: 24,
+  pdvCodeMin: 2,
+  addressMax: 200,
+  cityMax: 80,
+  postalCodeMax: 12,
+  phoneMax: 24,
+  emailMax: 120,
+  customTypeMax: 60,
+  notesMax: 500,
+};
+
+const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/g;
+/** Código: letras/números y guiones, sin empezar/terminar en guion (ej. BAD-01). */
+const PDV_CODE_FORMAT_RE = /^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$/;
+
+export function clampText(raw, maxLen) {
+  const n = Number(maxLen);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return String(raw ?? '').slice(0, n);
+}
+
+export function sanitizeStoreDisplayName(raw) {
+  const s = String(raw || '')
+    .replace(CONTROL_CHARS_RE, '')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return clampText(s, PDV_RETAIL_LIMITS.storeNameMax);
+}
+
+/** Recorte defensivo en sidebar/topbar (datos legacy pueden ser más largos). */
+export function truncateStoreLabelForUi(raw, maxLen = PDV_RETAIL_LIMITS.storeNameMax) {
+  const s = String(raw || '').trim();
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+export function validateStoreDisplayName(raw) {
+  const s = sanitizeStoreDisplayName(raw);
+  if (!s) return 'El nombre es obligatorio';
+  if (String(raw || '').replace(CONTROL_CHARS_RE, '').trim().length > PDV_RETAIL_LIMITS.storeNameMax) {
+    return `El nombre no puede superar ${PDV_RETAIL_LIMITS.storeNameMax} caracteres`;
+  }
+  return null;
+}
+
+/** Normaliza entrada de usuario: «OLE -02» → «OLE-02». */
+export function normalizePdvCodeInput(raw) {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/-+/g, '-');
+}
+
+export function sanitizePdvCodeInput(raw) {
+  return clampText(normalizePdvCodeInput(raw), PDV_RETAIL_LIMITS.pdvCodeMax);
+}
+
+export function validatePdvCodeInput(raw) {
+  const code = sanitizePdvCodeInput(raw);
+  if (!code) return 'El código PDV es obligatorio';
+  if (code.length < PDV_RETAIL_LIMITS.pdvCodeMin) {
+    return `El código debe tener al menos ${PDV_RETAIL_LIMITS.pdvCodeMin} caracteres (ej. BAD-01)`;
+  }
+  if (code.length > PDV_RETAIL_LIMITS.pdvCodeMax) {
+    return `El código no puede superar ${PDV_RETAIL_LIMITS.pdvCodeMax} caracteres`;
+  }
+  if (!PDV_CODE_FORMAT_RE.test(code) || code.includes('--')) {
+    return 'Usa letras, números y un guion (ej. BAD-01)';
+  }
+  return null;
+}
+
+export function sanitizeRetailTextField(raw, maxLen) {
+  return clampText(
+    String(raw || '')
+      .replace(CONTROL_CHARS_RE, '')
+      .trim()
+      .replace(/\s+/g, ' '),
+    maxLen,
+  );
+}
+
 /**
  * Siguiente código PREFIX-01, PREFIX-02…
  * El número (01, 02…) es **global por cuenta**: 1.ª tienda → 01, 2.ª → 02 (aunque cambie el prefijo BAD/GRA).
@@ -89,6 +176,19 @@ export function stripPdvDisplayNameBase(displayName) {
  * Nombre visible al crear: 1.ª tienda de la cuenta = solo «Badalona»; 2.ª en adelante = «Badalona - 02».
  * El número coincide con el del código (01 → sin sufijo en nombre; 02+ → sufijo en nombre).
  */
+/** Comprueba si un código PDV ya está en uso (comparación normalizada). */
+export function isPdvCodeAlreadyUsed(code, existingCodes, exceptCode) {
+  const norm = normalizePdvCodeInput(code);
+  if (!norm) return false;
+  const exceptNorm = exceptCode ? normalizePdvCodeInput(exceptCode) : '';
+  for (const c of existingCodes || []) {
+    const existing = normalizePdvCodeInput(c);
+    if (!existing || existing === exceptNorm) continue;
+    if (existing === norm) return true;
+  }
+  return false;
+}
+
 export function suggestNextPdvDisplayName(displayName, existingNames, existingCodes, explicitCode) {
   const base = stripPdvDisplayNameBase(displayName);
   if (!base) return '';

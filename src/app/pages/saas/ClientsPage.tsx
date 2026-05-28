@@ -1474,6 +1474,10 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const clientColDefsForUi = useMemo(
+    () => (isDeliveryBusiness ? CLIENT_COL_DEFS.filter((c) => c.id !== 'responsable') : CLIENT_COL_DEFS),
+    [isDeliveryBusiness],
+  );
   const viewClientDetail = useCallback((clientId: string) => {
     const path = `/saas/crm/clientes/${clientId}`;
     if (embedDeliveryOps) {
@@ -2291,7 +2295,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort(null); setFilterBranch('all'); setFilterWorkCenter('all'); };
 
   const { visibleColumns: visibleLeadCols, visibleIds: visibleLeadColIds, columnOrder: leadColOrder, toggleColumn: toggleLeadCol, reorderColumns: reorderLeadCols, resetToDefault: resetLeadCols } = useColumnPreferences('leads', LEAD_COL_DEFS);
-  const { visibleColumns: visibleClientCols, visibleIds: visibleClientColIds, columnOrder: clientColOrder, toggleColumn: toggleClientCol, reorderColumns: reorderClientCols, resetToDefault: resetClientCols } = useColumnPreferences('clients', CLIENT_COL_DEFS);
+  const clientColPrefsKey = isDeliveryBusiness ? 'clients-delivery' : 'clients';
+  const { visibleColumns: visibleClientCols, visibleIds: visibleClientColIds, columnOrder: clientColOrder, toggleColumn: toggleClientCol, reorderColumns: reorderClientCols, resetToDefault: resetClientCols } = useColumnPreferences(clientColPrefsKey, clientColDefsForUi);
 
 
   const PILLS: { id: LeadPill; label: string }[] = [
@@ -2735,14 +2740,17 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 min-w-0"><Mail className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{client.email}</span></div>
                   {client.city && <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><MapPin className="w-3.5 h-3.5" />{client.city}</div>}
                 </div>
-                {(client.vehiclesPurchased?.length ?? 0) > 0 && (
+                {!isDeliveryBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl mb-2">
                     <Car className="w-3 h-3 text-gray-400 dark:text-gray-500" />
                     <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{client.vehiclesPurchased!.join(' · ')}</p>
                   </div>
                 )}
                   <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-1.5"><UserPlus className="w-3 h-3 text-gray-400 dark:text-gray-500" /><span className="text-xs text-gray-400 dark:text-gray-500">{client.responsible}</span></div>
+                  {!isDeliveryBusiness && (
+                    <div className="flex items-center gap-1.5"><UserPlus className="w-3 h-3 text-gray-400 dark:text-gray-500" /><span className="text-xs text-gray-400 dark:text-gray-500">{client.responsible}</span></div>
+                  )}
+                  {isDeliveryBusiness && <div />}
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                     <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                     <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
@@ -2780,7 +2788,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               {(cActiveFilters > 0 || cSort) && (
                 <button onClick={clearCFilters} className="text-xs text-red-500 font-medium flex items-center gap-1"><X className="w-3 h-3" /> Limpiar filtros</button>
               )}
-              <ColumnCustomizer columns={CLIENT_COL_DEFS} visibleIds={visibleClientColIds} columnOrder={clientColOrder} onToggle={toggleClientCol} onReorder={reorderClientCols} onReset={resetClientCols} />
+              <ColumnCustomizer columns={clientColDefsForUi} visibleIds={visibleClientColIds} columnOrder={clientColOrder} onToggle={toggleClientCol} onReorder={reorderClientCols} onReset={resetClientCols} />
             </div>
           </div>
           <div className="overflow-x-auto">

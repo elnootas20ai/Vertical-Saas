@@ -287,20 +287,14 @@ function SaasContent() {
   }, [subscription.status, location.pathname, navigate]);
 
   const isInitialBusinessLoad =
-    !businessCtx || (businesses.length === 0 && (!businessesFetchSettled || isLoadingBusinesses));
+    !businessCtx || isLoadingBusinesses || !businessesFetchSettled;
 
   if (isInitializing || isInitialBusinessLoad || isAutoCreating) {
-
     return (
-
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
-
       </div>
-
     );
-
   }
 
 
@@ -348,8 +342,6 @@ function SaasContent() {
   );
 
 }
-
-
 
 export function SaasRoot() {
   return (

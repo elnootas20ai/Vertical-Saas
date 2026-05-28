@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Building2, User, ArrowRight, Users, BriefcaseBusiness, UserCheck, KeyRound } from 'lucide-react';
+import {
+  Building2,
+  User,
+  ArrowRight,
+  Users,
+  BriefcaseBusiness,
+  UserCheck,
+  KeyRound,
+  Handshake,
+} from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
@@ -133,7 +142,7 @@ export function Entry() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-      <div className="w-full max-w-4xl">
+      <div className="w-full max-w-6xl">
         <div className="text-center mb-10">
           <div className="flex items-center justify-center mb-6">
             <VertialLogo size="xl" />
@@ -141,18 +150,18 @@ export function Entry() {
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-3">
             ¿Cómo entras en Vertial?
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-xl mx-auto">
-            Dos accesos distintos: gestión de empresa o panel de trabajador. Elige el tuyo.
+          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+            Tres accesos distintos: empresa, trabajador o panel de afiliado. Elige el tuyo.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {/* Empresa */}
-          <div className="flex flex-col p-8 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl">
+          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl">
             <div className="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center mb-4">
               <Building2 className="w-7 h-7 text-gray-700 dark:text-gray-200" />
             </div>
-            <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Empresa / Gerente
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
@@ -177,11 +186,11 @@ export function Entry() {
           </div>
 
           {/* Trabajador */}
-          <div className="flex flex-col p-8 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-800/60 rounded-2xl">
+          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-800/60 rounded-2xl">
             <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4">
               <Users className="w-7 h-7 text-blue-600 dark:text-blue-400" />
             </div>
-            <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
               Trabajador / Empleado
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
@@ -202,6 +211,35 @@ export function Entry() {
               >
                 <KeyRound className="w-4 h-4" />
                 Entrar con código de empresa
+              </button>
+            </div>
+          </div>
+
+          {/* Afiliado */}
+          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-violet-200 dark:border-violet-800/60 rounded-2xl md:col-span-2 lg:col-span-1">
+            <div className="w-14 h-14 bg-violet-50 dark:bg-violet-900/30 rounded-xl flex items-center justify-center mb-4">
+              <Handshake className="w-7 h-7 text-violet-600 dark:text-violet-400" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
+              Afiliado / Partner
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
+              Programa de partners: clientes referidos, comisiones y seguimiento de tu red comercial.
+            </p>
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
+                className="w-full px-5 py-3.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-indigo-700 transition-colors"
+              >
+                Iniciar sesión — Afiliado
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/affiliados')}
+                className="w-full px-5 py-3 border-2 border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 rounded-xl font-medium hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
+              >
+                Solicitar ser afiliado
               </button>
             </div>
           </div>

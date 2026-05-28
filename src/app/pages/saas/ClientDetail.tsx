@@ -637,7 +637,7 @@ export function ClientDetail() {
       address: editForm.address,
       city: editForm.city,
       postalCode: editForm.postalCode,
-      responsible: editForm.responsible,
+      ...(!isDeliveryBusiness ? { responsible: editForm.responsible } : {}),
       notes: editForm.notes,
       referralCode: editForm.referralCode,
       status: editForm.status,
@@ -671,7 +671,7 @@ export function ClientDetail() {
       title: computedTitle,
       description,
       date: interactionForm.date || new Date().toISOString(),
-      user: interactionForm.user.trim() || client.responsible,
+      user: interactionForm.user.trim() || (isDeliveryBusiness ? (authUser?.fullName || 'Sistema') : client.responsible),
     };
 
     await updateClient(client.id, {
@@ -790,18 +790,20 @@ export function ClientDetail() {
                 placeholder="Código postal"
                 className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none"
               />
-              <select
-                value={editForm.responsible}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, responsible: e.target.value }))}
-                className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
-              >
-                <option value="">Seleccionar responsable</option>
-                {platformUsers.map((user) => (
-                  <option key={user.id} value={user.fullName}>
-                    {user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}
-                  </option>
-                ))}
-              </select>
+              {!isDeliveryBusiness && (
+                <select
+                  value={editForm.responsible}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, responsible: e.target.value }))}
+                  className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800"
+                >
+                  <option value="">Seleccionar responsable</option>
+                  {platformUsers.map((user) => (
+                    <option key={user.id} value={user.fullName}>
+                      {user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
               <select
                 value={editForm.status}
                 onChange={(e) =>
@@ -979,11 +981,13 @@ export function ClientDetail() {
 
       {/* Metadata */}
       <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
-            <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
-          </div>
+        <div className={`grid gap-4 ${isDeliveryBusiness ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {!isDeliveryBusiness && (
+            <div>
+              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
+              <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Cliente desde</label>
             <div className="text-gray-900 dark:text-gray-100">{new Date(client.createdAt).toLocaleDateString('es-ES')}</div>
@@ -1028,15 +1032,17 @@ export function ClientDetail() {
               <option value="email">Email</option>
               <option value="meeting">Reunión</option>
             </select>
-            <input
-              value={interactionForm.user}
-              onChange={(e) => {
-                setInteractionFormError(null);
-                setInteractionForm((prev) => ({ ...prev, user: e.target.value }));
-              }}
-              placeholder="Usuario responsable"
-              className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none"
-            />
+            {!isDeliveryBusiness && (
+              <input
+                value={interactionForm.user}
+                onChange={(e) => {
+                  setInteractionFormError(null);
+                  setInteractionForm((prev) => ({ ...prev, user: e.target.value }));
+                }}
+                placeholder="Usuario responsable"
+                className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none"
+              />
+            )}
             <input
               value={interactionForm.title}
               onChange={(e) => {
@@ -1197,8 +1203,8 @@ export function ClientDetail() {
           </div>
         </div>
 
-        {/* CLV Card */}
-        {authUser?.user_id && client.id && (
+        {/* CLV Card (concesionario; oculto en delivery) */}
+        {!isDeliveryBusiness && authUser?.user_id && client.id && (
           <ClientCLVCard userId={authUser.user_id} clientId={client.id} />
         )}
       </div>
@@ -1234,10 +1240,12 @@ export function ClientDetail() {
               </div>
               <input value={editForm.phone} onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Teléfono" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none" />
               <input type="email" value={editForm.email} onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))} placeholder="Email" className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none" />
-              <select value={editForm.responsible} onChange={(e) => setEditForm((p) => ({ ...p, responsible: e.target.value }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
-                <option value="">Seleccionar responsable</option>
-                {platformUsers.map((user) => (<option key={user.id} value={user.fullName}>{user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}</option>))}
-              </select>
+              {!isDeliveryBusiness && (
+                <select value={editForm.responsible} onChange={(e) => setEditForm((p) => ({ ...p, responsible: e.target.value }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
+                  <option value="">Seleccionar responsable</option>
+                  {platformUsers.map((user) => (<option key={user.id} value={user.fullName}>{user.fullName}{user.employment?.position ? ` — ${user.employment.position}` : ''}</option>))}
+                </select>
+              )}
               <select value={editForm.status} onChange={(e) => setEditForm((p) => ({ ...p, status: e.target.value as Client['status'] }))} className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none bg-white dark:bg-gray-800">
                 <option value="active">Activo</option>
                 <option value="inactive">Inactivo</option>
@@ -1272,10 +1280,12 @@ export function ClientDetail() {
               <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
               <div className="text-gray-900 dark:text-gray-100">{client.email}</div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
-              <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
-            </div>
+            {!isDeliveryBusiness && (
+              <div>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
+                <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Cliente desde</label>
               <div className="text-gray-900 dark:text-gray-100">{new Date(client.createdAt).toLocaleDateString('es-ES')}</div>

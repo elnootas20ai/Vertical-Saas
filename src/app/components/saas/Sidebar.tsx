@@ -130,10 +130,14 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { pointOfSaleDisplayLabel, pointOfSaleSidebarLines } from '../../lib/deliveryApi';
+import {
+  buildDeliverySidebarStoreRows,
+  pointOfSaleDisplayLabel,
+} from '../../lib/deliveryApi';
 import {
   filterWorkCentersForBusinessScope,
   resolveBusinessScopeId,
+  filterDeliverySidebarItemIds,
 } from '../../lib/deliverySetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
@@ -153,6 +157,8 @@ interface SidebarItem {
   disabled?: boolean;
   /** Tooltip cuando está bloqueado por alta delivery. */
   lockTitle?: string;
+  /** Tienda/PDV inactivo: visible en lista pero no seleccionable para operar. */
+  inactive?: boolean;
   upcoming?: boolean;
   isNew?: boolean;
 }
@@ -588,14 +594,44 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     loadSalesPoints();
   }, [loadSalesPoints]);
 
+  const activeStore = useActiveStoreScope();
+
+  const refreshStoreLists = useCallback(() => {
+    void loadSalesPoints();
+    void activeStore.refresh();
+  }, [loadSalesPoints, activeStore]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const handler = () => { void loadSalesPoints(); };
-    window.addEventListener('work-centers:changed', handler);
-    return () => window.removeEventListener('work-centers:changed', handler);
-  }, [loadSalesPoints]);
+    window.addEventListener('work-centers:changed', refreshStoreLists);
+    return () => window.removeEventListener('work-centers:changed', refreshStoreLists);
+  }, [refreshStoreLists]);
 
-  const activeStore = useActiveStoreScope();
+  useEffect(() => {
+    if (vertical !== 'delivery') return;
+    void activeStore.refresh();
+  }, [vertical, activeStore]);
+
+  useEffect(() => {
+    if (vertical !== 'delivery' || typeof window === 'undefined') return;
+    const onFocus = () => {
+      void activeStore.refresh();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void activeStore.refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [vertical, activeStore]);
+
+  useEffect(() => {
+    if (vertical !== 'delivery' || activeStore.retailWorkCenters.length === 0) return;
+    setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
+  }, [vertical, activeStore.retailWorkCenters.length]);
 
   /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
   const selectedSidebarWorkCenterId = useMemo(() => {
@@ -678,7 +714,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => ({
     id: g.id,
     icon: g.icon,
-    itemIds: [...g.itemIds],
+    itemIds: g.id === 'delivery' ? filterDeliverySidebarItemIds(g.itemIds) : [...g.itemIds],
     label: g.id === 'equipo' ? 'RRHH' : t(`sidebar.groups.${g.id}`),
   }));
 
@@ -737,14 +773,31 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     }
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
-      const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
-      const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
       if (rawId) {
+        const rows =
+          vertical === 'delivery'
+            ? buildDeliverySidebarStoreRows(
+                activeStore.retailWorkCenters,
+                activeStore.allPointsOfSale,
+              )
+            : [];
+        const row = rows.find((r) => r.rowId === rawId);
+        if (row?.needsPdv) {
+          toast.info('Esta tienda aún no tiene PDV de caja. Complétala en Ajustes → Tiendas.');
+          handleNavigate('/saas/settings/tienda');
+          return;
+        }
+        const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
+        if (pdv?.active === false || row?.inactive) {
+          toast.info('Tienda inactiva. Actívala en Ajustes → Tiendas para usarla en caja.');
+          handleNavigate('/saas/settings/tienda');
+          return;
+        }
         const isDeliveryPdvRow = activeStore.pointsOfSale.some((p) => p._id === rawId);
         if (isDeliveryPdvRow) {
           activeStore.setActiveSalesPoint(rawId);
-        } else {
-          activeStore.setActiveWorkCenterPreference(rawId);
+        } else if (row?.workCenterId) {
+          activeStore.setActiveWorkCenterPreference(row.workCenterId);
         }
       }
       handleNavigate('/saas/delivery-ops');
@@ -925,7 +978,8 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
       const rawId = item.id.slice('sp-'.length);
       if (!rawId) return false;
       if (vertical === 'delivery') {
-        const pdv = activeStore.pointsOfSale.find((p) => p._id === rawId);
+        const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
+        if (pdv && pdv.active === false) return false;
         if (pdv) return activeStore.activeSalesPointId === pdv._id;
       }
       if (!selectedSidebarWorkCenterId) return false;
@@ -944,30 +998,36 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
-  const deliverySidebarPdvs =
-    vertical === 'delivery' && activeStore.pointsOfSale.length > 0
-      ? activeStore.pointsOfSale
-      : null;
+  const deliverySidebarRows =
+    vertical === 'delivery'
+      ? buildDeliverySidebarStoreRows(activeStore.retailWorkCenters, activeStore.allPointsOfSale)
+      : [];
 
-  const salesPointRows: SidebarItem[] = deliverySidebarPdvs
-    ? deliverySidebarPdvs.map((pdv) => {
-        const lines = pointOfSaleSidebarLines(pdv);
-        return {
-          id: `sp-${pdv._id}`,
-          label: lines.title,
-          subLabel: lines.code || undefined,
-          icon: <Store className="w-3.5 h-3.5" />,
-          path: '#',
-        };
-      })
-    : salesPoints.map((sp) => ({
+  const salesPointRows: SidebarItem[] =
+    vertical === 'delivery'
+      ? deliverySidebarRows.map((row) => {
+          const subParts: string[] = [];
+          if (row.code) subParts.push(row.code);
+          if (row.needsPdv) subParts.push('Sin PDV');
+          else if (row.inactive) subParts.push('Inactiva');
+          return {
+            id: `sp-${row.rowId}`,
+            label: row.title,
+            subLabel: subParts.length ? subParts.join(' · ') : undefined,
+            inactive: row.inactive || row.needsPdv,
+            icon: <Store className="w-3.5 h-3.5" />,
+            path: '#',
+          };
+        })
+      : salesPoints.map((sp) => ({
         id: `sp-${sp._id}`,
         label: sp.name,
         icon: <Store className="w-3.5 h-3.5" />,
         path: '#',
       }));
 
-  const workCentersSidebarCount = deliverySidebarPdvs?.length ?? salesPoints.length;
+  const workCentersSidebarCount =
+    vertical === 'delivery' ? deliverySidebarRows.length : salesPoints.length;
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
@@ -1262,6 +1322,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                       const isDeliveryOpsHub = item.id === 'delivery-ops';
                       const isSalesPointSubItem =
                         item.id.startsWith('sp-') || item.id === 'salesPoints-add';
+                      const isInactiveStore = Boolean(item.inactive);
                       const itemDimmed = !dimmed && searchNorm && !itemMatchesSearch(item);
                       const calendarV2 = CALENDAR_V2_VISUAL && isCalendar;
                       return (
@@ -1278,7 +1339,9 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
                                 ? 'pl-10 pr-4'
                                 : 'px-4'
                           } ${
-                            isActive
+                            isInactiveStore && !isActive
+                              ? 'text-gray-400 dark:text-gray-500 border-l-2 border-dashed border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800/40'
+                              : isActive
                               ? isDeliveryOpsHub
                                 ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-900 dark:text-teal-100 border-l-2 border-teal-600'
                                 : (isCalendar

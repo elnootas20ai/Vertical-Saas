@@ -1,0 +1,43 @@
+---
+description: Visión UDar — SaaS core + verticales; delivery como primer motor operativo
+alwaysApply: true
+---
+
+# UDar — SaaS multi-vertical
+
+## Qué es el proyecto
+
+UDar es un **SaaS multi-vertical**: primero un **core** compartido (cuenta, negocio, permisos, PDV/tiendas, catálogo base, usuarios, informes transversales, etc.), y encima **verticales** con operativa propia.
+
+## Capas (respetar al codificar)
+
+1. **Core** — lógica común a todas las verticales. No acoplar aquí reglas de un solo negocio.
+2. **Motor operativo “tipo pedido/ops”** — pedidos, estados, asignaciones, operaciones del día, alertas, flujos de pantalla lista/detalle. Es lo que se está implementando ahora vía **delivery**.
+3. **Config de vertical** — nombres, estados, permisos, campos visibles, reglas de negocio que cambian entre negocios **sin cambiar el motor**.
+
+Muchas verticales futuras (bares, tienda de ropa, retail similar) comparten **la misma operativa que delivery**: no son módulos nuevos desde cero, sino **misma máquina, distinto traje** (config).
+
+**Compraventa** (u otras con lógica distinta) es la excepción probable: mismo core y mismo SaaS, pero **otra operativa** — no asumir que copian el flujo pedido/reparto 1:1.
+
+## Fase actual
+
+- Prioridad: **cerrar delivery v1** (flujos completos y estables).
+- No diseñar ni implementar otras verticales hasta que delivery esté cerrado, salvo que el usuario lo pida.
+- Al implementar en delivery, preguntarse: ¿esto es **core**, **motor reutilizable** o **solo config/reglas de esta vertical**?
+
+## Principios de implementación
+
+- Cambios **mínimos**; sin refactors grandes salvo petición explícita.
+- Evitar hardcodear `delivery` en sitios que serán **genéricos del motor**; usar nombres de dominio claros o configuración.
+- Preferir **config** (estados, etiquetas, flags) frente a duplicar pantallas o routers por cada negocio tipo “bar vs ropa”.
+- Un objetivo por chat si el usuario no amplía el scope; preguntar antes de mezclar flujos.
+
+## Trabajo con el usuario (Uriel)
+
+- El usuario **no revisa código** de forma habitual.
+- Al terminar cada tarea: explicar en **castellano simple** qué se hizo, qué falta, y **pasos concretos para probar en la UI** (clics/pantallas).
+- Indicar brevemente si el cambio es **solo delivery**, **motor reutilizable** o **core**.
+
+## Inicio de chat
+
+Si el usuario escribe **«revisa la regla»** (o similar): releer este archivo, confirmar en **una frase** el marco (core / motor ops / config; delivery v1 ahora) y luego atacar el objetivo concreto del chat sin repetir todo el manifiesto.

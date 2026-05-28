@@ -733,7 +733,7 @@ export interface PointOfSale {
 /** Etiqueta fija en sidebar, topbar y ops: siempre «Nombre · CÓDIGO» (p. ej. Badalona · BAD-01). */
 export function pointOfSaleDisplayLabel(p: Pick<PointOfSale, 'name' | 'code'>): string {
   const code = String(p.code || '').trim();
-  const name = String(p.name || '').trim();
+  const name = truncateStoreLabelForUi(String(p.name || '').trim());
   if (!name && !code) return 'Punto de venta';
   if (name && code) return `${name} · ${code}`;
   return name || code;
@@ -745,25 +745,88 @@ export function pointOfSaleSidebarLines(p: Pick<PointOfSale, 'name' | 'code'>): 
   code: string | null;
 } {
   const code = String(p.code || '').trim();
-  const name = String(p.name || '').trim();
+  const name = truncateStoreLabelForUi(String(p.name || '').trim());
   if (!name && !code) return { title: 'Punto de venta', code: null };
   if (name && code) return { title: name, code };
   return { title: name || code, code: null };
 }
 
+export type DeliverySidebarStoreRow = {
+  rowId: string;
+  pdvId?: string;
+  workCenterId: string;
+  title: string;
+  code?: string;
+  inactive: boolean;
+  needsPdv: boolean;
+};
+
+/** Una fila por centro retail: con PDV enlazado o solo centro (pendiente de PDV). */
+export function buildDeliverySidebarStoreRows(
+  workCenters: WorkCenter[],
+  pointsOfSale: PointOfSale[],
+): DeliverySidebarStoreRow[] {
+  const retail = workCenters.filter(
+    (wc) =>
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+  return retail.map((wc) => {
+    const pdv = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === wc._id);
+    const wcInactive = wc.active === false;
+    if (pdv) {
+      const lines = pointOfSaleSidebarLines(pdv);
+      return {
+        rowId: pdv._id,
+        pdvId: pdv._id,
+        workCenterId: wc._id,
+        title: lines.title,
+        code: lines.code || undefined,
+        inactive: wcInactive || pdv.active === false,
+        needsPdv: false,
+      };
+    }
+    return {
+      rowId: wc._id,
+      workCenterId: wc._id,
+      title: truncateStoreLabelForUi(String(wc.name || '').trim()) || 'Tienda',
+      inactive: wcInactive,
+      needsPdv: true,
+    };
+  });
+}
+
 /** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */
 import {
   derivePdvCodePrefix,
+  isPdvCodeAlreadyUsed,
+  normalizePdvCodeInput,
+  PDV_RETAIL_LIMITS,
+  sanitizePdvCodeInput,
+  sanitizeRetailTextField,
+  sanitizeStoreDisplayName,
   stripPdvDisplayNameBase,
   suggestNextPdvCode,
   suggestNextPdvDisplayName,
+  truncateStoreLabelForUi,
+  validatePdvCodeInput,
+  validateStoreDisplayName,
 } from '../../../shared/naming/deliveryPointOfSaleCode.js';
 
 export {
   derivePdvCodePrefix,
+  isPdvCodeAlreadyUsed,
+  normalizePdvCodeInput,
+  PDV_RETAIL_LIMITS,
+  sanitizePdvCodeInput,
+  sanitizeRetailTextField,
+  sanitizeStoreDisplayName,
   stripPdvDisplayNameBase,
   suggestNextPdvCode,
   suggestNextPdvDisplayName,
+  truncateStoreLabelForUi,
+  validatePdvCodeInput,
+  validateStoreDisplayName,
 };
 
 export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSale[]> {
@@ -830,14 +893,22 @@ function dedupePointsOfSaleById(pdvs: PointOfSale[]): PointOfSale[] {
 export async function ensureDeliveryPdvForWorkCenter(
   userId: string,
   wc: WorkCenter,
-  options?: { existingPdvs?: PointOfSale[]; business?: { members?: { user_id?: string }[] } | null },
+  options?: {
+    existingPdvs?: PointOfSale[];
+    business?: { members?: { user_id?: string }[] } | null;
+    /** Código PDV elegido en el formulario (si no, se sugiere automáticamente). */
+    pdvCode?: string;
+    /** Nombre visible en caja/menús (si no, se deriva del centro). */
+    pdvName?: string;
+  },
 ): Promise<PointOfSale | null> {
   const id = normalizeUserId(userId);
   if (!id || !wc?._id) return null;
 
   const isRetailLike =
-    (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && wc.active && !wc.deletedAt;
+    (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && !wc.deletedAt;
   if (!isRetailLike) return null;
+  const pdvActive = wc.active !== false;
 
   let pdvData = options?.existingPdvs ?? (await listPointsOfSaleRequest(id).catch(() => []));
   pdvData = dedupePointsOfSale(pdvData);
@@ -845,23 +916,28 @@ export async function ensureDeliveryPdvForWorkCenter(
   const linked = pdvData.find((p) => String(p.workCenterId || '').trim() === wc._id);
   if (linked) {
     const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
-    const nextName = String(wc.name || '').trim() || linked.name;
+    const nextName =
+      sanitizeStoreDisplayName(String(options?.pdvName || wc.name || '')) || linked.name;
+    const nextCode =
+      sanitizePdvCodeInput(String(options?.pdvCode || linked.code || '')) || linked.code;
     const nextAddr =
       (addr && String(addr).trim().length >= 5 ? addr : linked.address) || linked.address;
     if (
       nextName !== linked.name ||
+      nextCode !== linked.code ||
       nextAddr !== linked.address ||
-      (wc.active !== false) !== (linked.active !== false)
+      pdvActive !== (linked.active !== false)
     ) {
       try {
         return await updatePointOfSaleRequest(id, {
           ...linked,
           name: nextName,
+          code: nextCode,
           address: nextAddr,
-          active: wc.active !== false,
+          active: pdvActive,
         });
-      } catch {
-        return linked;
+      } catch (err) {
+        throw err instanceof Error ? err : new Error('No se pudo actualizar el punto de venta');
       }
     }
     return linked;
@@ -869,16 +945,20 @@ export async function ensureDeliveryPdvForWorkCenter(
 
   const nameLower = wc.name.trim().toLowerCase();
   const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
-  const orphanIdx = pdvData.findIndex(
-    (p) => !String(p.workCenterId || '').trim() && p.name.trim().toLowerCase() === nameLower,
-  );
+  const explicitCode = sanitizePdvCodeInput(String(options?.pdvCode || ''));
+  const orphanIdx =
+    explicitCode || options?.pdvName
+      ? -1
+      : pdvData.findIndex(
+          (p) => !String(p.workCenterId || '').trim() && p.name.trim().toLowerCase() === nameLower,
+        );
   if (orphanIdx >= 0) {
     const orphan = pdvData[orphanIdx];
     try {
       return await updatePointOfSaleRequest(id, {
         ...orphan,
         workCenterId: wc._id,
-        active: true,
+        active: pdvActive,
         address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
       });
     } catch {
@@ -890,8 +970,13 @@ export async function ensureDeliveryPdvForWorkCenter(
 
   const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
   const existingNames = pdvData.map((p) => String(p.name || '').trim()).filter(Boolean);
-  const pdvCode = suggestNextPdvCode(wc.name, existingCodes);
-  const pdvName = suggestNextPdvDisplayName(wc.name, existingNames, existingCodes, pdvCode);
+  const nameBase = String(options?.pdvName || wc.name || '').trim() || wc.name;
+  const pdvCode =
+    sanitizePdvCodeInput(String(options?.pdvCode || '')) ||
+    suggestNextPdvCode(nameBase, existingCodes);
+  const pdvName =
+    sanitizeStoreDisplayName(String(options?.pdvName || '')) ||
+    suggestNextPdvDisplayName(nameBase, existingNames, existingCodes, pdvCode);
   const termId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -901,8 +986,9 @@ export async function ensureDeliveryPdvForWorkCenter(
     return await createPointOfSaleRequest(id, {
       name: pdvName,
       code: pdvCode,
+      ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
       address: addr,
-      active: true,
+      active: pdvActive,
       workCenterId: wc._id,
       terminals: [
         {
@@ -917,8 +1003,8 @@ export async function ensureDeliveryPdvForWorkCenter(
         },
       ],
     });
-  } catch {
-    return null;
+  } catch (err) {
+    throw err instanceof Error ? err : new Error('No se pudo crear el punto de venta');
   }
 }
 

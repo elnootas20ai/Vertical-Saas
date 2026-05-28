@@ -36,9 +36,19 @@ import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/setting
 import { BusinessHoursEditor } from './BusinessHoursEditor';
 import {
   ensureDeliveryPdvForWorkCenter,
+  isPdvCodeAlreadyUsed,
+  PDV_RETAIL_LIMITS,
   pointOfSaleDisplayLabel,
+  sanitizePdvCodeInput,
+  sanitizeRetailTextField,
+  sanitizeStoreDisplayName,
+  stripPdvDisplayNameBase,
   suggestNextPdvCode,
   suggestNextPdvDisplayName,
+  updatePointOfSaleRequest,
+  validatePdvCodeInput,
+  validateStoreDisplayName,
+  type PointOfSale,
 } from '../../../lib/deliveryApi';
 import {
   formatMoneyAsYouType,
@@ -107,7 +117,10 @@ const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
 
 // ── Modal crear/editar centro de trabajo ──────────────────────────────────────
 
-export type WorkCenterSaveData = Partial<WorkCenter>;
+export type WorkCenterSaveData = Partial<WorkCenter> & {
+  /** Código PDV de caja (delivery), editable en el wizard. */
+  pdvCode?: string;
+};
 
 function isRetailWorkCenterType(centerType: WorkCenterType): boolean {
   return centerType === 'punto_de_venta' || centerType === 'almacen';
@@ -145,6 +158,10 @@ interface WorkCenterModalProps {
   /** Nombres de PDV/centros retail ya existentes (para sufijo « - 02 » en el nombre). */
   existingPdvNames?: readonly string[];
   defaultActiveOnCreate?: boolean;
+  /** Tienda delivery: permite editar código PDV al crear/editar. */
+  enablePdvCodeEdit?: boolean;
+  /** Código PDV actual al editar (si hay caja enlazada). */
+  editPdvCode?: string;
 }
 
 function WorkCenterModal({
@@ -159,6 +176,8 @@ function WorkCenterModal({
   existingPdvCodes = EMPTY_PDV_CODES,
   existingPdvNames = EMPTY_PDV_CODES,
   defaultActiveOnCreate = true,
+  enablePdvCodeEdit = false,
+  editPdvCode = '',
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
 
@@ -193,12 +212,20 @@ function WorkCenterModal({
   const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad' | 'horarios'>('general');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
+  const [pdvCode, setPdvCode] = useState('');
+  const [pdvCodeManual, setPdvCodeManual] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isRetailCenter =
+    forcePointOfSale ||
+    form.centerType === 'punto_de_venta' ||
+    form.centerType === 'almacen';
+  const showPdvCodeField = enablePdvCodeEdit && isRetailCenter;
 
   useEffect(() => {
     if (editItem) {
       setForm({
-        name: editItem.name,
+        name: stripPdvDisplayNameBase(editItem.name),
         centerType: editItem.centerType || 'punto_de_venta',
         customTypeName: editItem.customTypeName || '',
         ownership: editItem.ownership || 'propiedad',
@@ -235,11 +262,13 @@ function WorkCenterModal({
     setStep('general');
     setFieldErrors({});
     setPdvMoreOpen(null);
+    setPdvCode(editPdvCode || '');
+    setPdvCodeManual(Boolean(editPdvCode));
     setOpeningHours(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG);
     if (isOpen && initialWizardStep === 'horarios' && includeOpeningHours) {
       setStep('horarios');
     }
-  }, [editItem, isOpen, initialWizardStep, includeOpeningHours]);
+  }, [editItem, isOpen, initialWizardStep, includeOpeningHours, editPdvCode]);
 
   useEffect(() => {
     if (!isOpen || !includeOpeningHours) return;
@@ -282,16 +311,28 @@ function WorkCenterModal({
     if (!rawName) {
       return { code: '', displayName: '', label: '', needsName: true as const };
     }
-    const code = suggestNextPdvCode(rawName, [...existingPdvCodes]);
-    const displayName = suggestNextPdvDisplayName(
-      rawName,
-      [...existingPdvNames],
-      [...existingPdvCodes],
-      code,
-    );
+    const code =
+      (showPdvCodeField && pdvCode.trim()) ||
+      suggestNextPdvCode(rawName, [...existingPdvCodes]);
+    const displayName = showPdvCodeField
+      ? rawName
+      : suggestNextPdvDisplayName(rawName, [...existingPdvNames], [...existingPdvCodes], code);
     const label = pointOfSaleDisplayLabel({ name: displayName, code });
     return { code, displayName, label, needsName: false as const };
-  }, [showPdvLabelPreview, form.name, existingPdvCodes, existingPdvNames]);
+  }, [
+    showPdvLabelPreview,
+    showPdvCodeField,
+    form.name,
+    pdvCode,
+    existingPdvCodes,
+    existingPdvNames,
+  ]);
+
+  useEffect(() => {
+    if (!showPdvCodeField || pdvCodeManual || !form.name.trim()) return;
+    const suggested = suggestNextPdvCode(stripPdvDisplayNameBase(form.name), [...existingPdvCodes]);
+    setPdvCode(suggested);
+  }, [showPdvCodeField, pdvCodeManual, form.name, existingPdvCodes]);
 
   if (!isOpen) return null;
 
@@ -321,9 +362,12 @@ function WorkCenterModal({
 
   const handleSubmit = async () => {
     const nextErr: Record<string, string> = {};
-    if (!form.name.trim()) nextErr.name = ' ';
-    if (form.centerType === 'custom' && !form.customTypeName.trim()) {
-      nextErr.customTypeName = ' ';
+    const nameErr = validateStoreDisplayName(form.name);
+    if (nameErr) nextErr.name = ' ';
+    if (form.centerType === 'custom') {
+      const custom = sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax);
+      if (!custom) nextErr.customTypeName = ' ';
+      else if (form.customTypeName.trim().length > PDV_RETAIL_LIMITS.customTypeMax) nextErr.customTypeName = ' ';
     }
     const staffCount = Number(form.expectedStaffCount || 0);
     if (
@@ -334,10 +378,14 @@ function WorkCenterModal({
     ) {
       nextErr.expectedStaffCount = ' ';
     }
-    if (!form.address.trim()) nextErr.address = ' ';
-    if (!form.city.trim()) nextErr.city = ' ';
-    if (!form.postalCode.trim()) nextErr.postalCode = ' ';
-    if (!form.phone.trim()) nextErr.phone = ' ';
+    if (!form.address.trim() || form.address.trim().length > PDV_RETAIL_LIMITS.addressMax) nextErr.address = ' ';
+    if (!form.city.trim() || form.city.trim().length > PDV_RETAIL_LIMITS.cityMax) nextErr.city = ' ';
+    if (!form.postalCode.trim() || form.postalCode.trim().length > PDV_RETAIL_LIMITS.postalCodeMax) {
+      nextErr.postalCode = ' ';
+    }
+    if (!form.phone.trim() || form.phone.trim().length > PDV_RETAIL_LIMITS.phoneMax) nextErr.phone = ' ';
+    if (form.email.trim().length > PDV_RETAIL_LIMITS.emailMax) nextErr.email = ' ';
+    if (form.notes.trim().length > PDV_RETAIL_LIMITS.notesMax) nextErr.notes = ' ';
 
     if (form.ownership === 'propiedad') {
       if (!form.purchaseDate.trim()) nextErr.purchaseDate = ' ';
@@ -383,21 +431,49 @@ function WorkCenterModal({
         contractNotes: form.contractNotes.trim() || undefined,
       } : undefined;
 
-      const isRetailCreate =
-        !editItem && (forcePointOfSale || form.centerType === 'punto_de_venta' || form.centerType === 'almacen');
-      const saveName = isRetailCreate
-        ? suggestNextPdvDisplayName(
-            form.name.trim(),
-            [...existingPdvNames],
-            [...existingPdvCodes],
-          )
-        : form.name.trim();
+      const isRetailSave =
+        enablePdvCodeEdit &&
+        (forcePointOfSale || form.centerType === 'punto_de_venta' || form.centerType === 'almacen');
+      const trimmedName = sanitizeStoreDisplayName(form.name);
+      const codeForSave = isRetailSave ? sanitizePdvCodeInput(pdvCode) : '';
+
+      if (nameErr) {
+        setFieldErrors((p) => ({ ...p, name: ' ' }));
+        setStep('general');
+        setSaving(false);
+        toast.error(nameErr);
+        return;
+      }
+
+      if (isRetailSave) {
+        const codeErr = validatePdvCodeInput(pdvCode);
+        if (codeErr) {
+          setFieldErrors({ pdvCode: ' ' });
+          setStep('general');
+          setSaving(false);
+          toast.error(codeErr);
+          return;
+        }
+        if (isPdvCodeAlreadyUsed(codeForSave, existingPdvCodes, editPdvCode || undefined)) {
+          setFieldErrors({ pdvCode: ' ' });
+          setStep('general');
+          setSaving(false);
+          toast.error(`El código «${codeForSave}» ya está en uso. Elige otro.`);
+          return;
+        }
+      }
+
+      const saveName = trimmedName;
 
       await onSave({
         ...editItem,
         name: saveName,
+        pdvCode: isRetailSave ? codeForSave : undefined,
         centerType: forcePointOfSale ? 'punto_de_venta' : form.centerType,
-        customTypeName: !forcePointOfSale && form.centerType === 'custom' ? form.customTypeName.trim() : undefined,
+        customTypeName:
+          !forcePointOfSale && form.centerType === 'custom'
+            ? sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax)
+            : undefined,
         ownership: form.ownership,
         contract,
         purchasePrice:
@@ -406,15 +482,15 @@ function WorkCenterModal({
             : undefined,
         purchaseDate: form.ownership === 'propiedad' ? form.purchaseDate || undefined : undefined,
         cadastralReference: form.cadastralReference.trim() || undefined,
-        address: form.address.trim() || undefined,
-        city: form.city.trim() || undefined,
-        postalCode: form.postalCode.trim() || undefined,
-        province: form.province.trim() || undefined,
-        phone: form.phone.trim() || undefined,
-        email: form.email.trim() || undefined,
+        address: sanitizeRetailTextField(form.address, PDV_RETAIL_LIMITS.addressMax) || undefined,
+        city: sanitizeRetailTextField(form.city, PDV_RETAIL_LIMITS.cityMax) || undefined,
+        postalCode: sanitizeRetailTextField(form.postalCode, PDV_RETAIL_LIMITS.postalCodeMax) || undefined,
+        province: sanitizeRetailTextField(form.province, PDV_RETAIL_LIMITS.cityMax) || undefined,
+        phone: sanitizeRetailTextField(form.phone, PDV_RETAIL_LIMITS.phoneMax) || undefined,
+        email: sanitizeRetailTextField(form.email, PDV_RETAIL_LIMITS.emailMax) || undefined,
         expectedStaffCount: Math.max(1, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
-        notes: form.notes.trim() || undefined,
+        notes: sanitizeRetailTextField(form.notes, PDV_RETAIL_LIMITS.notesMax) || undefined,
         active: editItem ? editItem.active !== false : defaultActiveOnCreate,
         openingHours: includeOpeningHours ? openingHours : editItem?.openingHours,
       });
@@ -638,6 +714,7 @@ function WorkCenterModal({
                     <span className="font-semibold">{pdvLabelPreview.label}</span>
                   )}
                   {!pdvLabelPreview.needsName &&
+                  !showPdvCodeField &&
                   pdvLabelPreview.displayName !== form.name.trim() &&
                   form.name.trim() ? (
                     <span className="block mt-0.5 text-indigo-600/90 dark:text-indigo-300/90">
@@ -676,13 +753,39 @@ function WorkCenterModal({
                   className={inputClass('name')}
                   placeholder={simplifyPdvCreate ? 'Ej: Local Centro' : 'Ej: Oficina Central, Tienda Gran Vía...'}
                   value={form.name}
+                  maxLength={PDV_RETAIL_LIMITS.storeNameMax}
                   onChange={(e) => {
                     clearFieldError('name');
-                    setForm(f => ({ ...f, name: e.target.value }));
+                    setForm((f) => ({
+                      ...f,
+                      name: sanitizeStoreDisplayName(e.target.value),
+                    }));
                   }}
                   autoFocus
                 />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Máx. {PDV_RETAIL_LIMITS.storeNameMax} caracteres (menú, sidebar y caja).
+                </p>
               </div>
+              {showPdvCodeField && (
+                <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
+                  <label className={labelClass}>Código PDV</label>
+                  <input
+                    className={`${inputClass('pdvCode')} font-mono uppercase tracking-wide`}
+                    placeholder="Ej: BAD-01"
+                    value={pdvCode}
+                    maxLength={PDV_RETAIL_LIMITS.pdvCodeMax}
+                    onChange={(e) => {
+                      clearFieldError('pdvCode');
+                      setPdvCodeManual(true);
+                      setPdvCode(sanitizePdvCodeInput(e.target.value));
+                    }}
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Sugerido automáticamente; puedes cambiarlo (máx. {PDV_RETAIL_LIMITS.pdvCodeMax} caracteres, ej. BAD-01). Debe ser único.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className={labelClass}>
                   Trabajadores{simplifyPdvCreate ? '' : ' previstos'} *
@@ -848,9 +951,13 @@ function WorkCenterModal({
                   className={inputClass('address')}
                   placeholder="Calle, número, piso…"
                   value={form.address}
+                  maxLength={PDV_RETAIL_LIMITS.addressMax}
                   onChange={(e) => {
                     clearFieldError('address');
-                    setForm(f => ({ ...f, address: e.target.value }));
+                    setForm((f) => ({
+                      ...f,
+                      address: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.addressMax),
+                    }));
                   }}
                 />
               </div>
@@ -861,9 +968,13 @@ function WorkCenterModal({
                     className={inputClass('city')}
                     placeholder="Ciudad"
                     value={form.city}
+                    maxLength={PDV_RETAIL_LIMITS.cityMax}
                     onChange={(e) => {
                       clearFieldError('city');
-                      setForm(f => ({ ...f, city: e.target.value }));
+                      setForm((f) => ({
+                        ...f,
+                        city: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.cityMax),
+                      }));
                     }}
                   />
                 </div>
@@ -873,7 +984,13 @@ function WorkCenterModal({
                     className={inputClass()}
                     placeholder="Prov."
                     value={form.province}
-                    onChange={(e) => setForm(f => ({ ...f, province: e.target.value }))}
+                    maxLength={PDV_RETAIL_LIMITS.cityMax}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        province: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.cityMax),
+                      }))
+                    }
                   />
                 </div>
                 <div>
@@ -882,9 +999,13 @@ function WorkCenterModal({
                     className={inputClass('postalCode')}
                     placeholder="CP"
                     value={form.postalCode}
+                    maxLength={PDV_RETAIL_LIMITS.postalCodeMax}
                     onChange={(e) => {
                       clearFieldError('postalCode');
-                      setForm(f => ({ ...f, postalCode: e.target.value }));
+                      setForm((f) => ({
+                        ...f,
+                        postalCode: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.postalCodeMax),
+                      }));
                     }}
                   />
                 </div>
@@ -896,15 +1017,31 @@ function WorkCenterModal({
                     className={inputClass('phone')}
                     placeholder="+34 …"
                     value={form.phone}
+                    maxLength={PDV_RETAIL_LIMITS.phoneMax}
                     onChange={(e) => {
                       clearFieldError('phone');
-                      setForm(f => ({ ...f, phone: e.target.value }));
+                      setForm((f) => ({
+                        ...f,
+                        phone: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.phoneMax),
+                      }));
                     }}
                   />
                 </div>
                 <div>
                   <label className={labelClass}>Email{simplifyPdvCreate ? ' (opc.)' : ''}</label>
-                  <input type="email" className={inputClass()} placeholder="centro@empresa.com" value={form.email} onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
+                  <input
+                    type="email"
+                    className={inputClass('email')}
+                    placeholder="centro@empresa.com"
+                    value={form.email}
+                    maxLength={PDV_RETAIL_LIMITS.emailMax}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        email: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.emailMax),
+                      }))
+                    }
+                  />
                 </div>
               </div>
               {!simplifyPdvCreate && (
@@ -1224,7 +1361,7 @@ export function SalesPointsTab() {
   const [deliveryPdvCodes, setDeliveryPdvCodes] = useState<string[]>([]);
   const [deliveryPdvNames, setDeliveryPdvNames] = useState<string[]>([]);
   const [deliveryPdvsByWorkCenter, setDeliveryPdvsByWorkCenter] = useState<
-    Record<string, { code?: string; name: string }>
+    Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId'>>
   >({});
   const loadData = useCallback(async () => {
     if (!dataUserId || !user) return;
@@ -1234,10 +1371,19 @@ export function SalesPointsTab() {
       const pdvList = state.pointsOfSale;
       setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
       setDeliveryPdvNames(pdvList.map((p) => String(p.name || '').trim()).filter(Boolean));
-      const byWc: Record<string, { code?: string; name: string }> = {};
+      const byWc: Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId'>> = {};
       for (const p of pdvList) {
         const wcId = String(p.workCenterId || '').trim();
-        if (wcId) byWc[wcId] = { code: p.code, name: String(p.name || '') };
+        if (wcId) {
+          byWc[wcId] = {
+            _id: p._id,
+            _rev: p._rev,
+            code: p.code,
+            name: String(p.name || ''),
+            address: p.address,
+            workCenterId: wcId,
+          };
+        }
       }
       setDeliveryPdvsByWorkCenter(byWc);
     } catch {
@@ -1310,6 +1456,16 @@ export function SalesPointsTab() {
     }
     return Array.from(names);
   }, [deliveryPdvNames, workCenters, editingItem]);
+
+  const existingPdvCodesForModal = useMemo(() => {
+    const cur = editingItem ? String(deliveryPdvsByWorkCenter[editingItem._id]?.code || '').trim() : '';
+    if (!cur) return deliveryPdvCodes;
+    return deliveryPdvCodes.filter((c) => c !== cur);
+  }, [deliveryPdvCodes, deliveryPdvsByWorkCenter, editingItem]);
+
+  const editingPdvCode = editingItem
+    ? String(deliveryPdvsByWorkCenter[editingItem._id]?.code || '').trim()
+    : '';
 
   const newPdvQueryHandledRef = useRef(false);
   const horariosQueryHandledRef = useRef(false);
@@ -1471,21 +1627,43 @@ export function SalesPointsTab() {
       throw new Error('pdv limit required');
     }
     try {
+      const { pdvCode: pdvCodeToSave, ...wcPayload } = wcData;
+
       if (editingItem) {
-        const updated = await updateWorkCenter({ ...editingItem, ...wcData } as WorkCenter);
+        const updated = await updateWorkCenter({ ...editingItem, ...wcPayload } as WorkCenter);
         if (
           isDelivery &&
           (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
         ) {
-          await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
-            business: currentBusiness ?? null,
-          });
+          const displayName = sanitizeStoreDisplayName(String(wcData.name || ''));
+          const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
+          const linkedPdv = deliveryPdvsByWorkCenter[updated._id];
+          const addr = [updated.address, updated.postalCode, updated.city].filter(Boolean).join(', ');
+
+          if (linkedPdv?._id) {
+            const codeToPersist = normCode || String(linkedPdv.code || '').trim();
+            await updatePointOfSaleRequest(dataUserId, {
+              ...linkedPdv,
+              name: displayName,
+              code: codeToPersist,
+              address:
+                (addr && addr.trim().length >= 5 ? addr : linkedPdv.address) || linkedPdv.address || addr,
+              workCenterId: updated._id,
+              active: updated.active !== false,
+            });
+          } else {
+            await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
+              business: currentBusiness ?? null,
+              pdvCode: normCode || undefined,
+              pdvName: displayName,
+            });
+          }
           notifyDeliveryWorkCentersChanged();
           notifyDeliveryActiveStoreChanged();
         }
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
-        void loadData();
+        await loadData();
         toast.success(`"${updated.name}" actualizado`);
       } else {
         const createActive = resolveActiveOnCreate(
@@ -1520,8 +1698,11 @@ export function SalesPointsTab() {
           isDelivery &&
           (requestedCenterType === 'punto_de_venta' || requestedCenterType === 'almacen')
         ) {
+          const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
           const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
             business: currentBusiness ?? null,
+            pdvCode: normCode || undefined,
+            pdvName: sanitizeStoreDisplayName(String(wcData.name || '')),
           });
           if (pdv && created.active !== false) {
             selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
@@ -1531,20 +1712,21 @@ export function SalesPointsTab() {
         notifyWorkCentersChanged();
         notifyDeliveryWorkCentersChanged();
         notifyDeliveryActiveStoreChanged();
-        void loadData();
+        await loadData();
         toast.success(
           created.active !== false
             ? `"${created.name}" creada`
-            : `"${created.name}" creada como inactiva. Actívala cuando quieras usarla.`,
+            : `"${created.name}" creada (inactiva). Actívala en la tarjeta para usarla en caja.`,
         );
       }
 
       setShowModal(false);
       setEditingItem(null);
       setForceCreatePdv(false);
-    } catch {
-      toast.error('Error al guardar');
-      throw new Error('save failed');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar';
+      toast.error(msg && msg !== 'save failed' && msg !== 'pro required' && msg !== 'pdv limit required' ? msg : 'Error al guardar');
+      throw err instanceof Error ? err : new Error('save failed');
     }
   };
 
@@ -1558,13 +1740,24 @@ export function SalesPointsTab() {
     }
     try {
       const updated = await updateWorkCenter({ ...wc, active: wc.active === false });
-      setWorkCenters((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+      let linkedPdvId: string | null = null;
+      if (
+        isDelivery &&
+        (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
+      ) {
+        const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
+          business: currentBusiness ?? null,
+        });
+        linkedPdvId = pdv?._id || null;
+        await loadData();
+      } else {
+        setWorkCenters((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+      }
       notifyWorkCentersChanged();
       notifyDeliveryWorkCentersChanged();
       notifyDeliveryActiveStoreChanged();
-      if (isDelivery && updated.active !== false) {
-        const pdv = deliveryPdvsByWorkCenter[updated._id];
-        if (pdv) selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
+      if (isDelivery && updated.active !== false && linkedPdvId) {
+        selectDeliveryPointOfSale(currentBusiness, dataUserId, linkedPdvId);
       }
       toast.success(`"${updated.name}" marcada como ${updated.active !== false ? 'activa' : 'inactiva'}`);
     } catch {
@@ -1967,9 +2160,11 @@ export function SalesPointsTab() {
         }
         legacyUserId={dataUserId || undefined}
         initialWizardStep={openModalAtHorarios ? 'horarios' : undefined}
-        existingPdvCodes={deliveryPdvCodes}
+        existingPdvCodes={existingPdvCodesForModal}
         existingPdvNames={existingPdvNamesForModal}
         defaultActiveOnCreate={defaultActiveOnCreate}
+        enablePdvCodeEdit={isDelivery}
+        editPdvCode={editingPdvCode}
       />
 
       {showProAccessModal && !showModal && (

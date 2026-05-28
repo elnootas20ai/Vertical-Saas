@@ -188,13 +188,14 @@ export function clearOnboardingDraftForNewAccount(userId: string): void {
 
 export { clearLegacyOnboardingDraft, onboardingDataStorageKey, ONBOARDING_DATA_LEGACY_KEY };
 
+/** Tour ya terminado o saltado para esta empresa (cualquier versión guardada). */
 export function isOnboardingTourCompleted(userId: string, businessId: string): boolean {
   if (!userId || !businessId) return false;
   try {
-    return (
-      localStorage.getItem(onboardingTourCompletedKey(userId, businessId)) ===
-      ONBOARDING_TOUR_VERSION
-    );
+    const perBusiness = localStorage.getItem(onboardingTourCompletedKey(userId, businessId));
+    if (perBusiness != null && perBusiness !== '') return true;
+    const legacy = localStorage.getItem(onboardingTourCompletedLegacyKey(userId));
+    return legacy != null && legacy !== '';
   } catch {
     return false;
   }

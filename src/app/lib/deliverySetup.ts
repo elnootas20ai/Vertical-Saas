@@ -37,6 +37,17 @@ export const DELIVERY_FIRST_PDV_PATH = '/saas/settings/tienda';
 /** Tras crear PDV en sesión (evita parpadeos al revalidar listas). */
 export const DELIVERY_PDV_SESSION_KEY = 'vertial_delivery_has_pdv';
 
+/**
+ * Oculta Sala (`/saas/sala`) y la pantalla clásica de pedidos (`/saas/delivery`)
+ * en menú y accesos del centro operativo hasta la nueva UX.
+ */
+export const DELIVERY_LEGACY_SCREENS_HIDDEN = true;
+
+export function filterDeliverySidebarItemIds(itemIds: readonly string[]): string[] {
+  if (!DELIVERY_LEGACY_SCREENS_HIDDEN) return [...itemIds];
+  return itemIds.filter((id) => id !== 'sala' && id !== 'delivery');
+}
+
 import { ONBOARDING_DATA_LEGACY_KEY, onboardingDataStorageKey } from './onboardingStorage';
 
 /** Tipo de negocio guardado en onboarding (local) antes de que el user en API esté al día. */
@@ -179,7 +190,17 @@ export function filterWorkCentersForBusinessScope(
 
   const scoped = workCenters.filter((wc) => String(wc.businessId || '').trim() === bid);
   const anyScoped = workCenters.some((wc) => String(wc.businessId || '').trim());
-  if (scoped.length > 0) return scoped;
+  if (scoped.length > 0) {
+    const legacyRetail = workCenters.filter(
+      (wc) =>
+        !wc.deletedAt &&
+        !String(wc.businessId || '').trim() &&
+        (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+    );
+    const merged = new Map<string, WorkCenter>();
+    for (const wc of [...scoped, ...legacyRetail]) merged.set(wc._id, wc);
+    return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
   if (!anyScoped) return workCenters;
   return [];
 }
@@ -229,7 +250,7 @@ export async function loadDeliveryStores(
   let pointsOfSale = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, rawPdvs, {
     business: business ?? null,
   });
-  pointsOfSale = dedupePointsOfSale(pointsOfSale).filter((p) => p.active !== false);
+  pointsOfSale = dedupePointsOfSale(pointsOfSale);
   pointsOfSale = filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters);
 
   return { dataUserId, workCenters, pointsOfSale };
@@ -297,7 +318,7 @@ export async function countDeliveryPointsOfSale(
   if (!dataUserId) return 0;
 
   const state = await loadDeliveryStores(authUser, business);
-  const active = state.pointsOfSale.length;
+  const active = state.pointsOfSale.filter((p) => p.active !== false).length;
   if (active > 0) {
     markDeliveryPdvSessionConfirmed(dataUserId);
     return active;
@@ -391,6 +412,7 @@ export function notifyDeliveryWorkCentersChanged(): void {
   if (typeof window === 'undefined') return;
   try {
     window.dispatchEvent(new CustomEvent(DELIVERY_WORK_CENTERS_CHANGED));
+    notifyDeliveryActiveStoreChanged();
   } catch {
     /* ignore */
   }
