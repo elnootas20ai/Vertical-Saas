@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -859,7 +860,7 @@ export function DeliveryKitchen() {
   // Filtered + sorted orders
   const activeOrders = useMemo(() => {
     let list = orders.filter((o) => !['entregado', 'cancelled'].includes(o.status));
-    if (filterPdv) list = list.filter((o) => o.salesPointId === filterPdv);
+    if (filterPdv) list = list.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((o) =>

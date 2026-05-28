@@ -45,9 +45,12 @@ import {
   isDefaultBrandNamePlaceholder,
   isDefaultCommercialBrand,
   resolveBrandActiveOnCreate,
+  isBrandSetupComplete,
   sortBrandsForDisplay,
 } from '../../../lib/brandUtils';
 import { DeliveryActivationGatePanel } from '../DeliveryActivationGatePanel';
+import { useActivationFocus } from '../../../hooks/useActivationFocus';
+import { ActivationFieldWrap, ActivationFocusBanner } from '../ActivationGuideUi';
 import { useDeliveryStorePdvGate } from '../../../hooks/useDeliveryStorePdvGate';
 import { ensureDeliveryDefaultBrand } from '../../../lib/deliverySetup';
 import { readImageFileAsDataUrl } from '../../../lib/readImageAsDataUrl';
@@ -142,6 +145,7 @@ interface BrandLineModalProps {
   editingBrand: Brand | null;
   retailStores: WorkCenter[];
   isDelivery?: boolean;
+  activationHighlight?: string | null;
 }
 
 function BrandLineModal({
@@ -151,6 +155,7 @@ function BrandLineModal({
   editingBrand,
   retailStores,
   isDelivery = false,
+  activationHighlight = null,
 }: BrandLineModalProps) {
   const [step, setStep] = useState<WizardStep>('identidad');
   const [form, setForm] = useState<BrandFormState>(EMPTY_FORM);
@@ -211,6 +216,13 @@ function BrandLineModal({
 
   const defaultNameUnset =
     isDefault && (!form.name.trim() || isDefaultBrandNamePlaceholder(form.name));
+
+  useEffect(() => {
+    if (!isOpen || !activationHighlight) return;
+    if (activationHighlight === 'brand-name' || activationHighlight === 'edit-brand') {
+      setStep(showDeliveryWizard ? 'identidad' : 'identidad');
+    }
+  }, [isOpen, activationHighlight, showDeliveryWizard]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -479,6 +491,11 @@ function BrandLineModal({
         />
       }
     >
+            {activationHighlight ? (
+              <div className="mb-4">
+                <ActivationFocusBanner fieldKey={activationHighlight} />
+              </div>
+            ) : null}
             {step === 'negocio' && showDeliveryWizard && (
               <div className={settingsWizardSectionCompactClass}>
                 <p className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
@@ -519,25 +536,28 @@ function BrandLineModal({
                 <p className={settingsWizardLeadClass}>
                   Así verán tu marca en el catálogo, el TPV y los informes. El nombre es lo que identifica la línea de venta.
                 </p>
-                <div>
-                  <label className={settingsLabelClass}>
-                    {isDefault ? 'Nombre visible de tu negocio *' : 'Nombre de la marca *'}
-                  </label>
-                  <input
-                    className={`${settingsInputClass} ${fieldErrors.name ? 'border-red-500' : ''} ${
-                      defaultNameUnset
-                        ? 'border-2 border-dashed border-red-400 bg-red-50/70 placeholder:text-red-500/80 focus:border-red-500 dark:border-red-600 dark:bg-red-950/30 dark:placeholder:text-red-400/70'
-                        : ''
-                    }`}
-                    value={form.name}
-                    placeholder={
-                      isDefault
-                        ? 'Ej. La Pizzería, Burger House, tu carta…'
-                        : 'Ej. Pizza, Burger, Cafetería…'
-                    }
-                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    autoFocus={isDefault && defaultNameUnset}
-                  />
+                <ActivationFieldWrap fieldKey="brand-name" activeKey={activationHighlight}>
+                  <div>
+                    <label className={settingsLabelClass}>
+                      {isDefault ? 'Nombre visible de tu negocio *' : 'Nombre de la marca *'}
+                    </label>
+                    <input
+                      className={`${settingsInputClass} ${fieldErrors.name ? 'border-red-500' : ''} ${
+                        defaultNameUnset
+                          ? 'border-2 border-dashed border-red-400 bg-red-50/70 placeholder:text-red-500/80 focus:border-red-500 dark:border-red-600 dark:bg-red-950/30 dark:placeholder:text-red-400/70'
+                          : ''
+                      }`}
+                      value={form.name}
+                      placeholder={
+                        isDefault
+                          ? 'Ej. La Pizzería, Burger House, tu carta…'
+                          : 'Ej. Pizza, Burger, Cafetería…'
+                      }
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      autoFocus={isDefault && defaultNameUnset}
+                    />
+                  </div>
+                </ActivationFieldWrap>
                   {isDefault && nameSuggestions.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {nameSuggestions.map((suggestion) => {
@@ -556,7 +576,6 @@ function BrandLineModal({
                     </div>
                   ) : null}
                   {fieldErrors.name ? <p className="mt-1 text-xs text-red-600">{fieldErrors.name}</p> : null}
-                </div>
                 <div>
                   <label className={settingsLabelClass}>Descripción</label>
                   <textarea
@@ -912,6 +931,8 @@ export function CompanyMarcaSettings() {
   const [hoverBrandId, setHoverBrandId] = useState<string | null>(null);
   const [deactivateBrandTarget, setDeactivateBrandTarget] = useState<Brand | null>(null);
   const [togglingBrandId, setTogglingBrandId] = useState<string | null>(null);
+  const [modalActivationHighlight, setModalActivationHighlight] = useState<string | null>(null);
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
 
   const commercialBrandCount = useMemo(() => countCommercialBrands(brands), [brands]);
   const entitlements = useTenantEntitlements({ commercialBrandCount });
@@ -1001,6 +1022,22 @@ export function CompanyMarcaSettings() {
     [isDelivery, retailStores.length],
   );
 
+  useEffect(() => {
+    if (!activationFocus || loading) return;
+    if (activationFocus === 'edit-brand' || activationFocus === 'brand-name') {
+      const target =
+        brands.find((b) => !isBrandSetupComplete(b, setupCtx)) ??
+        brands.find((b) => isDefaultCommercialBrand(b)) ??
+        brands[0];
+      if (target) {
+        setEditingBrand(target);
+        setShowModal(true);
+        setModalActivationHighlight(activationFocus);
+      }
+      clearActivationFocus();
+    }
+  }, [activationFocus, loading, brands, setupCtx, clearActivationFocus]);
+
   const accentBrand = useMemo(() => {
     if (hoverBrandId) {
       const hit = brands.find((b) => b._id === hoverBrandId);
@@ -1043,6 +1080,7 @@ export function CompanyMarcaSettings() {
   const closeModal = () => {
     setShowModal(false);
     setEditingBrand(null);
+    setModalActivationHighlight(null);
   };
 
   const persistBrand = async (form: BrandFormState) => {
@@ -1464,6 +1502,7 @@ export function CompanyMarcaSettings() {
         editingBrand={editingBrand}
         retailStores={retailStores}
         isDelivery={isDelivery}
+        activationHighlight={modalActivationHighlight}
       />
 
       {deactivateBrandTarget ? (

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { ChevronDown, Menu, X } from 'lucide-react';
 import { VertialLogo } from './VertialLogo';
 import { useModalClose } from '../hooks/useModalClose';
+import { AUTH_PATHS } from '../lib/authEntryPaths';
 
 export function Header() {
   const navigate = useNavigate();
@@ -104,13 +105,13 @@ export function Header() {
                 Acceso afiliados
               </button>
               <button
-                onClick={() => navigate('/auth/login')}
+                onClick={() => navigate(AUTH_PATHS.companyLogin)}
                 className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
               >
-                Iniciar sesión
+                Acceso empresa
               </button>
               <button
-                onClick={() => navigate('/auth/worker-login')}
+                onClick={() => navigate(AUTH_PATHS.workerLogin)}
                 className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
               >
                 Soy trabajador
@@ -122,7 +123,7 @@ export function Header() {
                 Ver planes
               </button>
               <button
-                onClick={() => navigate('/auth/entry')}
+                onClick={() => navigate(AUTH_PATHS.entry)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium text-sm shadow-sm shadow-blue-600/30"
               >
                 Empezar gratis
@@ -132,7 +133,7 @@ export function Header() {
             {/* Mobile: CTA + Hamburger */}
             <div className="flex lg:hidden items-center gap-2">
               <button
-                onClick={() => navigate('/auth/entry')}
+                onClick={() => navigate(AUTH_PATHS.entry)}
                 className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
               >
                 Empezar gratis
@@ -184,13 +185,13 @@ export function Header() {
                 Acceso afiliados
               </button>
               <button
-                onClick={() => { navigate('/auth/login'); setMobileMenuOpen(false); }}
+                onClick={() => { navigate(AUTH_PATHS.companyLogin); setMobileMenuOpen(false); }}
                 className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
               >
-                Iniciar sesión
+                Acceso empresa
               </button>
               <button
-                onClick={() => { navigate('/auth/worker-login'); setMobileMenuOpen(false); }}
+                onClick={() => { navigate(AUTH_PATHS.workerLogin); setMobileMenuOpen(false); }}
                 className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
               >
                 Soy trabajador

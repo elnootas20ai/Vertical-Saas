@@ -27,6 +27,7 @@ import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
+  deliveryOrderMatchesPdvFilter,
 } from '../../lib/deliveryOpsPdvSelection';
 import {
   Plus,
@@ -165,9 +166,10 @@ const PAYMENT_METHOD_CONFIG: { value: PaymentMethod; label: string; icon: typeof
   { value: 'otros', label: 'Otros', icon: CreditCard },
 ];
 
-function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems }: {
+function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems, activePdv }: {
   userId: string;
   isOpen: boolean; onClose: () => void; onCreate: (d: Partial<DeliveryOrder>) => void; catalogItems: CatalogItem[];
+  activePdv?: { pdvId: string; label: string } | null;
 }) {
   const [step, setStep] = useState(1);
   const initialData: WizardData = {
@@ -325,8 +327,11 @@ function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems }: {
       clientId: data.clientId || '',
       customerName: data.customerName, customerPhone: data.customerPhone,
       customerAddress: resolvedAddress,
+      deliveryType: data.orderType,
       channel: data.channel, priority: data.priority, notes: data.notes, items: orderItems,
       totalAmount: cartTotal, status,
+      salesPointId: activePdv?.pdvId || '',
+      salesPointName: activePdv?.label || '',
       stageHistory: [{ status, date: new Date().toISOString(), user: 'Sistema', notes: 'Pedido creado' }],
     });
   };
@@ -1244,7 +1249,7 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
 
   const ordersForScope = useMemo(() => {
     if (!activeStoreScope?.pdvId) return orders;
-    return orders.filter((o) => o.salesPointId === activeStoreScope.pdvId);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, activeStoreScope.pdvId));
   }, [orders, activeStoreScope?.pdvId]);
 
   const filtered = useMemo(() => {
@@ -1465,7 +1470,7 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
         {activeTab === 'history' && renderHistoryTab()}
       </div>
 
-      <CreateOrderModal userId={userId} isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={handleCreate} catalogItems={catalogItems} />
+      <CreateOrderModal userId={userId} isOpen={showCreate} onClose={() => setShowCreate(false)} onCreate={handleCreate} catalogItems={catalogItems} activePdv={activeStoreScope} />
       <OrderDetailDrawer
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}

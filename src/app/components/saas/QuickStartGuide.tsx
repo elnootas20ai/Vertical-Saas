@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   Building2, Users, Package, Warehouse, Settings, Rocket,
   CheckCircle2, ChevronRight, ChevronDown, X, Upload,
-  ArrowRight, Download, Truck,
+  ArrowRight, Download, Truck, Circle, MousePointerClick,
 } from 'lucide-react';
 import { useActivationChecklist, type OnboardingStep, type OnboardingSubStep } from '../../context/ActivationChecklistContext';
+import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
 
 const ICON_MAP: Record<string, typeof Building2> = {
   building: Building2,
@@ -121,7 +122,7 @@ export function QuickStartGuide() {
             isExpanded={expandedStep === step.id}
             isNext={nextStep?.id === step.id}
             onToggle={() => handleToggle(step.id)}
-            onNavigate={() => navigate(step.route)}
+            onNavigate={(url) => navigate(url)}
           />
         ))}
       </div>
@@ -160,7 +161,7 @@ function StepCard({
   isExpanded: boolean;
   isNext: boolean;
   onToggle: () => void;
-  onNavigate: () => void;
+  onNavigate: (url: string) => void;
 }) {
   const Icon = ICON_MAP[step.icon] || Rocket;
   const gradient = GRADIENT_MAP[step.icon] || 'from-gray-500 to-gray-600';
@@ -220,8 +221,11 @@ function StepCard({
         {/* Progress + chevron */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {!isCompleted && step.totalSubSteps > 0 && (
-            <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500 tabular-nums">
-              {step.completedSubSteps}/{step.totalSubSteps}
+            <span
+              className="text-[10px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums bg-amber-100/80 dark:bg-amber-900/40 px-1.5 py-0.5 rounded"
+              title="Datos de este paso"
+            >
+              {step.completedSubSteps}/{step.totalSubSteps} datos
             </span>
           )}
           {!isCompleted && (
@@ -239,15 +243,15 @@ function StepCard({
 
           {/* Sub-steps */}
           <div className="space-y-1.5 pl-11 mb-4">
-            {step.subSteps.map(sub => (
-              <SubStepRow key={sub.id} sub={sub} />
+            {step.subSteps.map((sub) => (
+              <SubStepRow key={sub.id} sub={sub} stepRoute={step.route} />
             ))}
           </div>
 
           {/* Action button */}
           <div className="pl-11">
             <button
-              onClick={onNavigate}
+              onClick={() => onNavigate(step.route)}
               className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xl transition-all shadow-sm ${
                 isNext
                   ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-black dark:hover:bg-gray-100'
@@ -266,17 +270,34 @@ function StepCard({
 
 // ─── Sub-step row ─────────────────────────────────────────────────────────────
 
-function SubStepRow({ sub }: { sub: OnboardingSubStep }) {
+function SubStepRow({ sub, stepRoute }: { sub: OnboardingSubStep; stepRoute: string }) {
+  const navigate = useNavigate();
+  const guide = getSubStepGuide(sub.id);
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-start gap-2 rounded-md py-1">
       {sub.completed ? (
-        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
       ) : (
-        <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-200 dark:border-gray-700 flex-shrink-0" />
+        <Circle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5 fill-amber-50 dark:fill-amber-950" />
       )}
-      <span className={`text-xs ${sub.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-600 dark:text-gray-400'}`}>
-        {sub.label}
-      </span>
+      <div className="min-w-0 flex-1">
+        <span className={`text-xs block ${sub.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'font-medium text-gray-700 dark:text-gray-300'}`}>
+          {sub.label}
+        </span>
+        {!sub.completed && guide?.clickHint && (
+          <span className="text-[10px] text-gray-500 dark:text-gray-400 block mt-0.5">{guide.clickHint}</span>
+        )}
+      </div>
+      {!sub.completed && (
+        <button
+          type="button"
+          onClick={() => navigate(buildActivationTargetUrl(stepRoute, sub.id))}
+          className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-500 hover:bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
+        >
+          <MousePointerClick className="w-2.5 h-2.5" />
+          Ir
+        </button>
+      )}
     </div>
   );
 }

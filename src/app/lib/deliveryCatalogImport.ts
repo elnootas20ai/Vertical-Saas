@@ -1,4 +1,5 @@
 import { createBrandRequest, listBrandsRequest, type Brand } from './brandsApi';
+import { isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
 
 function foldKey(s: string): string {
   return String(s || '')
@@ -74,4 +75,28 @@ export function shouldClearBrandForCategory(category: string): boolean {
     c === 'salsas' ||
     c === 'otros'
   );
+}
+
+/** Misma marca por defecto que el wizard manual de alta de producto. */
+export function defaultBrandIdForCatalogImport(brands: Brand[]): string {
+  const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
+  const pick =
+    sorted.find((b) => isDefaultCommercialBrand(b)) ??
+    sorted[0];
+  return pick?._id ?? '';
+}
+
+/**
+ * Asigna brandIds en import Excel/IA igual que al crear desde el modal:
+ * marca explícita, vacío en categorías sin línea, o marca principal por defecto.
+ */
+export function resolveCatalogImportBrandIds(
+  explicitBrandIds: string[],
+  category: string,
+  brands: Brand[],
+): string[] {
+  if (explicitBrandIds.length > 0) return explicitBrandIds;
+  if (shouldClearBrandForCategory(category)) return [];
+  const defaultId = defaultBrandIdForCatalogImport(brands);
+  return defaultId ? [defaultId] : [];
 }

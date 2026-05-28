@@ -811,6 +811,10 @@ function TpvRapidoPageInner() {
           return '';
         })();
 
+        const pdvId = String(register.session?.pointOfSaleId || '').trim();
+        const pdvName = String(register.session?.pointOfSaleName || '').trim();
+        const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
+
         const orderData: Partial<DeliveryOrder> = {
           clientId: selectedClient.id,
           customerName: selectedClient.name,
@@ -823,6 +827,10 @@ function TpvRapidoPageInner() {
           deliveryType,
           channel: 'tpv',
           status,
+          salesPointId: pdvId,
+          salesPointName: pdvName,
+          takenBy: selectedCashierId || user?.user_id || user?.id || '',
+          takenByName: cashier?.name || user?.fullName || 'TPV',
           items,
           totalAmount: finalTotal,
           notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
@@ -838,7 +846,6 @@ function TpvRapidoPageInner() {
 
         const created = await createDeliveryOrderRequest(userId, orderData);
 
-        const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
         const pm = (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta' || paymentMethod === 'bizum')
           ? paymentMethod
           : 'otro';
@@ -862,7 +869,7 @@ function TpvRapidoPageInner() {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected, register, user?.fullName],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -1740,7 +1747,7 @@ function TpvRapidoPageInner() {
               Atrás
             </button>
             <button
-              onClick={() => handleSubmitOrder('cocina')}
+              onClick={() => handleSubmitOrder(initialStatus)}
               disabled={!canSubmit || submitting}
               className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >

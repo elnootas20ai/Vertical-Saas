@@ -98,6 +98,12 @@ import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
 import { filterWorkCentersForBusinessScope } from '../../lib/deliverySetup';
+import {
+  ACTIVATION_FOCUS_PARAM,
+  clearActivationFocusFromSearch,
+} from '../../lib/activationGuide';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { ActivationFieldWrap, ActivationFocusBanner } from '../../components/saas/ActivationGuideUi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useDocumentTemplates } from '../../hooks/useDocumentTemplates';
 import { SAAS__CreateZoneModal } from '../../components/design-system/SAAS__CreateZoneModal';
@@ -1282,11 +1288,13 @@ function BusinessFormModal({
   onSave,
   onClose,
   isNew,
+  highlightField = null,
 }: {
   initial: Partial<Business>;
   onSave: (data: Partial<Business>) => Promise<void>;
   onClose: () => void;
   isNew: boolean;
+  highlightField?: string | null;
 }) {
   useModalClose(true, onClose);
   const [step, setStep] = useState<1 | 2>(isNew ? 1 : 2);
@@ -1360,6 +1368,12 @@ function BusinessFormModal({
             <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
           </button>
         </div>
+
+        {highlightField && (
+          <div className="shrink-0 mx-6 mt-4">
+            <ActivationFocusBanner fieldKey={highlightField} />
+          </div>
+        )}
 
         {/* Step indicator */}
         {isNew && (
@@ -1498,19 +1512,21 @@ function BusinessFormModal({
                 )}
 
                 <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
-                      Nombre comercial <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      value={form.name}
-                      onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                      className={BUSINESS_INPUT_CLASS}
-                      placeholder="Ej. Mi Negocio"
-                      required
-                      autoFocus={step === 2}
-                    />
-                  </div>
+                  <ActivationFieldWrap fieldKey="name" activeKey={highlightField}>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
+                        Nombre comercial <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        value={form.name}
+                        onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                        className={BUSINESS_INPUT_CLASS}
+                        placeholder="Ej. Mi Negocio"
+                        required
+                        autoFocus={step === 2 && highlightField === 'name'}
+                      />
+                    </div>
+                  </ActivationFieldWrap>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -1522,15 +1538,18 @@ function BusinessFormModal({
                         placeholder="Mi Negocio S.L."
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">CIF / NIF</label>
-                      <input
-                        value={form.taxId}
-                        onChange={(e) => setForm((prev) => ({ ...prev, taxId: e.target.value }))}
-                        className={BUSINESS_INPUT_CLASS}
-                        placeholder="B12345678"
-                      />
-                    </div>
+                    <ActivationFieldWrap fieldKey="taxId" activeKey={highlightField}>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">CIF / NIF</label>
+                        <input
+                          value={form.taxId}
+                          onChange={(e) => setForm((prev) => ({ ...prev, taxId: e.target.value }))}
+                          className={BUSINESS_INPUT_CLASS}
+                          placeholder="B12345678"
+                          autoFocus={step === 2 && highlightField === 'taxId'}
+                        />
+                      </div>
+                    </ActivationFieldWrap>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -1543,26 +1562,32 @@ function BusinessFormModal({
                         placeholder="Madrid"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Teléfono</label>
-                      <input
-                        value={form.phone}
-                        onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
-                        className={BUSINESS_INPUT_CLASS}
-                        placeholder="+34 600 000 000"
-                      />
-                    </div>
+                    <ActivationFieldWrap fieldKey="phone" activeKey={highlightField}>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Teléfono</label>
+                        <input
+                          value={form.phone}
+                          onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+                          className={BUSINESS_INPUT_CLASS}
+                          placeholder="+34 600 000 000"
+                          autoFocus={step === 2 && highlightField === 'phone'}
+                        />
+                      </div>
+                    </ActivationFieldWrap>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Dirección</label>
-                    <input
-                      value={form.address}
-                      onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
-                      className={BUSINESS_INPUT_CLASS}
-                      placeholder="Calle Mayor 1, 28013"
-                    />
-                  </div>
+                  <ActivationFieldWrap fieldKey="address" activeKey={highlightField}>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Dirección</label>
+                      <input
+                        value={form.address}
+                        onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
+                        className={BUSINESS_INPUT_CLASS}
+                        placeholder="Calle Mayor 1, 28013"
+                        autoFocus={step === 2 && highlightField === 'address'}
+                      />
+                    </div>
+                  </ActivationFieldWrap>
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Email empresa</label>
@@ -1616,6 +1641,7 @@ function BusinessFormModal({
 function TabBusinesses() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     businesses,
     currentBusiness,
@@ -1624,6 +1650,25 @@ function TabBusinesses() {
     updateBusiness,
     deleteBusiness,
   } = useBusiness();
+
+  const activationFocus = useMemo(
+    () => new URLSearchParams(location.search).get(ACTIVATION_FOCUS_PARAM),
+    [location.search],
+  );
+
+  const clearActivationFocus = useCallback(() => {
+    if (!activationFocus) return;
+    const nextSearch = clearActivationFocusFromSearch(location.search);
+    navigate(
+      { pathname: location.pathname, search: nextSearch },
+      { replace: true, state: location.state },
+    );
+  }, [activationFocus, location.pathname, location.search, location.state, navigate]);
+
+  useEffect(() => {
+    if (!activationFocus || !currentBusiness) return;
+    setEditingBusiness(currentBusiness);
+  }, [activationFocus, currentBusiness?.business_id, currentBusiness]);
 
   const [showForm, setShowForm] = useState(false);
   const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
@@ -2504,9 +2549,16 @@ function TabBusinesses() {
       {editingBusiness && (
         <BusinessFormModal
           initial={editingBusiness}
-          onSave={handleUpdate}
-          onClose={() => setEditingBusiness(null)}
+          onSave={async (data) => {
+            await handleUpdate(data);
+            clearActivationFocus();
+          }}
+          onClose={() => {
+            setEditingBusiness(null);
+            clearActivationFocus();
+          }}
           isNew={false}
+          highlightField={activationFocus}
         />
       )}
 

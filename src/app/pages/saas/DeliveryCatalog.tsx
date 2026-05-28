@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { DeliveryActivationGatePanel } from '../../components/saas/DeliveryActivationGatePanel';
 import { useDeliveryStorePdvGate } from '../../hooks/useDeliveryStorePdvGate';
-import { isBrandSetupComplete, isDefaultCommercialBrand } from '../../lib/brandUtils';
-import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } from '../../lib/brandUtils';
+import { isDeliveryBusinessType, notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -14,11 +14,15 @@ import { listBrandsRequest, createBrandRequest, type Brand } from '../../lib/bra
 import {
   normalizeImportCategory,
   resolveBrandIdsFromImportText,
+  resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
 } from '../../lib/deliveryCatalogImport';
 import {
   catalogCategorySuggestions,
   defaultCategoryForSingleBrand,
+  deliveryBrandLineKindLabel,
+  getDeliveryBrandLinePreset,
+  DELIVERY_BRAND_LINE_ICON_BOX,
 } from '../../lib/deliveryBrandLineKinds';
 import {
   listCatalogItemsRequest,
@@ -58,11 +62,14 @@ import {
   Minus,
   Users,
   Archive,
+  Tag,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -91,15 +98,24 @@ const ALLERGEN_OPTIONS = [
   'Lácteos', 'Frutos de cáscara', 'Apio', 'Mostaza', 'Sésamo', 'Sulfitos', 'Moluscos', 'Altramuces',
 ];
 
-const STEP_LABELS = [
-  'Información básica',
-  'Categoría y unidad',
-  'Precios',
-  'Stock',
-  'Imagen',
-  'Alérgenos y notas',
-  'Visibilidad web',
-];
+const CREATE_STEP_LABELS = ['Marca y producto', 'Precios e inventario', 'Publicación'];
+
+function defaultBrandIdForCatalog(brands: Brand[]): string {
+  const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
+  const pick =
+    sorted.find((b) => isDefaultCommercialBrand(b)) ??
+    sorted[0];
+  return pick?._id ?? '';
+}
+
+function catalogItemBrandNames(item: CatalogItem, brands: Brand[]): string {
+  const ids = Array.isArray(item.brandIds) ? item.brandIds : [];
+  if (ids.length === 0) return '';
+  return ids
+    .map((id) => brands.find((b) => b._id === id)?.name)
+    .filter(Boolean)
+    .join(', ');
+}
 
 function normalizeMediaKey(value: string) {
   return String(value || '')
@@ -178,9 +194,10 @@ function CreateCatalogItemModal({
         available: editItem.available ?? true,
       });
     } else {
+      const defaultId = defaultBrandIdForCatalog(brands);
       setForm({
         itemType: 'product', name: '', description: '', category: '', unit: 'ud',
-        selectedBrandIds: [],
+        selectedBrandIds: defaultId ? [defaultId] : [],
         newBrandName: '',
         showNewBrand: false,
         unitPrice: '', costPrice: '', stockQuantity: '', minStock: '',
@@ -188,7 +205,7 @@ function CreateCatalogItemModal({
       });
     }
     setStep(1);
-  }, [editItem, isOpen]);
+  }, [editItem, isOpen, brands]);
 
   const categorySuggestions = useMemo(
     () => catalogCategorySuggestions(brands, form.selectedBrandIds, catalogCategoriesInUse),
@@ -205,10 +222,42 @@ function CreateCatalogItemModal({
 
   useModalClose(isOpen, onClose);
 
+  const activeBrands = useMemo(
+    () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
+    [brands],
+  );
+
   if (!isOpen) return null;
 
-  const totalSteps = 7;
+  const totalSteps = 3;
   const isEditMode = Boolean(editItem);
+
+  const handleCreateBrand = async () => {
+    const name = form.newBrandName.trim();
+    if (!name || !businessId) return;
+    try {
+      const created = await createBrandRequest(businessId, { name, active: true });
+      onBrandsChange([...brands, created]);
+      setForm((f) => ({
+        ...f,
+        selectedBrandIds: [...f.selectedBrandIds, created._id],
+        newBrandName: '',
+        showNewBrand: false,
+      }));
+      toast.success(`Marca "${created.name}" creada`);
+    } catch {
+      toast.error('No se pudo crear la marca');
+    }
+  };
+
+  const toggleBrand = (brandId: string) => {
+    setForm((f) => ({
+      ...f,
+      selectedBrandIds: f.selectedBrandIds.includes(brandId)
+        ? f.selectedBrandIds.filter((id) => id !== brandId)
+        : [...f.selectedBrandIds, brandId],
+    }));
+  };
 
   const handleFinalSubmit = async () => {
     if (!form.name.trim()) {
@@ -249,8 +298,151 @@ function CreateCatalogItemModal({
 
   const canNext = () => {
     if (step === 1) return form.name.trim().length > 0;
+    if (step === 2 && form.itemType !== 'service') {
+      return true;
+    }
     return true;
   };
+
+  const renderBrandPicker = () => (
+    <div>
+      <label className={labelClass}>Marca comercial</label>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+        Misma lógica que en Ajustes → Marca: define la línea de venta y las categorías sugeridas.
+      </p>
+      {activeBrands.length === 0 ? (
+        <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+          Crea al menos una marca en Ajustes antes de asignar productos.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+          {activeBrands.map((b) => {
+            const selected = form.selectedBrandIds.includes(b._id);
+            const preset = getDeliveryBrandLinePreset(b.deliveryLineKind);
+            const accent = b.primaryColor || preset?.primaryColor || '#6366F1';
+            const lineLabel = b.deliveryLineKind ? deliveryBrandLineKindLabel(b.deliveryLineKind) : null;
+            return (
+              <button
+                key={b._id}
+                type="button"
+                onClick={() => toggleBrand(b._id)}
+                className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                  selected
+                    ? 'border-gray-900 dark:border-gray-100 bg-gray-50 dark:bg-gray-900/50 ring-1 ring-gray-900/10'
+                    : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                }`}
+              >
+                {b.logo ? (
+                  <img src={b.logo} alt="" className="w-10 h-10 rounded-lg object-contain border border-gray-200 dark:border-gray-700 shrink-0" />
+                ) : (
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
+                    style={{ background: `linear-gradient(145deg, ${accent}, ${accent}cc)` }}
+                  >
+                    {b.name.trim().charAt(0).toUpperCase() || '?'}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{b.name}</div>
+                  {lineLabel ? (
+                    <span className={`inline-block mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded ${preset ? DELIVERY_BRAND_LINE_ICON_BOX[preset.id as keyof typeof DELIVERY_BRAND_LINE_ICON_BOX] : 'bg-gray-100 text-gray-600'}`}>
+                      {lineLabel}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">Sin tipo de carta</span>
+                  )}
+                </div>
+                {selected ? (
+                  <CheckCircle2 className="w-5 h-5 text-gray-900 dark:text-gray-100 shrink-0" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {form.showNewBrand ? (
+        <div className="mt-3 flex gap-2">
+          <input
+            className={inputClass}
+            placeholder="Nombre nueva marca"
+            value={form.newBrandName}
+            onChange={(e) => setForm((f) => ({ ...f, newBrandName: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void handleCreateBrand();
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void handleCreateBrand()}
+            disabled={!form.newBrandName.trim()}
+            className="px-4 py-2.5 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-semibold disabled:opacity-50"
+          >
+            Crear
+          </button>
+          <button
+            type="button"
+            onClick={() => setForm((f) => ({ ...f, showNewBrand: false, newBrandName: '' }))}
+            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm"
+          >
+            Cancelar
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setForm((f) => ({ ...f, showNewBrand: true }))}
+          className="mt-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:underline inline-flex items-center gap-1"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Nueva marca
+        </button>
+      )}
+    </div>
+  );
+
+  const renderCategoryUnit = () => (
+    <>
+      <div>
+        <label className={labelClass}>Categoría</label>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {categorySuggestions.map((cat) => {
+            const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, category: cat }))}
+                className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  active
+                    ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                    : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                }`}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+        <input
+          className={inputClass}
+          placeholder="O escribe otra categoría…"
+          value={form.category}
+          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+        />
+      </div>
+      <div>
+        <label className={labelClass}>Unidad de medida</label>
+        <select className={inputClass} value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}>
+          {UNIT_OPTIONS.map((u) => (
+            <option key={u.value} value={u.value}>{u.label}</option>
+          ))}
+        </select>
+      </div>
+    </>
+  );
 
   const toggleAllergen = (a: string) => {
     setForm(f => ({
@@ -275,11 +467,11 @@ function CreateCatalogItemModal({
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {editItem ? 'Editar artículo' : 'Nuevo artículo'}
               </h2>
-              {!isEditMode && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  Paso {step} de {totalSteps} — {STEP_LABELS[step - 1]}
-                </p>
-              )}
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                {editItem
+                  ? 'Marca, categoría y precios vinculados a tus líneas comerciales'
+                  : `Paso ${step} de ${totalSteps} — ${CREATE_STEP_LABELS[step - 1]}`}
+              </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
               <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
@@ -339,9 +531,110 @@ function CreateCatalogItemModal({
 
         {/* Step content */}
         <div className="p-6 min-h-[280px]">
-          {/* Step 1: Información básica */}
-          {(step === 1 || isEditMode) && (
+          {isEditMode ? (
+            <div className="space-y-8">
+              <section className="space-y-5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Marca y producto</h3>
+                {renderBrandPicker()}
+                <div>
+                  <label className={labelClass}>Tipo de elemento</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'product', label: 'Producto', desc: 'Se vende y puede tener stock' },
+                      { value: 'service', label: 'Servicio', desc: 'No descuenta inventario' },
+                      { value: 'combo', label: 'Combo', desc: 'Paquete o menú compuesto' },
+                    ].map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
+                        className={`rounded-xl border-2 p-3 text-left transition-colors ${
+                          form.itemType === option.value
+                            ? 'border-gray-900 dark:border-gray-100 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-400'
+                        }`}
+                      >
+                        <div className="text-sm font-bold">{option.label}</div>
+                        <div className={`mt-1 text-xs ${form.itemType === option.value ? 'text-white/75 dark:text-gray-600' : 'text-gray-500 dark:text-gray-400'}`}>{option.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>Nombre del producto *</label>
+                  <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className={labelClass}>Descripción</label>
+                  <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+                </div>
+                {renderCategoryUnit()}
+              </section>
+              <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Precios e inventario</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Precio venta (€)</label>
+                    <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Precio coste (€)</label>
+                    <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} />
+                  </div>
+                </div>
+                {form.itemType !== 'service' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClass}>Stock actual</label>
+                      <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={(e) => setForm((f) => ({ ...f, stockQuantity: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Stock mínimo (alerta)</label>
+                      <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={(e) => setForm((f) => ({ ...f, minStock: e.target.value }))} />
+                    </div>
+                  </div>
+                )}
+              </section>
+              <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Publicación</h3>
+                <div>
+                  <label className={labelClass}>URL de imagen</label>
+                  <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} />
+                </div>
+                <div>
+                  <label className={labelClass}>Alérgenos</label>
+                  <div className="flex flex-wrap gap-2">
+                    {ALLERGEN_OPTIONS.map((a) => (
+                      <button key={a} type="button" onClick={() => toggleAllergen(a)} className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${form.allergens.includes(a) ? 'bg-orange-100 border-orange-400 text-orange-800' : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}>{a}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>Notas internas</label>
+                  <textarea rows={2} className={`${inputClass} resize-none`} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+                </div>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, webVisible: !f.webVisible }))} className={`w-full p-4 rounded-2xl border-2 text-left ${form.webVisible ? 'border-green-400 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 dark:border-gray-700'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">Visible en la web</span>
+                    <div className={`w-11 h-6 rounded-full relative ${form.webVisible ? 'bg-green-500' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.webVisible ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </div>
+                  </div>
+                </button>
+                <button type="button" onClick={() => setForm((f) => ({ ...f, available: !f.available }))} className={`w-full p-4 rounded-2xl border-2 text-left ${form.available ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-red-300 bg-red-50 dark:bg-red-900/20'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">{form.available ? 'Disponible' : 'Agotado'}</span>
+                    <div className={`w-11 h-6 rounded-full relative ${form.available ? 'bg-blue-500' : 'bg-red-400'}`}>
+                      <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.available ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </div>
+                  </div>
+                </button>
+              </section>
+            </div>
+          ) : step === 1 ? (
             <div className="space-y-5">
+              {renderBrandPicker()}
+              {renderCategoryUnit()}
               <div>
                 <label className={labelClass}>Tipo de elemento</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -353,7 +646,7 @@ function CreateCatalogItemModal({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setForm(f => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
+                      onClick={() => setForm((f) => ({ ...f, itemType: option.value as CatalogItem['itemType'] }))}
                       className={`rounded-xl border-2 p-3 text-left transition-colors ${
                         form.itemType === option.value
                           ? 'border-gray-900 dark:border-gray-100 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -368,139 +661,27 @@ function CreateCatalogItemModal({
               </div>
               <div>
                 <label className={labelClass}>Nombre del producto *</label>
-                <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+                <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
               </div>
               <div>
                 <label className={labelClass}>Descripción</label>
-                <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-              </div>
-              <div>
-                <label className={labelClass}>Marca</label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {brands.filter((b) => b.active !== false).map((b) => (
-                    <button
-                      key={b._id}
-                      type="button"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          selectedBrandIds: f.selectedBrandIds.includes(b._id)
-                            ? f.selectedBrandIds.filter((id) => id !== b._id)
-                            : [...f.selectedBrandIds, b._id],
-                        }))
-                      }
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${
-                        form.selectedBrandIds.includes(b._id)
-                          ? 'bg-violet-100 border-violet-400 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300'
-                          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      {b.name}
-                    </button>
-                  ))}
-                </div>
-                {form.showNewBrand ? (
-                  <div className="flex gap-2">
-                    <input
-                      className={inputClass}
-                      placeholder="Nombre nueva marca"
-                      value={form.newBrandName}
-                      onChange={(e) => setForm((f) => ({ ...f, newBrandName: e.target.value }))}
-                      onKeyDown={async (e) => {
-                        if (e.key !== 'Enter' || !businessId) return;
-                        const name = form.newBrandName.trim();
-                        if (!name) return;
-                        try {
-                          const created = await createBrandRequest(businessId, { name, active: true });
-                          onBrandsChange([...brands, created]);
-                          setForm((f) => ({
-                            ...f,
-                            selectedBrandIds: [...f.selectedBrandIds, created._id],
-                            newBrandName: '',
-                            showNewBrand: false,
-                          }));
-                        } catch {
-                          toast.error('No se pudo crear la marca');
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, showNewBrand: false, newBrandName: '' }))}
-                      className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setForm((f) => ({ ...f, showNewBrand: true }))}
-                    className="text-xs font-semibold text-violet-700 dark:text-violet-300 hover:underline"
-                  >
-                    + Nueva marca
-                  </button>
-                )}
+                <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
               </div>
             </div>
-          )}
-
-          {/* Step 2: Categoría y unidad */}
-          {(step === 2 || isEditMode) && (
+          ) : step === 2 ? (
             <div className="space-y-5">
-              <div>
-                <label className={labelClass}>Categoría</label>
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {categorySuggestions.map((cat) => {
-                    const active = normalizeImportCategory(form.category).toLowerCase() === cat.toLowerCase();
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setForm((f) => ({ ...f, category: cat }))}
-                        className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                          active
-                            ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    );
-                  })}
-                </div>
-                <input
-                  className={inputClass}
-                  placeholder="O escribe otra categoría…"
-                  value={form.category}
-                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Unidad de medida</label>
-                <select className={inputClass} value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}>
-                  {UNIT_OPTIONS.map(u => (<option key={u.value} value={u.value}>{u.label}</option>))}
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Precios */}
-          {(step === 3 || isEditMode) && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl mb-2">
+              <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
                 <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
-                <p className="text-sm text-green-800 dark:text-green-300">Define el precio de venta al público y el coste de compra para calcular márgenes.</p>
+                <p className="text-sm text-green-800 dark:text-green-300">Precio de venta y coste para calcular el margen del artículo.</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>Precio venta (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={e => setForm(f => ({ ...f, unitPrice: e.target.value }))} autoFocus />
+                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} autoFocus />
                 </div>
                 <div>
                   <label className={labelClass}>Precio coste (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))} />
+                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} />
                 </div>
               </div>
               {(Number(form.unitPrice) > 0 || Number(form.costPrice) > 0) && (
@@ -513,177 +694,79 @@ function CreateCatalogItemModal({
                   </div>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Step 4: Stock */}
-          {(step === 4 || isEditMode) && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl mb-2">
-                <Archive className="w-6 h-6 text-amber-600 shrink-0" />
-                <p className="text-sm text-amber-800 dark:text-amber-300">
-                  {form.itemType === 'service'
-                    ? 'Los servicios no gestionan stock. Puedes continuar sin cantidades.'
-                    : 'Configura las cantidades de inventario y la alerta de stock mínimo.'}
-                </p>
-              </div>
               {form.itemType !== 'service' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelClass}>Stock actual</label>
-                    <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={e => setForm(f => ({ ...f, stockQuantity: e.target.value }))} autoFocus />
+                <>
+                  <div className="flex items-center gap-3 p-4 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl">
+                    <Archive className="w-6 h-6 text-amber-600 shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-300">Stock inicial y alerta de reposición.</p>
                   </div>
-                  <div>
-                    <label className={labelClass}>Stock mínimo (alerta)</label>
-                    <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={e => setForm(f => ({ ...f, minStock: e.target.value }))} />
-                  </div>
-                </div>
-              )}
-              {form.itemType !== 'service' && Number(form.stockQuantity) > 0 && Number(form.minStock) > 0 && (
-                <div className={`p-4 rounded-xl border-2 ${Number(form.stockQuantity) <= Number(form.minStock) ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-                  <div className="flex items-center gap-2">
-                    {Number(form.stockQuantity) <= Number(form.minStock) ? (
-                      <><AlertTriangle className="w-5 h-5 text-red-600" /><span className="text-sm font-semibold text-red-700">Stock por debajo del mínimo</span></>
-                    ) : (
-                      <><CheckCircle2 className="w-5 h-5 text-green-600" /><span className="text-sm font-semibold text-green-700">Stock correcto</span></>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 5: Imagen */}
-          {(step === 5 || isEditMode) && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl mb-2">
-                <Package className="w-6 h-6 text-indigo-600 shrink-0" />
-                <p className="text-sm text-indigo-800 dark:text-indigo-300">Añade una imagen del producto que se mostrará en la web pública.</p>
-              </div>
-              <div>
-                <label className={labelClass}>URL de imagen</label>
-                <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))} autoFocus />
-              </div>
-              {form.image && (
-                <div className="flex justify-center">
-                  <div className="w-48 h-48 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-100 dark:bg-gray-900">
-                    <img src={form.image} alt="Preview" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  </div>
-                </div>
-              )}
-              {!form.image && (
-                <div className="flex justify-center">
-                  <div className="w-48 h-48 rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-                    <div className="text-center text-gray-400">
-                      <Package className="w-10 h-10 mx-auto mb-2" />
-                      <p className="text-xs">Sin imagen</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClass}>Stock actual</label>
+                      <input type="number" className={inputClass} placeholder="0" value={form.stockQuantity} onChange={(e) => setForm((f) => ({ ...f, stockQuantity: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Stock mínimo (alerta)</label>
+                      <input type="number" className={inputClass} placeholder="0" value={form.minStock} onChange={(e) => setForm((f) => ({ ...f, minStock: e.target.value }))} />
                     </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
-          )}
-
-          {/* Step 6: Alérgenos y notas */}
-          {(step === 6 || isEditMode) && (
+          ) : (
             <div className="space-y-5">
               <div>
+                <label className={labelClass}>URL de imagen</label>
+                <input className={inputClass} placeholder="https://ejemplo.com/imagen.jpg" value={form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} autoFocus />
+              </div>
+              {form.image ? (
+                <div className="flex justify-center">
+                  <div className="w-40 h-40 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-100 dark:bg-gray-900">
+                    <img src={form.image} alt="Preview" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  </div>
+                </div>
+              ) : null}
+              <div>
                 <label className={labelClass}>Alérgenos</label>
-                <div className="flex flex-wrap gap-2">
-                  {ALLERGEN_OPTIONS.map(a => (
-                    <button
-                      key={a}
-                      type="button"
-                      onClick={() => toggleAllergen(a)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${
-                        form.allergens.includes(a)
-                          ? 'bg-orange-100 border-orange-400 text-orange-800'
-                          : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
-                      }`}
-                    >
-                      {a}
-                    </button>
+                <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
+                  {ALLERGEN_OPTIONS.map((a) => (
+                    <button key={a} type="button" onClick={() => toggleAllergen(a)} className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-colors ${form.allergens.includes(a) ? 'bg-orange-100 border-orange-400 text-orange-800' : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400'}`}>{a}</button>
                   ))}
                 </div>
               </div>
               <div>
                 <label className={labelClass}>Notas internas</label>
-                <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Notas adicionales (solo visibles para el equipo)..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Solo visible para el equipo" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </div>
-            </div>
-          )}
-
-          {/* Step 7: Visibilidad web */}
-          {(step === 7 || isEditMode) && (
-            <div className="space-y-5">
-              <div className="flex items-center gap-3 p-4 bg-cyan-50 dark:bg-cyan-900/20 border-2 border-cyan-200 dark:border-cyan-800 rounded-xl mb-2">
-                <Package className="w-6 h-6 text-cyan-600 shrink-0" />
-                <p className="text-sm text-cyan-800 dark:text-cyan-300">Controla si este producto aparece en la web pública y si está disponible para pedidos.</p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, webVisible: !f.webVisible }))}
-                className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${
-                  form.webVisible
-                    ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
-                    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'
-                }`}
-              >
+              <button type="button" onClick={() => setForm((f) => ({ ...f, webVisible: !f.webVisible }))} className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${form.webVisible ? 'border-green-400 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900'}`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-bold text-gray-900 dark:text-gray-100">Visible en la web</div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                      {form.webVisible ? 'Este producto aparece en la tienda online' : 'Este producto está oculto de la tienda online'}
-                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">{form.webVisible ? 'Aparece en la tienda online' : 'Oculto de la tienda'}</p>
                   </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors relative ${form.webVisible ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-                    <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${form.webVisible ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <div className={`w-11 h-6 rounded-full relative transition-colors ${form.webVisible ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.webVisible ? 'translate-x-5' : 'translate-x-0.5'}`} />
                   </div>
                 </div>
               </button>
-
-              <button
-                type="button"
-                onClick={() => setForm(f => ({ ...f, available: !f.available }))}
-                className={`w-full p-5 rounded-2xl border-2 text-left transition-all ${
-                  form.available
-                    ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-red-300 bg-red-50 dark:bg-red-900/20'
-                }`}
-              >
+              <button type="button" onClick={() => setForm((f) => ({ ...f, available: !f.available }))} className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${form.available ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/20' : 'border-red-300 bg-red-50 dark:bg-red-900/20'}`}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-bold text-gray-900 dark:text-gray-100">
-                      {form.available ? 'Disponible' : 'No disponible'}
-                    </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                      {form.available
-                        ? 'Los clientes pueden pedir este producto'
-                        : 'Aparecerá como "agotado" en la web'}
-                    </p>
+                    <div className="font-bold text-gray-900 dark:text-gray-100">{form.available ? 'Disponible' : 'Agotado'}</div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">{form.available ? 'Se puede pedir' : 'No se aceptan pedidos'}</p>
                   </div>
-                  <div className={`w-12 h-7 rounded-full transition-colors relative ${form.available ? 'bg-blue-500' : 'bg-red-400'}`}>
-                    <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${form.available ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  <div className={`w-11 h-6 rounded-full relative transition-colors ${form.available ? 'bg-blue-500' : 'bg-red-400'}`}>
+                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.available ? 'translate-x-5' : 'translate-x-0.5'}`} />
                   </div>
                 </div>
               </button>
-
-              {/* Summary preview */}
               <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
-                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Resumen del producto</h4>
-                <div className="flex gap-4">
-                  {form.image ? (
-                    <img src={form.image} alt="" className="w-16 h-16 rounded-xl object-cover shrink-0" />
-                  ) : (
-                    <div className="w-16 h-16 rounded-xl bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0"><Package className="w-6 h-6 text-gray-400" /></div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-gray-900 dark:text-gray-100 truncate">{form.name || 'Sin nombre'}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{form.category || 'Sin categoría'} · {form.unit}</div>
-                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 mt-1">{Number(form.unitPrice).toFixed(2)}€</div>
-                  </div>
-                </div>
+                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Resumen</h4>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{form.name || 'Sin nombre'}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {[form.category, activeBrands.filter((b) => form.selectedBrandIds.includes(b._id)).map((b) => b.name).join(', ')].filter(Boolean).join(' · ')}
+                </p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-1">{Number(form.unitPrice || 0).toFixed(2)}€</p>
               </div>
             </div>
           )}
@@ -1334,6 +1417,7 @@ export function CatalogPage() {
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
   const [searchCatalog, setSearchCatalog] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterBrand, setFilterBrand] = useState('all');
   const [filterType, setFilterType] = useState<CatalogItem['itemType'] | 'all'>('all');
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
@@ -1361,6 +1445,7 @@ export function CatalogPage() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
   const [loadingImageZip, setLoadingImageZip] = useState(false);
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
 
   const MODULE_AI_FIELDS: AIFieldDef[] = [
     { key: 'name', label: 'Nombre' },
@@ -1403,7 +1488,7 @@ export function CatalogPage() {
       items.push({
         name,
         category,
-        brandIds,
+        brandIds: resolveCatalogImportBrandIds(brandIds, category, brandCache),
         itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
           ? (String(entry.itemType).trim() as CatalogItem['itemType'])
           : 'product',
@@ -1427,6 +1512,7 @@ export function CatalogPage() {
     const result = await bulkCreateCatalogItemsRequest(user.id, items as Partial<CatalogItem>[]);
     if (result.created > 0) {
       await loadCatalog();
+      notifyDeliveryCatalogChanged();
       toast.success(`${result.created} producto(s) importado(s) con IA`);
     }
     if (result.errors > 0) {
@@ -1472,7 +1558,7 @@ export function CatalogPage() {
       items.push({
         name,
         category,
-        brandIds: brandIds.length > 0 ? brandIds : shouldClearBrandForCategory(category) ? [] : [],
+        brandIds: resolveCatalogImportBrandIds(brandIds, category, brandCache),
         itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
           ? (String(entry.itemType).trim() as CatalogItem['itemType'])
           : 'product',
@@ -1536,6 +1622,7 @@ export function CatalogPage() {
     }
     if (result.created > 0) {
       await loadCatalog();
+      notifyDeliveryCatalogChanged();
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
       toast.success(
         `${result.created} producto(s) importado(s)` +
@@ -1678,6 +1765,7 @@ export function CatalogPage() {
       }
       setShowCreateItem(false);
       setEditingItem(null);
+      notifyDeliveryCatalogChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el artículo');
     }
@@ -1856,22 +1944,44 @@ export function CatalogPage() {
     return [...new Set(catalogItems.map(i => i.category).filter(Boolean))].sort();
   }, [catalogItems]);
 
+  const openNewCatalogItemManual = useCallback(() => {
+    setEditingItem(null);
+    setShowCreateItem(true);
+  }, []);
+
+  useEffect(() => {
+    if (!activationFocus) return;
+    if (activationFocus === 'catalog-add') {
+      openNewCatalogItemManual();
+      clearActivationFocus();
+    } else if (activationFocus === 'catalog-import') {
+      setShowImportModal(true);
+      clearActivationFocus();
+    }
+  }, [activationFocus, openNewCatalogItemManual, clearActivationFocus]);
+
   const filteredCatalog = useMemo(() => {
     return catalogItems.filter(item => {
       if (filterCategory !== 'all' && item.category !== filterCategory) return false;
+      if (filterBrand !== 'all') {
+        const ids = Array.isArray(item.brandIds) ? item.brandIds : [];
+        if (!ids.includes(filterBrand)) return false;
+      }
       if (filterType !== 'all' && (item.itemType || 'product') !== filterType) return false;
       if (searchCatalog) {
         const q = searchCatalog.toLowerCase();
+        const brandNames = catalogItemBrandNames(item, brands).toLowerCase();
         return (
           item.name.toLowerCase().includes(q) ||
           item.sku?.toLowerCase().includes(q) ||
           item.category?.toLowerCase().includes(q) ||
-          item.description?.toLowerCase().includes(q)
+          item.description?.toLowerCase().includes(q) ||
+          brandNames.includes(q)
         );
       }
       return true;
     });
-  }, [catalogItems, searchCatalog, filterCategory, filterType]);
+  }, [catalogItems, searchCatalog, filterCategory, filterBrand, filterType, brands]);
 
   const catalogKpis = useMemo(() => ({
     totalItems: catalogItems.length,
@@ -1935,7 +2045,7 @@ export function CatalogPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
             <input
               className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-56"
-              placeholder="Buscar artículo, SKU..."
+              placeholder="Buscar artículo, marca, SKU..."
               value={searchCatalog}
               onChange={e => setSearchCatalog(e.target.value)}
             />
@@ -1960,21 +2070,37 @@ export function CatalogPage() {
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
+          <select
+            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
+            value={filterBrand}
+            onChange={(e) => setFilterBrand(e.target.value)}
+          >
+            <option value="all">Todas las marcas</option>
+            {sortBrandsForDisplay(brands.filter((b) => b.active !== false)).map((b) => (
+              <option key={b._id} value={b._id}>{b.name}</option>
+            ))}
+          </select>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-gray-50"
+          <ActivationFieldWrap
+            fieldKey="catalog-import"
+            activeKey={
+              activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
+                ? activationFocus
+                : null
+            }
           >
-            Importar Excel
-          </button>
-          <button
-            onClick={() => { setEditingItem(null); setShowCreateItem(true); }}
-            className="px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl flex items-center gap-2 font-medium transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            Nuevo artículo
-          </button>
+            <AddButtonDropdown
+              label="Nuevo artículo"
+              onQuickAdd={openNewCatalogItemManual}
+              onAIAdd={() => setShowAIModal(true)}
+              onImport={() => setShowImportModal(true)}
+              quickAddLabel="Añadir manualmente"
+              quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
+              aiAddLabel="Crear con IA"
+              aiAddDesc="Describe productos en texto y se importan al catálogo"
+            />
+          </ActivationFieldWrap>
           <button
             onClick={handleDeleteFilteredCatalog}
             disabled={bulkDeletingCatalog || filteredCatalog.length === 0}
@@ -1998,10 +2124,10 @@ export function CatalogPage() {
           <p className="font-semibold">No hay artículos en el catálogo</p>
           <p className="text-sm mt-1">Añade el primer artículo</p>
           <button
-            onClick={() => { setEditingItem(null); setShowCreateItem(true); }}
-            className="mt-4 px-4 py-2 bg-gray-900 text-white rounded-xl text-sm font-medium"
+            onClick={openNewCatalogItemManual}
+            className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
           >
-            + Nuevo artículo
+            + Añadir manualmente
           </button>
         </div>
       ) : (
@@ -2010,6 +2136,7 @@ export function CatalogPage() {
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Marca</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Categoría</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Precio</th>
@@ -2048,6 +2175,19 @@ export function CatalogPage() {
                           )}
                         </div>
                       </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const brandLabel = catalogItemBrandNames(item, brands);
+                        return brandLabel ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300 text-xs font-medium rounded-lg border border-violet-200 dark:border-violet-800 max-w-[140px] truncate" title={brandLabel}>
+                            <Tag className="w-3 h-3 shrink-0" />
+                            {brandLabel}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-sm">—</span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 text-xs font-semibold rounded-lg border ${typeBadgeClass}`}>

@@ -7,6 +7,7 @@ import {
 } from '../lib/deliveryActivationChecklist';
 import { listCatalogItemsRequest, listPointsOfSaleRequest } from '../lib/deliveryApi';
 import {
+  DELIVERY_CATALOG_CHANGED,
   filterPointsOfSaleForWorkCenters,
   isDeliveryBusinessType,
   workCentersStrictlyForBusiness,
@@ -166,9 +167,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
         const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
         const catalogForBusiness = catalog.filter((item) => {
-          const ids = item.brandIds ?? [];
-          if (ids.length === 0) return false;
-          return ids.some((id) => brandIds.has(String(id).trim()));
+          const ids = (item.brandIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+          if (ids.length === 0) {
+            // Import sin columna marca: cuenta si hay producto y el negocio tiene marcas
+            return Boolean(item.name?.trim()) && brandIds.size > 0;
+          }
+          return ids.some((id) => brandIds.has(id));
         });
         const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
@@ -200,11 +204,13 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     };
 
     void load();
-    const onStoresChanged = () => void load();
-    window.addEventListener('work-centers:changed', onStoresChanged);
+    const onRefresh = () => void load();
+    window.addEventListener('work-centers:changed', onRefresh);
+    window.addEventListener(DELIVERY_CATALOG_CHANGED, onRefresh);
     return () => {
       cancelled = true;
-      window.removeEventListener('work-centers:changed', onStoresChanged);
+      window.removeEventListener('work-centers:changed', onRefresh);
+      window.removeEventListener(DELIVERY_CATALOG_CHANGED, onRefresh);
     };
   }, [isDelivery, dataUserId, businessId, user, currentBusiness]);
 

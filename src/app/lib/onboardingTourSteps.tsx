@@ -22,6 +22,8 @@ export interface OnboardingTourStep {
   description: string;
   hint?: string;
   route?: string;
+  /** Lista de comprobaciones concretas (evita confusión tipo 3/4 sin contexto) */
+  checklist?: string[];
 }
 
 export type OnboardingTourPersonalization = {
@@ -97,6 +99,7 @@ const GENERIC_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Empieza completando los datos de tu empresa: nombre comercial, datos fiscales, dirección y contacto. Así tus documentos y facturas saldrán con la información correcta.',
     hint: 'Accede desde Ajustes → Empresa para completar tu perfil.',
     route: '/saas/settings/empresa',
+    checklist: ['Nombre comercial', 'CIF / NIF', 'Dirección', 'Teléfono', 'Sedes o centros (opcional)'],
   },
   {
     id: 'clients',
@@ -107,6 +110,7 @@ const GENERIC_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Importa tu base de clientes desde Excel o créalos manualmente. Con el CRM integrado podrás gestionar clientes y leads desde un mismo sitio.',
     hint: 'Puedes importar clientes en bloque desde un fichero CSV o Excel.',
     route: tourClientsRoute(),
+    checklist: ['Primer cliente o lead', 'Al menos 3 clientes (recomendado)'],
   },
   {
     id: 'catalog',
@@ -117,6 +121,7 @@ const GENERIC_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Da de alta tus productos o servicios. Asigna categorías, precios, impuestos y toda la información necesaria para empezar a vender.',
     hint: 'Puedes añadir productos de uno en uno o importar en bloque.',
     route: '/saas/catalog',
+    checklist: ['Primer artículo', 'Precio de venta', 'Al menos 3 artículos (recomendado)'],
   },
   {
     id: 'operations',
@@ -127,6 +132,7 @@ const GENERIC_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Define la numeración de documentos, invita a tu equipo y configura los permisos básicos para que todos puedan trabajar.',
     hint: 'Accede a Ajustes para personalizar numeración, plantillas y roles.',
     route: '/saas/settings/numeracion',
+    checklist: ['Invitar a un miembro del equipo', 'Crear una plantilla de documento'],
   },
   {
     id: 'sales',
@@ -137,6 +143,7 @@ const GENERIC_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Ya estás listo para crear tu primera operación. Registra una venta, genera el documento correspondiente y comprueba que todo funciona correctamente.',
     hint: 'Desde Ventas puedes crear operaciones y generar facturas.',
     route: '/saas/sales',
+    checklist: ['Cliente seleccionado', 'Primera venta u operación registrada'],
   },
   {
     id: 'done',
@@ -160,6 +167,7 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Cada tienda es un local físico (nombre y dirección). Al darla de alta se crea el PDV, la caja del TPV de ese local. Puedes tener varios locales, cada uno con su PDV.',
     hint: 'Al crear la tienda también se prepara un borrador de carta (marca) vinculado al local.',
     route: '/saas/settings/tienda',
+    checklist: ['Crear la primera tienda (local)', 'Confirmar que la caja / PDV está activa'],
   },
   {
     id: 'delivery_brand',
@@ -170,6 +178,7 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'No tienes que crear la marca desde cero: ya existe una línea (suele llamarse «General» o como tu tienda). Aquí defines qué vendes, el nombre visible, las categorías y en qué locales se sirve. La marca no es el local: es la carta que verás en catálogo y TPV.',
     hint: 'Ajustes → Marca → edita la marca existente (Qué vendes, Identidad, Tiendas y categorías).',
     route: '/saas/settings/marca',
+    checklist: ['Nombre visible de la carta', 'Categorías y tiendas donde se sirve'],
   },
   {
     id: 'delivery_catalog',
@@ -180,6 +189,7 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Da de alta platos o productos bajo esa marca, con precio de venta. Si el paso Marca del checklist sigue pendiente, termínalo antes: el catálogo usa sus categorías.',
     hint: 'Catálogo → misma línea que completaste en Marca.',
     route: '/saas/catalog',
+    checklist: ['Al menos un producto o plato', 'Con precio de venta mayor que 0'],
   },
   {
     id: 'delivery_company',
@@ -187,9 +197,15 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
     iconBg: 'bg-gradient-to-br from-blue-500 to-indigo-600',
     title: 'Revisa los datos de empresa',
     description:
-      'Si acabas de registrarte, buena parte ya está guardada (nombre, CIF/NIF, dirección y teléfono). Entra solo para comprobar que todo es correcto o rellenar lo que falte en facturas y documentos — no hace falta volver a darlos todos.',
-    hint: 'Ajustes → Empresa. En «Alta delivery» este paso se marca solo cuando falta algún dato.',
+      'En el menú lateral, «4/5 pasos» es el progreso global; «3/4 datos» en Empresa son estos cuatro campos. Pulsa Ir junto al que falte (en tu caso suele ser Dirección).',
+    hint: 'Ajustes → Empresa → icono lápiz → el campo se resalta en amarillo.',
     route: '/saas/settings/empresa',
+    checklist: [
+      'Nombre comercial',
+      'CIF / NIF',
+      'Dirección',
+      'Teléfono de contacto',
+    ],
   },
   {
     id: 'delivery_operate',
@@ -200,6 +216,7 @@ const DELIVERY_ONBOARDING_TOUR_STEPS_BODY: OnboardingTourStep[] = [
       'Al crear o editar tu tienda, define el horario de apertura en el mismo asistente. Con local, marca y carta listos, ya puedes cobrar en el TPV.',
     hint: 'El horario queda guardado en cada local; el TPV se abre desde el dashboard.',
     route: '/saas/settings/horarios',
+    checklist: ['Horario de apertura en la tienda', 'Tienda, marca y catálogo listos para el TPV'],
   },
   {
     id: 'done',

@@ -343,6 +343,14 @@ export const router = createBrowserRouter([
         Component: Entry,
       },
       {
+        path: 'acceso/empresa',
+        element: <Navigate to="/auth/login" replace />,
+      },
+      {
+        path: 'acceso/trabajador',
+        element: <Navigate to="/auth/worker-login" replace />,
+      },
+      {
         path: 'auth/login',
         Component: Login,
       },

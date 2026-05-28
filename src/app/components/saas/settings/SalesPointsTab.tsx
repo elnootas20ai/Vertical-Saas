@@ -46,6 +46,8 @@ import {
   moneyNumberToDisplay,
 } from '../../../lib/workCenterMoneyInput';
 import { AddButtonDropdown } from '../AddButtonDropdown';
+import { useActivationFocus } from '../../../hooks/useActivationFocus';
+import { ActivationFieldWrap, scrollToActivationField } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
@@ -1311,7 +1313,9 @@ export function SalesPointsTab() {
 
   const newPdvQueryHandledRef = useRef(false);
   const horariosQueryHandledRef = useRef(false);
+  const activationQueryHandledRef = useRef(false);
   const [openModalAtHorarios, setOpenModalAtHorarios] = useState(false);
+  const { focus: activationFocus, clearFocus: clearActivationFocus, isFocused } = useActivationFocus();
 
   const requestCreateWorkCenter = useCallback(
     (forcePdv = false) => {
@@ -1384,6 +1388,48 @@ export function SalesPointsTab() {
     next.delete('panel');
     setSearchParams(next, { replace: true });
   }, [loading, searchParams, setSearchParams, requestCreateWorkCenter, workCenters]);
+
+  useEffect(() => {
+    if (!activationFocus) {
+      activationQueryHandledRef.current = false;
+      return;
+    }
+    if (loading || activationQueryHandledRef.current) return;
+    activationQueryHandledRef.current = true;
+
+    if (activationFocus === 'create-store') {
+      requestCreateWorkCenter(true);
+      clearActivationFocus();
+      return;
+    }
+
+    if (activationFocus === 'store-hours') {
+      const retailActive = workCenters.filter(
+        (wc) => wc.active !== false && isRetailWorkCenterType(wc.centerType),
+      );
+      if (retailActive.length === 0) {
+        requestCreateWorkCenter(true);
+      } else {
+        const target =
+          retailActive.find((wc) => !hasValidBusinessHoursConfig(wc.openingHours)) ?? retailActive[0];
+        setOpenModalAtHorarios(true);
+        setEditingItem(target);
+        setShowModal(true);
+      }
+      clearActivationFocus();
+      return;
+    }
+
+    if (activationFocus === 'pdv-list') {
+      window.setTimeout(() => scrollToActivationField('pdv-list', { focusInput: false }), 300);
+    }
+  }, [
+    activationFocus,
+    loading,
+    workCenters,
+    requestCreateWorkCenter,
+    clearActivationFocus,
+  ]);
 
   const goToProAccess = () => {
     if (dataUserId) {
@@ -1682,12 +1728,14 @@ export function SalesPointsTab() {
             ))}
           </select>
         </div>
-        <AddButtonDropdown
-          label={isDelivery ? 'Nueva tienda' : 'Nuevo centro'}
-          onQuickAdd={() => requestCreateWorkCenter(isDelivery)}
-          quickAddLabel={isDelivery ? 'Nueva tienda / PDV' : 'Alta rápida'}
-          quickAddDesc={isDelivery ? 'Formulario compacto + TPV de caja' : 'Formulario de centro de trabajo'}
-        />
+        <ActivationFieldWrap fieldKey="create-store" activeKey={isFocused('create-store') ? 'create-store' : activationFocus}>
+          <AddButtonDropdown
+            label={isDelivery ? 'Nueva tienda' : 'Nuevo centro'}
+            onQuickAdd={() => requestCreateWorkCenter(isDelivery)}
+            quickAddLabel={isDelivery ? 'Nueva tienda / PDV' : 'Alta rápida'}
+            quickAddDesc={isDelivery ? 'Formulario compacto + TPV de caja' : 'Formulario de centro de trabajo'}
+          />
+        </ActivationFieldWrap>
       </div>
 
       {/* Lista de centros */}
@@ -1708,16 +1756,21 @@ export function SalesPointsTab() {
               : 'Prueba con otros términos de búsqueda'}
           </p>
           {workCenters.length === 0 && (
-            <button
-              onClick={() => requestCreateWorkCenter(isDelivery)}
-              className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
-            >
-              {isDelivery ? '+ Primera tienda / PDV' : '+ Nuevo centro de trabajo'}
-            </button>
+            <ActivationFieldWrap fieldKey="create-store" activeKey={activationFocus}>
+              <button
+                onClick={() => requestCreateWorkCenter(isDelivery)}
+                className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
+              >
+                {isDelivery ? '+ Primera tienda / PDV' : '+ Nuevo centro de trabajo'}
+              </button>
+            </ActivationFieldWrap>
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          data-activation-field="pdv-list"
+        >
           {filtered.map(wc => {
             const primary = isPrimaryPdv(wc);
             const openEdit = () => openEditWorkCenter(wc);

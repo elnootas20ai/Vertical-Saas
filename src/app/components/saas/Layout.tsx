@@ -10,6 +10,7 @@ import { BusinessCarousel } from './BusinessCarousel';
 
 import { OnboardingTour } from './OnboardingTour';
 import { GuidedStepsPopup } from './GuidedStepsPopup';
+import { ActivationPageCoach } from './ActivationPageCoach';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -269,6 +270,7 @@ export function Layout({ children, title, subtitle, noPadding, titleClassName, s
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
           <ErrorBoundary>
             <DeliveryOpsReturnStrip />
+            <ActivationPageCoach />
             {children}
           </ErrorBoundary>
         </main>

@@ -1691,7 +1691,13 @@ export async function getOpsCenter(req, res) {
     const allOrders = await listDeliveryOrdersByUser(req, userId);
     let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
 
-    if (salesPointId) dayOrders = dayOrders.filter(o => o.salesPointId === salesPointId);
+    if (salesPointId) {
+      const pdv = String(salesPointId).trim();
+      dayOrders = dayOrders.filter((o) => {
+        const oid = String(o.salesPointId || '').trim();
+        return !oid || oid === pdv;
+      });
+    }
     if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
     if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
 

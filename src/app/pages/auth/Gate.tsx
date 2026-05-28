@@ -392,13 +392,22 @@ export function Gate() {
               <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-5">Tu espacio</h3>
               {isLoadingBusinesses ? (
                 <div className="space-y-3 animate-pulse">
-                  <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
                   <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded-xl" />
+                  <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
                 </div>
               ) : hasApiBusinesses && currentBusiness ? (
                 <div className="space-y-4">
+                  <ACCESO__Button
+                    onClick={handleEnterDashboard}
+                    variant="primary"
+                    fullWidth
+                    size="lg"
+                  >
+                    <span className="flex-1 text-left">Entrar al panel</span>
+                    <ArrowRight className="w-5 h-5 shrink-0" />
+                  </ACCESO__Button>
                   <div className="p-5 bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-800/70 rounded-2xl border border-gray-200 dark:border-gray-700">
-                    <div className="flex items-start gap-3 mb-4">
+                    <div className="flex items-start gap-3">
                       <div className="w-12 h-12 bg-gray-900 dark:bg-gray-700 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
                         {currentBusiness.logo ? (
                           <img src={currentBusiness.logo} alt="" className="w-12 h-12 object-cover" />
@@ -407,7 +416,12 @@ export function Gate() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{displayTradeName}</h4>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{displayTradeName}</h4>
+                          <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 text-xs font-medium rounded-full">
+                            Empresa activa
+                          </span>
+                        </div>
                         {hasCIF ? (
                           <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">CIF: {displayTaxId}</p>
                         ) : (
@@ -417,33 +431,20 @@ export function Gate() {
                         )}
                       </div>
                     </div>
-                    <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-full mb-4">
-                      Empresa activa
-                    </span>
                     {!hasCIF && (
                       <button
+                        type="button"
                         onClick={() => navigate('/auth/onboarding/company')}
-                        className="w-full px-3 py-1.5 mb-3 border border-yellow-600 text-yellow-700 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-950/30 transition-colors text-sm font-medium"
+                        className="w-full mt-4 px-3 py-1.5 border border-yellow-600 text-yellow-700 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-950/30 transition-colors text-sm font-medium"
                       >
                         Completar datos
                       </button>
                     )}
                   </div>
-                  <div className="space-y-3">
-                    <ACCESO__Button
-                      onClick={handleEnterDashboard}
-                      variant="primary"
-                      fullWidth
-                      size="lg"
-                    >
-                      <span className="flex-1 text-left">Entrar al panel</span>
-                      <ArrowRight className="w-5 h-5" />
-                    </ACCESO__Button>
-                    <ACCESO__Button onClick={() => setShowInviteModal(true)} variant="outline" fullWidth>
-                      <UserPlus className="w-5 h-5" />
-                      Invitar a un trabajador
-                    </ACCESO__Button>
-                  </div>
+                  <ACCESO__Button onClick={() => setShowInviteModal(true)} variant="outline" fullWidth>
+                    <UserPlus className="w-5 h-5" />
+                    Invitar a un trabajador
+                  </ACCESO__Button>
                 </div>
               ) : (
                 <div className="text-center py-8">

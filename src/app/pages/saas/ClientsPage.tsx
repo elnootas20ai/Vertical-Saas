@@ -21,6 +21,8 @@ import { CrmNav } from '../../components/saas/CrmNav';
 import { NuevoClienteModal } from '../../components/saas/NuevoClienteModal';
 import { CrmAlertsPanel } from '../../components/saas/CrmAlertsPanel';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { toast } from 'sonner';
 import { DuplicatesMergeModal } from '../../components/saas/DuplicatesMergeModal';
@@ -1505,6 +1507,18 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [filterClientTag,         setFilterClientTag]         = useState<string>('');
   const [filterBranch,            setFilterBranch]            = useState<string>('all');
   const [filterWorkCenter, setFilterWorkCenter] = useState<string>('all');
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+
+  useEffect(() => {
+    if (!activationFocus) return;
+    if (activationFocus === 'client-add') {
+      setShowAddClientModal(true);
+      clearActivationFocus();
+    } else if (activationFocus === 'client-import') {
+      setCrmImportMode('clients');
+      clearActivationFocus();
+    }
+  }, [activationFocus, clearActivationFocus]);
 
   // ── Col-filter state: Leads ────────────────────────────────────────────────
   const [lFilterName,        setLFilterName]        = useState<string[]>([]);
@@ -2336,10 +2350,12 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <TrendingUp className="w-4 h-4" />
           {segmentConditions.length > 0 && <span className="text-xs bg-indigo-600 text-white rounded-full w-4 h-4 flex items-center justify-center">{segmentConditions.length}</span>}
         </button>
-        <button onClick={() => setCrmImportMode('leads')} title="Importar leads desde CSV"
-          className="flex-shrink-0 p-2.5 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400 rounded-xl transition-colors">
-          <Upload className="w-4 h-4" />
-        </button>
+        <ActivationFieldWrap fieldKey="client-import" activeKey={activationFocus}>
+          <button onClick={() => setCrmImportMode('leads')} title="Importar leads desde CSV"
+            className="flex-shrink-0 p-2.5 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-600 dark:text-gray-400 rounded-xl transition-colors">
+            <Upload className="w-4 h-4" />
+          </button>
+        </ActivationFieldWrap>
         <button onClick={() => setShowNewLeadModal(true)}
           className="flex items-center gap-1.5 px-3.5 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors flex-shrink-0">
           <Plus className="w-4 h-4" />
@@ -2637,14 +2653,16 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
 
         <div className={isDeliveryBusiness ? 'ml-auto flex-shrink-0' : ''}>
-          <AddButtonDropdown
-            label="Cliente"
-            onQuickAdd={() => setShowAddClientModal(true)}
-            onAIAdd={() => setShowAIClientModal(true)}
-            onImport={() => setCrmImportMode('clients')}
-            quickAddLabel="Alta rápida"
-            quickAddDesc="Formulario de nuevo cliente"
-          />
+          <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
+            <AddButtonDropdown
+              label="Cliente"
+              onQuickAdd={() => setShowAddClientModal(true)}
+              onAIAdd={() => setShowAIClientModal(true)}
+              onImport={() => setCrmImportMode('clients')}
+              quickAddLabel="Alta rápida"
+              quickAddDesc="Formulario de nuevo cliente"
+            />
+          </ActivationFieldWrap>
         </div>
       </div>
 

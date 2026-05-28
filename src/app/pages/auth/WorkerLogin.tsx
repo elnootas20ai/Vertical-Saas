@@ -7,6 +7,7 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -98,11 +99,14 @@ export function WorkerLogin() {
             <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
               <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
+            <span className="inline-block mb-3 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+              Acceso trabajador
+            </span>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Iniciar sesión como trabajador
+              Iniciar sesión — Trabajador
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Usa el correo y la contraseña que te dio tu empresa para acceder a tu panel.
+              Correo y contraseña que te dio tu empresa. Irás directo a tu panel operativo.
             </p>
           </div>
 
@@ -186,17 +190,28 @@ export function WorkerLogin() {
             ¿Accedes con código de empresa?{' '}
             <button
               type="button"
-              onClick={() => navigate('/auth/team-login')}
+              onClick={() => navigate(AUTH_PATHS.teamLogin)}
               className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
-              Iniciar con código de empresa
+              Entrar con código
+            </button>
+          </p>
+
+          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-4">
+            ¿Gestionas la empresa?{' '}
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.companyLogin)}
+              className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
+            >
+              Acceso empresa
             </button>
           </p>
         </div>
 
         <div className="mt-6 text-center">
-          <ACCESO__Button variant="ghost" onClick={() => navigate('/auth/entry')}>
-            ← {t('common.back')}
+          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
+            ← Elegir tipo de acceso
           </ACCESO__Button>
         </div>
       </div>

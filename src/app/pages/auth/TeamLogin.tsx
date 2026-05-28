@@ -6,6 +6,7 @@ import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 
 type Step = 'companyCode' | 'credentials';
 
@@ -219,13 +220,31 @@ export function TeamLogin() {
           )}
         </div>
 
-        <div className="mt-6 text-center">
-          <ACCESO__Button
-            variant="ghost"
-            onClick={() => navigate('/auth/entry')}
+        <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
+          ¿Tienes correo y contraseña de la empresa?{' '}
+          <button
+            type="button"
+            onClick={() => navigate(AUTH_PATHS.workerLogin)}
+            className="font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
+            Iniciar sesión — Trabajador
+          </button>
+        </p>
+        <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
+          ¿Gestionas la empresa?{' '}
+          <button
+            type="button"
+            onClick={() => navigate(AUTH_PATHS.companyLogin)}
+            className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
+          >
+            Acceso empresa
+          </button>
+        </p>
+
+        <div className="mt-4 text-center">
+          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
             <ArrowLeft className="w-4 h-4 mr-1" />
-            {t('common.back')}
+            Elegir tipo de acceso
           </ACCESO__Button>
         </div>
       </div>

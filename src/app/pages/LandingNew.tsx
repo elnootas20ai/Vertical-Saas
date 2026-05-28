@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react';
 import { ModalComingSoon } from '../components/landing/ModalComingSoon';
 import { BrowserFrame } from '../components/landing/BrowserFrame';
 import { ModuleImageModal } from '../components/landing/ModuleImageModal';
+import { AUTH_PATHS } from '../lib/authEntryPaths';
 
 export function LandingNew() {
   const navigate = useNavigate();
@@ -153,21 +154,31 @@ export function LandingNew() {
                 Stock, operaciones, clientes y documentos en un solo lugar. Sin papeles perdidos, sin procesos duplicados.
               </p>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-8">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4">
                 <button
-                  onClick={() => navigate('/auth/entry')}
+                  onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
                   className="px-8 py-4 bg-white text-blue-700 rounded-xl hover:bg-blue-50 transition-all font-bold flex items-center justify-center gap-2 shadow-2xl shadow-blue-950/50 hover:-translate-y-0.5"
                 >
-                  Probar gratis 14 días
+                  Probar como empresa
                   <ArrowRight className="w-5 h-5" />
                 </button>
                 <button
-                  onClick={() => scrollToSection('contacto')}
-                  className="px-8 py-4 border-2 border-white/30 text-white rounded-xl hover:bg-white/10 hover:border-white/50 transition-all font-semibold"
+                  onClick={() => navigate(AUTH_PATHS.workerLogin)}
+                  className="px-8 py-4 border-2 border-white/40 text-white rounded-xl hover:bg-white/10 hover:border-white/60 transition-all font-semibold flex items-center justify-center gap-2"
                 >
-                  Hablar con ventas
+                  Acceso trabajadores
                 </button>
               </div>
+              <p className="text-sm text-blue-300/90 mb-4">
+                ¿Ya tienes cuenta?{' '}
+                <button type="button" onClick={() => navigate(AUTH_PATHS.entry)} className="text-white underline underline-offset-2 hover:text-blue-100">
+                  Elegir cómo entrar
+                </button>
+                {' · '}
+                <button type="button" onClick={() => scrollToSection('contacto')} className="text-white underline underline-offset-2 hover:text-blue-100">
+                  Hablar con ventas
+                </button>
+              </p>
 
               <div className="grid grid-cols-2 gap-2.5 text-sm">
                 {[
@@ -742,7 +753,7 @@ export function LandingNew() {
               </ul>
 
               <button
-                onClick={() => navigate('/auth/entry')}
+                onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
                 className="w-full px-6 py-3.5 border-2 border-blue-600 text-blue-700 font-bold rounded-xl hover:bg-blue-600 hover:text-white transition-all"
               >
                 Empezar gratis
@@ -782,7 +793,7 @@ export function LandingNew() {
               </ul>
 
               <button
-                onClick={() => navigate('/auth/entry')}
+                onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
                 className="w-full px-6 py-3.5 bg-white text-blue-700 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-xl shadow-blue-900/30"
               >
                 Empezar gratis

@@ -54,7 +54,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_store',
     number: 1,
     label: 'Tienda y PDV',
-    description: 'Local + caja (obligatorio primero)',
+    description: 'Crea el local y la caja; pulsa Ir en cada dato pendiente',
     route: '/saas/settings/tienda',
     icon: 'store',
     subSteps: [
@@ -66,7 +66,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_brand',
     number: 2,
     label: 'Personaliza tu marca',
-    description: 'Tu carta ya viene creada — personaliza nombre, categorías y tiendas',
+    description: 'Edita la carta (nombre, categorías, tiendas); Ir abre el editor',
     route: '/saas/settings/marca',
     icon: 'brand',
     subSteps: [
@@ -81,7 +81,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_catalog',
     number: 3,
     label: 'Catálogo',
-    description: 'Al menos un producto con precio',
+    description: 'Importa Excel o añade productos con precio; Ir en cada dato',
     route: '/saas/catalog',
     icon: 'package',
     subSteps: [
@@ -93,7 +93,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_company',
     number: 4,
     label: 'Empresa',
-    description: 'Revisar o completar facturación (muchos datos ya vienen del alta)',
+    description: 'Ajustes → Empresa: revisa nombre, CIF, dirección y teléfono (suele faltar el teléfono)',
     route: '/saas/settings/empresa',
     icon: 'building',
     subSteps: [
@@ -107,7 +107,7 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_operate',
     number: 5,
     label: 'Listo para vender',
-    description: 'Horario en tienda y primer TPV',
+    description: 'Horario en la tienda y acceso al TPV rápido',
     route: '/saas/settings/horarios',
     icon: 'clock',
     subSteps: [

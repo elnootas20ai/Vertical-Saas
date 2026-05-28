@@ -303,7 +303,13 @@ export function DeliveryOrders() {
   const filtered = useMemo(() => {
     let result = [...orders];
     if (filters.channel) result = result.filter((o) => o.channel === filters.channel);
-    if (filters.salesPointId) result = result.filter((o) => o.salesPointId === filters.salesPointId);
+    if (filters.salesPointId) {
+      const pdv = filters.salesPointId;
+      result = result.filter((o) => {
+        const oid = String(o.salesPointId || '').trim();
+        return !oid || oid === pdv;
+      });
+    }
     if (filters.status) result = result.filter((o) => o.status === filters.status);
     if (filters.deliveryType) result = result.filter((o) => o.deliveryType === filters.deliveryType);
     if (filters.dateFrom) result = result.filter((o) => o.createdAt >= filters.dateFrom);

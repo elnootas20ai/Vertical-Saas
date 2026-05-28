@@ -29,6 +29,8 @@ import {
   LayoutGrid, List, Target, Users, MapPin,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
@@ -1114,6 +1116,14 @@ export function Sales() {
   const [showGenerateDocsModal, setShowGenerateDocsModal] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+
+  useEffect(() => {
+    if (activationFocus === 'sale-new') {
+      setShowCreateModal(true);
+      clearActivationFocus();
+    }
+  }, [activationFocus, clearActivationFocus]);
 
   const SALES_AI_FIELDS: AIFieldDef[] = [
     { key: 'vehiclePlate', label: 'Matrícula vehículo' },
@@ -1588,14 +1598,16 @@ export function Sales() {
               <Trophy className="w-4 h-4" />
               <span className="hidden sm:inline">RAMP</span>
             </button>
-            <AddButtonDropdown
-              label={t('sales.newSale')}
-              onQuickAdd={() => setShowCreateModal(true)}
-              onAIAdd={() => setShowAIModal(true)}
-              onImport={() => setShowImportModal(true)}
-              quickAddLabel="Alta rápida"
-              quickAddDesc="Formulario de nueva venta"
-            />
+            <ActivationFieldWrap fieldKey="sale-new" activeKey={activationFocus}>
+              <AddButtonDropdown
+                label={t('sales.newSale')}
+                onQuickAdd={() => setShowCreateModal(true)}
+                onAIAdd={() => setShowAIModal(true)}
+                onImport={() => setShowImportModal(true)}
+                quickAddLabel="Alta rápida"
+                quickAddDesc="Formulario de nueva venta"
+              />
+            </ActivationFieldWrap>
           </div>
         </div>
 

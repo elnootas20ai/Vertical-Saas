@@ -200,33 +200,65 @@ export function isOnboardingTourCompleted(userId: string, businessId: string): b
   }
 }
 
+type OnboardingTourStepSnapshot = { i: number; id: string };
+
+function clampOnboardingTourStepIndex(index: number, stepCount: number): number {
+  if (stepCount <= 0) return 0;
+  return Math.max(0, Math.min(Math.floor(index), stepCount - 1));
+}
+
 /**
  * Paso actual del tour persistido en sessionStorage (sobrevive al refresh dentro
  * de la misma pestaña). Devuelve 0 si no hay valor o es inválido.
+ * @deprecated Prefer {@link resolveOnboardingTourStepIndex} con la lista de pasos actual.
  */
 export function getOnboardingTourStep(userId: string, businessId: string): number {
-  if (!userId || !businessId) return 0;
+  return resolveOnboardingTourStepIndex([], userId, businessId);
+}
+
+/** Restaura el índice del paso por `id` (genérico vs delivery comparten longitud pero no el orden semántico). */
+export function resolveOnboardingTourStepIndex(
+  steps: { id: string }[],
+  userId: string,
+  businessId: string,
+): number {
+  if (!userId || !businessId || steps.length === 0) return 0;
   try {
     const raw = sessionStorage.getItem(onboardingTourStepKey(userId, businessId));
     if (!raw) return 0;
-    const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    const trimmed = raw.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const n = Number.parseInt(trimmed, 10);
+      return Number.isFinite(n) ? clampOnboardingTourStepIndex(n, steps.length) : 0;
+    }
+    const parsed = JSON.parse(trimmed) as Partial<OnboardingTourStepSnapshot>;
+    const id = String(parsed.id || '').trim();
+    if (id) {
+      const byId = steps.findIndex((s) => s.id === id);
+      if (byId >= 0) return byId;
+    }
+    if (typeof parsed.i === 'number' && Number.isFinite(parsed.i)) {
+      return clampOnboardingTourStepIndex(parsed.i, steps.length);
+    }
   } catch {
-    return 0;
+    /* ignore */
   }
+  return 0;
 }
 
 export function setOnboardingTourStep(
   userId: string,
   businessId: string,
   step: number,
+  stepId?: string,
 ): void {
   if (!userId || !businessId) return;
   try {
-    sessionStorage.setItem(
-      onboardingTourStepKey(userId, businessId),
-      String(Math.max(0, Math.floor(step))),
-    );
+    const payload: OnboardingTourStepSnapshot = {
+      i: Math.max(0, Math.floor(step)),
+      id: String(stepId || '').trim(),
+    };
+    sessionStorage.setItem(onboardingTourStepKey(userId, businessId), JSON.stringify(payload));
   } catch {
     /* ignore */
   }
@@ -288,7 +320,10 @@ export function armOnboardingTourForBusiness(userId: string, businessId: string)
   if (!userId || !businessId) return;
   try {
     clearOnboardingTourForBusiness(userId, businessId);
-    sessionStorage.setItem(onboardingTourStepKey(userId, businessId), '0');
+    sessionStorage.setItem(
+      onboardingTourStepKey(userId, businessId),
+      JSON.stringify({ i: 0, id: 'welcome' } satisfies OnboardingTourStepSnapshot),
+    );
     sessionStorage.setItem(onboardingTourActiveKey(userId, businessId), '1');
     window.dispatchEvent(
       new CustomEvent(ONBOARDING_TOUR_ARM_EVENT, {

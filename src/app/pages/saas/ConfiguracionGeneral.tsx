@@ -58,6 +58,12 @@ import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import { ImportStockWizard } from '../../components/saas/ImportStockWizard';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { bulkCreateCatalogItemsRequest } from '../../lib/deliveryApi';
+import { listBrandsRequest } from '../../lib/brandsApi';
+import {
+  normalizeImportCategory,
+  resolveCatalogImportBrandIds,
+} from '../../lib/deliveryCatalogImport';
+import { notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -333,14 +339,17 @@ export function ConfiguracionGeneral() {
   const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
     if (!user?.user_id) return 0;
     const businessType = biz?.businessType || 'delivery';
+    let brands = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
     const items = entries
       .map((entry) => {
         const name = String(entry.name || '').trim();
         if (!name) return null;
+        const category = normalizeImportCategory(entry.category || '');
         return {
           name,
           description: entry.description || '',
-          category: entry.category || '',
+          category,
+          brandIds: resolveCatalogImportBrandIds([], category, brands),
           unit: entry.unit || 'ud',
           vertical: businessType,
           module: 'catalog' as const,
@@ -368,6 +377,7 @@ export function ConfiguracionGeneral() {
 
     // Marcar como completado si se creó al menos 1.
     if (bizId && result.created > 0) {
+      notifyDeliveryCatalogChanged();
       const nextStatus = {
         stock: resolvedImportStatus?.stock || 'pending',
         clients: resolvedImportStatus?.clients || 'pending',

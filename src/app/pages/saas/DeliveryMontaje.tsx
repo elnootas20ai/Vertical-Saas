@@ -13,6 +13,7 @@ import {
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
 import {
   Package,
   Search,
@@ -258,7 +259,7 @@ export function DeliveryMontaje() {
 
   const storeOrders = useMemo(() => {
     if (!filterPdv) return orders;
-    return orders.filter((o) => o.salesPointId === filterPdv);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
   }, [orders, filterPdv]);
 
   const assemblyOrders = useMemo(

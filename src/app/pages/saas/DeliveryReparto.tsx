@@ -10,6 +10,7 @@ import {
   type DeliveryOrder, type Driver, type DriverStats, type RepartoConfig, type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
 import {
   Truck, Package, CheckCircle2, Search, X, Phone, MapPin, User,
   Timer, MessageSquare, ChevronDown, ChevronRight, Users, Navigation,
@@ -92,7 +93,7 @@ export function DeliveryReparto() {
 
   const storeOrders = useMemo(() => {
     if (!filterPdv) return orders;
-    return orders.filter((o) => o.salesPointId === filterPdv);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
   }, [orders, filterPdv]);
 
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);

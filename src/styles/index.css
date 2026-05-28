@@ -34,3 +34,14 @@
 .ProseMirror em { font-style: italic; }
 .ProseMirror u { text-decoration: underline; }
 .ProseMirror s { text-decoration: line-through; }
+
+/* Alta delivery: campo señalado desde el checklist (?activar=…) */
+.activation-field-highlight {
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0 2px rgb(245 158 11), 0 0 0 6px rgba(245, 158, 11, 0.2);
+  animation: activation-field-pulse 1.5s ease-in-out infinite;
+}
+@keyframes activation-field-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgb(245 158 11), 0 0 0 4px rgba(245, 158, 11, 0.15); }
+  50% { box-shadow: 0 0 0 2px rgb(245 158 11), 0 0 0 8px rgba(245, 158, 11, 0.35); }
+}

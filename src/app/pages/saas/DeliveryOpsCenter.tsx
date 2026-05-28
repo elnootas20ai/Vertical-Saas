@@ -16,6 +16,8 @@ import {
   notifyDeliveryActiveStoreChanged,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { scrollToActivationField } from '../../components/saas/ActivationGuideUi';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { getAuthHeaders } from '../../lib/authApi';
 import { Delivery } from './Delivery';
@@ -404,11 +406,12 @@ function Alerts({ alerts }: { alerts: OpsAlert[] }) {
 
 /* ── Quick Access ─────────────────────────────────────────────────────────── */
 
-function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueCount }: {
+function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueCount, activationFocus }: {
   cfg: DeliveryConfig | null; kpis: OpsCenterData['kpis'] | null; cashPend: number; incidents: number;
   onNavigate: (path: string) => void;
   /** Cola nuevo+cocina+listo (preferible a KPI suelto; evita parpadeos) */
   pedidosQueueCount: number;
+  activationFocus?: string | null;
 }) {
   type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean };
   const items: QItem[] = [
@@ -426,12 +429,20 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueC
   ];
   return (
     <div className="flex gap-2.5 sm:gap-3 overflow-x-auto pb-1.5 pt-1 scrollbar-thin overflow-y-visible -mx-0.5">
-      {items.filter(x => x.v).map(x => (
+      {items.filter(x => x.v).map(x => {
+        const activationKey = x.l === 'TPV rápido' ? 'open-tpv' : undefined;
+        const highlighted = activationKey && activationFocus === activationKey;
+        return (
         <button
           key={x.l}
           type="button"
+          data-activation-field={activationKey}
           onClick={() => onNavigate(x.r)}
-          className="flex flex-col items-center justify-center gap-2 px-3 py-3.5 rounded-xl border-2 border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:border-amber-400/80 dark:hover:border-amber-600/50 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 hover:shadow-md active:scale-[0.98] transition-all min-w-[88px] sm:min-w-[102px] shrink-0 relative overflow-visible shadow-sm"
+          className={`flex flex-col items-center justify-center gap-2 px-3 py-3.5 rounded-xl border-2 bg-white dark:bg-gray-800 hover:border-amber-400/80 dark:hover:border-amber-600/50 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 hover:shadow-md active:scale-[0.98] transition-all min-w-[88px] sm:min-w-[102px] shrink-0 relative overflow-visible shadow-sm ${
+            highlighted
+              ? 'activation-field-highlight border-amber-500 dark:border-amber-500'
+              : 'border-gray-200 dark:border-gray-600'
+          }`}
         >
           <x.i className="w-7 h-7 sm:w-8 sm:h-8 text-gray-700 dark:text-gray-200" strokeWidth={2} />
           <span className="text-[11px] sm:text-xs font-bold text-gray-700 dark:text-gray-200 leading-tight text-center max-w-[5.5rem]">{x.l}</span>
@@ -443,7 +454,8 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueC
             </span>
           )}
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -825,6 +837,15 @@ export function DeliveryOpsCenter() {
   }, [user?.user_id]);
   const [data, setData] = useState<OpsCenterData | null>(null);
   const [loading, setLoading] = useState(true);
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+
+  useEffect(() => {
+    if (activationFocus !== 'open-tpv') return;
+    window.setTimeout(() => {
+      scrollToActivationField('open-tpv', { focusInput: false });
+    }, 500);
+    clearActivationFocus();
+  }, [activationFocus, clearActivationFocus]);
   const [filters, setFilters] = useState<OpsCenterFilters>({});
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sseOk, setSseOk] = useState(false);
@@ -1120,6 +1141,7 @@ export function DeliveryOpsCenter() {
                 incidents={data?.kpis?.byStatus?.incident || 0}
                 onNavigate={quickNav}
                 pedidosQueueCount={pedidosQueueCount}
+                activationFocus={activationFocus}
               />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
@@ -1164,6 +1186,7 @@ export function DeliveryOpsCenter() {
               incidents={data?.kpis?.byStatus?.incident || 0}
               onNavigate={quickNav}
               pedidosQueueCount={pedidosQueueCount}
+              activationFocus={activationFocus}
             />
 
             <Metrics kpis={data?.kpis || null} />

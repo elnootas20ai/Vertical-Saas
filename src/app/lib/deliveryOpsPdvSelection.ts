@@ -78,6 +78,21 @@ export function pickDefaultActivePdvId(
   return sorted[0]._id;
 }
 
+/**
+ * Pedidos sin `salesPointId` (p. ej. TPV antiguo) siguen visibles en la tienda activa.
+ * Con PDV asignado, solo coinciden si es la misma tienda.
+ */
+export function deliveryOrderMatchesPdvFilter(
+  order: { salesPointId?: string | null },
+  pdvId: string | null | undefined,
+): boolean {
+  const filterId = String(pdvId || '').trim();
+  if (!filterId) return true;
+  const orderPdv = String(order.salesPointId || '').trim();
+  if (!orderPdv) return true;
+  return orderPdv === filterId;
+}
+
 /** Si la preferencia es `wc:…`, devuelve el `_id` del PDV y opcionalmente reescribe storage al id estable. */
 export function normalizeStoredPdvPreference(
   pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean }>,

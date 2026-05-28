@@ -385,11 +385,21 @@ export async function setupDeliveryRetailStore(
 }
 
 export const DELIVERY_WORK_CENTERS_CHANGED = 'work-centers:changed';
+export const DELIVERY_CATALOG_CHANGED = 'catalog:changed';
 
 export function notifyDeliveryWorkCentersChanged(): void {
   if (typeof window === 'undefined') return;
   try {
     window.dispatchEvent(new CustomEvent(DELIVERY_WORK_CENTERS_CHANGED));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function notifyDeliveryCatalogChanged(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(DELIVERY_CATALOG_CHANGED));
   } catch {
     /* ignore */
   }

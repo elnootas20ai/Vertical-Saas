@@ -9,6 +9,7 @@ import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbo
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 
 const CREDENTIALS_KEY = 'vertial_saved_login';
 
@@ -149,11 +150,14 @@ export function Login() {
             <div className="flex items-center justify-center mb-6">
               <VertialLogo size="lg" />
             </div>
+            <span className="inline-block mb-3 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+              Acceso empresa
+            </span>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              {t('auth.login')}
+              Iniciar sesión — Empresa
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              {t('auth.loginSubtitle')}
+              Para propietarios, gerentes y administración del negocio.
             </p>
           </div>
 
@@ -275,20 +279,29 @@ export function Login() {
           <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
             {t('auth.noAccount')}{' '}
             <button
-              onClick={() => navigate('/auth/register')}
-              className="font-medium text-[#0f1419] hover:underline"
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
+              className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
             >
-              {t('auth.createAccount')}
+              Crear cuenta de empresa
+            </button>
+          </p>
+
+          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-4">
+            ¿Eres trabajador?{' '}
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.workerLogin)}
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Accede por aquí
             </button>
           </p>
         </div>
 
         <div className="mt-6 text-center">
-          <ACCESO__Button 
-            variant="ghost"
-            onClick={() => navigate('/auth/entry')}
-          >
-            ← {t('common.back')}
+          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
+            ← Elegir tipo de acceso
           </ACCESO__Button>
         </div>
       </div>

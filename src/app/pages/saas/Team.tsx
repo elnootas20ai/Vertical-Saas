@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useModalClose } from '../../hooks/useModalClose';
+import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import {
   Activity,
   AlertCircle,
@@ -2742,6 +2744,14 @@ export function Team() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
   const [workCentersData, setWorkCentersData] = useState<WorkCenter[]>([]);
+  const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+
+  useEffect(() => {
+    if (activationFocus === 'team-invite') {
+      setShowInvite(true);
+      clearActivationFocus();
+    }
+  }, [activationFocus, clearActivationFocus]);
 
   const TEAM_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'name', label: 'Nombre', required: true, example: 'María López' },
@@ -3094,14 +3104,16 @@ export function Team() {
               <Network className="w-4 h-4" />
               {t('team.orgchart.button')}
             </button>
-            <button
-              type="button"
-              onClick={() => setShowInvite(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-            >
-              <UserPlus className="w-4 h-4" />
-              {t('team.inviteUser')}
-            </button>
+            <ActivationFieldWrap fieldKey="team-invite" activeKey={activationFocus}>
+              <button
+                type="button"
+                onClick={() => setShowInvite(true)}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                <UserPlus className="w-4 h-4" />
+                {t('team.inviteUser')}
+              </button>
+            </ActivationFieldWrap>
           </div>
         </div>
 

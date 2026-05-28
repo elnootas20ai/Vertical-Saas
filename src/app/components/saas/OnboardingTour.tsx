@@ -6,12 +6,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   clearOnboardingTourForBusiness,
-  getOnboardingTourStep,
   isOnboardingTourActive,
   isOnboardingTourCompleted,
   markOnboardingTourCompleted,
   ONBOARDING_TOUR_ARM_EVENT,
   setOnboardingTourActive,
+  resolveOnboardingTourStepIndex,
   setOnboardingTourStep,
 } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
@@ -53,6 +53,7 @@ export function OnboardingTour({ onComplete }: Props) {
 
   const accountUserId = resolveAccountUserId(user);
   const businessId = String(currentBusiness?.business_id || '').trim();
+  const businessType = String(currentBusiness?.businessType || '').trim();
   const [stepIndex, setStepIndex] = useState(0);
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -61,16 +62,12 @@ export function OnboardingTour({ onComplete }: Props) {
   const ownerRef = useRef<string>('');
 
   useEffect(() => {
-    if (!accountUserId || !businessId || !businessesFetchSettled) return;
+    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) return;
 
-    const ownerKey = `${accountUserId}::${businessId}`;
-    // Al cambiar de empresa / sesión (o al montar tras refresh), restauramos el
-    // progreso persistido en sessionStorage para no perder el paso actual.
+    const ownerKey = `${accountUserId}::${businessId}::${businessType || 'unknown'}`;
     if (ownerRef.current !== ownerKey) {
       ownerRef.current = ownerKey;
       setClosedThisSession(false);
-      const savedStep = getOnboardingTourStep(accountUserId, businessId);
-      setStepIndex(savedStep);
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
@@ -87,7 +84,7 @@ export function OnboardingTour({ onComplete }: Props) {
       const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
       if (detail?.userId === accountUserId && detail?.businessId === businessId) {
         setStepIndex(0);
-        setOnboardingTourStep(accountUserId, businessId, 0);
+        setOnboardingTourStep(accountUserId, businessId, 0, 'welcome');
         setClosedThisSession(false);
         openTour();
       }
@@ -112,11 +109,19 @@ export function OnboardingTour({ onComplete }: Props) {
       if (timer) clearTimeout(timer);
       window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
     };
-  }, [accountUserId, businessId, businessesFetchSettled, closedThisSession]);
+  }, [
+    accountUserId,
+    businessId,
+    businessType,
+    businessesFetchSettled,
+    closedThisSession,
+    currentBusiness,
+  ]);
 
   useEffect(() => {
-    setStepIndex((idx) => Math.max(0, Math.min(idx, steps.length - 1)));
-  }, [steps.length]);
+    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) return;
+    setStepIndex(resolveOnboardingTourStepIndex(steps, accountUserId, businessId));
+  }, [accountUserId, businessId, businessesFetchSettled, currentBusiness, steps]);
 
   const closeTour = useCallback(
     (completed = false) => {
@@ -148,7 +153,7 @@ export function OnboardingTour({ onComplete }: Props) {
     }
 
     setStepIndex(next);
-    setOnboardingTourStep(accountUserId, businessId, next);
+    setOnboardingTourStep(accountUserId, businessId, next, step?.id);
     tourRouteNavigate(navigate, step?.route);
   }, [stepIndex, closeTour, navigate, steps, accountUserId, businessId]);
 
@@ -157,7 +162,7 @@ export function OnboardingTour({ onComplete }: Props) {
       const prev = stepIndex - 1;
       const step = steps[prev];
       setStepIndex(prev);
-      setOnboardingTourStep(accountUserId, businessId, prev);
+      setOnboardingTourStep(accountUserId, businessId, prev, step?.id);
       tourRouteNavigate(navigate, step?.route);
     }
   }, [stepIndex, navigate, steps, accountUserId, businessId]);
@@ -166,7 +171,7 @@ export function OnboardingTour({ onComplete }: Props) {
     (idx: number) => {
       const step = steps[idx];
       setStepIndex(idx);
-      setOnboardingTourStep(accountUserId, businessId, idx);
+      setOnboardingTourStep(accountUserId, businessId, idx, step?.id);
       tourRouteNavigate(navigate, step?.route);
     },
     [navigate, steps, accountUserId, businessId],
@@ -226,6 +231,20 @@ export function OnboardingTour({ onComplete }: Props) {
             {step.description}
           </p>
 
+          {step.checklist && step.checklist.length > 0 && (
+            <ul className="mb-4 space-y-1.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 px-3 py-2.5">
+              {step.checklist.map((item) => (
+                <li
+                  key={item}
+                  className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"
+                >
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          )}
+
           {step.hint && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950 rounded-xl border border-amber-100 dark:border-amber-900 mb-5">
               <Sparkles className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
@@ -261,6 +280,11 @@ export function OnboardingTour({ onComplete }: Props) {
                 <>
                   <Rocket className="w-4 h-4" />
                   Empezar a trabajar
+                </>
+              ) : step.route ? (
+                <>
+                  Ir a este paso
+                  <ChevronRight className="w-4 h-4" />
                 </>
               ) : (
                 <>
