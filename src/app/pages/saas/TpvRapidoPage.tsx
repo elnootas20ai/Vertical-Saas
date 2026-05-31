@@ -9,7 +9,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   listCatalogItemsRequest,
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   type CatalogItem,
   type DeliveryOrder,
@@ -249,9 +249,16 @@ function TpvRapidoPageInner() {
       setRecentOrdersPool([]);
       return;
     }
+    const pdvId = String(register.session?.pointOfSaleId || '').trim();
+    const today = new Date().toISOString().slice(0, 10);
     let cancelled = false;
-    listDeliveryOrdersRequest(userId)
-      .then((orders) => {
+    filterDeliveryOrdersRequest(userId, {
+      ...(pdvId ? { salesPointId: pdvId } : {}),
+      dateFrom: `${today}T00:00:00.000Z`,
+      dateTo: `${today}T23:59:59.999Z`,
+      limit: MAX_ORDERS_FOR_TPV_INTEL,
+    })
+      .then(({ orders }) => {
         if (!cancelled) setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
       })
       .catch(() => {
@@ -260,7 +267,7 @@ function TpvRapidoPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, [userId, register.session?.pointOfSaleId]);
 
   // ─── Autofocus phone on mount or reset ─────────────────────────────────────
   useEffect(() => {

@@ -10,7 +10,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import type { Client } from '../../context/AppContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   updateDeliveryOrderRequest,
   deleteDeliveryOrderRequest,
@@ -22,12 +22,14 @@ import {
   type DeliveryOrderStatus,
   type DeliveryOrderItem,
   type CatalogItem,
+  type PointOfSale,
 } from '../../lib/deliveryApi';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
   deliveryOrderMatchesPdvFilter,
+  pickDefaultActivePdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import {
   Plus,
@@ -1048,6 +1050,11 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
   const [loading, setLoading] = useState(true);
   /** Tienda activa (sidebar / centro ops): solo pedidos de ese PDV en esta vista. */
   const [activeStoreScope, setActiveStoreScope] = useState<{ pdvId: string; label: string } | null>(null);
+  const [scopedPdvs, setScopedPdvs] = useState<PointOfSale[]>([]);
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(scopedPdvs.filter((p) => p.active !== false)),
+    [scopedPdvs],
+  );
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<DeliveryOrderStatus | 'all'>('all');
@@ -1109,6 +1116,7 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
     try {
       const pdvRaw = await listPointsOfSaleRequest(userId);
       const merged = await mergePointsOfSaleWithRetailWorkCenters(userId, pdvRaw, { business: currentBusiness });
+      setScopedPdvs(merged.filter((p) => p.active !== false));
       const pdvId = resolvePreferenceToPdvId(merged, raw);
       const p = merged.find((x) => x._id === pdvId);
       if (pdvId && p) {
@@ -1135,9 +1143,16 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
 
   const loadOrders = useCallback(async () => {
     if (!userId) return;
+    const pdvForApi = activeStoreScope?.pdvId?.trim() || undefined;
+    const today = new Date().toISOString().slice(0, 10);
     try {
       const [ordersData, catalogData] = await Promise.all([
-        listDeliveryOrdersRequest(userId),
+        filterDeliveryOrdersRequest(userId, {
+          ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+          dateFrom: `${today}T00:00:00.000Z`,
+          dateTo: `${today}T23:59:59.999Z`,
+          limit: 500,
+        }).then((r) => r.orders),
         listCatalogItemsRequest(userId),
       ]);
       setOrders(ordersData);
@@ -1147,7 +1162,7 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, activeStoreScope?.pdvId]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
@@ -1249,8 +1264,8 @@ export function Delivery({ embedded, onEmbeddedBack }: DeliveryProps = {}) {
 
   const ordersForScope = useMemo(() => {
     if (!activeStoreScope?.pdvId) return orders;
-    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, activeStoreScope.pdvId));
-  }, [orders, activeStoreScope?.pdvId]);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, activeStoreScope.pdvId, { primaryPdvId }));
+  }, [orders, activeStoreScope?.pdvId, primaryPdvId]);
 
   const filtered = useMemo(() => {
     return ordersForScope.filter(o => {

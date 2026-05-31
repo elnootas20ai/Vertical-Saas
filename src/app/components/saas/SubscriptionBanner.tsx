@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router';
 import { AlertTriangle, Clock, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
@@ -24,6 +25,9 @@ export function SubscriptionBanner() {
   const dismissedTrial = trialDismissKey && isBannerDismissedForLocalToday(trialDismissKey);
   const dismissedPayment = paymentDismissKey && isBannerDismissedForLocalToday(paymentDismissKey);
   const dismissedGrace = graceDismissKey && isBannerDismissedForLocalToday(graceDismissKey);
+
+  // Trabajadores no gestionan la suscripción de la empresa — ocultar avisos de trial/pago.
+  if (isWorkerAccount(user)) return null;
 
   /** Navegación u otro tick: releer localStorage; intervalo para pasar medianoche sin recargar. */
   useEffect(() => {

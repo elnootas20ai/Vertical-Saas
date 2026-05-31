@@ -78,18 +78,27 @@ export function pickDefaultActivePdvId(
   return sorted[0]._id;
 }
 
+export interface DeliveryOrderPdvFilterOptions {
+  /** PDV principal (el más antiguo). Pedidos legacy sin `salesPointId` solo cuentan aquí. */
+  primaryPdvId?: string | null;
+}
+
 /**
- * Pedidos sin `salesPointId` (p. ej. TPV antiguo) siguen visibles en la tienda activa.
- * Con PDV asignado, solo coinciden si es la misma tienda.
+ * Filtra pedidos por PDV de forma estricta: cada tienda es independiente.
+ * Pedidos sin `salesPointId` (legacy) solo aparecen en el PDV principal, no en el 2º/3º.
  */
 export function deliveryOrderMatchesPdvFilter(
   order: { salesPointId?: string | null },
   pdvId: string | null | undefined,
+  options?: DeliveryOrderPdvFilterOptions,
 ): boolean {
   const filterId = String(pdvId || '').trim();
   if (!filterId) return true;
   const orderPdv = String(order.salesPointId || '').trim();
-  if (!orderPdv) return true;
+  if (!orderPdv) {
+    const primary = String(options?.primaryPdvId || '').trim();
+    return primary ? filterId === primary : false;
+  }
   return orderPdv === filterId;
 }
 

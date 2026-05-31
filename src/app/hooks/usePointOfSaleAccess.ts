@@ -1,4 +1,6 @@
 import { useApp } from '../context/AppContext';
+import { userCanUseDevPlanOverride } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import {
   PLAN_TIER_LABELS,
   getEffectivePointOfSaleLimit,
@@ -16,6 +18,8 @@ export interface PointOfSaleAccess {
   hasProAccess: boolean;
   includedPointOfSaleLimit: number;
   canCreatePointOfSale: boolean;
+  /** Modo Ilimitado activo en Plan (dev) — sin tope de PDV ni bloqueo multi-centro. */
+  devUnlimitedPdv: boolean;
   /** Hay que subir de plan (basic/normal → pro) para crear el siguiente PDV. */
   needsProUpgrade: boolean;
   /** Plan PRO con el cupo agotado; el siguiente PDV es un add-on de pago. */
@@ -23,11 +27,13 @@ export interface PointOfSaleAccess {
 }
 
 export function usePointOfSaleAccess(pointOfSaleCount: number): PointOfSaleAccess {
-  const { subscription } = useApp();
+  const { subscription, devUnlimitedPdv: devUnlimitedPdvState } = useApp();
+  const { user } = useAuth();
   const planTier = resolvePlanTier(subscription.selectedPlanId || '', subscription.planName || '');
   const includedPointOfSaleLimit = getEffectivePointOfSaleLimit(subscription);
   const hasProAccess = subscriptionHasProAccess(subscription);
-  const canCreatePointOfSale = pointOfSaleCount < includedPointOfSaleLimit;
+  const devUnlimitedPdv = userCanUseDevPlanOverride(user) && devUnlimitedPdvState;
+  const canCreatePointOfSale = devUnlimitedPdv || pointOfSaleCount < includedPointOfSaleLimit;
 
   return {
     planTier,
@@ -35,7 +41,8 @@ export function usePointOfSaleAccess(pointOfSaleCount: number): PointOfSaleAcces
     hasProAccess,
     includedPointOfSaleLimit,
     canCreatePointOfSale,
-    needsProUpgrade: !hasProAccess && pointOfSaleCount >= includedPointOfSaleLimit,
-    needsPointOfSaleAddon: hasProAccess && pointOfSaleCount >= includedPointOfSaleLimit,
+    devUnlimitedPdv,
+    needsProUpgrade: !hasProAccess && !devUnlimitedPdv && pointOfSaleCount >= includedPointOfSaleLimit,
+    needsPointOfSaleAddon: hasProAccess && !devUnlimitedPdv && pointOfSaleCount >= includedPointOfSaleLimit,
   };
 }

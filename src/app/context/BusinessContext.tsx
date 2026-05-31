@@ -93,7 +93,9 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       const found = storedId ? list.find((b) => b.business_id === storedId) : null;
       const resolved = found || list[0];
 
-      setCurrentBusiness(resolved);
+      setCurrentBusiness((prev) =>
+        prev?.business_id === resolved.business_id ? prev : resolved,
+      );
       storeBusinessId(userId, resolved.business_id);
     },
     [],
@@ -110,8 +112,11 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setIsLoading(true);
     const userId = user.user_id;
+    const cachedBeforeFetch = readBusinessesCache(userId);
+    if (cachedBeforeFetch.length === 0) {
+      setIsLoading(true);
+    }
 
     const fetchWithRetry = async (): Promise<Business[]> => {
       try {
@@ -146,12 +151,16 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const userId = user?.user_id;
     if (!userId) return;
-    setBusinessesFetchSettled(false);
-    setIsLoading(true);
     const cached = readBusinessesCache(userId);
     if (cached.length > 0) {
       setBusinesses(cached);
       resolveCurrentBusiness(cached, userId);
+      setIsLoading(false);
+      // Permite cargar tiendas/PDV en paralelo sin esperar listBusinesses.
+      setBusinessesFetchSettled(true);
+    } else {
+      setBusinessesFetchSettled(false);
+      setIsLoading(true);
     }
   }, [user?.user_id, resolveCurrentBusiness]);
 

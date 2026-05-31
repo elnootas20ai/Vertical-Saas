@@ -4,7 +4,13 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import {
+  deliveryOrderMatchesPdvFilter,
+  pickDefaultActivePdvId,
+  DELIVERY_ACTIVE_STORE_CHANGED,
+} from '../../lib/deliveryOpsPdvSelection';
 // SSE events are emitted by the backend (delivery_order_created, etc.)
 // and handled globally; auto-refresh provides real-time updates
 import {
@@ -15,7 +21,6 @@ import {
   reopenDeliveryOrderRequest,
   registerPaymentRequest,
   listCatalogItemsRequest,
-  listPointsOfSaleRequest,
   pointOfSaleDisplayLabel,
   type DeliveryOrder,
   type DeliveryOrderStatus,
@@ -119,10 +124,10 @@ const EMPTY_FILTERS: Filters = { channel: '', salesPointId: '', status: '', date
 export function DeliveryOrders() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
@@ -170,27 +175,42 @@ export function DeliveryOrders() {
 
   const loadData = useCallback(async () => {
     if (!userId) return;
+    const pdvForApi =
+      filters.salesPointId?.trim() ||
+      activeStoreScope.activeSalesPointId?.trim() ||
+      undefined;
     try {
       const dateFrom = `${selectedDay}T00:00:00.000Z`;
       const dateTo = `${selectedDay}T23:59:59.999Z`;
-      const [ordersData, catalogData, pdvData] = await Promise.all([
-        filterDeliveryOrdersRequest(userId, { dateFrom, dateTo, limit: 500 }),
+      const [ordersData, catalogData] = await Promise.all([
+        filterDeliveryOrdersRequest(userId, {
+          dateFrom,
+          dateTo,
+          limit: 500,
+          ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+        }),
         listCatalogItemsRequest(userId, 'catalog'),
-        listPointsOfSaleRequest(userId),
       ]);
       setOrders(ordersData.orders);
       setCatalogItems(catalogData);
-      setPointsOfSale(pdvData);
     } catch {
       toast.error('Error al cargar pedidos');
     } finally {
       setLoading(false);
     }
-  }, [userId, selectedDay]);
+  }, [userId, selectedDay, filters.salesPointId, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  useEffect(() => {
+    const onStore = () => { loadData(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [loadData]);
+
+  const pointsOfSale = activeStoreScope.pointsOfSale;
   const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active !== false), [pointsOfSale]);
+  const primaryPdvId = useMemo(() => pickDefaultActivePdvId(activePdvs), [activePdvs]);
   const singlePdvId = useMemo(
     () => (activePdvs.length === 1 ? activePdvs[0]._id : null),
     [activePdvs],
@@ -304,11 +324,9 @@ export function DeliveryOrders() {
     let result = [...orders];
     if (filters.channel) result = result.filter((o) => o.channel === filters.channel);
     if (filters.salesPointId) {
-      const pdv = filters.salesPointId;
-      result = result.filter((o) => {
-        const oid = String(o.salesPointId || '').trim();
-        return !oid || oid === pdv;
-      });
+      result = result.filter((o) =>
+        deliveryOrderMatchesPdvFilter(o, filters.salesPointId, { primaryPdvId }),
+      );
     }
     if (filters.status) result = result.filter((o) => o.status === filters.status);
     if (filters.deliveryType) result = result.filter((o) => o.deliveryType === filters.deliveryType);
@@ -325,7 +343,7 @@ export function DeliveryOrders() {
     }
     result.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
     return result;
-  }, [orders, filters]);
+  }, [orders, filters, primaryPdvId]);
 
   // ─── KPIs ────────────────────────────────────────────────────────────────
 

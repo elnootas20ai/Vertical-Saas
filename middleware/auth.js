@@ -98,6 +98,18 @@ export function requireAuthAndEmailVerified(req, res, next) {
   requireAuth(req, res, () => requireEmailVerified(req, res, next));
 }
 
+/** Propio perfil: basta JWT (ficha trabajador antes de verificar email). Otros perfiles: email verificado. */
+export function requireAuthForProfileUpdate(req, res, next) {
+  requireAuth(req, res, () => {
+    const targetUserId = String(req.params.userId || '').trim();
+    const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+    if (targetUserId && authUserId && targetUserId === authUserId) {
+      return next();
+    }
+    return requireEmailVerified(req, res, next);
+  });
+}
+
 // S-07: Middleware para requerir el sessionId del JWT (útil para invalidación de sesión)
 export function extractSessionId(req, _res, next) {
   try {

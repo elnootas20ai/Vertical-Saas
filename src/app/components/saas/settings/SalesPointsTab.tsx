@@ -6,6 +6,7 @@ import { useBusiness } from '../../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   isDeliveryBusinessType,
+  bootstrapRetailStoreAfterCreate,
   loadDeliveryStores,
   notifyDeliveryWorkCentersChanged,
   selectDeliveryPointOfSale,
@@ -1414,7 +1415,8 @@ export function SalesPointsTab() {
     [workCenters],
   );
   const pointOfSaleAccess = usePointOfSaleAccess(pointOfSaleCount);
-  const canCreateWorkCenter = hasProAccess || pointOfSaleCount === 0;
+  const canCreateWorkCenter =
+    hasProAccess || pointOfSaleCount === 0 || pointOfSaleAccess.devUnlimitedPdv;
   const forceFirstCenterAsPdv = !hasProAccess && !editingItem && pointOfSaleCount === 0;
 
   const defaultActiveOnCreate = useMemo(
@@ -1704,14 +1706,16 @@ export function SalesPointsTab() {
             pdvCode: normCode || undefined,
             pdvName: sanitizeStoreDisplayName(String(wcData.name || '')),
           });
-          if (pdv && created.active !== false) {
-            selectDeliveryPointOfSale(currentBusiness, dataUserId, pdv._id);
+          if (pdv) {
+            await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
+              workCenter: created,
+              pointOfSale: pdv,
+              storeName: String(wcData.name || ''),
+            });
           }
         }
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
-        notifyDeliveryWorkCentersChanged();
-        notifyDeliveryActiveStoreChanged();
         await loadData();
         toast.success(
           created.active !== false

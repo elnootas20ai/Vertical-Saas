@@ -10,26 +10,39 @@ import {
   Loader2,
   Check,
   Save,
+  Users,
+  UserCheck,
+  FileCheck,
 } from 'lucide-react';
 import {
   type NotificationPreferences,
   type ClockinNotificationPreferences,
+  type TeamNotificationPreferences,
   DEFAULT_NOTIFICATION_PREFERENCES,
   getNotificationPreferencesRequest,
   updateNotificationPreferencesRequest,
 } from '../../../lib/authApi';
 
-type PrefKey = keyof ClockinNotificationPreferences;
+type ClockinPrefKey = keyof ClockinNotificationPreferences;
+type TeamPrefKey = keyof TeamNotificationPreferences;
 
-interface PrefOption {
-  key: PrefKey;
+interface ClockinPrefOption {
+  key: ClockinPrefKey;
   label: string;
   description: string;
   icon: React.ComponentType<{ className?: string }>;
   accent: string;
 }
 
-const CLOCKIN_OPTIONS: PrefOption[] = [
+interface TeamPrefOption {
+  key: TeamPrefKey;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  accent: string;
+}
+
+const CLOCKIN_OPTIONS: ClockinPrefOption[] = [
   {
     key: 'onEntry',
     label: 'Entrada puntual',
@@ -81,6 +94,53 @@ const CLOCKIN_OPTIONS: PrefOption[] = [
   },
 ];
 
+const TEAM_OPTIONS: TeamPrefOption[] = [
+  {
+    key: 'onIdentityCompleted',
+    label: 'Identidad completada',
+    description: 'Cuando un trabajador rellena DNI, teléfono y dirección (paso 1 de la ficha).',
+    icon: UserCheck,
+    accent: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:border-violet-800',
+  },
+  {
+    key: 'onWorkerProfileCompleted',
+    label: 'Ficha de nómina completada',
+    description: 'Cuando añade IBAN, Seguridad Social, banco y contacto de emergencia (paso 2).',
+    icon: FileCheck,
+    accent: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/30 dark:text-teal-300 dark:border-teal-800',
+  },
+];
+
+function PrefToggle({
+  active,
+  label,
+  onToggle,
+}: {
+  active: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-colors ${
+        active
+          ? 'bg-blue-600 border-blue-600'
+          : 'bg-gray-200 dark:bg-gray-700 border-gray-200 dark:border-gray-700'
+      }`}
+      role="switch"
+      aria-checked={active}
+      aria-label={`${active ? 'Desactivar' : 'Activar'} ${label}`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+          active ? 'translate-x-5' : 'translate-x-0.5'
+        } mt-[1px]`}
+      />
+    </button>
+  );
+}
+
 export function MyNotificationsTab() {
   const [prefs, setPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
   const [originalPrefs, setOriginalPrefs] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
@@ -100,15 +160,25 @@ export function MyNotificationsTab() {
       .finally(() => setLoading(false));
   }, []);
 
-  const togglePref = (key: PrefKey) => {
+  const toggleClockinPref = (key: ClockinPrefKey) => {
     setPrefs((prev) => ({
       ...prev,
       clockin: { ...prev.clockin, [key]: !prev.clockin[key] },
     }));
   };
 
+  const toggleTeamPref = (key: TeamPrefKey) => {
+    setPrefs((prev) => ({
+      ...prev,
+      team: { ...prev.team, [key]: !prev.team[key] },
+    }));
+  };
+
   const hasChanges = JSON.stringify(prefs) !== JSON.stringify(originalPrefs);
-  const totalActive = Object.values(prefs.clockin).filter(Boolean).length;
+  const totalActive =
+    Object.values(prefs.clockin).filter(Boolean).length
+    + Object.values(prefs.team).filter(Boolean).length;
+  const totalOptions = CLOCKIN_OPTIONS.length + TEAM_OPTIONS.length;
 
   const handleSave = async () => {
     if (!hasChanges) return;
@@ -151,7 +221,7 @@ export function MyNotificationsTab() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-            {totalActive} de {CLOCKIN_OPTIONS.length} activos
+            {totalActive} de {totalOptions} activos
           </span>
           {success && (
             <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
@@ -175,6 +245,50 @@ export function MyNotificationsTab() {
           {error}
         </div>
       )}
+
+      <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+        <div className="px-5 py-4 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex items-center gap-3">
+          <Users className="w-5 h-5 text-violet-500" />
+          <div>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Ficha del equipo</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Avisos cuando un trabajador completa pasos de su ficha personal.
+            </p>
+          </div>
+        </div>
+
+        <div className="divide-y divide-gray-200 dark:divide-gray-700">
+          {TEAM_OPTIONS.map((option) => {
+            const active = prefs.team[option.key];
+            const Icon = option.icon;
+            return (
+              <div
+                key={option.key}
+                className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors"
+              >
+                <div
+                  className={`flex items-center justify-center w-10 h-10 rounded-xl border-2 ${option.accent} shrink-0`}
+                >
+                  <Icon className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {option.label}
+                  </span>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {option.description}
+                  </p>
+                </div>
+                <PrefToggle
+                  active={active}
+                  label={option.label}
+                  onToggle={() => toggleTeamPref(option.key)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
         <div className="px-5 py-4 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex items-center gap-3">
@@ -202,32 +316,18 @@ export function MyNotificationsTab() {
                   <Icon className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-900 dark:text-white">
-                      {option.label}
-                    </span>
-                  </div>
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">
+                    {option.label}
+                  </span>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     {option.description}
                   </p>
                 </div>
-                <button
-                  onClick={() => togglePref(option.key)}
-                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-colors ${
-                    active
-                      ? 'bg-blue-600 border-blue-600'
-                      : 'bg-gray-200 dark:bg-gray-700 border-gray-200 dark:border-gray-700'
-                  }`}
-                  role="switch"
-                  aria-checked={active}
-                  aria-label={`${active ? 'Desactivar' : 'Activar'} ${option.label}`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
-                      active ? 'translate-x-5' : 'translate-x-0.5'
-                    } mt-[1px]`}
-                  />
-                </button>
+                <PrefToggle
+                  active={active}
+                  label={option.label}
+                  onToggle={() => toggleClockinPref(option.key)}
+                />
               </div>
             );
           })}

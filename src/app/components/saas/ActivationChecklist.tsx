@@ -40,10 +40,7 @@ function StepIcon({ iconKey, status, size = 16 }: { iconKey: string; status: str
   }
   if (status === 'in_progress') {
     return (
-      <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
-        <Icon style={{ width: size, height: size }} className="text-amber-500" />
-        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-      </div>
+      <Icon style={{ width: size, height: size }} className="text-amber-500 flex-shrink-0" />
     );
   }
   return <Icon style={{ width: size, height: size }} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />;
@@ -142,7 +139,7 @@ export function ActivationChecklist({ collapsed }: Props) {
         </p>
         <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full transition-all duration-500"
+            className="h-full bg-gradient-to-r from-amber-400 to-amber-500 rounded-full"
             style={{ width: `${completionPct}%` }}
           />
         </div>

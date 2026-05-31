@@ -7,6 +7,12 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { listBrandsRequest, type Brand } from '../../lib/brandApi';
+import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import {
   listCatalogItemsRequest,
@@ -812,11 +818,15 @@ function ArticleDetailDrawer({ item, onClose, onStockAdjust, onUpdate, suppliers
 
 export function ArticlesPage() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const navigate = useNavigate();
   const { config: vc, businessType } = useVerticalCatalog();
   const articleLabels = getArticleLabel(businessType);
 
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [salesPoints, setSalesPoints] = useState<SalesPoint[]>([]);
@@ -835,26 +845,49 @@ export function ArticlesPage() {
   useModalClose(!!stockAdjustItem, () => setStockAdjustItem(null));
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
+    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
     try {
-      const [items, sps, sups, invs] = await Promise.all([
-        listCatalogItemsRequest(user.id, 'stock'),
-        listSalesPoints(user.id),
-        listSuppliersRequest(user.id).catch(() => [] as Supplier[]),
-        listPurchaseInvoicesRequest(user.id).catch(() => [] as PurchaseInvoice[]),
+      const [items, sps, sups, invs, brandList] = await Promise.all([
+        listCatalogItemsRequest(dataUserId, 'stock'),
+        listSalesPoints(dataUserId),
+        listSuppliersRequest(dataUserId).catch(() => [] as Supplier[]),
+        listPurchaseInvoicesRequest(dataUserId).catch(() => [] as PurchaseInvoice[]),
+        businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
       ]);
       setCatalogItems(items);
       setSalesPoints(sps);
       setSuppliers(sups);
       setInvoices(invs);
+      setBrands(brandList);
     } catch {
       toast.error('Error al cargar stock');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const activeWorkCenterId = useMemo(() => {
+    const pdv = activeStoreScope.pointsOfSale.find(
+      (p) => p._id === activeStoreScope.activeSalesPointId,
+    );
+    return String(pdv?.workCenterId || '').trim();
+  }, [activeStoreScope.pointsOfSale, activeStoreScope.activeSalesPointId]);
+
+  const applyStoreFilter = useCallback((pdvId: string | undefined) => {
+    if (!pdvId) return;
+    const pdv = activeStoreScope.pointsOfSale.find((p) => p._id === pdvId);
+    const wc = String(pdv?.workCenterId || '').trim();
+    if (wc) setFilterSalesPoint(wc);
+  }, [activeStoreScope.pointsOfSale]);
+
+  useSyncDeliveryPdvFilter(activeStoreScope.pointsOfSale, applyStoreFilter);
+
+  useEffect(() => {
+    if (activeWorkCenterId) setFilterSalesPoint(activeWorkCenterId);
+  }, [activeWorkCenterId]);
 
   const handleStockAdjust = async (item: CatalogItem, newQuantity: number) => {
     if (!user?.id) return;
@@ -1009,7 +1042,7 @@ export function ArticlesPage() {
       items = items.filter(i => !i.active || i.stockQuantity > i.minStock);
     }
     if (filterSalesPoint !== 'all') {
-      items = items.filter(i => i.salesPointId === filterSalesPoint);
+      items = items.filter((i) => catalogItemOperatesAtWorkCenter(i, brands, filterSalesPoint));
     }
     items.sort((a, b) => {
       const aLow = a.stockQuantity <= a.minStock ? 0 : 1;
@@ -1017,7 +1050,7 @@ export function ArticlesPage() {
       return aLow - bLow || a.stockQuantity - b.stockQuantity;
     });
     return items;
-  }, [catalogItems, searchStock, filterStockStatus, filterSalesPoint]);
+  }, [catalogItems, searchStock, filterStockStatus, filterSalesPoint, brands]);
 
   const lowStockItems = useMemo(() => catalogItems.filter(i => i.active && i.stockQuantity <= i.minStock), [catalogItems]);
 

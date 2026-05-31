@@ -41,7 +41,11 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { Business, BusinessType } from '../../lib/businessApi';
-import { listWorkCenters, type WorkCenter } from '../../lib/workCentersApi';
+import type { WorkCenter } from '../../lib/workCentersApi';
+import {
+  DELIVERY_WORK_CENTERS_CHANGED,
+  loadDeliveryStores,
+} from '../../lib/deliverySetup';
 import {
   getModulesConfig,
   saveModulesConfig,
@@ -306,6 +310,7 @@ export function ConfiguracionGeneral() {
   const { subscription } = useApp();
 
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
+  const [pdvCount, setPdvCount] = useState(0);
   const [loadingCenters, setLoadingCenters] = useState(true);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [modulesData, setModulesData] = useState<ModulesConfig | null>(null);
@@ -390,14 +395,35 @@ export function ConfiguracionGeneral() {
     return result.created;
   }, [user?.user_id, biz?.businessType, bizId, resolvedImportStatus?.stock, resolvedImportStatus?.clients]);
 
-  useEffect(() => {
-    if (!user?.id) return;
+  const loadWorkCenters = useCallback(async () => {
+    if (!user || !bizId) {
+      setWorkCenters([]);
+      setPdvCount(0);
+      setLoadingCenters(false);
+      return;
+    }
     setLoadingCenters(true);
-    listWorkCenters(user.id)
-      .then((centers) => setWorkCenters(centers))
-      .catch(() => {})
-      .finally(() => setLoadingCenters(false));
-  }, [user?.id]);
+    try {
+      const state = await loadDeliveryStores(user, biz);
+      setWorkCenters(state.workCenters);
+      setPdvCount(state.pointsOfSale.length);
+    } catch {
+      setWorkCenters([]);
+      setPdvCount(0);
+    } finally {
+      setLoadingCenters(false);
+    }
+  }, [user, bizId, biz]);
+
+  useEffect(() => {
+    void loadWorkCenters();
+  }, [loadWorkCenters]);
+
+  useEffect(() => {
+    const onChanged = () => void loadWorkCenters();
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
+    return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
+  }, [loadWorkCenters]);
 
   useEffect(() => {
     if (!bizId) return;
@@ -454,7 +480,24 @@ export function ConfiguracionGeneral() {
     [biz, subscription, dismissedAlerts],
   );
 
-  const activeCenters = workCenters.filter((c) => c.active);
+  const activeCenters = workCenters.filter((c) => c.active && !c.deletedAt);
+  const retailCenters = activeCenters.filter(
+    (c) => c.centerType === 'punto_de_venta' || c.centerType === 'almacen',
+  );
+
+  const sedesDescription = loadingCenters
+    ? 'Cargando locales…'
+    : activeCenters.length > 0
+      ? pdvCount > 0
+        ? `${retailCenters.length} local(es) · ${pdvCount} PDV`
+        : `${activeCenters.length} centro(s) activo(s)`
+      : 'Configura tus centros de trabajo en Ajustes → Tienda';
+
+  const sedesStats = loadingCenters
+    ? '…'
+    : activeCenters.length > 0
+      ? `${activeCenters.length} activo(s)`
+      : '0 activos';
 
   const invitedAccepted = invitedWorkersCount(biz);
 
@@ -475,10 +518,10 @@ export function ConfiguracionGeneral() {
       id: 'sedes',
       icon: Store,
       title: 'Sedes / PDV',
-      description: activeCenters.length > 0 ? `${activeCenters.length} centro(s) activo(s)` : 'Configura tus centros de trabajo',
-      status: getSedesStatus(activeCenters.length),
+      description: sedesDescription,
+      status: loadingCenters ? 'partial' as BlockStatus : getSedesStatus(activeCenters.length),
       route: '/saas/settings/tienda',
-      stats: `${activeCenters.length} activos`,
+      stats: sedesStats,
     },
     {
       id: 'usuarios',
@@ -558,7 +601,7 @@ export function ConfiguracionGeneral() {
         return `${[s.stock, s.clients, s.catalog].filter((v) => v === 'completed').length}/3 completados`;
       })(),
     },
-  ], [biz, activeCenters, invitedAccepted, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet]);
+  ], [biz, activeCenters.length, sedesDescription, sedesStats, loadingCenters, invitedAccepted, modulesData, invoiceEmailData, importData, activeModulesSet, contractedModulesSet]);
 
   const visibleBlocks = blocks.filter((b) => !('hidden' in b && b.hidden));
 

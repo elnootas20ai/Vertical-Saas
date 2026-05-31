@@ -47,7 +47,7 @@ import {
   updateProfile,
   verifyEmail,
 } from '../controllers/authController.js';
-import { requireAuth, requireAuthAndEmailVerified } from '../middleware/auth.js';
+import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate } from '../middleware/auth.js';
 import { authLimiter, emailVerificationLimiter, registerLimiter, recoverLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
@@ -101,7 +101,7 @@ authRouter.post('/activity', requireAuthAndEmailVerified, logActivity);
 authRouter.get('/activities', requireAuthAndEmailVerified, listAllActivities);
 authRouter.get('/users', requireAuthAndEmailVerified, listUsers);
 authRouter.get('/roles', requireAuthAndEmailVerified, listRoles);
-authRouter.put('/profile/:userId', requireAuthAndEmailVerified, validateParams(userIdParamSchema), updateProfile);
+authRouter.put('/profile/:userId', requireAuthForProfileUpdate, validateParams(userIdParamSchema), updateProfile);
 authRouter.put('/profile/:userId/password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(updatePasswordSchema), updatePassword);
 authRouter.put('/profile/:userId/reset-password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resetUserPassword);
 authRouter.post('/profile/:userId/resend-invite', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resendInvite);

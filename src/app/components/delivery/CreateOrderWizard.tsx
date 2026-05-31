@@ -166,6 +166,7 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
       const cityOk = data.customerCity.trim().length > 0;
       return nameOk && phoneOk && streetOk && cityOk;
     }
+    if (step === 2) return Boolean(data.salesPointId?.trim());
     if (step === 3) return data.cart.length > 0;
     return true;
   };

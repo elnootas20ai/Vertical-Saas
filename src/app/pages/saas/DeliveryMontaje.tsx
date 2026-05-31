@@ -4,16 +4,22 @@ import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
-  listDeliveryOrdersRequest,
-  listPointsOfSaleRequest,
+  filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
-import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
+import {
+  deliveryOrderMatchesPdvFilter,
+  pickDefaultActivePdvId,
+  DELIVERY_ACTIVE_STORE_CHANGED,
+} from '../../lib/deliveryOpsPdvSelection';
 import {
   Package,
   Search,
@@ -174,10 +180,12 @@ const DESTINATION_CONFIG: Record<OrderDestination, { label: string; icon: typeof
 
 export function DeliveryMontaje() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
+  const userId = resolveBusinessDataUserId(user, currentBusiness);
 
   // Data
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [filterPdv, setFilterPdv] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -223,31 +231,42 @@ export function DeliveryMontaje() {
   // ─── Data Loading ────────────────────────────────────────────────────────
 
   const loadOrders = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) return;
+    const pdvForApi =
+      filterPdv?.trim() ||
+      activeStoreScope.activeSalesPointId?.trim() ||
+      undefined;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const data = await listDeliveryOrdersRequest(user.id);
-      setOrders(data);
+      const data = await filterDeliveryOrdersRequest(userId, {
+        ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+        dateFrom: `${today}T00:00:00.000Z`,
+        dateTo: `${today}T23:59:59.999Z`,
+        limit: 500,
+      });
+      setOrders(data.orders);
     } catch {
       toast.error('Error al cargar los pedidos');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
-
-  const loadPdv = useCallback(async () => {
-    if (!user?.id) return;
-    try {
-      const data = await listPointsOfSaleRequest(user.id);
-      setPointsOfSale(data.filter((p) => p.active !== false));
-    } catch {
-      setPointsOfSale([]);
-    }
-  }, [user?.id]);
+  }, [userId, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => {
     void loadOrders();
-    void loadPdv();
-  }, [loadOrders, loadPdv]);
+  }, [loadOrders]);
+
+  useEffect(() => {
+    const onStore = () => { void loadOrders(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [loadOrders]);
+
+  const pointsOfSale = activeStoreScope.pointsOfSale;
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(pointsOfSale.filter((p) => p.active !== false)),
+    [pointsOfSale],
+  );
 
   const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
     setFilterPdv(pdvId || '');
@@ -259,8 +278,8 @@ export function DeliveryMontaje() {
 
   const storeOrders = useMemo(() => {
     if (!filterPdv) return orders;
-    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
-  }, [orders, filterPdv]);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv, { primaryPdvId }));
+  }, [orders, filterPdv, primaryPdvId]);
 
   const assemblyOrders = useMemo(
     () => storeOrders.filter(o => o.status === 'assembly'),

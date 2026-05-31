@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 type PermissionEntry = { view?: boolean; edit?: boolean } | boolean | undefined;
 
@@ -12,7 +13,7 @@ type PermissionEntry = { view?: boolean; edit?: boolean } | boolean | undefined;
  * Reglas:
  *  - Owner/Admin/Gerente (cuenta tipo 'company', sin `invitedBy`) → pasa siempre.
  *  - Worker con `permissions[key].view === true` → pasa.
- *  - Worker sin ese permiso → redirige a `/saas/worker`.
+ *  - Worker sin ese permiso → redirige a Mi trabajo.
  *
  * Acepta una o varias keys: con varias, basta con tener UNA para pasar.
  *
@@ -54,7 +55,7 @@ export function RequireWorkerPermission({
     if (isLoading) return;
     if (!user) return;
     if (isWorker && !hasPermission) {
-      navigate('/saas/worker', { replace: true });
+      navigate(WORKER_DEFAULT_LANDING_PATH, { replace: true });
     }
   }, [isLoading, user, isWorker, hasPermission, navigate]);
 

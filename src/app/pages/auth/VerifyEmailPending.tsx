@@ -10,6 +10,7 @@ import {
   getPendingVerifyEmail,
   setPendingVerifyEmail,
 } from '../../lib/onboardingLocalKeys';
+import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 const RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 const COOLDOWN_SECONDS = 60;
@@ -21,7 +22,7 @@ type LocationState = {
 };
 
 function postVerifyPath(accountType?: string) {
-  return accountType === 'user' ? '/saas/worker' : '/auth/onboarding/business-type';
+  return accountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/auth/onboarding/business-type';
 }
 
 export function VerifyEmailPending() {

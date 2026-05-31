@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listBrandsRequest } from '../lib/brandApi';
 import {
   buildDeliveryActivationStepDefs,
@@ -117,8 +117,14 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const [teamCount, setTeamCount] = useState(0);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [deliveryFlags, setDeliveryFlags] = useState<DeliveryActivationFlags | null>(null);
+  const deliveryFlagsRef = useRef<DeliveryActivationFlags | null>(null);
+  const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountUserId = resolveAccountUserId(user);
   const businessId = currentBusiness?.business_id || '';
+  const bizName = currentBusiness?.name ?? '';
+  const bizTaxId = currentBusiness?.taxId ?? '';
+  const bizAddress = currentBusiness?.address ?? '';
+  const bizPhone = currentBusiness?.phone ?? '';
   const [isDismissed, setIsDismissed] = useState(false);
 
   useEffect(() => {
@@ -137,6 +143,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
       .then(members => setTeamCount(members.length))
       .catch(() => setTeamCount(0));
   }, [listUsers]);
+
+  useEffect(() => {
+    setDeliveryFlags(null);
+    deliveryFlagsRef.current = null;
+  }, [businessId]);
 
   useEffect(() => {
     if (!isDelivery || !dataUserId) {
@@ -169,7 +180,6 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         const catalogForBusiness = catalog.filter((item) => {
           const ids = (item.brandIds ?? []).map((id) => String(id).trim()).filter(Boolean);
           if (ids.length === 0) {
-            // Import sin columna marca: cuenta si hay producto y el negocio tiene marcas
             return Boolean(item.name?.trim()) && brandIds.size > 0;
           }
           return ids.some((id) => brandIds.has(id));
@@ -186,33 +196,44 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           ? isBrandSetupComplete(primaryBrand, setupCtx)
           : false;
 
-        setDeliveryFlags({
-          hasCompanyName: Boolean(currentBusiness?.name?.trim()),
-          hasTaxData: Boolean(currentBusiness?.taxId?.trim()),
-          hasAddress: Boolean(currentBusiness?.address?.trim()),
-          hasPhone: Boolean(currentBusiness?.phone?.trim()),
+        const nextFlags: DeliveryActivationFlags = {
+          hasCompanyName: Boolean(bizName.trim()),
+          hasTaxData: Boolean(bizTaxId.trim()),
+          hasAddress: Boolean(bizAddress.trim()),
+          hasPhone: Boolean(bizPhone.trim()),
           hasActiveRetailStore: retailActive.length > 0,
           hasActivePdv: scopedPdvs.length > 0,
           brandSetupComplete: brandReady,
           hasCatalogProduct: catalogForBusiness.length > 0,
           hasPricedProduct: priced.length > 0,
           hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailActive),
-        });
+        };
+        deliveryFlagsRef.current = nextFlags;
+        setDeliveryFlags(nextFlags);
       } catch {
-        if (!cancelled) setDeliveryFlags(EMPTY_DELIVERY_ACTIVATION_FLAGS);
+        if (!cancelled && !deliveryFlagsRef.current) {
+          setDeliveryFlags(EMPTY_DELIVERY_ACTIVATION_FLAGS);
+        }
       }
     };
 
     void load();
-    const onRefresh = () => void load();
-    window.addEventListener('work-centers:changed', onRefresh);
-    window.addEventListener(DELIVERY_CATALOG_CHANGED, onRefresh);
+    const scheduleLoad = () => {
+      if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
+      loadDebounceRef.current = setTimeout(() => {
+        loadDebounceRef.current = null;
+        void load();
+      }, 400);
+    };
+    window.addEventListener('work-centers:changed', scheduleLoad);
+    window.addEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
     return () => {
       cancelled = true;
-      window.removeEventListener('work-centers:changed', onRefresh);
-      window.removeEventListener(DELIVERY_CATALOG_CHANGED, onRefresh);
+      if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
+      window.removeEventListener('work-centers:changed', scheduleLoad);
+      window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
     };
-  }, [isDelivery, dataUserId, businessId, user, currentBusiness]);
+  }, [isDelivery, dataUserId, businessId, bizName, bizTaxId, bizAddress, bizPhone, user, currentBusiness]);
 
   const biz = currentBusiness;
 
@@ -244,7 +265,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     } catch { /* noop */ }
 
     if (isDelivery) {
-      const flags = deliveryFlags ?? EMPTY_DELIVERY_ACTIVATION_FLAGS;
+      const flags = deliveryFlags ?? deliveryFlagsRef.current;
+      if (!flags) return [];
       return finalizeStepDefs(buildDeliveryActivationStepDefs(flags), activeStepKey);
     }
 
@@ -303,14 +325,24 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     hasSales,
   ]);
 
-  const completedSteps = steps.filter(s => s.status === 'completed').length;
-  const totalSteps = steps.length;
-  const completionPct = Math.round((completedSteps / totalSteps) * 100);
+  const stableStepsRef = useRef<OnboardingStep[]>([]);
+  useEffect(() => {
+    stableStepsRef.current = [];
+  }, [businessId]);
+
+  const displaySteps = steps.length > 0 ? steps : stableStepsRef.current;
+  if (steps.length > 0) {
+    stableStepsRef.current = steps;
+  }
+
+  const completedSteps = displaySteps.filter(s => s.status === 'completed').length;
+  const totalSteps = displaySteps.length;
+  const completionPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
   const currentStepIndex = useMemo(() => {
-    const idx = steps.findIndex(s => s.status !== 'completed');
-    return idx === -1 ? steps.length - 1 : idx;
-  }, [steps]);
+    const idx = displaySteps.findIndex(s => s.status !== 'completed');
+    return idx === -1 ? Math.max(displaySteps.length - 1, 0) : idx;
+  }, [displaySteps]);
 
   useEffect(() => {
     if (completionPct !== 100 || !accountUserId || !businessId) return;
@@ -353,7 +385,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
   return (
     <ActivationChecklistContext.Provider
-      value={{ steps, completionPct, completedSteps, totalSteps, isVisible, isDismissed, currentStepIndex, dismiss, restore, loadSampleData, isLoadingSample }}
+      value={{ steps: displaySteps, completionPct, completedSteps, totalSteps, isVisible, isDismissed, currentStepIndex, dismiss, restore, loadSampleData, isLoadingSample }}
     >
       {children}
     </ActivationChecklistContext.Provider>

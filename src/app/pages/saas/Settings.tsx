@@ -1687,7 +1687,7 @@ function TabBusinesses() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list');
 
-  type BusinessStats = { brands: number; stores: number; loading: boolean };
+  type BusinessStats = { brands: number; stores: number; sedes: number; loading: boolean };
   const [businessStats, setBusinessStats] = useState<Record<string, BusinessStats>>({});
 
   useEffect(() => {
@@ -1700,7 +1700,7 @@ function TabBusinesses() {
     setBusinessStats((prev) => {
       const next: Record<string, BusinessStats> = {};
       for (const b of businesses) {
-        next[b.business_id] = prev[b.business_id] || { brands: 0, stores: 0, loading: true };
+        next[b.business_id] = prev[b.business_id] || { brands: 0, stores: 0, sedes: 0, loading: true };
       }
       return next;
     });
@@ -1715,17 +1715,22 @@ function TabBusinesses() {
             : Promise.resolve([]),
         ]);
         const scopedStores = filterWorkCentersForBusinessScope(workCenters, business.business_id);
+        const active = scopedStores.filter((wc) => !wc.deletedAt && wc.active !== false);
+        const retail = active.filter(
+          (wc) => wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen',
+        );
         return {
           businessId: business.business_id,
           brands: brands.filter((b) => !b.deletedAt).length,
-          stores: scopedStores.filter((wc) => !wc.deletedAt).length,
+          stores: retail.length,
+          sedes: active.length,
         };
       }),
     ).then((results) => {
       if (cancelled) return;
       const next: Record<string, BusinessStats> = {};
       for (const r of results) {
-        next[r.businessId] = { brands: r.brands, stores: r.stores, loading: false };
+        next[r.businessId] = { brands: r.brands, stores: r.stores, sedes: r.sedes, loading: false };
       }
       setBusinessStats(next);
     });
@@ -2246,11 +2251,11 @@ function TabBusinesses() {
                           key: 'branches',
                           label: 'Sedes',
                           icon: <Layers className="w-3.5 h-3.5" />,
-                          value: business.branches?.length ?? 0,
+                          value: stats?.sedes ?? 0,
                           color: 'text-amber-600 dark:text-amber-400',
                           bg: 'bg-amber-50 dark:bg-amber-900/20',
                           border: 'border-amber-100 dark:border-amber-900/40',
-                          loading: false,
+                          loading: loadingStats,
                         },
                         {
                           key: 'members',

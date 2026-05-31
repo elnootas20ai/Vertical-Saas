@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuthOptional } from '../context/AuthContext';
 import { useBusinessOptional } from '../context/BusinessContext';
 import { listBrandsRequest } from '../lib/brandApi';
 import { isBrandSetupComplete, isDefaultCommercialBrand } from '../lib/brandUtils';
@@ -10,7 +10,7 @@ import { DELIVERY_WORK_CENTERS_CHANGED, isDeliveryBusinessType, loadDeliveryStor
  * Flags para bloquear navegación delivery (sidebar, pestañas Ajustes).
  */
 export function useDeliveryActivationNav() {
-  const { user } = useAuth();
+  const user = useAuthOptional()?.user ?? null;
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const businessId = currentBusiness?.business_id || '';

@@ -63,6 +63,10 @@ export interface AuthUser {
   subscription?: BillingSubscription;
   permissions?: AccountPermissionMatrix;
   employment?: EmploymentInfo;
+  personalData?: PersonalData;
+  workerProfileCompletion?: WorkerProfileCompletion;
+  /** true cuando DNI, nacimiento, teléfono y dirección están completos */
+  workerIdentityCompleted?: boolean;
   recentActivity?: AccountActivityItem[];
   skinId?: string;
   animationId?: string;
@@ -79,6 +83,14 @@ export interface AuthUser {
   username?: string;
 }
 
+/** Cuenta invitada al equipo (trabajador), no titular de suscripción. */
+export function isWorkerAccount(
+  user?: Pick<AuthUser, 'accountType' | 'invitedBy'> | null,
+): boolean {
+  if (!user) return false;
+  return user.accountType === 'user' || Boolean(String(user.invitedBy || '').trim());
+}
+
 export interface AccountPermissionValue {
   view: boolean;
   edit: boolean;
@@ -90,6 +102,25 @@ export interface EmploymentSkill {
   id: string;
   name: string;
   level: number; // 1-5
+}
+
+export interface PersonalData {
+  dni: string;
+  birthDate: string;
+  nationality: string;
+  address: string;
+  city: string;
+  postalCode: string;
+  socialSecurityNumber: string;
+}
+
+export interface WorkerProfileCompletion {
+  workerCompleted: boolean;
+  hrCompleted: boolean;
+  fullyCompleted: boolean;
+  workerMissing: string[];
+  hrMissing: string[];
+  updatedAt: string;
 }
 
 export interface EmploymentInfo {
@@ -106,9 +137,12 @@ export interface EmploymentInfo {
   workday: string;
   salary: string;
   bankAccount: string;
+  bankName: string;
   emergencyContact: string;
   emergencyPhone: string;
   salesPointId?: string;
+  contributionGroup?: string;
+  mutualInsurance?: string;
   // Labor cost
   grossSalary?: number;
   socialSecurityCost?: number;
@@ -792,8 +826,14 @@ export interface ClockinNotificationPreferences {
   onLongBreak: boolean;
 }
 
+export interface TeamNotificationPreferences {
+  onIdentityCompleted: boolean;
+  onWorkerProfileCompleted: boolean;
+}
+
 export interface NotificationPreferences {
   clockin: ClockinNotificationPreferences;
+  team: TeamNotificationPreferences;
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -805,6 +845,10 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
     onEarlyExit: true,
     onBreaks: false,
     onLongBreak: true,
+  },
+  team: {
+    onIdentityCompleted: true,
+    onWorkerProfileCompleted: true,
   },
 };
 

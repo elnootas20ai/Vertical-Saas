@@ -3,7 +3,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -35,6 +37,7 @@ export interface ActiveStoreScopeValue {
   activePreferenceRaw: string | null;
   setActiveSalesPoint: (pdvId: string) => void;
   setActiveWorkCenterPreference: (workCenterId: string) => void;
+  /** Solo true en la primera carga sin datos en pantalla (no en refrescos). */
   loading: boolean;
   refresh: () => Promise<void>;
   displayLabelForActive: string;
@@ -54,6 +57,54 @@ const noopScope: ActiveStoreScopeValue = {
 };
 
 const ActiveStoreScopeContext = createContext<ActiveStoreScopeValue>(noopScope);
+
+interface CachedStores {
+  retailWorkCenters: WorkCenter[];
+  allPointsOfSale: PointOfSale[];
+  pointsOfSale: PointOfSale[];
+}
+
+function storesCacheKey(businessId: string) {
+  return `vertial_delivery_stores_cache:${businessId}`;
+}
+
+function readStoresCache(businessId: string): CachedStores | null {
+  if (!businessId) return null;
+  try {
+    const raw = sessionStorage.getItem(storesCacheKey(businessId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedStores;
+    if (!parsed || !Array.isArray(parsed.retailWorkCenters)) return null;
+    const hasData =
+      parsed.retailWorkCenters.length > 0 ||
+      (Array.isArray(parsed.allPointsOfSale) && parsed.allPointsOfSale.length > 0);
+    if (!hasData) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoresCache(businessId: string, data: CachedStores) {
+  if (!businessId) return;
+  const hasData =
+    data.retailWorkCenters.length > 0 || data.allPointsOfSale.length > 0;
+  if (!hasData) return;
+  try {
+    sessionStorage.setItem(storesCacheKey(businessId), JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
+function clearStoresCache(businessId: string) {
+  if (!businessId) return;
+  try {
+    sessionStorage.removeItem(storesCacheKey(businessId));
+  } catch {
+    // ignore
+  }
+}
 
 /**
  * Debe vivir bajo `BusinessProvider`. Si no hay contexto (árbol mal ordenado o HMR),
@@ -75,67 +126,151 @@ function ActiveStoreScopeProviderImpl({
   business: BusinessContextType;
 }) {
   const { user } = useAuth();
-  const { currentBusiness, businessesFetchSettled, isLoading: businessLoading } = business;
+  const { currentBusiness, businessesFetchSettled } = business;
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [allPointsOfSale, setAllPointsOfSale] = useState<PointOfSale[]>([]);
   const [retailWorkCenters, setRetailWorkCenters] = useState<WorkCenter[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
   const [version, setVersion] = useState(0);
 
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
-  const dataUserId = useMemo(() => resolveBusinessDataUserId(user, currentBusiness), [user, currentBusiness]);
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user?.user_id, currentBusiness?.business_id, currentBusiness?.id],
+  );
+
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+  const businessIdRef = useRef(businessId);
+  businessIdRef.current = businessId;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const loadInflightRef = useRef<Promise<void> | null>(null);
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasDisplayedStoresRef = useRef(false);
+
+  const applyStores = useCallback((retail: WorkCenter[], allPdvs: PointOfSale[]) => {
+    const activePdvs = allPdvs.filter((p) => p.active !== false);
+    setRetailWorkCenters(retail);
+    setAllPointsOfSale(allPdvs);
+    setPointsOfSale(activePdvs);
+    if (retail.length > 0 || allPdvs.length > 0) {
+      hasDisplayedStoresRef.current = true;
+    }
+  }, []);
+
+  // Hidratar tiendas desde caché al cambiar de negocio (nunca reutilizar tiendas del negocio anterior).
+  useLayoutEffect(() => {
+    if (!businessId) {
+      setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
+      hasDisplayedStoresRef.current = false;
+      return;
+    }
+    hasDisplayedStoresRef.current = false;
+    const cached = readStoresCache(businessId);
+    if (cached) {
+      applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
+    } else {
+      setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
+    }
+  }, [businessId, applyStores]);
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
   const load = useCallback(async () => {
-    if (!dataUserId || !user) {
-      setPointsOfSale([]);
-      setAllPointsOfSale([]);
-      setRetailWorkCenters([]);
-      return;
+    if (loadInflightRef.current) {
+      return loadInflightRef.current;
     }
-    if (!isDeliveryBusinessType(currentBusiness?.businessType)) {
-      setPointsOfSale([]);
-      setAllPointsOfSale([]);
-      setRetailWorkCenters([]);
-      return;
-    }
-    setLoading(true);
+
+    const run = async () => {
+      const biz = currentBusinessRef.current;
+      if (!dataUserId || !user?.user_id) {
+        if (!hasDisplayedStoresRef.current) {
+          setPointsOfSale([]);
+          setAllPointsOfSale([]);
+          setRetailWorkCenters([]);
+        }
+        return;
+      }
+      if (!isDeliveryBusinessType(biz?.businessType)) {
+        setPointsOfSale([]);
+        setAllPointsOfSale([]);
+        setRetailWorkCenters([]);
+        hasDisplayedStoresRef.current = false;
+        return;
+      }
+
+      const showInitialSpinner = !hasDisplayedStoresRef.current;
+      if (showInitialSpinner) setInitialLoading(true);
+
+      try {
+        const state = await loadDeliveryStores(userRef.current, biz ?? null);
+        const retail = state.workCenters.filter(
+          (wc) =>
+            !wc.deletedAt &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
+        const allPdvs = state.pointsOfSale;
+        applyStores(retail, allPdvs);
+        const bid = String(biz?.business_id || biz?.id || '');
+        if (bid) {
+          writeStoresCache(bid, {
+            retailWorkCenters: retail,
+            allPointsOfSale: allPdvs,
+            pointsOfSale: allPdvs.filter((p) => p.active !== false),
+          });
+        }
+      } catch {
+        // Conservar última lista válida (caché o estado previo).
+      } finally {
+        if (showInitialSpinner) setInitialLoading(false);
+      }
+    };
+
+    const promise = run();
+    loadInflightRef.current = promise;
     try {
-      const state = await loadDeliveryStores(user, currentBusiness ?? null);
-      const retail = state.workCenters.filter(
-        (wc) =>
-          !wc.deletedAt &&
-          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-      );
-      setRetailWorkCenters(retail);
-      setAllPointsOfSale(state.pointsOfSale);
-      setPointsOfSale(state.pointsOfSale.filter((p) => p.active !== false));
-    } catch {
-      setPointsOfSale([]);
-      setAllPointsOfSale([]);
-      setRetailWorkCenters([]);
+      await promise;
     } finally {
-      setLoading(false);
+      if (loadInflightRef.current === promise) {
+        loadInflightRef.current = null;
+      }
     }
-  }, [dataUserId, currentBusiness, user]);
+  }, [applyStores, dataUserId, user?.user_id]);
+
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  /** Referencia estable: evita bucles de refresh en Sidebar cuando `loading` cambia. */
+  const refresh = useCallback(async () => {
+    await loadRef.current();
+  }, []);
 
   /** Tras cargar negocios: una sola carga de tiendas/PDV (evita competir con listBusinesses). */
   useEffect(() => {
-    if (!businessId || !businessesFetchSettled || businessLoading) return;
-    setPointsOfSale([]);
-    setAllPointsOfSale([]);
-    setRetailWorkCenters([]);
+    if (!businessId || !businessesFetchSettled) return;
     void load();
-  }, [businessId, businessesFetchSettled, businessLoading, load]);
+  }, [businessId, businessesFetchSettled, load]);
 
   useEffect(() => {
-    const onWorkCenters = () => {
-      void load();
+    const scheduleRefresh = () => {
+      clearStoresCache(businessIdRef.current);
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+      refreshDebounceRef.current = setTimeout(() => {
+        refreshDebounceRef.current = null;
+        void loadRef.current();
+      }, 500);
     };
-    window.addEventListener('work-centers:changed', onWorkCenters);
-    return () => window.removeEventListener('work-centers:changed', onWorkCenters);
-  }, [load]);
+    window.addEventListener('work-centers:changed', scheduleRefresh);
+    return () => {
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+      window.removeEventListener('work-centers:changed', scheduleRefresh);
+    };
+  }, []);
 
   useEffect(() => {
     const onExt = () => {
@@ -205,8 +340,8 @@ function ActiveStoreScopeProviderImpl({
       activePreferenceRaw,
       setActiveSalesPoint,
       setActiveWorkCenterPreference,
-      loading,
-      refresh: load,
+      loading: initialLoading,
+      refresh,
       displayLabelForActive,
     }),
     [
@@ -217,8 +352,8 @@ function ActiveStoreScopeProviderImpl({
       activePreferenceRaw,
       setActiveSalesPoint,
       setActiveWorkCenterPreference,
-      loading,
-      load,
+      initialLoading,
+      refresh,
       displayLabelForActive,
     ],
   );

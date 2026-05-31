@@ -3,16 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   listTpvRegisterSessionsRequest,
   updateTpvRegisterSessionRequest,
-  listPointsOfSaleRequest,
-  mergePointsOfSaleWithRetailWorkCenters,
+  filterDeliveryOrdersRequest,
   listDriverCashSessionsRequest,
   getDeliveryConfigRequest,
   updateDeliveryConfigRequest,
-  listDeliveryOrdersRequest,
   type TpvRegisterSession,
   type TpvRegisterSummary,
   type PointOfSale,
@@ -493,6 +493,7 @@ type TabId = 'estado' | 'historial' | 'incidencias' | 'configuracion';
 export function CajaPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
@@ -501,7 +502,6 @@ export function CajaPage() {
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [driverSessions, setDriverSessions] = useState<DriverCashSession[]>([]);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TabId>('estado');
   const [filterPdv, setFilterPdv] = useState('');
@@ -519,17 +519,14 @@ export function CajaPage() {
 
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
+    const pdvForApi = filterPdv?.trim() || activeStoreScope.activeSalesPointId?.trim() || undefined;
     try {
-      const [sessData, pdvData, driverData, cfgData] = await Promise.all([
-        listTpvRegisterSessionsRequest(dataUserId),
-        listPointsOfSaleRequest(dataUserId),
+      const [sessData, driverData, cfgData] = await Promise.all([
+        listTpvRegisterSessionsRequest(dataUserId, pdvForApi ? { salesPointId: pdvForApi } : undefined),
         listDriverCashSessionsRequest(dataUserId),
         getDeliveryConfigRequest(dataUserId).catch(() => null),
       ]);
       setSessions(sessData);
-      setPointsOfSale(
-        await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvData, { business: currentBusiness }),
-      );
       setDriverSessions(driverData);
       if (cfgData) setDeliveryConfig(cfgData);
     } catch {
@@ -537,28 +534,39 @@ export function CajaPage() {
     } finally {
       setLoading(false);
     }
-  }, [dataUserId, currentBusiness]);
+  }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const pointsOfSale = activeStoreScope.pointsOfSale;
+  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
+    setFilterPdv(pdvId || '');
+  }, []);
+  useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
 
   const loadOrders = useCallback(async () => {
     if (!dataUserId) return;
     setLoadingOrders(true);
+    const pdvForApi = filterPdv?.trim() || activeStoreScope.activeSalesPointId?.trim() || undefined;
     try {
-      const all = await listDeliveryOrdersRequest(dataUserId);
-      setOrders(all || []);
+      const data = await filterDeliveryOrdersRequest(dataUserId, {
+        ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+        dateFrom: `${ordersFrom}T00:00:00.000Z`,
+        dateTo: `${ordersTo}T23:59:59.999Z`,
+        limit: 500,
+      });
+      setOrders(data.orders || []);
     } catch {
       setOrders([]);
     } finally {
       setLoadingOrders(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId, ordersFrom, ordersTo]);
 
   useEffect(() => {
     if (tab !== 'historial') return;
-    if (orders.length > 0 || loadingOrders) return;
     void loadOrders();
-  }, [tab, orders.length, loadingOrders, loadOrders]);
+  }, [tab, loadOrders]);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 

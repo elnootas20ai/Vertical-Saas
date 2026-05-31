@@ -306,6 +306,38 @@ export async function listDeliveryOrdersRequest(userId: string): Promise<Deliver
   return payload.orders || [];
 }
 
+export interface FilterDeliveryOrdersParams {
+  channel?: string;
+  salesPointId?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  clientId?: string;
+  deliveryType?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function filterDeliveryOrdersRequest(
+  userId: string,
+  params: FilterDeliveryOrdersParams = {},
+): Promise<{ orders: DeliveryOrder[]; total: number }> {
+  const id = normalizeUserId(userId);
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) qs.set(key, text);
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  const payload = await request<{ ok: boolean; orders: DeliveryOrder[]; total?: number }>(
+    `/api/delivery/orders/${encodeURIComponent(id)}/filter${suffix}`,
+  );
+  const orders = payload.orders || [];
+  return { orders, total: payload.total ?? orders.length };
+}
+
 export async function createDeliveryOrderRequest(userId: string, data: Partial<DeliveryOrder>): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: DeliveryOrder }>(
@@ -761,7 +793,7 @@ export type DeliverySidebarStoreRow = {
   needsPdv: boolean;
 };
 
-/** Una fila por centro retail: con PDV enlazado o solo centro (pendiente de PDV). */
+/** Una fila por centro retail: con PDV enlazado, solo centro (pendiente de PDV) o PDV huérfano. */
 export function buildDeliverySidebarStoreRows(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
@@ -771,7 +803,7 @@ export function buildDeliverySidebarStoreRows(
       !wc.deletedAt &&
       (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
   );
-  return retail.map((wc) => {
+  const rows: DeliverySidebarStoreRow[] = retail.map((wc) => {
     const pdv = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === wc._id);
     const wcInactive = wc.active === false;
     if (pdv) {
@@ -794,6 +826,24 @@ export function buildDeliverySidebarStoreRows(
       needsPdv: true,
     };
   });
+
+  const linkedPdvIds = new Set(rows.map((r) => r.pdvId).filter(Boolean));
+  for (const pdv of pointsOfSale) {
+    if (!pdv._id || linkedPdvIds.has(pdv._id)) continue;
+    const lines = pointOfSaleSidebarLines(pdv);
+    rows.push({
+      rowId: pdv._id,
+      pdvId: pdv._id,
+      workCenterId: String(pdv.workCenterId || '').trim() || undefined,
+      title: lines.title,
+      code: lines.code || undefined,
+      inactive: pdv.active === false,
+      needsPdv: false,
+    });
+    linkedPdvIds.add(pdv._id);
+  }
+
+  return rows;
 }
 
 /** Códigos PDV: lógica en `shared/naming/` (una sola fuente; ver `shared/naming/README.md`). */
@@ -1358,10 +1408,16 @@ export interface TpvRegisterSession {
   updatedAt: string;
 }
 
-export async function listTpvRegisterSessionsRequest(userId: string): Promise<TpvRegisterSession[]> {
+export async function listTpvRegisterSessionsRequest(
+  userId: string,
+  options?: { salesPointId?: string },
+): Promise<TpvRegisterSession[]> {
   const id = normalizeUserId(userId);
+  const qs = options?.salesPointId?.trim()
+    ? `?salesPointId=${encodeURIComponent(options.salesPointId.trim())}`
+    : '';
   const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
-    `/api/delivery/tpv-sessions/${encodeURIComponent(id)}`,
+    `/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`,
   );
   return payload.sessions || [];
 }

@@ -3,14 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
-  listDeliveryOrdersRequest, updateDeliveryOrderRequest, listDriversRequest,
+  filterDeliveryOrdersRequest,
+  updateDeliveryOrderRequest, listDriversRequest,
   createDriverRequest, updateDriverRequest, getDriversStatsRequest,
-  getRepartoConfigRequest, listPointsOfSaleRequest,
+  getRepartoConfigRequest,
   type DeliveryOrder, type Driver, type DriverStats, type RepartoConfig, type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
-import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
+import {
+  deliveryOrderMatchesPdvFilter,
+  pickDefaultActivePdvId,
+  DELIVERY_ACTIVE_STORE_CHANGED,
+} from '../../lib/deliveryOpsPdvSelection';
 import {
   Truck, Package, CheckCircle2, Search, X, Phone, MapPin, User,
   Timer, MessageSquare, ChevronDown, ChevronRight, Users, Navigation,
@@ -44,12 +52,13 @@ const SC: Record<string, string> = { active: 'bg-green-500', offline: 'bg-gray-4
 
 export function DeliveryReparto() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const nav = useNavigate();
-  const uid = user?.id || '';
+  const uid = resolveBusinessDataUserId(user, currentBusiness);
   const isMgr = user?.role === 'Admin' || user?.role === 'Gerente';
 
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [filterPdv, setFilterPdv] = useState('');
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [stats, setStats] = useState<DriverStats[]>([]);
@@ -71,19 +80,41 @@ export function DeliveryReparto() {
 
   const load = useCallback(async () => {
     if (!uid) return;
+    const pdvForApi =
+      filterPdv?.trim() ||
+      activeStoreScope.activeSalesPointId?.trim() ||
+      undefined;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const [o, d, s, c, pdvs] = await Promise.all([
-        listDeliveryOrdersRequest(uid), listDriversRequest(uid),
-        getDriversStatsRequest(uid), getRepartoConfigRequest(uid),
-        listPointsOfSaleRequest(uid),
+      const [o, d, s, c] = await Promise.all([
+        filterDeliveryOrdersRequest(uid, {
+          ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+          dateFrom: `${today}T00:00:00.000Z`,
+          dateTo: `${today}T23:59:59.999Z`,
+          limit: 500,
+        }).then((r) => r.orders),
+        listDriversRequest(uid),
+        getDriversStatsRequest(uid),
+        getRepartoConfigRequest(uid),
       ]);
       setOrders(o); setDrivers(d); setStats(s); setCfg(c);
-      setPointsOfSale(pdvs.filter((p) => p.active !== false));
     } catch { /* silent */ } finally { setLoading(false); }
-  }, [uid]);
+  }, [uid, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (!uid) return; const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [uid, load]);
+
+  useEffect(() => {
+    const onStore = () => { load(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [load]);
+
+  const pointsOfSale = activeStoreScope.pointsOfSale;
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(pointsOfSale.filter((p) => p.active !== false)),
+    [pointsOfSale],
+  );
 
   const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
     setFilterPdv(pdvId || '');
@@ -93,8 +124,8 @@ export function DeliveryReparto() {
 
   const storeOrders = useMemo(() => {
     if (!filterPdv) return orders;
-    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
-  }, [orders, filterPdv]);
+    return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv, { primaryPdvId }));
+  }, [orders, filterPdv, primaryPdvId]);
 
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   // "Listos para salir": status 'listo' sin departedAt todavía. Mantengo el

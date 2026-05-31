@@ -58,7 +58,8 @@ import { StaffExpensesTab } from '../../components/saas/StaffExpensesTab';
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
 import { toast } from 'sonner';
 import { InviteUserModal, type InviteUserPayload } from '../../components/saas/InviteUserModal';
-import { listWorkCenters, type WorkCenter } from '../../lib/workCentersApi';
+import { loadInviteWorkCenters } from '../../lib/inviteWorkCenters';
+import type { WorkCenter } from '../../lib/workCentersApi';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { OrgChartModal } from '../../components/saas/OrgChartModal';
@@ -76,9 +77,21 @@ import type {
   AuthUser,
   EmploymentInfo,
   EmploymentSkill,
+  PersonalData,
   RoleDefinition,
   TeamInvitation,
 } from '../../lib/authApi';
+import { BirthDateEsField } from '../../components/saas/BirthDateEsField';
+import { buildDefaultPersonalData } from '../../lib/workerProfileCompletion';
+import {
+  formatIbanInput,
+  IBAN_DISPLAY_MAX_LENGTH,
+  IBAN_INPUT_CLASS,
+  normalizeBankName,
+  normalizeEmergencyContact,
+  normalizeEmergencyPhone,
+  normalizeIbanInput,
+} from '../../lib/employmentBankUtils';
 import { getUserActivityRequest } from '../../lib/authApi';
 import {
   buildCustomRolePermissionMatrix,
@@ -938,10 +951,19 @@ function buildEmploymentInfo(overrides?: Partial<EmploymentInfo>): EmploymentInf
     contractType: overrides?.contractType || '',
     workday: overrides?.workday || '',
     salary: overrides?.salary || '',
-    bankAccount: overrides?.bankAccount || '',
+    bankAccount: formatIbanInput(overrides?.bankAccount || ''),
+    bankName: overrides?.bankName || '',
     emergencyContact: overrides?.emergencyContact || '',
     emergencyPhone: overrides?.emergencyPhone || '',
+    salesPointId: overrides?.salesPointId || '',
+    contributionGroup: overrides?.contributionGroup || '',
+    mutualInsurance: overrides?.mutualInsurance || '',
+    assignments: overrides?.assignments,
   };
+}
+
+function buildPersonalDataInfo(overrides?: Partial<PersonalData> | null): PersonalData {
+  return buildDefaultPersonalData(overrides);
 }
 
 function buildRolePermissions(role = 'Usuario', roleDefinitions: RoleDefinition[] = []): AccountPermissionMatrix {
@@ -1300,6 +1322,7 @@ function MemberDrawer({
     role: member.role || 'Usuario',
     status: (member.status || 'active') as MemberStatus,
     employment: buildEmploymentInfo(member.employment),
+    personalData: buildPersonalDataInfo(member.personalData),
   });
 
   useEffect(() => {
@@ -1313,6 +1336,7 @@ function MemberDrawer({
       role: member.role || 'Usuario',
       status: (member.status || 'active') as MemberStatus,
       employment: buildEmploymentInfo(member.employment),
+      personalData: buildPersonalDataInfo(member.personalData),
     });
     setSelectedSkinId(member.skinId || 'default');
     setSelectedAnimationId(member.animationId || 'none');
@@ -1433,7 +1457,14 @@ function MemberDrawer({
       role: form.role,
       status: form.status,
       inviteStatus,
-      employment: form.employment,
+      employment: {
+        ...form.employment,
+        bankAccount: normalizeIbanInput(form.employment.bankAccount),
+        bankName: normalizeBankName(form.employment.bankName),
+        emergencyContact: normalizeEmergencyContact(form.employment.emergencyContact),
+        emergencyPhone: normalizeEmergencyPhone(form.employment.emergencyPhone),
+      },
+      personalData: buildDefaultPersonalData(form.personalData),
     });
 
     if (nextUser) {
@@ -1658,6 +1689,11 @@ function MemberDrawer({
             <div className="flex items-center gap-2">
               <RoleBadge role={memberState.role} skinId={memberState.skinId} />
               <StatusBadge status={memberState.status} />
+              {memberState.workerProfileCompletion && !memberState.workerProfileCompletion.fullyCompleted && (
+                <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                  Ficha incompleta
+                </span>
+              )}
             </div>
           </div>
 
@@ -1789,6 +1825,14 @@ function MemberDrawer({
                     <input type="date" className={inputClassName} value={form.employment.startDate} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, startDate: event.target.value } }))} />
                   </div>
                   <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Grupo de cotización</label>
+                    <input className={inputClassName} value={form.employment.contributionGroup || ''} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, contributionGroup: event.target.value } }))} placeholder="Ej: 05" />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Mutua</label>
+                    <input className={inputClassName} value={form.employment.mutualInsurance || ''} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, mutualInsurance: event.target.value } }))} placeholder="Nombre de la mutua" />
+                  </div>
+                  <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Tipo de contrato</label>
                     <div className="relative">
                       <select className={`${inputClassName} appearance-none pr-9 cursor-pointer`} value={form.employment.contractType} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, contractType: event.target.value } }))}>
@@ -1819,17 +1863,45 @@ function MemberDrawer({
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Salario bruto anual</label>
                     <input className={inputClassName} value={form.employment.salary} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, salary: event.target.value } }))} placeholder="Ej: 28.000 €" />
                   </div>
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Cuenta bancaria (IBAN)</label>
-                    <input className={inputClassName} value={form.employment.bankAccount} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, bankAccount: event.target.value } }))} placeholder="ES00 0000 0000 0000 0000 0000" />
+                    <input
+                      className={`${inputClassName} ${IBAN_INPUT_CLASS}`}
+                      value={form.employment.bankAccount}
+                      onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, bankAccount: formatIbanInput(event.target.value) } }))}
+                      maxLength={IBAN_DISPLAY_MAX_LENGTH}
+                      placeholder="ES00 0000 0000 0000 0000 0000"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Banco</label>
+                    <input
+                      className={inputClassName}
+                      value={form.employment.bankName}
+                      onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, bankName: normalizeBankName(event.target.value) } }))}
+                      maxLength={60}
+                      placeholder="Ej: CaixaBank, BBVA…"
+                    />
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Contacto de emergencia</label>
-                    <input className={inputClassName} value={form.employment.emergencyContact} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, emergencyContact: event.target.value } }))} placeholder="Nombre y parentesco" />
+                    <input
+                      className={inputClassName}
+                      value={form.employment.emergencyContact}
+                      onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, emergencyContact: normalizeEmergencyContact(event.target.value) } }))}
+                      maxLength={80}
+                      placeholder="Nombre y parentesco"
+                    />
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Teléfono emergencia</label>
-                    <input className={inputClassName} value={form.employment.emergencyPhone} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, emergencyPhone: event.target.value } }))} placeholder="+34 600 000 000" />
+                    <input
+                      className={inputClassName}
+                      value={form.employment.emergencyPhone}
+                      onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, emergencyPhone: normalizeEmergencyPhone(event.target.value) } }))}
+                      maxLength={20}
+                      placeholder="+34 600 000 000"
+                    />
                   </div>
                   <div className="md:col-span-2">
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Notas internas</label>
@@ -1840,6 +1912,44 @@ function MemberDrawer({
                       onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, notes: event.target.value } }))}
                       placeholder="Describe el rol del agente (afecta a la asignación automática de MCPs)..."
                     />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Datos personales del trabajador</p>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">DNI / NIE</label>
+                    <input className={inputClassName} value={form.personalData.dni} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, dni: event.target.value } }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Fecha de nacimiento</label>
+                    <BirthDateEsField
+                      value={form.personalData.birthDate}
+                      onChange={(iso) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, birthDate: iso } }))}
+                      className={inputClassName}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Nacionalidad</label>
+                    <input className={inputClassName} value={form.personalData.nationality} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, nationality: event.target.value } }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Dirección</label>
+                    <input className={inputClassName} value={form.personalData.address} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, address: event.target.value } }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Ciudad</label>
+                    <input className={inputClassName} value={form.personalData.city} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, city: event.target.value } }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">C.P.</label>
+                    <input className={inputClassName} value={form.personalData.postalCode} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, postalCode: event.target.value } }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Nº Seguridad Social</label>
+                    <input className={inputClassName} value={form.personalData.socialSecurityNumber} onChange={(event) => setForm((prev) => ({ ...prev, personalData: { ...prev.personalData, socialSecurityNumber: event.target.value } }))} />
                   </div>
                 </div>
               </div>
@@ -2806,13 +2916,26 @@ export function Team() {
   useEffect(() => {
     void loadDirectory();
     void loadPendingInvitations();
-    if (resolvedUserId) {
-      listWorkCenters(resolvedUserId).then(setWorkCentersData).catch(() => {});
+    if (resolvedUserId && currentBusiness) {
+      loadInviteWorkCenters(user, currentBusiness)
+        .then(setWorkCentersData)
+        .catch(() => {});
     }
     if (currentBusiness?.business_id) {
       fetchTeamAlerts(currentBusiness.business_id).then(setTeamAlerts).catch(() => {});
     }
-  }, [currentBusiness?.business_id, resolvedUserId]);
+  }, [currentBusiness?.business_id, resolvedUserId, user]);
+
+  useEffect(() => {
+    if (!resolvedUserId || !currentBusiness) return;
+    const refreshWorkCenters = () => {
+      loadInviteWorkCenters(user, currentBusiness)
+        .then(setWorkCentersData)
+        .catch(() => {});
+    };
+    window.addEventListener('work-centers:changed', refreshWorkCenters);
+    return () => window.removeEventListener('work-centers:changed', refreshWorkCenters);
+  }, [currentBusiness, resolvedUserId, user]);
 
   useEffect(() => {
     setCustomRoles(loadCustomRoles(roleScope));
@@ -3164,6 +3287,11 @@ export function Team() {
                   {teamAlerts.filter(a => a.type === 'cost_review_pending').length > 0 && (
                     <span className="inline-flex items-center gap-1 rounded-lg bg-purple-100 dark:bg-purple-900/30 px-2.5 py-1 text-xs font-semibold text-purple-700 dark:text-purple-300">
                       {teamAlerts.filter(a => a.type === 'cost_review_pending').length} coste pendiente
+                    </span>
+                  )}
+                  {teamAlerts.filter(a => a.type === 'profile_incomplete').length > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-orange-100 dark:bg-orange-900/30 px-2.5 py-1 text-xs font-semibold text-orange-700 dark:text-orange-300">
+                      {teamAlerts.filter(a => a.type === 'profile_incomplete').length} ficha incompleta
                     </span>
                   )}
                 </div>
@@ -3601,7 +3729,6 @@ export function Team() {
         <InviteUserModal
           onClose={() => setShowInvite(false)}
           roles={roles}
-          workCenters={workCentersData}
           businesses={businesses}
           currentBusinessId={currentBusiness?.business_id}
           onInvite={async (payload) => {
@@ -3639,7 +3766,7 @@ export function Team() {
                 email: entry.email || '',
                 phone: '',
                 role: entry.role || 'employee',
-                landingPage: '/saas/worker',
+                landingPage: '/saas/worker/tasks',
                 position: entry.position || '',
                 contractType: '',
                 grossMonthlySalary: '',

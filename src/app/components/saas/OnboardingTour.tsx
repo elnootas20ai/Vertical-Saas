@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useModalClose } from '../../hooks/useModalClose';
 import { X, ChevronRight, ChevronLeft, Sparkles, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   clearOnboardingTourForBusiness,
@@ -63,6 +64,15 @@ export function OnboardingTour({ onComplete }: Props) {
   const ownerRef = useRef<string>('');
 
   useEffect(() => {
+    if (isWorkerAccount(user)) {
+      if (accountUserId && businessId) {
+        markOnboardingTourCompleted(accountUserId, businessId);
+        setOnboardingTourActive(accountUserId, businessId, false);
+      }
+      setTourGate('hide');
+      return;
+    }
+
     if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) {
       setTourGate('loading');
       return;
@@ -129,6 +139,7 @@ export function OnboardingTour({ onComplete }: Props) {
     businessesFetchSettled,
     closedThisSession,
     currentBusiness,
+    user,
   ]);
 
   useEffect(() => {
@@ -192,7 +203,7 @@ export function OnboardingTour({ onComplete }: Props) {
 
   useModalClose(tourGate === 'show', closeTour);
 
-  if (tourGate !== 'show') return null;
+  if (isWorkerAccount(user) || tourGate !== 'show') return null;
 
   const step = steps[stepIndex];
   const isLast = stepIndex === steps.length - 1;

@@ -124,8 +124,10 @@ import {
   FileCheck,
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
-import { useAuth } from '../../context/AuthContext';
+import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
+import { getEffectivePointOfSaleLimit } from '../../lib/pointOfSaleLimits';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
@@ -393,7 +395,6 @@ const menuItemDefs = [
 // ── Modo Trabajador ─────────────────────────────────────────────────────────
 const workerMenuItemDefs = [
   // ── Principal ───────────────────────────────────────────────────────────────
-  { id: 'worker-home',       navKey: 'workerHome',       icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/worker' },
   { id: 'worker-tpv',        navKey: 'workerTpv',        icon: <Monitor className="w-5 h-5" />,         path: '/saas/worker/tpv', isNew: true },
   { id: 'worker-tasks',      navKey: 'workerTasks',      icon: <ClipboardList className="w-5 h-5" />,   path: '/saas/worker/tasks' },
   { id: 'worker-calendar',   navKey: 'workerCalendar',   icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/worker/calendar' },
@@ -411,11 +412,13 @@ const workerMenuItemDefs = [
   { id: 'worker-security',      navKey: 'workerSecurity',     icon: <Shield className="w-5 h-5" />,        path: '/saas/worker/security' },
 ] as const;
 
+const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv']);
+
 const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
   label: 'Principal',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['worker-home', 'worker-tpv', 'worker-tasks', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
+  itemIds: ['worker-tasks', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
 };
 
 const workerSidebarGroupDefs = [
@@ -509,13 +512,36 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) {
+  const auth = useAuthOptional();
+  if (!auth) return null;
+  return (
+    <SidebarInner
+      auth={auth}
+      collapsed={collapsed}
+      mobileOpen={mobileOpen}
+      onMobileClose={onMobileClose}
+    />
+  );
+}
+
+function SidebarInner({
+  auth,
+  collapsed,
+  mobileOpen,
+  onMobileClose,
+}: SidebarProps & { auth: AuthContextType }) {
   useModalClose(mobileOpen, onMobileClose);
   const SIDEBAR_SCROLL_KEY = 'saas-sidebar-scroll-top';
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout, user } = useAuth();
+  const { logout, user } = auth;
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
-  const { subscription, setDevSubscriptionPlan } = useApp();
+  const {
+    subscription,
+    setDevSubscriptionPlan,
+    enableDevUnlimitedPdv,
+    devUnlimitedPdv,
+  } = useApp();
   const { t } = useTranslation();
   const canUseDevPlanSwitcher = userCanUseDevPlanOverride(user);
   const currentDevPlan: 'basic' | 'normal' | 'pro' = (() => {
@@ -525,9 +551,23 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     return 'basic';
   })();
 
-  const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
-  const allowedGroups = VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership;
-  const allowedBottom = VERTICAL_BOTTOM_ITEMS[vertical] || VERTICAL_BOTTOM_ITEMS.carDealership;
+  const isWorker = isWorkerAccount(user);
+  /** Trabajador con empresa asignada (invitación aceptada / miembro en el negocio). */
+  const workerHasLinkedCompany = Boolean(
+    isWorker && currentBusiness?.business_id && currentBusiness.businessType,
+  );
+
+  const vertical: BusinessType | null = currentBusiness?.businessType
+    ? (currentBusiness.businessType as BusinessType)
+    : isWorker
+      ? null
+      : 'carDealership';
+  const allowedGroups = vertical
+    ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
+    : new Set<string>();
+  const allowedBottom = vertical
+    ? (VERTICAL_BOTTOM_ITEMS[vertical] || VERTICAL_BOTTOM_ITEMS.carDealership)
+    : new Set<string>();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
   const companySelectorRef = useRef<HTMLDivElement>(null);
   const [sidebarSearch, setSidebarSearch] = useState('');
@@ -537,10 +577,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   // - Cuenta tipo 'user' o con `invitedBy` (team member invitado) → modo trabajador.
   // - Resto (owner/gerente que se registró por el flujo normal) → modo gerente.
   // Se mantiene espejado en localStorage por compatibilidad con código que aún lo lee.
-  const workerMode = useMemo<boolean>(() => {
-    if (!user) return false;
-    return user.accountType === 'user' || Boolean((user as { invitedBy?: string }).invitedBy);
-  }, [user]);
+  const workerMode = isWorker;
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('saas-worker-mode', String(workerMode));
@@ -588,45 +625,23 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     } catch {
       // silent
     }
-  }, [user, currentBusiness, vertical]);
-
-  useEffect(() => {
-    loadSalesPoints();
-  }, [loadSalesPoints]);
+  }, [user?.user_id, currentBusiness?.business_id, vertical]);
 
   const activeStore = useActiveStoreScope();
 
-  const refreshStoreLists = useCallback(() => {
-    void loadSalesPoints();
-    void activeStore.refresh();
-  }, [loadSalesPoints, activeStore]);
-
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.addEventListener('work-centers:changed', refreshStoreLists);
-    return () => window.removeEventListener('work-centers:changed', refreshStoreLists);
-  }, [refreshStoreLists]);
-
-  useEffect(() => {
-    if (vertical !== 'delivery') return;
-    void activeStore.refresh();
-  }, [vertical, activeStore]);
+    if (vertical === 'delivery') return;
+    loadSalesPoints();
+  }, [loadSalesPoints, vertical]);
 
   useEffect(() => {
     if (vertical !== 'delivery' || typeof window === 'undefined') return;
-    const onFocus = () => {
-      void activeStore.refresh();
+    const onChanged = () => {
+      void loadSalesPoints();
     };
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void activeStore.refresh();
-    };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [vertical, activeStore]);
+    window.addEventListener('work-centers:changed', onChanged);
+    return () => window.removeEventListener('work-centers:changed', onChanged);
+  }, [vertical, loadSalesPoints]);
 
   useEffect(() => {
     if (vertical !== 'delivery' || activeStore.retailWorkCenters.length === 0) return;
@@ -667,7 +682,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     home: false,
-    'worker-main': false,
+    'worker-main': true,
     salesPoints: false,
     ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
     ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
@@ -862,10 +877,6 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     'scrapyard-deregistrations', 'scrapyard-environment',
   ]);
 
-  const isWorker = Boolean(
-    user && (user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy),
-  );
-
   const visibleMenuItems = visibleMenuItemsBase.filter((item) => {
     if (!user) {
       return true;
@@ -953,8 +964,7 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
     (item.id === 'bank-reconciliation' && location.pathname.startsWith('/saas/bank-reconciliation')) ||
     (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'payroll' && location.pathname.startsWith('/saas/payroll')) ||
-    (item.id === 'worker-home' && location.pathname === '/saas/worker') ||
-    (item.id !== 'worker-home' && item.id.startsWith('worker-') && location.pathname.startsWith(item.path)) ||
+    (item.id.startsWith('worker-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('gym-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('clinic-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('hotel-') && location.pathname.startsWith(item.path)) ||
@@ -1077,17 +1087,24 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
   const workerById = new Map(workerMenuItems.map((item) => [item.id, item]));
   const ADMIN_ONLY_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
   const WORKER_HIDDEN_ITEM_IDS = BUSINESS_OWNER_ONLY_IDS;
-  const verticalGroupsForWorker = sidebarGroups
-    .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
-    .map((group) => ({
-      ...group,
-      items: group.itemIds
-        .map((id) => visibleById.get(id))
-        .filter((item): item is SidebarItem => Boolean(item) && !WORKER_HIDDEN_ITEM_IDS.has(item.id)),
-    }))
-    .filter((group) => group.items.length > 0);
+  const verticalGroupsForWorker = workerHasLinkedCompany
+    ? sidebarGroups
+        .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
+        .map((group) => ({
+          ...group,
+          items: group.itemIds
+            .map((id) => visibleById.get(id))
+            .filter((item): item is SidebarItem => Boolean(item) && !WORKER_HIDDEN_ITEM_IDS.has(item.id)),
+        }))
+        .filter((group) => group.items.length > 0)
+    : [];
   const workerGroupedItems = [
-    { ...workerHomeGroup, items: workerHomeGroup.itemIds.map((id) => workerById.get(id)).filter((item): item is SidebarItem => Boolean(item)) },
+    {
+      ...workerHomeGroup,
+      items: workerHomeGroup.itemIds
+        .map((id) => workerById.get(id))
+        .filter((item): item is SidebarItem => Boolean(item) && !WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)),
+    },
     ...verticalGroupsForWorker,
     ...workerGroups.map((g) => ({ ...g, items: g.itemIds.map((id) => workerById.get(id)).filter((item): item is SidebarItem => Boolean(item)) })),
   ].filter((g) => g.items.length > 0);
@@ -1468,42 +1485,61 @@ export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) 
         })()}
 
         {!workerMode && canUseDevPlanSwitcher && (isMobile || !collapsed) && (
-          <div className={`mb-3 rounded-xl border border-dashed border-violet-300 bg-violet-50/60 px-3 py-2 dark:border-violet-700 dark:bg-violet-950/20 ${narrow ? 'mx-0.5' : 'mx-2'}`}>
-            <div className="mb-1.5">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
+          <div className={`mb-3 rounded-lg border border-dashed border-violet-300 bg-violet-50/60 px-2 py-1.5 dark:border-violet-700 dark:bg-violet-950/20 ${narrow ? 'mx-0.5' : 'mx-2'}`}>
+            <div className="mb-1">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-violet-700 dark:text-violet-300">
                 Plan (dev)
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-1">
-              {(['basic', 'normal', 'pro'] as const).map((p) => {
-                const isCurrent = currentDevPlan === p;
+            <div className="grid grid-cols-3 gap-0.5">
+              {([
+                { id: 'basic' as const, label: 'Básico' },
+                { id: 'normal' as const, label: 'Normal' },
+                { id: 'pro' as const, label: 'Pro' },
+              ]).map(({ id, label }) => {
+                const isCurrent = !devUnlimitedPdv && currentDevPlan === id;
                 return (
                   <button
-                    key={p}
+                    key={id}
                     type="button"
-                    onClick={() => setDevSubscriptionPlan(p)}
-                    className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold transition-colors capitalize ${
+                    onClick={() => setDevSubscriptionPlan(id)}
+                    className={`px-1 py-1 rounded text-[10px] font-semibold transition-colors ${
                       isCurrent
-                        ? p === 'pro'
-                          ? 'bg-violet-600 text-white shadow-sm'
-                          : p === 'normal'
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-slate-700 text-white shadow-sm'
+                        ? id === 'pro'
+                          ? 'bg-violet-600 text-white'
+                          : id === 'normal'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-700 text-white'
                         : 'bg-white text-gray-600 hover:bg-violet-100 border border-violet-200 dark:bg-gray-900 dark:text-gray-300 dark:border-violet-800 dark:hover:bg-violet-900/30'
                     }`}
-                    title={`Cambiar plan a ${p}`}
                   >
-                    {p}
+                    {label}
                   </button>
                 );
               })}
             </div>
             <button
               type="button"
-              onClick={() => setDevSubscriptionPlan(null)}
-              className="mt-1.5 w-full text-[10px] text-violet-600/80 dark:text-violet-400/80 hover:text-violet-800 dark:hover:text-violet-200 underline-offset-2 hover:underline"
+              onClick={enableDevUnlimitedPdv}
+              className={`mt-0.5 w-full px-1 py-1 rounded text-[10px] font-semibold transition-colors ${
+                devUnlimitedPdv
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-white text-sky-700 hover:bg-sky-50 border border-sky-300 dark:bg-gray-900 dark:text-sky-300 dark:border-sky-800 dark:hover:bg-sky-950/40'
+              }`}
             >
-              Reset (usar plan real)
+              Ilimitado
+            </button>
+            <p className="mt-1 text-[9px] text-violet-600/80 dark:text-violet-400/80">
+              {devUnlimitedPdv
+                ? 'PDV sin límite (plan real)'
+                : `Máx. ${getEffectivePointOfSaleLimit(subscription)} PDV`}
+            </p>
+            <button
+              type="button"
+              onClick={() => setDevSubscriptionPlan(null)}
+              className="mt-0.5 w-full text-[9px] text-violet-600/80 dark:text-violet-400/80 hover:text-violet-800 dark:hover:text-violet-200 underline-offset-2 hover:underline"
+            >
+              Reset (plan real)
             </button>
           </div>
         )}

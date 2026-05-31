@@ -1,3 +1,5 @@
+export { WorkerIdentitySetup } from './WorkerIdentitySetup';
+export { WorkerPayrollSetup } from './WorkerPayrollSetup';
 export { WorkerHome } from './WorkerHome';
 export { WorkerTasks } from './WorkerTasks';
 export { WorkerCalendar } from './WorkerCalendar';

@@ -51,7 +51,7 @@ function destinationAfterSignup(opts: {
   if (opts.emailVerified === false) {
     return '/auth/verify-email-pending';
   }
-  return opts.redirectTo ?? (opts.isUserAccount ? '/saas/worker' : '/auth/onboarding/business-type');
+  return opts.redirectTo ?? (opts.isUserAccount ? '/saas/worker/setup-profile' : '/auth/onboarding/business-type');
 }
 
 export function Register() {

@@ -52,6 +52,11 @@ function getPlanTier(req) {
   return 'trial'; // Basic, trial_active, desconocido → trial
 }
 
+/** En local el dashboard dispara 80+ peticiones al montar; no aplicar límites SaaS. */
+function skipRateLimitInDev() {
+  return process.env.NODE_ENV !== 'production' || process.env.DISABLE_RATE_LIMIT === 'true';
+}
+
 // ─── I-06: Abuse tracker ──────────────────────────────────────────────────────
 
 /**
@@ -161,6 +166,7 @@ export const burstLimiter = rateLimit({
   max: BURST_MAX,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipRateLimitInDev,
   keyGenerator: getUserKey,
   handler(req, res, next, options) {
     trackViolation(req);
@@ -187,6 +193,7 @@ const _trialLimiter = rateLimit({
   max: TRIAL_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipRateLimitInDev,
   keyGenerator: getUserKey,
   handler(req, res, next, options) {
     trackViolation(req);
@@ -202,6 +209,7 @@ const _proLimiter = rateLimit({
   max: PRO_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipRateLimitInDev,
   keyGenerator: getUserKey,
   handler(req, res, next, options) {
     trackViolation(req);
@@ -217,6 +225,7 @@ const _enterpriseLimiter = rateLimit({
   max: ENTERPRISE_MAX_PER_MIN,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipRateLimitInDev,
   keyGenerator: getUserKey,
   handler(req, res, next, options) {
     trackViolation(req);

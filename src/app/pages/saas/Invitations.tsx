@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import type { TeamInvitation } from '../../lib/authApi';
+import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 function formatDate(value?: string) {
   if (!value) return '';
@@ -40,17 +41,26 @@ export function Invitations() {
     setBusyId(null);
 
     if (!result.success) {
+      const alreadyAccepted = result.error?.includes('ya fue aceptada')
+        || result.error?.includes('ya no está activa');
+      if (alreadyAccepted) {
+        toast.info('Esta invitación ya estaba aceptada. Entrando a tu zona de trabajo…');
+        navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH, { replace: true, state: { payrollCompleted: true } });
+        return;
+      }
       toast.error(result.error || 'No se pudo aceptar la invitación.');
       return;
     }
 
-    toast.success(`Te uniste a ${invitation.businessName || 'este equipo'}.`);
+    if (result.alreadyAccepted) {
+      toast.info(`Ya formabas parte de ${invitation.businessName || 'este equipo'}.`);
+    } else {
+      toast.success(`Te uniste a ${invitation.businessName || 'este equipo'}.`);
+    }
     window.dispatchEvent(new CustomEvent('vertial:invitations:refresh'));
     await loadInvitations();
 
-    if (result.redirectTo) {
-      navigate(result.redirectTo);
-    }
+    navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH, { replace: true });
   };
 
   const handleReject = async (invitation: TeamInvitation) => {
@@ -119,7 +129,7 @@ export function Invitations() {
             </p>
             <button
               type="button"
-              onClick={() => navigate('/saas/worker')}
+              onClick={() => navigate(WORKER_DEFAULT_LANDING_PATH)}
               className="mt-5 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
             >
               Ir a mi zona

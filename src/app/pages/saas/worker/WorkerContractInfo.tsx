@@ -1,51 +1,71 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  ClipboardCheck,
-  Building2,
-  Calendar,
-  DollarSign,
-  Clock,
+  Shield,
   FileText,
+  DollarSign,
   Save,
   Edit3,
-  AlertCircle,
   Info,
-  Briefcase,
-  Shield,
+  Loader2,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
+import { buildDefaultPersonalData } from '../../../lib/workerProfileCompletion';
+import {
+  formatIbanInput,
+  IBAN_DISPLAY_MAX_LENGTH,
+  IBAN_INPUT_CLASS,
+  normalizeBankName,
+  normalizeIbanInput,
+} from '../../../lib/employmentBankUtils';
+import { toast } from 'sonner';
 
 export function WorkerContractInfo() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
 
   const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
-    ssNumber: '',
-    ssAffiliation: '',
-    contractType: 'indefinido',
-    startDate: '2025-09-01',
-    endDate: '',
-    workday: 'completa',
-    weeklyHours: '40',
-    salary: '',
-    payFrequency: 'monthly',
-    iban: '',
-    professionalCategory: '',
-    contributionGroup: '',
-    cnae: '',
-    epigraph: '',
-    trialPeriodEnd: '2025-11-01',
-    collectiveAgreement: '',
+    socialSecurityNumber: user?.personalData?.socialSecurityNumber || '',
+    iban: formatIbanInput(user?.employment?.bankAccount || ''),
+    bankName: user?.employment?.bankName || '',
   });
+
+  useEffect(() => {
+    if (!user) return;
+    setFormData({
+      socialSecurityNumber: user.personalData?.socialSecurityNumber || '',
+      iban: formatIbanInput(user.employment?.bankAccount || ''),
+      bankName: user.employment?.bankName || '',
+    });
+  }, [user]);
 
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!user?.user_id) return;
+    setIsSaving(true);
+    const result = await updateUser(user.user_id, {
+      personalData: buildDefaultPersonalData({
+        ...(user.personalData || {}),
+        socialSecurityNumber: formData.socialSecurityNumber.trim(),
+      }),
+      employment: {
+        ...(user.employment || {}),
+        bankAccount: normalizeIbanInput(formData.iban),
+        bankName: normalizeBankName(formData.bankName),
+      },
+    });
+    setIsSaving(false);
+    if (!result.success) {
+      toast.error(result.error || 'No se pudieron guardar los datos');
+      return;
+    }
+    toast.success('Datos guardados');
     setIsEditing(false);
   };
 
@@ -55,10 +75,11 @@ export function WorkerContractInfo() {
       : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
   }`;
 
+  const employment = user?.employment;
+
   return (
     <Layout title={t('worker.contractInfo.title')} subtitle={t('worker.contractInfo.subtitle')}>
       <div className="space-y-6">
-        {/* Info banner */}
         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
           <div>
@@ -69,19 +90,20 @@ export function WorkerContractInfo() {
 
         <div className="flex justify-end">
           <button
-            onClick={() => isEditing ? handleSave() : setIsEditing(true)}
+            type="button"
+            onClick={() => (isEditing ? void handleSave() : setIsEditing(true))}
+            disabled={isSaving}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
               isEditing
-                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                ? 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60'
                 : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
           >
-            {isEditing ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-            {isEditing ? t('common.save') : t('common.edit')}
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
+            {isSaving ? t('common.saving', 'Guardando…') : isEditing ? t('common.save') : t('common.edit')}
           </button>
         </div>
 
-        {/* Seguridad Social */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
             <Shield className="w-4 h-4 text-blue-500" />
@@ -90,24 +112,18 @@ export function WorkerContractInfo() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.ssNumber')}</label>
-              <input type="text" value={formData.ssNumber} onChange={(e) => handleChange('ssNumber', e.target.value)} disabled={!isEditing} className={inputClass()} placeholder="XX/12345678/90" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.ssAffiliation')}</label>
-              <input type="text" value={formData.ssAffiliation} onChange={(e) => handleChange('ssAffiliation', e.target.value)} disabled={!isEditing} className={inputClass()} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.contributionGroup')}</label>
-              <input type="text" value={formData.contributionGroup} onChange={(e) => handleChange('contributionGroup', e.target.value)} disabled={!isEditing} className={inputClass()} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.professionalCat')}</label>
-              <input type="text" value={formData.professionalCategory} onChange={(e) => handleChange('professionalCategory', e.target.value)} disabled={!isEditing} className={inputClass()} />
+              <input
+                type="text"
+                value={formData.socialSecurityNumber}
+                onChange={(e) => handleChange('socialSecurityNumber', e.target.value)}
+                disabled={!isEditing}
+                className={inputClass()}
+                placeholder="XX/12345678/90"
+              />
             </div>
           </div>
         </div>
 
-        {/* Datos del Contrato */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
             <FileText className="w-4 h-4 text-emerald-500" />
@@ -116,44 +132,23 @@ export function WorkerContractInfo() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.contractType')}</label>
-              <select value={formData.contractType} onChange={(e) => handleChange('contractType', e.target.value)} disabled={!isEditing} className={inputClass()}>
-                <option value="indefinido">{t('worker.contractInfo.indefinite')}</option>
-                <option value="temporal">{t('worker.contractInfo.temporary')}</option>
-                <option value="practicas">{t('worker.contractInfo.internship')}</option>
-                <option value="formacion">{t('worker.contractInfo.training')}</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.workday')}</label>
-              <select value={formData.workday} onChange={(e) => handleChange('workday', e.target.value)} disabled={!isEditing} className={inputClass()}>
-                <option value="completa">{t('worker.contractInfo.fullTime')}</option>
-                <option value="parcial">{t('worker.contractInfo.partTime')}</option>
-              </select>
+              <div className={inputClass(true)}>{employment?.contractType || '—'}</div>
             </div>
             <div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.startDate')}</label>
-              <input type="date" value={formData.startDate} onChange={(e) => handleChange('startDate', e.target.value)} disabled={!isEditing} className={inputClass()} />
+              <div className={inputClass(true)}>{employment?.startDate || 'Pendiente (RRHH)'}</div>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.endDate')}</label>
-              <input type="date" value={formData.endDate} onChange={(e) => handleChange('endDate', e.target.value)} disabled={!isEditing} className={inputClass()} placeholder={t('worker.contractInfo.noEndDate')} />
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Grupo de cotización</label>
+              <div className={inputClass(true)}>{employment?.contributionGroup || 'Pendiente (RRHH)'}</div>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.weeklyHours')}</label>
-              <input type="number" value={formData.weeklyHours} onChange={(e) => handleChange('weeklyHours', e.target.value)} disabled={!isEditing} className={inputClass()} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.trialPeriod')}</label>
-              <input type="date" value={formData.trialPeriodEnd} onChange={(e) => handleChange('trialPeriodEnd', e.target.value)} disabled={!isEditing} className={inputClass()} />
-            </div>
-            <div className="sm:col-span-2">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.collectiveAgreement')}</label>
-              <input type="text" value={formData.collectiveAgreement} onChange={(e) => handleChange('collectiveAgreement', e.target.value)} disabled={!isEditing} className={inputClass()} />
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">Mutua</label>
+              <div className={inputClass(true)}>{employment?.mutualInsurance || 'Pendiente (RRHH)'}</div>
             </div>
           </div>
         </div>
 
-        {/* Datos Bancarios */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
             <DollarSign className="w-4 h-4 text-amber-500" />
@@ -162,14 +157,27 @@ export function WorkerContractInfo() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.iban')}</label>
-              <input type="text" value={formData.iban} onChange={(e) => handleChange('iban', e.target.value)} disabled={!isEditing} className={inputClass()} placeholder="ES00 0000 0000 0000 0000 0000" />
+              <input
+                type="text"
+                value={formData.iban}
+                onChange={(e) => handleChange('iban', formatIbanInput(e.target.value))}
+                disabled={!isEditing}
+                maxLength={IBAN_DISPLAY_MAX_LENGTH}
+                className={`${inputClass()} ${IBAN_INPUT_CLASS}`}
+                placeholder="ES00 0000 0000 0000 0000 0000"
+              />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.payFrequency')}</label>
-              <select value={formData.payFrequency} onChange={(e) => handleChange('payFrequency', e.target.value)} disabled={!isEditing} className={inputClass()}>
-                <option value="monthly">{t('worker.contractInfo.monthly')}</option>
-                <option value="biweekly">{t('worker.contractInfo.biweekly')}</option>
-              </select>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.contractInfo.bankName')}</label>
+              <input
+                type="text"
+                value={formData.bankName}
+                onChange={(e) => handleChange('bankName', normalizeBankName(e.target.value))}
+                disabled={!isEditing}
+                maxLength={60}
+                className={inputClass()}
+                placeholder="Ej: CaixaBank, BBVA…"
+              />
             </div>
           </div>
         </div>

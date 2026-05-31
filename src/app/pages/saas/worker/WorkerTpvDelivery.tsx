@@ -2,13 +2,18 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
+import { useBusiness } from '../../../context/BusinessContext';
+import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
 } from '../../../lib/deliveryApi';
+import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
+import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import {
   ChefHat,
   Package,
@@ -280,6 +285,8 @@ function OrderDetail({ order, onClose, onAdvance, advancing }: {
 
 export function WorkerTpvDelivery() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -288,19 +295,34 @@ export function WorkerTpvDelivery() {
   const [advancingId, setAdvancingId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
 
-  const userId = user?.user_id || user?.id || '';
+  const userId = resolveBusinessDataUserId(user, currentBusiness);
+  const workerPdv = useMemo(
+    () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
+    [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
+  );
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(activeStoreScope.pointsOfSale.filter((p) => p.active !== false)),
+    [activeStoreScope.pointsOfSale],
+  );
 
   const loadOrders = useCallback(async () => {
     if (!userId) return;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const data = await listDeliveryOrdersRequest(userId);
-      setOrders(data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+      const data = await filterDeliveryOrdersRequest(userId, {
+        ...(workerPdv.pdvId ? { salesPointId: workerPdv.pdvId } : {}),
+        dateFrom: `${today}T00:00:00.000Z`,
+        dateTo: `${today}T23:59:59.999Z`,
+        limit: 500,
+      });
+      const scoped = filterOrdersForActivePdv(data.orders, workerPdv.pdvId, primaryPdvId);
+      setOrders(scoped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       toast.error('Error al cargar pedidos');
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, workerPdv.pdvId, primaryPdvId]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
@@ -360,7 +382,7 @@ export function WorkerTpvDelivery() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => navigate('/saas/worker')}
+              onClick={() => navigate('/saas/worker/tasks')}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />

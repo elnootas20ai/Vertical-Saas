@@ -1716,6 +1716,7 @@ const es = {
         contractLabel: 'Contrato',
         startDateLabel: 'Fecha de alta',
         bankInfo: 'Datos bancarios',
+        bankName: 'Banco',
       },
       contractInfo: {
         title: 'Info. Contratación',
@@ -1744,6 +1745,7 @@ const es = {
         collectiveAgreement: 'Convenio colectivo',
         bankData: 'Datos bancarios',
         iban: 'IBAN',
+        bankName: 'Banco',
         payFrequency: 'Periodicidad de pago',
         monthly: 'Mensual',
         biweekly: 'Quincenal',
@@ -3539,6 +3541,7 @@ const en = {
         contractLabel: 'Contract',
         startDateLabel: 'Start date',
         bankInfo: 'Bank details',
+        bankName: 'Bank',
       },
       contractInfo: {
         title: 'Contract Info',
@@ -3567,6 +3570,7 @@ const en = {
         collectiveAgreement: 'Collective agreement',
         bankData: 'Bank details',
         iban: 'IBAN',
+        bankName: 'Bank',
         payFrequency: 'Pay frequency',
         monthly: 'Monthly',
         biweekly: 'Biweekly',

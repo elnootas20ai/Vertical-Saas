@@ -1,20 +1,26 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
-import { deliveryOrderMatchesPdvFilter } from '../../lib/deliveryOpsPdvSelection';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
-  listPointsOfSaleRequest,
   setCatalogItemAvailabilityRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryOrderItem,
   type PointOfSale,
 } from '../../lib/deliveryApi';
+import {
+  deliveryOrderMatchesPdvFilter,
+  pickDefaultActivePdvId,
+  DELIVERY_ACTIVE_STORE_CHANGED,
+} from '../../lib/deliveryOpsPdvSelection';
 import {
   ChefHat,
   Package,
@@ -673,11 +679,12 @@ type MobileTab = 'cola' | 'cocina' | 'listos';
 
 export function DeliveryKitchen() {
   const { user } = useAuth();
-  const userId = user?.user_id || user?.id || '';
+  const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
+  const userId = resolveBusinessDataUserId(user, currentBusiness);
 
   // Data state
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
-  const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
 
@@ -703,8 +710,24 @@ export function DeliveryKitchen() {
   // Load data
   const loadOrders = useCallback(async () => {
     if (!userId) return;
+    const pdvForApi =
+      filterPdv?.trim() ||
+      activeStoreScope.activeSalesPointId?.trim() ||
+      undefined;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const data = await listDeliveryOrdersRequest(userId);
+      const data = pdvForApi
+        ? await filterDeliveryOrdersRequest(userId, {
+            salesPointId: pdvForApi,
+            dateFrom: `${today}T00:00:00.000Z`,
+            dateTo: `${today}T23:59:59.999Z`,
+            limit: 500,
+          }).then((r) => r.orders)
+        : await filterDeliveryOrdersRequest(userId, {
+            dateFrom: `${today}T00:00:00.000Z`,
+            dateTo: `${today}T23:59:59.999Z`,
+            limit: 500,
+          }).then((r) => r.orders);
       setOrders(data);
       if (prevOrderCountRef.current > 0) {
         const activeNew = data.filter((o) => o.status === 'nuevo').length;
@@ -730,17 +753,21 @@ export function DeliveryKitchen() {
     } finally {
       setLoading(false);
     }
-  }, [userId, soundEnabled]);
+  }, [userId, filterPdv, activeStoreScope.activeSalesPointId, soundEnabled]);
 
-  const loadPdv = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const data = await listPointsOfSaleRequest(userId);
-      setPointsOfSale(data.filter((p) => p.active));
-    } catch {}
-  }, [userId]);
+  const pointsOfSale = activeStoreScope.pointsOfSale;
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(pointsOfSale.filter((p) => p.active !== false)),
+    [pointsOfSale],
+  );
 
-  useEffect(() => { loadOrders(); loadPdv(); }, [loadOrders, loadPdv]);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
+
+  useEffect(() => {
+    const onStore = () => { loadOrders(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [loadOrders]);
 
   const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
     setFilterPdv(pdvId || '');
@@ -860,7 +887,7 @@ export function DeliveryKitchen() {
   // Filtered + sorted orders
   const activeOrders = useMemo(() => {
     let list = orders.filter((o) => !['entregado', 'cancelled'].includes(o.status));
-    if (filterPdv) list = list.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv));
+    if (filterPdv) list = list.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv, { primaryPdvId }));
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((o) =>
@@ -870,7 +897,7 @@ export function DeliveryKitchen() {
       );
     }
     return list;
-  }, [orders, filterPdv, search]);
+  }, [orders, filterPdv, search, primaryPdvId]);
 
   const colQueue = useMemo(() => sortByUrgency(activeOrders.filter((o) => o.status === 'nuevo')), [activeOrders]);
   const colKitchen = useMemo(() => sortByUrgency(activeOrders.filter((o) => o.status === 'cocina')), [activeOrders]);

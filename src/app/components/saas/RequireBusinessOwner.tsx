@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 /**
  * Restringe el acceso a páginas "de negocio" (Centro Operativo, listas
@@ -23,7 +24,7 @@ export function RequireBusinessOwner({ children }: { children: React.ReactNode }
     if (isInitializing) return;
     if (!user) return;
     if (isWorker) {
-      navigate('/saas/worker', { replace: true });
+      navigate(WORKER_DEFAULT_LANDING_PATH, { replace: true });
     }
   }, [isInitializing, user, isWorker, navigate]);
 

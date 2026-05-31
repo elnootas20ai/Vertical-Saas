@@ -1,4 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
+import { hasMinimumWorkerIdentity, mergePersonalData, computeWorkerProfileCompletion } from '../lib/workerProfileCompletion';
 import {
   type AccountActivityItem,
   type ActiveSession,
@@ -49,7 +51,23 @@ import {
 
 type User = AuthUser;
 
-interface AuthContextType {
+function mergeProfilePatch(base: User, patch: Partial<User>): User {
+  const merged: User = { ...base, ...patch };
+  if (patch.personalData !== undefined) {
+    merged.personalData = mergePersonalData(base.personalData, patch.personalData);
+  }
+  if (patch.employment !== undefined) {
+    merged.employment = { ...(base.employment || {}), ...patch.employment };
+  }
+  if (patch.phone !== undefined) {
+    merged.phone = String(patch.phone).trim();
+  }
+  merged.workerIdentityCompleted = hasMinimumWorkerIdentity(merged);
+  merged.workerProfileCompletion = computeWorkerProfileCompletion(merged);
+  return merged;
+}
+
+export interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
@@ -128,7 +146,7 @@ interface AuthContextType {
   ) => Promise<InviteLookupResult & { success: boolean; error?: string }>;
   listMyInvitations: () => Promise<TeamInvitation[]>;
   listBusinessInvitations: (businessId: string, includeAll?: boolean) => Promise<TeamInvitation[]>;
-  acceptInvitation: (invitationId: string) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
+  acceptInvitation: (invitationId: string) => Promise<{ success: boolean; redirectTo?: string; alreadyAccepted?: boolean; error?: string; code?: string }>;
   rejectInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
   resendInvitation: (invitationId: string) => Promise<{ success: boolean; inviteExpiresAt?: string; error?: string }>;
   revokeInvitation: (invitationId: string) => Promise<{ success: boolean; error?: string }>;
@@ -560,16 +578,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.user) {
         setSessionUser(response.user);
       }
-      // Tras aceptar, el usuario ya es miembro de un negocio nuevo. Notificamos al
-      // BusinessProvider para que recargue la lista; si no, el sidebar queda con
-      // currentBusiness obsoleto (o vacío) y la vertical (delivery, comercial,
-      // limpieza…) no aparece o aparece la del fallback 'carDealership'.
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('vertial:invitation-accepted'));
       }
-      return { success: true, redirectTo: response.redirectTo };
+      return {
+        success: true,
+        redirectTo: response.redirectTo,
+        alreadyAccepted: Boolean((response as { alreadyAccepted?: boolean }).alreadyAccepted),
+      };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Error al aceptar la invitación' };
+      const message = error instanceof Error ? error.message : 'Error al aceptar la invitación';
+      const code = (error as Error & { code?: string }).code;
+      return { success: false, error: message, code };
     }
   };
 
@@ -609,10 +629,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!response.user) {
         return { success: false, error: 'No se pudo actualizar el usuario' };
       }
-      if (user?.user_id === userId) {
-        setSessionUser(response.user);
+      const updated = response.user as User;
+      const mergedUser = mergeProfilePatch(updated, data);
+      const requestId = String(userId || '').trim();
+      const currentIds = [user?.user_id, user?.id].map((id) => String(id || '').trim()).filter(Boolean);
+      const updatedIds = [updated.user_id, updated.id].map((id) => String(id || '').trim()).filter(Boolean);
+      const idsMatch = requestId && (
+        currentIds.includes(requestId)
+        || updatedIds.includes(requestId)
+        || (currentIds.length > 0 && updatedIds.some((id) => currentIds.includes(id)))
+      );
+      const emailMatch = Boolean(
+        user?.email
+        && updated.email
+        && String(user.email).trim().toLowerCase() === String(updated.email).trim().toLowerCase(),
+      );
+      if (idsMatch || emailMatch || !user) {
+        flushSync(() => setSessionUser(mergedUser));
       }
-      return { success: true, user: response.user };
+      return { success: true, user: mergedUser };
     } catch (error) {
       return {
         success: false,

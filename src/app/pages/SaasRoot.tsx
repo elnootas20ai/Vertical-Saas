@@ -19,12 +19,20 @@ import { SetupProgressProvider } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
-
+import { isWorkerAccount } from '../lib/authApi';
 import {
   ensureDeliveryDefaultBrand,
   isDeliveryBusinessType,
   readStoredOnboardingBusinessType,
 } from '../lib/deliverySetup';
+import {
+  clearWorkerIdentityBypass,
+  hasMinimumWorkerIdentity,
+  hasSkippedWorkerProfileGates,
+  hasWorkerIdentityBypass,
+  WORKER_IDENTITY_SETUP_PATH,
+  WORKER_PAYROLL_SETUP_PATH,
+} from '../lib/workerProfileCompletion';
 
 
 
@@ -99,6 +107,7 @@ function SaasContent() {
     if (!isInitializing && isAuthenticated && user && !user.emailVerified) {
 
       if (location.pathname.startsWith('/saas/settings')) return;
+      if (location.pathname === WORKER_IDENTITY_SETUP_PATH) return;
 
       navigate('/auth/verify-email-pending', { replace: true });
 
@@ -108,7 +117,41 @@ function SaasContent() {
 
 
 
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (!isWorkerAccount(user)) return;
+    if (hasMinimumWorkerIdentity(user)) {
+      clearWorkerIdentityBypass();
+      return;
+    }
+
+    const userId = String(user.user_id || user.id || '').trim();
+    if (hasSkippedWorkerProfileGates(userId)) return;
+
+    const navState = location.state as { identityCompleted?: boolean } | null;
+    if (navState?.identityCompleted || hasWorkerIdentityBypass(userId || undefined)) return;
+
+    const allowed = [
+      WORKER_IDENTITY_SETUP_PATH,
+      WORKER_PAYROLL_SETUP_PATH,
+      '/auth/verify-email-pending',
+      '/saas/user-dashboard',
+      '/saas/invitations',
+    ];
+    if (allowed.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`))) {
+      return;
+    }
+    if (location.pathname.startsWith('/saas/worker')) return;
+
+    navigate(WORKER_IDENTITY_SETUP_PATH, { replace: true });
+  }, [isInitializing, isAuthenticated, user, location.pathname, location.state, navigate]);
+
+
+
   const isUserAccount = user?.accountType === 'user';
+  const isLinkedWorker = Boolean(
+    isWorkerAccount(user) && String(user?.linkedBusinessId || '').trim(),
+  );
 
 
 
@@ -267,29 +310,30 @@ function SaasContent() {
   useEffect(() => {
 
     if (
-
-      subscription.status === 'trial_expired' &&
-
-      location.pathname !== '/saas/billing' &&
-
-      location.pathname !== '/saas/settings' &&
-
-      location.pathname !== '/saas/help' &&
-
-      location.pathname !== '/saas/suspended'
-
+      isWorkerAccount(user) ||
+      subscription.status !== 'trial_expired' ||
+      location.pathname === '/saas/billing' ||
+      location.pathname === '/saas/settings' ||
+      location.pathname === '/saas/help' ||
+      location.pathname === '/saas/suspended'
     ) {
-
-      navigate('/saas/billing', { replace: true });
-
+      return;
     }
 
-  }, [subscription.status, location.pathname, navigate]);
+    navigate('/saas/billing', { replace: true });
+
+  }, [subscription.status, location.pathname, navigate, user]);
 
   const isInitialBusinessLoad =
     !businessCtx || isLoadingBusinesses || !businessesFetchSettled;
 
-  if (isInitializing || isInitialBusinessLoad || isAutoCreating) {
+  const skipBusinessLoadGate =
+    location.pathname === WORKER_IDENTITY_SETUP_PATH
+    || location.pathname === WORKER_PAYROLL_SETUP_PATH
+    || location.pathname === '/saas/user-dashboard'
+    || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
+
+  if (isInitializing || ((!skipBusinessLoadGate && isInitialBusinessLoad) || isAutoCreating)) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
@@ -307,7 +351,7 @@ function SaasContent() {
 
 
 
-  if (businesses.length === 0 && !isUserAccount) {
+  if (businesses.length === 0 && !isUserAccount && !isLinkedWorker) {
 
     return null;
 
@@ -315,7 +359,9 @@ function SaasContent() {
 
 
 
-  if (location.pathname === '/saas/suspended') {
+  if (location.pathname === '/saas/suspended'
+    || location.pathname === WORKER_IDENTITY_SETUP_PATH
+    || location.pathname === WORKER_PAYROLL_SETUP_PATH) {
 
     return (
 

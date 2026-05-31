@@ -410,7 +410,7 @@ export function WorkerTpvHotel() {
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => navigate('/saas/worker')}
+              onClick={() => navigate('/saas/worker/tasks')}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />

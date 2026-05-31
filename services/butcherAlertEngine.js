@@ -356,7 +356,7 @@ async function checkButcherRegister(ctx, tpvSessions, config) {
         category: 'butcher_register_pending', title: 'Caja pendiente de cierre',
         message: `Sesion de caja abierta desde ${new Date(s.openedAt).toLocaleTimeString('es-ES')} sin cerrar (${Math.floor(hours)}h).`,
         entityId: s._id, entityType: 'tpv_register_session',
-        route: '/saas/worker',
+        route: '/saas/worker/tasks',
         metadata: { sessionId: s._id, hoursOpen: Math.floor(hours), pendingTickets: s.pendingTickets || 0 },
         audience: ['worker', 'manager'],
       }));
@@ -382,7 +382,7 @@ async function checkButcherTickets(ctx, tpvSessions, config) {
           category: 'butcher_ticket_unpaid', title: 'Ticket sin cobro',
           message: `Ticket ${tx.ticketNumber || ''} pendiente de cobro desde hace ${mins} min. Total: ${Number(tx.total || 0).toFixed(2)} EUR.`,
           entityId: session._id, entityType: 'tpv_register_session',
-          route: '/saas/worker',
+          route: '/saas/worker/tasks',
           metadata: { ticketNumber: tx.ticketNumber, minutes: mins, total: tx.total },
           audience: ['worker'],
         }));

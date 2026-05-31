@@ -1,65 +1,104 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   Bell,
   BellOff,
-  Mail,
-  Smartphone,
-  Monitor,
-  MessageSquare,
-  Calendar,
-  Clock,
-  ClipboardList,
-  FileText,
-  Users,
-  AlertCircle,
-  Save,
+  Loader2,
+  CheckCheck,
+  ExternalLink,
+  Info,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
+import { useAuthOptional } from '../../../context/AuthContext';
+import {
+  listNotificationsRequest,
+  markAllNotificationsReadRequest,
+  markNotificationReadRequest,
+  type NotificationRecord,
+} from '../../../lib/notificationApi';
 
-interface NotificationSetting {
-  id: string;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-  email: boolean;
-  push: boolean;
-  inApp: boolean;
+function formatWhen(iso: string) {
+  try {
+    const date = new Date(iso);
+    return date.toLocaleString('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
 export function WorkerNotifications() {
   const { t } = useTranslation();
+  const user = useAuthOptional()?.user ?? null;
+  const userId = user?.user_id || user?.id || '';
 
-  const [settings, setSettings] = useState<NotificationSetting[]>([
-    { id: 'tasks', label: t('worker.notifications.taskAssigned'), description: t('worker.notifications.taskAssignedDesc'), icon: <ClipboardList className="w-5 h-5" />, email: true, push: true, inApp: true },
-    { id: 'calendar', label: t('worker.notifications.calendarReminder'), description: t('worker.notifications.calendarReminderDesc'), icon: <Calendar className="w-5 h-5" />, email: false, push: true, inApp: true },
-    { id: 'clock', label: t('worker.notifications.clockReminder'), description: t('worker.notifications.clockReminderDesc'), icon: <Clock className="w-5 h-5" />, email: false, push: true, inApp: true },
-    { id: 'chat', label: t('worker.notifications.newMessage'), description: t('worker.notifications.newMessageDesc'), icon: <MessageSquare className="w-5 h-5" />, email: false, push: true, inApp: true },
-    { id: 'docs', label: t('worker.notifications.newDocument'), description: t('worker.notifications.newDocumentDesc'), icon: <FileText className="w-5 h-5" />, email: true, push: false, inApp: true },
-    { id: 'team', label: t('worker.notifications.teamUpdates'), description: t('worker.notifications.teamUpdatesDesc'), icon: <Users className="w-5 h-5" />, email: false, push: false, inApp: true },
-    { id: 'payslip', label: t('worker.notifications.payslipReady'), description: t('worker.notifications.payslipReadyDesc'), icon: <FileText className="w-5 h-5" />, email: true, push: true, inApp: true },
-    { id: 'urgent', label: t('worker.notifications.urgentNotice'), description: t('worker.notifications.urgentNoticeDesc'), icon: <AlertCircle className="w-5 h-5" />, email: true, push: true, inApp: true },
-  ]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [markingAll, setMarkingAll] = useState(false);
 
-  const [globalEnabled, setGlobalEnabled] = useState(true);
-  const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
-  const [quietStart, setQuietStart] = useState('22:00');
-  const [quietEnd, setQuietEnd] = useState('08:00');
+  useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    listNotificationsRequest(userId)
+      .then((res) => {
+        const list = (res as { notifications?: NotificationRecord[] }).notifications || [];
+        setNotifications(list);
+      })
+      .catch((err: Error) => setError(err.message || 'No se pudieron cargar las notificaciones'))
+      .finally(() => setLoading(false));
+  }, [userId]);
 
-  const toggleChannel = (id: string, channel: 'email' | 'push' | 'inApp') => {
-    setSettings((prev) =>
-      prev.map((s) => s.id === id ? { ...s, [channel]: !s[channel] } : s),
-    );
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const handleMarkRead = async (notification: NotificationRecord) => {
+    if (!userId || notification.read) return;
+    try {
+      await markNotificationReadRequest(userId, notification.id, true);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
+      );
+    } catch {
+      /* best-effort */
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    if (!userId || unreadCount === 0) return;
+    setMarkingAll(true);
+    try {
+      await markAllNotificationsReadRequest(userId);
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error al marcar como leídas');
+    } finally {
+      setMarkingAll(false);
+    }
   };
 
   return (
     <Layout title={t('worker.notifications.title')} subtitle={t('worker.notifications.subtitle')}>
       <div className="space-y-6">
-        {/* Global Toggle */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between">
+        <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-5 py-4 flex items-start gap-3">
+          <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <p className="text-sm text-blue-800 dark:text-blue-200">
+            Aquí ves tus avisos in-app. También aparecen en el campanario de la barra superior.
+            Las preferencias de email y push por categoría llegarán en una próxima actualización.
+          </p>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center gap-3">
-              {globalEnabled ? (
+              {unreadCount > 0 ? (
                 <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
                   <Bell className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                 </div>
@@ -69,98 +108,97 @@ export function WorkerNotifications() {
                 </div>
               )}
               <div>
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">{t('worker.notifications.globalToggle')}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">{t('worker.notifications.globalToggleDesc')}</p>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                  {unreadCount > 0
+                    ? `${unreadCount} sin leer`
+                    : 'Todo al día'}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {notifications.length} avisos en total
+                </p>
               </div>
             </div>
-            <button
-              onClick={() => setGlobalEnabled(!globalEnabled)}
-              className={`relative w-12 h-7 rounded-full transition-colors ${globalEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-            >
-              <div className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${globalEnabled ? 'translate-x-5.5 left-[2px]' : 'left-[2px]'}`}
-                style={{ transform: globalEnabled ? 'translateX(22px)' : 'translateX(0)' }}
-              />
-            </button>
+            {unreadCount > 0 && (
+              <button
+                onClick={handleMarkAllRead}
+                disabled={markingAll}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50"
+              >
+                {markingAll ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCheck className="w-4 h-4" />
+                )}
+                Marcar todas leídas
+              </button>
+            )}
           </div>
-        </div>
 
-        {/* Quiet Hours */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100">{t('worker.notifications.quietHours')}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{t('worker.notifications.quietHoursDesc')}</p>
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
             </div>
-            <button
-              onClick={() => setQuietHoursEnabled(!quietHoursEnabled)}
-              className={`relative w-12 h-7 rounded-full transition-colors ${quietHoursEnabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-            >
-              <div className="absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform"
-                style={{ transform: quietHoursEnabled ? 'translateX(22px)' : 'translateX(0)', left: '2px' }}
-              />
-            </button>
-          </div>
-          {quietHoursEnabled && (
-            <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">{t('worker.notifications.from')}</label>
-                <input type="time" value={quietStart} onChange={(e) => setQuietStart(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700" />
-              </div>
-              <span className="text-gray-400 mt-4">→</span>
-              <div>
-                <label className="text-xs text-gray-500 block mb-1">{t('worker.notifications.to')}</label>
-                <input type="time" value={quietEnd} onChange={(e) => setQuietEnd(e.target.value)}
-                  className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700" />
-              </div>
+          ) : error ? (
+            <div className="px-5 py-8 text-sm text-red-600 dark:text-red-400">{error}</div>
+          ) : notifications.length === 0 ? (
+            <div className="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
+              No tienes notificaciones todavía.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-700">
+              {notifications.slice(0, 50).map((notification) => {
+                const content = (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className={`text-sm font-medium ${notification.read ? 'text-gray-600 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
+                        {notification.title}
+                      </p>
+                      <span className="text-xs text-gray-400 shrink-0">
+                        {formatWhen(notification.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      {notification.message}
+                    </p>
+                  </>
+                );
+
+                const className = `block px-5 py-4 transition-colors ${
+                  notification.read
+                    ? 'bg-white dark:bg-gray-800'
+                    : 'bg-blue-50/50 dark:bg-blue-900/10 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                }`;
+
+                if (notification.route) {
+                  return (
+                    <Link
+                      key={notification.id}
+                      to={notification.route}
+                      onClick={() => handleMarkRead(notification)}
+                      className={className}
+                    >
+                      {content}
+                      <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 mt-2">
+                        Ver detalle
+                        <ExternalLink className="w-3 h-3" />
+                      </span>
+                    </Link>
+                  );
+                }
+
+                return (
+                  <button
+                    key={notification.id}
+                    type="button"
+                    onClick={() => handleMarkRead(notification)}
+                    className={`w-full text-left ${className}`}
+                  >
+                    {content}
+                  </button>
+                );
+              })}
             </div>
           )}
-        </div>
-
-        {/* Per-category Settings */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
-          <div className="p-5 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">{t('worker.notifications.byCategory')}</h3>
-            <div className="flex items-center gap-6 mt-3 text-xs font-semibold text-gray-400">
-              <span className="flex-1" />
-              <span className="w-16 text-center flex items-center justify-center gap-1"><Mail className="w-3 h-3" /> Email</span>
-              <span className="w-16 text-center flex items-center justify-center gap-1"><Smartphone className="w-3 h-3" /> Push</span>
-              <span className="w-16 text-center flex items-center justify-center gap-1"><Monitor className="w-3 h-3" /> App</span>
-            </div>
-          </div>
-          <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {settings.map((setting) => (
-              <div key={setting.id} className="flex items-center gap-4 px-5 py-4">
-                <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-gray-500 dark:text-gray-400 shrink-0">
-                  {setting.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{setting.label}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{setting.description}</p>
-                </div>
-                {(['email', 'push', 'inApp'] as const).map((channel) => (
-                  <button
-                    key={channel}
-                    onClick={() => toggleChannel(setting.id, channel)}
-                    className={`w-16 flex justify-center`}
-                  >
-                    <div className={`w-9 h-5 rounded-full transition-colors relative ${setting[channel] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'}`}>
-                      <div className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                        style={{ transform: setting[channel] ? 'translateX(18px)' : 'translateX(2px)' }}
-                      />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex justify-end">
-          <button className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm">
-            <Save className="w-4 h-4" />
-            {t('common.saveChanges')}
-          </button>
         </div>
       </div>
     </Layout>

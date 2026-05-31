@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import * as cacheService from './cache.js';
 import { computeSetupSteps } from '../models/setupSteps.js';
+import { buildDefaultPersonalData, computeWorkerProfileCompletion, hasMinimumWorkerIdentity, WORKER_DEFAULT_LANDING_PATH } from './workerProfileCompletion.js';
 
 export const ACCOUNTS_DB = 'accounts';
 export const BUSINESSES_DB = 'businesses';
@@ -891,24 +892,40 @@ export function normalizeEmail(email) {
 }
 
 export function buildDefaultEmploymentInfo(overrides = {}) {
+  const base = overrides && typeof overrides === 'object' ? overrides : {};
   return {
-    department: String(overrides.department || '').trim(),
-    position: String(overrides.position || '').trim(),
-    schedule: String(overrides.schedule || '').trim(),
-    notes: String(overrides.notes || '').trim(),
-    skills: Array.isArray(overrides.skills) ? overrides.skills.map(s => ({
+    department: String(base.department || '').trim(),
+    position: String(base.position || '').trim(),
+    schedule: String(base.schedule || '').trim(),
+    notes: String(base.notes || '').trim(),
+    skills: Array.isArray(base.skills) ? base.skills.map(s => ({
       id: String(s.id || '').trim(),
       name: String(s.name || '').trim(),
       level: Math.max(1, Math.min(5, Number(s.level) || 1)),
     })) : [],
-    startDate: String(overrides.startDate || '').trim(),
-    contractType: String(overrides.contractType || '').trim(),
-    workday: String(overrides.workday || '').trim(),
-    salary: String(overrides.salary || '').trim(),
-    bankAccount: String(overrides.bankAccount || '').trim(),
-    emergencyContact: String(overrides.emergencyContact || '').trim(),
-    emergencyPhone: String(overrides.emergencyPhone || '').trim(),
-    salesPointId: String(overrides.salesPointId || '').trim(),
+    startDate: String(base.startDate || '').trim(),
+    endDate: String(base.endDate || '').trim(),
+    contractType: String(base.contractType || '').trim(),
+    workday: String(base.workday || '').trim(),
+    salary: String(base.salary || '').trim(),
+    bankAccount: String(base.bankAccount || '').trim(),
+    bankName: String(base.bankName || '').trim(),
+    emergencyContact: String(base.emergencyContact || '').trim(),
+    emergencyPhone: String(base.emergencyPhone || '').trim(),
+    salesPointId: String(base.salesPointId || '').trim(),
+    contributionGroup: String(base.contributionGroup || '').trim(),
+    mutualInsurance: String(base.mutualInsurance || '').trim(),
+    terminationReason: String(base.terminationReason || '').trim(),
+    terminationType: base.terminationType || undefined,
+    grossSalary: base.grossSalary != null ? Number(base.grossSalary) : undefined,
+    socialSecurityCost: base.socialSecurityCost != null ? Number(base.socialSecurityCost) : undefined,
+    otherCosts: base.otherCosts != null ? Number(base.otherCosts) : undefined,
+    costCurrency: base.costCurrency || undefined,
+    costPeriod: base.costPeriod || undefined,
+    lastCostReview: base.lastCostReview || undefined,
+    nextCostReview: base.nextCostReview || undefined,
+    baseProductivity: base.baseProductivity || undefined,
+    assignments: Array.isArray(base.assignments) ? base.assignments : undefined,
   };
 }
 
@@ -1542,7 +1559,7 @@ export function buildAccountDocument({
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(email);
   const resolvedAccountType = ['user', 'company'].includes(accountType) ? accountType : 'company';
-  const defaultLanding = resolvedAccountType === 'user' ? '/saas/worker' : '/saas/dashboard';
+  const defaultLanding = resolvedAccountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/dashboard';
 
   return {
     _id: `account:${userId}`,
@@ -1627,13 +1644,23 @@ export function sanitizeAccount(account) {
     subscription: account.subscription || null,
     permissions: normalizePermissionMatrix(account.permissions || account.permissionMatrix || account.permissionsLegacy, account.role),
     employment: buildDefaultEmploymentInfo(account.employment),
+    personalData: buildDefaultPersonalData(account.personalData),
+    workerProfileCompletion: account.workerProfileCompletion || computeWorkerProfileCompletion({
+      ...account,
+      employment: buildDefaultEmploymentInfo(account.employment),
+      personalData: buildDefaultPersonalData(account.personalData),
+    }),
+    workerIdentityCompleted: Boolean(account.workerIdentityCompleted) || hasMinimumWorkerIdentity({
+      ...account,
+      personalData: buildDefaultPersonalData(account.personalData),
+    }),
     recentActivity: normalizeRecentActivity(account.recentActivity),
     failedLoginAttempts: account.failedLoginAttempts || 0,
     lockUntil: account.lockUntil || null,
     googleId: account.googleId || null,
     googleScopes: account.googleScopes || null,
     googleProfile: account.googleProfile || null,
-    landingPage: account.landingPage || (accountType === 'user' ? '/saas/worker' : '/saas/dashboard'),
+    landingPage: account.landingPage || (accountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/dashboard'),
     linkedBusinessId: account.linkedBusinessId || '',
     username: account.username || '',
     referralCode: account.referralCode || '',
@@ -1658,6 +1685,10 @@ export function defaultNotificationPreferences() {
       onBreaks: false,      // inicio/fin de descanso (puede ser ruidoso)
       onLongBreak: true,    // descanso prolongado
     },
+    team: {
+      onIdentityCompleted: true,
+      onWorkerProfileCompleted: true,
+    },
   };
 }
 
@@ -1665,6 +1696,7 @@ export function normalizeNotificationPreferences(prefs) {
   const defaults = defaultNotificationPreferences();
   if (!prefs || typeof prefs !== 'object') return defaults;
   const clockin = prefs.clockin && typeof prefs.clockin === 'object' ? prefs.clockin : {};
+  const team = prefs.team && typeof prefs.team === 'object' ? prefs.team : {};
   return {
     clockin: {
       onEntry: clockin.onEntry !== undefined ? Boolean(clockin.onEntry) : defaults.clockin.onEntry,
@@ -1674,6 +1706,14 @@ export function normalizeNotificationPreferences(prefs) {
       onEarlyExit: clockin.onEarlyExit !== undefined ? Boolean(clockin.onEarlyExit) : defaults.clockin.onEarlyExit,
       onBreaks: clockin.onBreaks !== undefined ? Boolean(clockin.onBreaks) : defaults.clockin.onBreaks,
       onLongBreak: clockin.onLongBreak !== undefined ? Boolean(clockin.onLongBreak) : defaults.clockin.onLongBreak,
+    },
+    team: {
+      onIdentityCompleted: team.onIdentityCompleted !== undefined
+        ? Boolean(team.onIdentityCompleted)
+        : defaults.team.onIdentityCompleted,
+      onWorkerProfileCompleted: team.onWorkerProfileCompleted !== undefined
+        ? Boolean(team.onWorkerProfileCompleted)
+        : defaults.team.onWorkerProfileCompleted,
     },
   };
 }
@@ -9198,7 +9238,7 @@ export function buildTeamInvitationDocument({
   businessName = '',
   role = 'Usuario',
   permissions = null,
-  landingPage = '/saas/worker',
+  landingPage = WORKER_DEFAULT_LANDING_PATH,
   employment = null,
   invitedBy = '',
   invitedByName = '',
@@ -9218,7 +9258,7 @@ export function buildTeamInvitationDocument({
     businessName: String(businessName || '').trim(),
     role: String(role || 'Usuario').trim() || 'Usuario',
     permissions: permissions || null,
-    landingPage: String(landingPage || '/saas/worker'),
+    landingPage: String(landingPage || WORKER_DEFAULT_LANDING_PATH),
     employment: employment || null,
     invitedBy: String(invitedBy || '').trim(),
     invitedByName: String(invitedByName || '').trim(),

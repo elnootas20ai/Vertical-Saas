@@ -299,7 +299,7 @@ export function WorkerTpvHairSalon() {
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
-              onClick={() => navigate('/saas/worker')}
+              onClick={() => navigate('/saas/worker/tasks')}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border-2 border-transparent hover:border-gray-200 dark:hover:border-gray-600"
             >
               <ArrowLeft className="w-4 h-4 shrink-0" />

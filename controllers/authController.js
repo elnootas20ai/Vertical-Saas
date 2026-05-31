@@ -60,6 +60,16 @@ import {
   verifyPassword,
   writeChangelog,
 } from '../services/couchdb.js';
+import {
+  mergeEmploymentInfo,
+  mergePersonalData,
+  computeWorkerProfileCompletion,
+  hasMinimumWorkerIdentity,
+  resolveRedirectAfterInvitationAccept,
+  WORKER_DEFAULT_LANDING_PATH,
+  normalizeWorkerLandingPage,
+} from '../services/workerProfileCompletion.js';
+import { notifyManagersWorkerProfileEvents } from '../services/workerProfileNotifications.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken, setAuthCookies, clearAuthCookies } from '../middleware/auth.js';
 import {
   sendEmail,
@@ -103,6 +113,9 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
   if (pendingInvitationsCount > 0) {
     return '/saas/invitations';
   }
+  if (!hasMinimumWorkerIdentity(account)) {
+    return '/saas/worker/setup-profile';
+  }
 
   const isUserAccount = account.accountType === 'user';
   const isInvitedWorker = Boolean(String(account.invitedBy || '').trim());
@@ -117,9 +130,9 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
 
   if (isWorker) {
     if (landing && !ADMIN_ONLY_LANDINGS.has(landing)) {
-      return landing;
+      return normalizeWorkerLandingPage(landing);
     }
-    return '/saas/worker';
+    return WORKER_DEFAULT_LANDING_PATH;
   }
 
   return '/auth/gate';
@@ -344,7 +357,9 @@ export async function register(req, res) {
     } else if (pendingInvitationsCount > 0) {
       redirectTo = '/saas/invitations';
     } else if (isUserAccount) {
-      redirectTo = '/saas/worker';
+      redirectTo = hasMinimumWorkerIdentity(savedAccount)
+        ? '/saas/user-dashboard'
+        : '/saas/worker/setup-profile';
     } else {
       redirectTo = '/auth/onboarding/business-type';
     }
@@ -702,7 +717,19 @@ export async function listRoles(req, res) {
 
 export async function updateProfile(req, res) {
   try {
-    const userId = req.params.userId;
+    const rawUserId = req.params.userId;
+    const userId = String(rawUserId || '').trim().replace(/^account:/, '');
+    const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+    const targetUserId = userId;
+
+    if (authUserId && targetUserId && authUserId !== targetUserId) {
+      const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
+      const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
+      if (!isManager) {
+        return res.status(403).json({ ok: false, error: 'No puedes modificar el perfil de otro usuario.' });
+      }
+    }
+
     const account = await findAccountByUserId(req, userId);
 
     if (!account) {
@@ -720,6 +747,7 @@ export async function updateProfile(req, res) {
       status,
       permissions,
       employment,
+      personalData,
       inviteStatus,
       lastLoginAt,
       companyName,
@@ -778,19 +806,42 @@ export async function updateProfile(req, res) {
       nextSubscription = merged;
     }
 
+    const nextEmployment = employment !== undefined
+      ? mergeEmploymentInfo(account.employment, employment)
+      : account.employment;
+    const nextPersonalData = personalData !== undefined
+      ? mergePersonalData(account.personalData, personalData)
+      : account.personalData;
+    const nextPhone = phone !== undefined ? String(phone).trim() : account.phone;
+
+    const profileDraft = {
+      ...account,
+      firstName: nextFirstName,
+      lastName: nextLastName,
+      fullName: nextFullName,
+      phone: nextPhone,
+      employment: nextEmployment,
+      personalData: nextPersonalData,
+    };
+    const workerProfileCompletion = computeWorkerProfileCompletion(profileDraft);
+    const workerIdentityCompleted = hasMinimumWorkerIdentity(profileDraft);
+
     const updatedAccount = {
       ...account,
       firstName: nextFirstName,
       lastName: nextLastName,
       fullName: nextFullName,
       email: email !== undefined ? String(email).trim().toLowerCase() : account.email,
-      phone: phone !== undefined ? String(phone).trim() : account.phone,
+      phone: nextPhone,
       avatar: avatar !== undefined ? String(avatar).trim() : account.avatar,
       role: role !== undefined ? String(role).trim() : account.role,
       status: status !== undefined ? String(status).trim() : account.status,
       inviteStatus: inviteStatus !== undefined ? String(inviteStatus).trim() : account.inviteStatus,
       permissions: permissions !== undefined ? permissions : account.permissions,
-      employment: employment !== undefined ? employment : account.employment,
+      employment: nextEmployment,
+      personalData: nextPersonalData,
+      workerProfileCompletion,
+      workerIdentityCompleted,
       lastLoginAt: lastLoginAt !== undefined ? String(lastLoginAt).trim() : account.lastLoginAt,
       companyName: companyName !== undefined ? String(companyName).trim() : account.companyName,
       onboardingCompleted:
@@ -802,6 +853,27 @@ export async function updateProfile(req, res) {
     };
 
     const savedAccount = await saveAccount(req, updatedAccount);
+    const persistedAccount = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
+
+    if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined)) {
+      try {
+        const business = await findBusinessById(req, savedAccount.linkedBusinessId);
+        if (business && Array.isArray(business.members)) {
+          const members = business.members.map((m) => {
+            if (m.user_id !== savedAccount.user_id) return m;
+            return {
+              ...m,
+              fullName: savedAccount.fullName || m.fullName,
+              email: savedAccount.email || m.email,
+              role: savedAccount.role || m.role,
+            };
+          });
+          await saveBusiness(req, { ...business, members, updatedAt: new Date().toISOString() });
+        }
+      } catch {
+        /* roster sync best-effort */
+      }
+    }
     const actorId = req.body?.actorUserId || userId;
     const actorNameStr = req.body?.actorName || savedAccount.fullName;
     await logAccountActivity(req, {
@@ -813,6 +885,15 @@ export async function updateProfile(req, res) {
       entityId: savedAccount.user_id,
       entityLabel: savedAccount.fullName,
     });
+
+    try {
+      await notifyManagersWorkerProfileEvents(req, {
+        accountBefore: account,
+        accountAfter: persistedAccount,
+      });
+    } catch (notifyErr) {
+      console.warn('[updateProfile] worker profile notify:', notifyErr?.message);
+    }
     const profileDiff = {};
     for (const key of ['role', 'status', 'email', 'companyName', 'subscription']) {
       if (JSON.stringify(account[key]) !== JSON.stringify(updatedAccount[key])) {
@@ -834,7 +915,7 @@ export async function updateProfile(req, res) {
 
     return res.json({
       ok: true,
-      user: sanitizeAccount(savedAccount),
+      user: sanitizeAccount(persistedAccount),
     });
   } catch (error) {
     return res.status(500).json({
@@ -984,7 +1065,7 @@ export async function getBillingCard(req, res) {
 
 export async function inviteUser(req, res) {
   try {
-    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = '/saas/worker', position = '', contractType = '', grossMonthlySalary = '', workCenterId = '', message = '' } = req.body || {};
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = WORKER_DEFAULT_LANDING_PATH, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '', message = '' } = req.body || {};
 
     if (!email) {
       return badRequest(res, 'El email es obligatorio');
@@ -1286,7 +1367,7 @@ function sanitizeInvitation(inv) {
     businessName: inv.businessName,
     role: inv.role,
     permissions: inv.permissions || null,
-    landingPage: inv.landingPage || '/saas/worker',
+    landingPage: inv.landingPage || WORKER_DEFAULT_LANDING_PATH,
     employment: inv.employment || null,
     invitedBy: inv.invitedBy,
     invitedByName: inv.invitedByName,
@@ -1322,15 +1403,6 @@ export async function acceptInvitation(req, res) {
     if (!invitation || invitation.type !== 'team_invitation' || invitation.deletedAt) {
       return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
     }
-    if (invitation.status !== 'pending') {
-      return res.status(409).json({ ok: false, code: 'INVITATION_NOT_PENDING', error: 'Esta invitación ya no está activa.' });
-    }
-    if (invitation.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now()) {
-      return res.status(410).json({ ok: false, code: 'INVITATION_EXPIRED', error: 'La invitación ha caducado.' });
-    }
-    if (invitation.email !== String(account.email).trim().toLowerCase()) {
-      return res.status(403).json({ ok: false, error: 'Esta invitación no es para tu cuenta.' });
-    }
 
     const business = invitation.business_id ? await findBusinessById(req, invitation.business_id) : null;
     if (!business) {
@@ -1340,6 +1412,34 @@ export async function acceptInvitation(req, res) {
     const isOwner = business.owner_user_id === account.user_id;
     const members = Array.isArray(business.members) ? business.members : [];
     const isAlreadyMember = members.some((m) => m.user_id === account.user_id);
+
+    if (invitation.status !== 'pending') {
+      const alreadyLinked = isAlreadyMember
+        || String(account.linkedBusinessId || '') === String(business.business_id || '');
+      if (invitation.status === 'accepted' && alreadyLinked) {
+        const freshAccount = (await findAccountByUserId(req, account.user_id)) || account;
+        return res.json({
+          ok: true,
+          alreadyAccepted: true,
+          user: sanitizeAccount(freshAccount),
+          redirectTo: resolveRedirectAfterInvitationAccept(freshAccount),
+        });
+      }
+      return res.status(409).json({
+        ok: false,
+        code: 'INVITATION_NOT_PENDING',
+        error: invitation.status === 'accepted'
+          ? 'Esta invitación ya fue aceptada.'
+          : 'Esta invitación ya no está activa.',
+      });
+    }
+    if (invitation.expiresAt && new Date(invitation.expiresAt).getTime() < Date.now()) {
+      return res.status(410).json({ ok: false, code: 'INVITATION_EXPIRED', error: 'La invitación ha caducado.' });
+    }
+    if (invitation.email !== String(account.email).trim().toLowerCase()) {
+      return res.status(403).json({ ok: false, error: 'Esta invitación no es para tu cuenta.' });
+    }
+
     const now = new Date().toISOString();
 
     if (!isOwner && !isAlreadyMember) {
@@ -1358,12 +1458,32 @@ export async function acceptInvitation(req, res) {
       });
     }
 
+    const inviteEmployment = invitation.employment || {};
+    const mergedEmployment = mergeEmploymentInfo(account.employment, {
+      position: inviteEmployment.position || invitation.role || '',
+      contractType: inviteEmployment.contractType || '',
+      salary: inviteEmployment.salary || '',
+      salesPointId: inviteEmployment.salesPointId || '',
+    });
+    const profileDraft = {
+      ...account,
+      employment: mergedEmployment,
+      personalData: account.personalData,
+      invitedBy: account.invitedBy || invitation.invitedBy || '',
+    };
+    const workerProfileCompletion = computeWorkerProfileCompletion(profileDraft);
+    const workerIdentityCompleted = hasMinimumWorkerIdentity(profileDraft);
+
     const updatedAccount = await saveAccount(req, {
       ...account,
       linkedBusinessId: account.linkedBusinessId || business.business_id,
+      invitedBy: profileDraft.invitedBy,
       role: account.role && account.role !== 'Usuario' ? account.role : (invitation.role || 'Usuario'),
       permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
-      landingPage: invitation.landingPage || account.landingPage || '/saas/worker',
+      landingPage: invitation.landingPage || account.landingPage || WORKER_DEFAULT_LANDING_PATH,
+      employment: mergedEmployment,
+      workerProfileCompletion,
+      workerIdentityCompleted,
       pendingTeamInvite: null,
       inviteStatus: 'accepted',
       updatedAt: now,
@@ -1392,7 +1512,7 @@ export async function acceptInvitation(req, res) {
       ok: true,
       invitation: sanitizeInvitation(savedInvitation),
       user: sanitizeAccount(updatedAccount),
-      redirectTo: updatedAccount.landingPage || '/saas/worker',
+      redirectTo: resolveRedirectAfterInvitationAccept(updatedAccount),
     });
   } catch (error) {
     return res.status(500).json({
@@ -2282,9 +2402,17 @@ export async function acceptInvite(req, res) {
       if (teamInvite.role) updatedAccountDoc.role = teamInvite.role;
       if (teamInvite.permissions) updatedAccountDoc.permissions = teamInvite.permissions;
       if (teamInvite.landingPage) updatedAccountDoc.landingPage = teamInvite.landingPage;
-      if (teamInvite.employment) updatedAccountDoc.employment = teamInvite.employment;
+      if (teamInvite.employment) {
+        updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, teamInvite.employment);
+      }
       if (teamInvite.businessId) updatedAccountDoc.linkedBusinessId = teamInvite.businessId;
       if (teamInvite.businessName) updatedAccountDoc.companyName = teamInvite.businessName;
+      updatedAccountDoc.invitedBy = account.invitedBy || teamInvite.invitedBy || '';
+      updatedAccountDoc.workerProfileCompletion = computeWorkerProfileCompletion({
+        ...updatedAccountDoc,
+        employment: updatedAccountDoc.employment || account.employment,
+        personalData: account.personalData,
+      });
     }
 
     const savedAccount = await saveAccount(req, updatedAccountDoc);
@@ -2870,6 +2998,7 @@ export async function updateNotificationPreferences(req, res) {
       ...current,
       ...incoming,
       clockin: { ...current.clockin, ...(incoming.clockin || {}) },
+      team: { ...current.team, ...(incoming.team || {}) },
     });
 
     const saved = await saveAccount(req, {

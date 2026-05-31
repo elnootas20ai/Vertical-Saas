@@ -80,7 +80,6 @@ const QUICK_ACTIONS_DELIVERY = [
 ];
 
 const QUICK_ACTIONS_WORKER = [
-  { label: 'Ir a Inicio', shortcut: 'G H', route: '/saas/worker', icon: <LayoutDashboard className="w-4 h-4" /> },
   { label: 'Ir a Mi trabajo', shortcut: 'G T', route: '/saas/worker/tasks', icon: <ClipboardList className="w-4 h-4" /> },
   { label: 'Ir a Calendario', shortcut: 'G C', route: '/saas/worker/calendar', icon: <CalendarDays className="w-4 h-4" /> },
   { label: 'Ir a Fichaje', shortcut: 'G F', route: '/saas/worker/clock', icon: <Clock className="w-4 h-4" /> },
@@ -186,7 +185,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
           title: m.fullName,
           subtitle: [m.email, m.role || 'Usuario'].filter(Boolean).join(' · '),
           category: 'team' as const,
-          route: `/saas/worker`,
+          route: `/saas/worker/tasks`,
           searchText: `${m.fullName} ${m.email} ${m.role || ''}`,
         })),
       );

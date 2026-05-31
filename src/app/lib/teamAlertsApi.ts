@@ -1,6 +1,6 @@
 export interface TeamAlert {
   id: string;
-  type: 'document_expired' | 'document_expiring' | 'no_assignment' | 'cost_review_pending';
+  type: 'document_expired' | 'document_expiring' | 'no_assignment' | 'cost_review_pending' | 'profile_incomplete';
   severity: 'critical' | 'warning' | 'info';
   workerId: string;
   workerName: string;
@@ -19,6 +19,7 @@ export interface TeamAlertsSummary {
     document_expiring: number;
     no_assignment: number;
     cost_review_pending: number;
+    profile_incomplete: number;
   };
 }
 

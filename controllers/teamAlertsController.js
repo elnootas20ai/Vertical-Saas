@@ -1,4 +1,5 @@
 import { couchRequest } from '../services/couchdb.js';
+import { computeProfileCompletionAlerts } from '../services/workerProfileCompletion.js';
 
 const DAYS_30 = 30 * 24 * 60 * 60 * 1000;
 
@@ -113,7 +114,8 @@ export async function getTeamAlerts(req, res) {
     const docAlerts = computeDocAlerts(payrollDocs, members);
     const assignmentAlerts = computeAssignmentAlerts(members);
     const costAlerts = computeCostReviewAlerts(members);
-    const allAlerts = [...docAlerts, ...assignmentAlerts, ...costAlerts];
+    const profileAlerts = computeProfileCompletionAlerts(members);
+    const allAlerts = [...docAlerts, ...assignmentAlerts, ...costAlerts, ...profileAlerts];
 
     allAlerts.sort((a, b) => {
       const severityOrder = { critical: 0, warning: 1, info: 2 };
@@ -141,6 +143,7 @@ export async function getTeamAlertsSummary(req, res) {
         document_expiring: alerts.filter(a => a.type === 'document_expiring').length,
         no_assignment: alerts.filter(a => a.type === 'no_assignment').length,
         cost_review_pending: alerts.filter(a => a.type === 'cost_review_pending').length,
+        profile_incomplete: alerts.filter(a => a.type === 'profile_incomplete').length,
       },
     });
   } catch (err) {
@@ -170,6 +173,7 @@ async function getTeamAlertsInternal(businessId) {
     ...computeDocAlerts(payrollDocs, members),
     ...computeAssignmentAlerts(members),
     ...computeCostReviewAlerts(members),
+    ...computeProfileCompletionAlerts(members),
   ];
 
   return { alerts };

@@ -7,7 +7,6 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useModalClose } from '../../hooks/useModalClose';
 import { InviteUserModal, type InviteUserPayload } from '../saas/InviteUserModal';
 import { getInvitePermissionsForUser } from '../../lib/roleCatalog';
-import { listWorkCenters, type WorkCenter } from '../../lib/workCentersApi';
 import type { RoleDefinition } from '../../lib/authApi';
 
 interface Props {
@@ -18,27 +17,22 @@ interface Props {
 export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const { user } = useApp();
-  const { inviteUser, listRoles, user: authUser } = useAuth();
+  const { inviteUser, listRoles } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
 
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
-  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
 
   useModalClose(isOpen && !showInviteModal, onClose);
 
   const loadInviteData = useCallback(async () => {
     try {
-      const [rolesData, wcData] = await Promise.all([
-        listRoles(),
-        authUser?.user_id ? listWorkCenters(authUser.user_id) : Promise.resolve([]),
-      ]);
+      const rolesData = await listRoles();
       setRoles(rolesData);
-      setWorkCenters(wcData);
     } catch {
       /* fallback to defaults inside InviteUserModal */
     }
-  }, [listRoles, authUser?.user_id]);
+  }, [listRoles]);
 
   useEffect(() => {
     if (showInviteModal && roles.length === 0) {
@@ -135,7 +129,6 @@ export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
         onClose={() => setShowInviteModal(false)}
         onInvite={handleInvite}
         roles={roles}
-        workCenters={workCenters}
         businesses={businesses}
         currentBusinessId={currentBusiness?.business_id}
       />

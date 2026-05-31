@@ -278,7 +278,8 @@ import { SalesPointTpvPage } from './pages/saas/SalesPointTpvPage';
 import { ClockKiosk } from './pages/saas/ClockKiosk';
 
 import {
-  WorkerHome,
+  WorkerIdentitySetup,
+  WorkerPayrollSetup,
   WorkerTasks,
   WorkerCalendar,
   WorkerClock,
@@ -765,7 +766,9 @@ export const router = createBrowserRouter([
           { path: 'saas-flow-map', Component: SAAS__FlowMap },
 
           // Worker mode
-          { path: 'worker', Component: WorkerHome },
+          { path: 'worker/setup-profile', Component: WorkerIdentitySetup },
+          { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
+          { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
           { path: 'worker/tpv', Component: WorkerTpv },
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/calendar', Component: WorkerCalendar },

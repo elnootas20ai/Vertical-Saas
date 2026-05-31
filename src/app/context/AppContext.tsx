@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
-import { logActivityRequest } from '../lib/authApi';
+import { isWorkerAccount, logActivityRequest } from '../lib/authApi';
 import {
   bulkCreateVehiclesRequest,
   createVehicleRequest,
@@ -558,6 +558,10 @@ export interface AppContextType {
   user: User | null;
   subscription: Subscription;
   setDevSubscriptionPlan: (plan: 'basic' | 'normal' | 'pro' | null) => void;
+  /** Activa PDV ilimitados en local para pruebas (desactiva simulación de plan). */
+  enableDevUnlimitedPdv: () => void;
+  /** Sin tope de PDV al crear tiendas (solo simulación local). */
+  devUnlimitedPdv: boolean;
   canAccessFeature: () => boolean;
   canPerformCriticalAction: () => boolean;
   getAccessRestrictionMessage: () => string | null;
@@ -629,6 +633,8 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       vehicles: [], isLoadingVehicles: true, isLoadingClients: true, parkingZones: [], leads: [], clients: [], notifications: [], sales: [], documents: [], locations: [], user: null,
       subscription: { status: 'trial_active', planName: 'Basic', cancelAtPeriodEnd: false },
       setDevSubscriptionPlan: () => {},
+      enableDevUnlimitedPdv: () => {},
+      devUnlimitedPdv: false,
       canAccessFeature: () => true,
       canPerformCriticalAction: () => true,
       getAccessRestrictionMessage: () => null,
@@ -708,6 +714,8 @@ function deserializeNotification(notification: NotificationRecord): AppNotificat
 }
 
 export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
+export const DEV_EXTRA_PDV_KEY = 'vertial_dev_extra_pdv';
+export const DEV_UNLIMITED_PDV_KEY = 'vertial_dev_unlimited_pdv';
 
 type DevPlan = 'basic' | 'normal' | 'pro';
 
@@ -738,20 +746,77 @@ export function readDevPlanOverride(): DevPlan | null {
   }
 }
 
-function applyDevPlanOverride(sub: Subscription): Subscription {
-  const override = readDevPlanOverride();
-  if (!override) return sub;
-  const def = DEV_PLAN_DEFINITIONS[override];
-  return {
-    ...sub,
-    status: 'subscription_active',
-    planName: def.planName,
-    selectedPlanId: def.selectedPlanId,
-  };
+/** PDV extra solo en local (suma al cupo del plan real al simular). */
+export function readDevExtraPdv(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const n = Math.floor(Number(window.localStorage.getItem(DEV_EXTRA_PDV_KEY) || 0));
+    return Math.max(0, Math.min(99, n));
+  } catch {
+    return 0;
+  }
 }
 
-function deserializeSubscription(subscription?: PersistedBillingSubscription | null): Subscription {
+export function readDevUnlimitedPdv(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(DEV_UNLIMITED_PDV_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function clearDevPlanLocalStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
+    window.localStorage.removeItem(DEV_EXTRA_PDV_KEY);
+    window.localStorage.removeItem(DEV_UNLIMITED_PDV_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function mergeDevOverrides(sub: Subscription): Subscription {
+  const override = readDevPlanOverride();
+  let result: Subscription = { ...sub };
+  if (override) {
+    const def = DEV_PLAN_DEFINITIONS[override];
+    result = {
+      ...result,
+      status: 'subscription_active',
+      planName: def.planName,
+      selectedPlanId: def.selectedPlanId,
+    };
+  }
+  const devExtra = readDevExtraPdv();
+  if (devExtra > 0) {
+    const serverExtra = Math.max(0, Math.floor(Number(sub.extraPointOfSaleSlots) || 0));
+    result = {
+      ...result,
+      extraPointOfSaleSlots: Math.min(99, serverExtra + devExtra),
+    };
+  }
+  return result;
+}
+
+function applyDevPlanOverride(sub: Subscription): Subscription {
+  return mergeDevOverrides(sub);
+}
+
+function deserializeSubscription(
+  subscription?: PersistedBillingSubscription | null,
+  options?: { isWorker?: boolean },
+): Subscription {
   if (!subscription) {
+    if (options?.isWorker) {
+      return {
+        status: 'subscription_active',
+        planName: '',
+        selectedPlanId: '',
+        cancelAtPeriodEnd: false,
+      };
+    }
     return {
       status: 'trial_active',
       planName: 'Basic',
@@ -980,6 +1045,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cancelAtPeriodEnd: false,
   });
 
+  const [devExtraPdv, setDevExtraPdv] = useState(0);
+  const [devUnlimitedPdv, setDevUnlimitedPdv] = useState(false);
 
   useEffect(() => {
     if (!authUser) {
@@ -994,13 +1061,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       email: authUser.email,
       role: authUser.role,
     });
-    const baseSubscription = deserializeSubscription(authUser.subscription);
+    const isWorker = isWorkerAccount(authUser);
+    const baseSubscription = deserializeSubscription(authUser.subscription, { isWorker });
     const canUseDevPlanOverride = userCanUseDevPlanOverride(authUser);
     setSubscription(canUseDevPlanOverride ? applyDevPlanOverride(baseSubscription) : baseSubscription);
+    if (canUseDevPlanOverride) {
+      setDevExtraPdv(readDevExtraPdv());
+      setDevUnlimitedPdv(readDevUnlimitedPdv());
+    } else {
+      setDevExtraPdv(0);
+      setDevUnlimitedPdv(false);
+    }
     if (!canUseDevPlanOverride && typeof window !== 'undefined') {
-      try { window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY); } catch { /* ignore */ }
+      clearDevPlanLocalStorage();
     }
   }, [authUser]);
+
+  const refreshDevSubscription = useCallback(() => {
+    const base = deserializeSubscription(authUser?.subscription, {
+      isWorker: isWorkerAccount(authUser),
+    });
+    setSubscription(mergeDevOverrides(base));
+    setDevExtraPdv(readDevExtraPdv());
+    setDevUnlimitedPdv(readDevUnlimitedPdv());
+  }, [authUser?.subscription]);
 
   const setDevSubscriptionPlan = useCallback((plan: DevPlan | null) => {
     if (!userCanUseDevPlanOverride(authUser)) {
@@ -1008,23 +1092,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (typeof window !== 'undefined') {
       try {
-        if (plan) window.localStorage.setItem(DEV_PLAN_OVERRIDE_KEY, plan);
-        else window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
+        if (plan) {
+          window.localStorage.setItem(DEV_PLAN_OVERRIDE_KEY, plan);
+          window.localStorage.removeItem(DEV_UNLIMITED_PDV_KEY);
+        } else clearDevPlanLocalStorage();
       } catch {
         // Storage may be unavailable (private mode); we still update state below.
       }
     }
     if (!plan) {
-      setSubscription(deserializeSubscription(authUser?.subscription));
+      setDevExtraPdv(0);
+      setDevUnlimitedPdv(false);
+      setSubscription(deserializeSubscription(authUser?.subscription, {
+        isWorker: isWorkerAccount(authUser),
+      }));
       return;
     }
-    const def = DEV_PLAN_DEFINITIONS[plan];
-    setSubscription((prev) => ({
-      ...prev,
-      status: 'subscription_active',
-      planName: def.planName,
-      selectedPlanId: def.selectedPlanId,
-    }));
+    setDevUnlimitedPdv(false);
+    refreshDevSubscription();
+  }, [authUser, refreshDevSubscription]);
+
+  const enableDevUnlimitedPdv = useCallback(() => {
+    if (!userCanUseDevPlanOverride(authUser)) return;
+    try {
+      window.localStorage.setItem(DEV_UNLIMITED_PDV_KEY, '1');
+      window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
+      window.localStorage.removeItem(DEV_EXTRA_PDV_KEY);
+    } catch {
+      // ignore
+    }
+    setDevExtraPdv(0);
+    setDevUnlimitedPdv(true);
+    setSubscription(deserializeSubscription(authUser?.subscription));
   }, [authUser]);
 
   useEffect(() => {
@@ -2034,6 +2133,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppContextType = {
     vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
     setDevSubscriptionPlan,
+    enableDevUnlimitedPdv,
+    devUnlimitedPdv,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
     addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,

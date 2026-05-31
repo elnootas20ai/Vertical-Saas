@@ -2,15 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
-  ArrowLeft, ArrowRight, LayoutDashboard, Car, Users, TrendingUp, FileText,
-  DollarSign, CalendarDays, Loader2, Briefcase,
+  ArrowLeft, ArrowRight, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
-  Truck, ChefHat, Activity,
+  DollarSign,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { InviteLookupResult, RoleDefinition } from '../../lib/authApi';
-import type { WorkCenter } from '../../lib/workCentersApi';
 import type { Business } from '../../lib/businessApi';
+import { useBusiness } from '../../context/BusinessContext';
+import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
+import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
+import { getHrOwnedLabels, getWorkerOwnedLabels } from '../../lib/workerProfileCompletion';
 
 // --- Types ---
 
@@ -41,7 +43,8 @@ interface InviteUserModalProps {
     businessId?: string,
   ) => Promise<InviteLookupResult & { success: boolean; error?: string }>;
   roles?: RoleDefinition[];
-  workCenters?: WorkCenter[];
+  /** @deprecated El modal carga tiendas solo; mantener solo por compatibilidad. */
+  workCenters?: { id: string; name: string; active?: boolean; businessId?: string }[];
   businesses?: Business[];
   currentBusinessId?: string;
 }
@@ -108,20 +111,6 @@ function formatSalaryThousandsEs(digitsOnly: string): string {
 function salaryDigitsFromDisplay(display: string): string {
   return display.replace(/\D/g, '');
 }
-
-const LANDING_PAGES = [
-  { id: '/saas/worker', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
-  { id: '/saas/vehicles', icon: <Car className="w-3.5 h-3.5" /> },
-  { id: '/saas/clients', icon: <Users className="w-3.5 h-3.5" /> },
-  { id: '/saas/sales', icon: <TrendingUp className="w-3.5 h-3.5" /> },
-  { id: '/saas/workshop', icon: <Wrench className="w-3.5 h-3.5" /> },
-  { id: '/saas/documents', icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: '/saas/calendar', icon: <CalendarDays className="w-3.5 h-3.5" /> },
-  // Vertical delivery: pantallas operativas para invitar a repartidor / cocinero / encargado.
-  { id: '/saas/delivery-reparto', icon: <Truck className="w-3.5 h-3.5" /> },
-  { id: '/saas/delivery-kitchen', icon: <ChefHat className="w-3.5 h-3.5" /> },
-  { id: '/saas/delivery-ops', icon: <Activity className="w-3.5 h-3.5" /> },
-] as const;
 
 // --- Worker Function Config ---
 
@@ -394,11 +383,25 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workCenters, businesses, currentBusinessId }: InviteUserModalProps) {
   useModalClose(true, onClose);
   const { t } = useTranslation();
+  const { currentBusiness: ctxBusiness } = useBusiness();
   void roles;
   const roleOptions = ROLES.map((item) => ({ id: item.id, description: item.desc, permissions: [], users: 0 }));
 
-  const hasMultipleBusinesses = (businesses?.length ?? 0) > 1;
-  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(currentBusinessId || businesses?.[0]?.business_id || null);
+  const businessList = businesses?.length ? businesses : ctxBusiness ? [ctxBusiness] : [];
+  const hasMultipleBusinesses = businessList.length > 1;
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string | null>(
+    currentBusinessId || businessList[0]?.business_id || null,
+  );
+
+  const inviteBusiness = businessList.find((b) => b.business_id === selectedBusinessId)
+    ?? ctxBusiness
+    ?? businessList[0]
+    ?? null;
+
+  const { options: loadedWorkCenterOptions, loading: workCentersLoading } = useInviteWorkCenters(
+    inviteBusiness,
+    true,
+  );
 
   const [step, setStep] = useState(1);
 
@@ -419,7 +422,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const [grossSalary, setGrossSalary] = useState('');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
-  const [landingPage, setLandingPage] = useState('/saas/worker');
+
+  useEffect(() => {
+    setWorkCenterId(null);
+  }, [selectedBusinessId]);
 
   // UI
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -562,7 +568,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         email: email.trim(),
         phone: fullPhone,
         role: role!,
-        landingPage,
+        landingPage: getDefaultInviteLandingPage(inviteBusiness?.businessType, role),
         position: '',
         contractType: contractType!,
         grossMonthlySalary: salaryDigitsFromDisplay(grossSalary),
@@ -585,21 +591,23 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
     setContractType(null); setGrossSalary(''); setWorkCenterId(null);
-    setRole(null); setLandingPage('/saas/worker');
+    setRole(null);
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
     setInviteResult(null); setStep(1);
     setEmailStatus('idle'); setLookupResult(null);
   }
 
-  const filteredWorkCenters = (workCenters || []).filter((wc) => {
-    if (!wc.active) return false;
-    if (!selectedBusinessId) return true;
-    if (!wc.businessId) return true;
-    return wc.businessId === selectedBusinessId;
-  });
-  const wcOptions = filteredWorkCenters.map((wc) => ({ id: wc.id, label: wc.name }));
-  const businessOptions = (businesses || []).map((b) => ({ id: b.business_id, label: b.name }));
+  const legacyWcOptions = (workCenters || [])
+    .filter((wc) => wc.active !== false)
+    .filter((wc) => !selectedBusinessId || !wc.businessId || wc.businessId === selectedBusinessId)
+    .map((wc) => ({ id: wc.id, label: wc.name }));
+
+  const wcOptions = loadedWorkCenterOptions.length > 0
+    ? loadedWorkCenterOptions.map((wc) => ({ id: wc.id, label: wc.label }))
+    : legacyWcOptions;
+
+  const businessOptions = businessList.map((b) => ({ id: b.business_id, label: b.name }));
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
@@ -662,7 +670,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     <p className="text-xs font-bold text-blue-800 dark:text-blue-300">El trabajador debe completar</p>
                   </div>
                   <ul className="space-y-0.5">
-                    {['DNI / NIE', 'Fecha de nacimiento', 'Nacionalidad', 'Lugar de nacimiento', 'Dirección completa', 'Contacto emergencia', 'N. Seguridad Social', 'Cuenta bancaria'].map((item) => (
+                    {getWorkerOwnedLabels().map((item) => (
                       <li key={item} className="text-[10px] leading-snug text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
                         <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0 mt-1.5" />
                         <span>{item}</span>
@@ -676,7 +684,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     <p className="text-xs font-bold text-violet-800 dark:text-violet-300">Gestoría / RRHH debe completar</p>
                   </div>
                   <ul className="space-y-0.5">
-                    {['Fecha de alta', 'Grupo de cotización', 'Mutua'].map((item) => (
+                    {getHrOwnedLabels().map((item) => (
                       <li key={item} className="text-[10px] leading-snug text-violet-700 dark:text-violet-300 flex items-start gap-1.5">
                         <span className="w-1 h-1 rounded-full bg-violet-400 shrink-0 mt-1.5" />
                         <span>{item}</span>
@@ -945,7 +953,12 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
                       Centro de trabajo / PDV
                     </label>
-                    {wcOptions.length > 0 ? (
+                    {workCentersLoading ? (
+                      <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Cargando tiendas y centros…</p>
+                      </div>
+                    ) : wcOptions.length > 0 ? (
                       <SelectDropdown
                         value={workCenterId}
                         onChange={setWorkCenterId}
@@ -957,43 +970,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
                         <MapPin className="h-4 w-4 shrink-0 text-gray-300" />
                         <p className="text-xs text-gray-400 dark:text-gray-500">
-                          No hay centros de trabajo configurados. Puedes anadirlos en Ajustes.
+                          No hay tiendas en este negocio. Créalas en Ajustes → Tiendas y vuelve aquí (se actualizan solas).
                         </p>
                       </div>
                     )}
-                  </div>
-
-                  <div className="h-px bg-gray-100 dark:bg-gray-700" />
-
-                  {/* Pagina inicial */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      {t('team.inviteModal.landingPage', 'Pagina inicial')}
-                    </label>
-                    <p className="mb-2 text-[11px] text-gray-400 dark:text-gray-500">
-                      {t('team.inviteModal.landingPageHint', 'La primera pantalla que vera este usuario al iniciar sesion.')}
-                    </p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {LANDING_PAGES.map((page) => {
-                        const isActive = landingPage === page.id;
-                        const label = t(`team.inviteModal.pages.${page.id.replace('/saas/', '')}`, page.id.replace('/saas/', ''));
-                        return (
-                          <button
-                            key={page.id}
-                            type="button"
-                            onClick={() => setLandingPage(page.id)}
-                            className={`flex flex-col items-center gap-1.5 rounded-xl border-2 px-2 py-2.5 text-xs font-medium transition-all ${
-                              isActive
-                                ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300'
-                                : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:border-gray-600'
-                            }`}
-                          >
-                            <span className={isActive ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500'}>{page.icon}</span>
-                            <span className="w-full truncate text-center text-[10px] leading-tight">{label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
                   </div>
 
                   {/* Info */}

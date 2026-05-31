@@ -96,6 +96,73 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+/** PDV principal (más antiguo activo): pedidos legacy sin salesPointId solo cuentan aquí. */
+function pickPrimaryPdvId(pdvs) {
+  const active = (pdvs || []).filter((p) => p && p.active !== false);
+  if (!active.length) return null;
+  const sorted = [...active].sort((a, b) => {
+    const ta = String(a.createdAt || '');
+    const tb = String(b.createdAt || '');
+    if (ta !== tb) return ta.localeCompare(tb);
+    return String(a._id || '').localeCompare(String(b._id || ''));
+  });
+  return sorted[0]._id || null;
+}
+
+function orderMatchesPdvScope(order, pdvId, primaryPdvId) {
+  const filterId = String(pdvId || '').trim();
+  if (!filterId) return true;
+  const oid = String(order.salesPointId || '').trim();
+  if (!oid) {
+    const primary = String(primaryPdvId || '').trim();
+    return primary ? filterId === primary : false;
+  }
+  return oid === filterId;
+}
+
+/** Resuelve referencia de tienda (PDV `_id` o centro de trabajo) al `_id` del PDV. */
+function resolvePdvIdFromRef(pdvs, ref) {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  const byId = (pdvs || []).find((p) => p && p._id === r);
+  if (byId) return byId._id;
+  const byWc = (pdvs || []).find((p) => String(p?.workCenterId || '').trim() === r);
+  return byWc?._id || null;
+}
+
+async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
+  const pdvs = await listPointsOfSaleByUser(req, userId);
+  let salesPointId = String(order?.salesPointId || '').trim();
+  if (salesPointId) {
+    const resolved = resolvePdvIdFromRef(pdvs, salesPointId);
+    if (resolved) salesPointId = resolved;
+    const pdv = pdvs.find((p) => p._id === salesPointId);
+    return {
+      salesPointId,
+      salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
+    };
+  }
+  const workerRef = String(callerAccount?.employment?.salesPointId || '').trim();
+  if (workerRef) {
+    const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
+    if (workerPdv) {
+      const pdv = pdvs.find((p) => p._id === workerPdv);
+      return {
+        salesPointId: workerPdv,
+        salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
+      };
+    }
+  }
+  const active = (pdvs || []).filter((p) => p && p.active !== false);
+  if (active.length === 1) {
+    return {
+      salesPointId: active[0]._id,
+      salesPointName: String(order?.salesPointName || active[0].name || '').trim(),
+    };
+  }
+  return { salesPointId: '', salesPointName: String(order?.salesPointName || '').trim() };
+}
+
 function assertUserScope(req, res, userId) {
   const authId = String(req.authUser?.user_id || req.authUser?.id || '').trim();
   const paramId = String(userId || '').trim();
@@ -264,10 +331,17 @@ export async function listDeliveryOrders(req, res) {
     // Defensa en profundidad para workers: solo su PDV y solo el día de hoy.
     // Las vistas operativas (cocina/montaje/reparto) trabajan con eso.
     if (req.callerIsWorker) {
-      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
       const today = new Date().toISOString().slice(0, 10);
+      const primaryPdvId = pickPrimaryPdvId(pdvs);
       orders = orders.filter((o) => {
-        if (workerSalesPoint && o.salesPointId && o.salesPointId !== workerSalesPoint) return false;
+        if (workerPdv) {
+          if (!orderMatchesPdvScope(o, workerPdv, primaryPdvId)) return false;
+        } else if (workerRef && o.salesPointId && o.salesPointId !== workerRef) {
+          return false;
+        }
         if (o.createdAt && o.createdAt.slice(0, 10) < today) return false;
         return true;
       });
@@ -289,7 +363,15 @@ export async function createDeliveryOrder(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
-    const doc = buildDeliveryOrderDocument(userId, order);
+    const scoped = await resolveOrderSalesPoint(req, userId, order, req.callerAccount || account);
+    if (!scoped.salesPointId) {
+      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const active = (pdvs || []).filter((p) => p && p.active !== false);
+      if (active.length > 1) {
+        return badRequest(res, 'Indica la tienda (salesPointId) del pedido');
+      }
+    }
+    const doc = buildDeliveryOrderDocument(userId, { ...order, ...scoped });
     const saved = await putDocument(req, db, doc._id, doc);
     const savedDoc = { ...doc, _rev: saved.rev };
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
@@ -579,7 +661,12 @@ export async function filterDeliveryOrders(req, res) {
       if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
     }
     if (channel) orders = orders.filter((o) => o.channel === channel);
-    if (salesPointId) orders = orders.filter((o) => o.salesPointId === salesPointId);
+    if (salesPointId) {
+      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const primaryPdvId = pickPrimaryPdvId(pdvs);
+      const pdv = String(salesPointId).trim();
+      orders = orders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId));
+    }
     if (status) orders = orders.filter((o) => o.status === status);
     if (deliveryType) orders = orders.filter((o) => o.deliveryType === deliveryType);
     if (clientId) orders = orders.filter((o) => o.clientId === clientId);
@@ -1290,7 +1377,11 @@ export async function listTpvRegisterSessions(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const sessions = await listTpvRegisterSessionsByUser(req, userId);
+    let sessions = await listTpvRegisterSessionsByUser(req, userId);
+    const pdvFilter = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
+    if (pdvFilter) {
+      sessions = sessions.filter((s) => String(s.pointOfSaleId || '') === pdvFilter);
+    }
     return res.json({ ok: true, sessions: sessions.map(sanitizeTpvRegisterSession) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar sesiones de caja TPV' });
@@ -1723,11 +1814,10 @@ export async function getOpsCenter(req, res) {
     let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
 
     if (salesPointId) {
+      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
-      dayOrders = dayOrders.filter((o) => {
-        const oid = String(o.salesPointId || '').trim();
-        return !oid || oid === pdv;
-      });
+      dayOrders = dayOrders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId));
     }
     if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
     if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
@@ -1759,7 +1849,11 @@ export async function getOpsCenter(req, res) {
 
     const tpvSessions = await listTpvRegisterSessionsByUser(req, userId);
     const driverSessions = await listDriverCashSessionsByUser(req, userId);
-    const openTpv = tpvSessions.filter(s => s.status === 'open');
+    let openTpv = tpvSessions.filter(s => s.status === 'open');
+    if (salesPointId) {
+      const pdv = String(salesPointId).trim();
+      openTpv = openTpv.filter((s) => String(s.pointOfSaleId || '') === pdv);
+    }
     const openDriverSessions = driverSessions.filter(s => s.status === 'open');
 
     let catalogItems = [];

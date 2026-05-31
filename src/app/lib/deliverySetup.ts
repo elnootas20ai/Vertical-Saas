@@ -13,7 +13,6 @@ import {
   dedupePointsOfSale,
   ensureDeliveryPdvForWorkCenter,
   listPointsOfSaleRequest,
-  mergePointsOfSaleWithRetailWorkCenters,
   suggestNextPdvDisplayName,
   type PointOfSale,
 } from './deliveryApi';
@@ -202,6 +201,16 @@ export function filterWorkCentersForBusinessScope(
     return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
   if (!anyScoped) return workCenters;
+  // Empresa sin centros con businessId propio: mostrar legacy retail (datos antiguos).
+  const legacyOnly = workCenters.filter(
+    (wc) =>
+      !wc.deletedAt &&
+      !String(wc.businessId || '').trim() &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+  if (legacyOnly.length > 0) {
+    return [...legacyOnly].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
   return [];
 }
 
@@ -247,10 +256,9 @@ export async function loadDeliveryStores(
 
   const workCenters = filterWorkCentersForBusinessScope(allWorkCenters, businessId);
 
-  let pointsOfSale = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, rawPdvs, {
-    business: business ?? null,
-  });
-  pointsOfSale = dedupePointsOfSale(pointsOfSale);
+  // Lectura rápida: no sincronizar PDV↔centro en cada listado (541+ PDV bloqueaba el sidebar).
+  // La sincronización ocurre al crear/editar centro (SalesPointsTab, ensureDeliveryPdvForWorkCenter).
+  let pointsOfSale = dedupePointsOfSale(rawPdvs);
   pointsOfSale = filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters);
 
   return { dataUserId, workCenters, pointsOfSale };
@@ -381,28 +389,46 @@ export async function setupDeliveryRetailStore(
     throw new Error('No se pudo crear el punto de venta de caja para este local');
   }
 
+  await bootstrapRetailStoreAfterCreate(authUser, business, {
+    workCenter: wc,
+    pointOfSale: pdv,
+    storeName: trimmedName,
+  });
+
+  return { workCenter: wc, pointOfSale: pdv };
+}
+
+/** Mismo post-alta para PDV 1, 2, 3…: tienda activa + marca por defecto enlazada. */
+export async function bootstrapRetailStoreAfterCreate(
+  authUser: AuthLike,
+  business: Business | null | undefined,
+  payload: {
+    workCenter: WorkCenter;
+    pointOfSale: PointOfSale;
+    storeName?: string;
+  },
+): Promise<void> {
+  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  const { workCenter, pointOfSale, storeName } = payload;
   const businessId = String(business?.business_id || business?.id || '').trim();
-  if (businessId) {
-    writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdv._id);
-    notifyDeliveryActiveStoreChanged();
+
+  if (businessId && dataUserId && pointOfSale.active !== false) {
+    selectDeliveryPointOfSale(business, dataUserId, pointOfSale._id);
   }
 
-  notifyDeliveryWorkCentersChanged();
-  markDeliveryPdvSessionConfirmed(dataUserId);
-
-  const businessIdForBrand = String(business?.business_id || business?.id || payload.businessId || '').trim();
-  if (businessIdForBrand) {
+  if (businessId) {
     try {
-      await ensureDeliveryDefaultBrand(businessIdForBrand, {
-        workCenterId: wc._id,
-        preferredName: trimmedName,
+      await ensureDeliveryDefaultBrand(businessId, {
+        workCenterId: workCenter._id,
+        preferredName: storeName?.trim() || workCenter.name,
       });
     } catch {
       /* la marca se puede completar en Ajustes → Marca */
     }
   }
 
-  return { workCenter: wc, pointOfSale: pdv };
+  notifyDeliveryWorkCentersChanged();
+  if (dataUserId) markDeliveryPdvSessionConfirmed(dataUserId);
 }
 
 export const DELIVERY_WORK_CENTERS_CHANGED = 'work-centers:changed';

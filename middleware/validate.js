@@ -92,7 +92,7 @@ export const inviteUserSchema = z.object({
   businessId: z.string().max(100).trim().optional().default(''),
   // Matriz anidada { módulo: { view, edit } }; z.record(z.unknown()) puede fallar según versión de Zod.
   permissions: z.any().optional(),
-  landingPage: z.string().max(200).trim().optional().default('/saas/worker'),
+  landingPage: z.string().max(200).trim().optional().default('/saas/worker/tasks'),
   position: z.string().max(200).trim().optional().default(''),
   contractType: z.string().max(100).trim().optional().default(''),
   grossMonthlySalary: z.string().max(50).trim().optional().default(''),

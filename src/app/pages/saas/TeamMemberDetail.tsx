@@ -42,7 +42,7 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
-import { Layout } from '../../components/saas/Layout';
+import { formatIbanInput } from '../../lib/employmentBankUtils';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type {
@@ -136,6 +136,7 @@ function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
     workday: emp?.workday || '',
     salary: emp?.salary || '',
     bankAccount: emp?.bankAccount || '',
+    bankName: emp?.bankName || '',
     emergencyContact: emp?.emergencyContact || '',
     emergencyPhone: emp?.emergencyPhone || '',
     salesPointId: emp?.salesPointId || '',
@@ -216,11 +217,22 @@ function TabButton({
 
 // ─── InfoField ────────────────────────────────────────────────────────────────
 
-function InfoField({ label, value }: { label: string; value: string | undefined }) {
+function InfoField({
+  label,
+  value,
+  monoLarge,
+}: {
+  label: string;
+  value: string | undefined;
+  monoLarge?: boolean;
+}) {
+  const display = monoLarge && value ? formatIbanInput(value) : (value || '—');
   return (
     <div>
       <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-sm text-gray-900 dark:text-gray-100">{value || '—'}</p>
+      <p className={monoLarge && value ? `break-all font-mono text-sm text-gray-900 dark:text-gray-100` : 'text-sm text-gray-900 dark:text-gray-100'}>
+        {display}
+      </p>
     </div>
   );
 }
@@ -888,7 +900,8 @@ export function TeamMemberDetail() {
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <InfoField label="Salario bruto anual" value={emp.salary} />
-                <InfoField label="Cuenta bancaria (IBAN)" value={emp.bankAccount} />
+                <InfoField label="Cuenta bancaria (IBAN)" value={emp.bankAccount} monoLarge />
+                <InfoField label="Banco" value={emp.bankName} />
                 <InfoField label="Último acceso" value={member.lastLoginAt ? new Date(member.lastLoginAt).toLocaleString('es-ES') : undefined} />
               </div>
             </div>

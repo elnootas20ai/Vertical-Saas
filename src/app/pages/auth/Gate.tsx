@@ -22,6 +22,7 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useAuth } from '../../context/AuthContext';
+import { WORKER_DEFAULT_LANDING_PATH, normalizeWorkerLandingPage } from '../../lib/workerProfileCompletion';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
 import { BadgeStatus } from '../../components/gate/BadgeStatus';
@@ -104,8 +105,8 @@ export function Gate() {
     if (isWorker) {
       const ADMIN_ONLY_LANDINGS = new Set(['/saas/dashboard', '/saas/finance', '/saas/reports', '/saas/team', '/saas/billing']);
       const target = user.landingPage && !ADMIN_ONLY_LANDINGS.has(user.landingPage)
-        ? user.landingPage
-        : '/saas/worker';
+        ? normalizeWorkerLandingPage(user.landingPage)
+        : WORKER_DEFAULT_LANDING_PATH;
       navigate(target, { replace: true });
     }
   }, [user, navigate]);

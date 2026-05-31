@@ -3,19 +3,27 @@ import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useBusiness } from '../../../context/BusinessContext';
+import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useTpv, type TpvWorker } from '../../../context/TpvContext';
 import { TpvProvider } from '../../../context/TpvContext';
 import { NuevoClienteModal } from '../../../components/saas/NuevoClienteModal';
 import type { Client } from '../../../context/AppContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
+  filterDeliveryOrdersRequest,
   listCatalogItemsRequest,
-  listDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   type CatalogItem,
   type DeliveryOrder,
   type DeliveryOrderItem,
 } from '../../../lib/deliveryApi';
+import {
+  pickDefaultActivePdvId,
+} from '../../../lib/deliveryOpsPdvSelection';
+import {
+  resolvePdvIdFromStoreRef,
+  filterOrdersForActivePdv,
+} from '../../../lib/pdvScope';
 import { listClockins, type ClockinRecord } from '../../../lib/clockinsApi';
 import type { BusinessType } from '../../../lib/businessApi';
 import { useNavigate } from 'react-router';
@@ -98,6 +106,7 @@ function SalesContent() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const activeStoreScope = useActiveStoreScope();
   const {
     lines, activeWorker, ticketTotal, ticketCount,
     addItem, removeItem, updateQuantity, clearTicket, setActiveWorker,
@@ -122,6 +131,25 @@ function SalesContent() {
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = currentBusiness?.business_id || '';
 
+  const workerPdv = useMemo(() => {
+    const fromEmployment = resolvePdvIdFromStoreRef(
+      activeStoreScope.pointsOfSale,
+      user?.employment?.salesPointId,
+    );
+    if (fromEmployment.pdvId) return fromEmployment;
+    const activeId = activeStoreScope.activeSalesPointId;
+    if (activeId) {
+      const p = activeStoreScope.pointsOfSale.find((x) => x._id === activeId);
+      return { pdvId: activeId, pdvName: p?.name || null, workCenterId: p?.workCenterId || null };
+    }
+    return fromEmployment;
+  }, [activeStoreScope.pointsOfSale, activeStoreScope.activeSalesPointId, user?.employment?.salesPointId]);
+
+  const primaryPdvId = useMemo(
+    () => pickDefaultActivePdvId(activeStoreScope.pointsOfSale.filter((p) => p.active !== false)),
+    [activeStoreScope.pointsOfSale],
+  );
+
   useEffect(() => {
     if (!dataUserId) return;
     setCatalogLoading(true);
@@ -137,8 +165,14 @@ function SalesContent() {
       return;
     }
     let cancelled = false;
-    listDeliveryOrdersRequest(dataUserId)
-      .then((orders) => {
+    const today = new Date().toISOString().slice(0, 10);
+    filterDeliveryOrdersRequest(dataUserId, {
+      ...(workerPdv.pdvId ? { salesPointId: workerPdv.pdvId } : {}),
+      dateFrom: `${today}T00:00:00.000Z`,
+      dateTo: `${today}T23:59:59.999Z`,
+      limit: MAX_ORDERS_FOR_TPV_INTEL,
+    })
+      .then(({ orders }) => {
         if (!cancelled) setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
       })
       .catch(() => {
@@ -147,22 +181,29 @@ function SalesContent() {
     return () => {
       cancelled = true;
     };
-  }, [dataUserId]);
+  }, [dataUserId, workerPdv.pdvId]);
 
   const refreshOrdersPool = useCallback(async () => {
     if (!dataUserId) return;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const orders = await listDeliveryOrdersRequest(dataUserId);
+      const { orders } = await filterDeliveryOrdersRequest(dataUserId, {
+        ...(workerPdv.pdvId ? { salesPointId: workerPdv.pdvId } : {}),
+        dateFrom: `${today}T00:00:00.000Z`,
+        dateTo: `${today}T23:59:59.999Z`,
+        limit: MAX_ORDERS_FOR_TPV_INTEL,
+      });
       setRecentOrdersPool(orders.slice(0, MAX_ORDERS_FOR_TPV_INTEL));
     } catch {
       /* mantener pool anterior */
     }
-  }, [dataUserId]);
+  }, [dataUserId, workerPdv.pdvId]);
 
   /** KPI e historial: pedidos reales canal TPV del día (local), alineados con TPV rápido gerente. */
   const todayTpvFromServer = useMemo(() => {
     const now = new Date();
-    const orders = recentOrdersPool.filter(
+    let orders = filterOrdersForActivePdv(recentOrdersPool, workerPdv.pdvId, primaryPdvId);
+    orders = orders.filter(
       (o) => o.channel === 'tpv' && isSameLocalCalendarDay(o.createdAt, now),
     );
     const sorted = [...orders].sort(
@@ -170,7 +211,7 @@ function SalesContent() {
     );
     const total = sorted.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
     return { orders: sorted, count: sorted.length, total };
-  }, [recentOrdersPool]);
+  }, [recentOrdersPool, workerPdv.pdvId, primaryPdvId]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -343,6 +384,10 @@ function SalesContent() {
 
   const confirmSale = useCallback(async () => {
     if (!dataUserId || lines.length === 0) return;
+    if (!workerPdv.pdvId) {
+      toast.error('No hay tienda asignada. Pide al gerente que te asigne un local.');
+      return;
+    }
     const items: DeliveryOrderItem[] = lines.map((l) => ({
       id: l.id,
       name: l.catalogItem.name,
@@ -364,6 +409,8 @@ function SalesContent() {
         customerPhone: tpvClient?.phone || '',
         customerEmail: '',
         customerAddress: '',
+        salesPointId: workerPdv.pdvId,
+        salesPointName: workerPdv.pdvName || '',
         deliveryType: 'sala',
         channel: 'tpv',
         status: 'entregado',
@@ -401,6 +448,7 @@ function SalesContent() {
     paymentMethod,
     activeWorker,
     tpvClient,
+    workerPdv,
     clearTicketAndClient,
     refreshOrdersPool,
   ]);
@@ -418,7 +466,7 @@ function SalesContent() {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => navigate('/saas/worker')}
+                onClick={() => navigate('/saas/worker/tasks')}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />

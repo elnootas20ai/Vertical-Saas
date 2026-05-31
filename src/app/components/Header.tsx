@@ -99,24 +99,6 @@ export function Header() {
             {/* Desktop Actions */}
             <div className="hidden lg:flex items-center gap-3">
               <button
-                onClick={() => navigate(AUTH_PATHS.companyLogin)}
-                className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
-              >
-                Acceso empresa
-              </button>
-              <button
-                onClick={() => navigate(AUTH_PATHS.workerLogin)}
-                className="text-slate-600 hover:text-blue-700 transition-colors font-medium"
-              >
-                Soy trabajador
-              </button>
-              <button
-                onClick={() => scrollToSection('planes')}
-                className="px-4 py-2 border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-medium text-sm"
-              >
-                Ver planes
-              </button>
-              <button
                 onClick={() => navigate(AUTH_PATHS.entry)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium text-sm shadow-sm shadow-blue-600/30"
               >
@@ -171,20 +153,6 @@ export function Header() {
             <button onClick={() => scrollToSection('contacto')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
               Contacto
             </button>
-            <div className="pt-4 border-t border-blue-100 space-y-2">
-              <button
-                onClick={() => { navigate(AUTH_PATHS.companyLogin); setMobileMenuOpen(false); }}
-                className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
-              >
-                Acceso empresa
-              </button>
-              <button
-                onClick={() => { navigate(AUTH_PATHS.workerLogin); setMobileMenuOpen(false); }}
-                className="w-full px-4 py-3 border-2 border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-colors font-semibold"
-              >
-                Soy trabajador
-              </button>
-            </div>
           </div>
         </div>
       )}

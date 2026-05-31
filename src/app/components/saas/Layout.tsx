@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { SubscriptionBanner } from './SubscriptionBanner';
 import { PendingInvitationsBanner } from './PendingInvitationsBanner';
+import { WorkerProfileCompletionBanner } from './WorkerProfileCompletionBanner';
 import { BottomNav } from './BottomNav';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
@@ -12,7 +13,8 @@ import { OnboardingTour } from './OnboardingTour';
 import { GuidedStepsPopup } from './GuidedStepsPopup';
 import { ActivationPageCoach } from './ActivationPageCoach';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { useAuth } from '../../context/AuthContext';
+import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { Mail, X, ArrowLeft } from 'lucide-react';
 import {
@@ -51,8 +53,7 @@ function DeliveryOpsReturnStrip() {
   );
 }
 
-function UnverifiedEmailBanner() {
-  const { user } = useAuth();
+function UnverifiedEmailBanner({ user }: { user: AuthContextType['user'] }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [, rerender] = useReducer((x: number) => x + 1, 0);
@@ -107,8 +108,34 @@ function UnverifiedEmailBanner() {
 }
 
 export function Layout({ children, title, subtitle, noPadding, titleClassName, subtitleClassName }: LayoutProps) {
+  const auth = useAuthOptional();
+  if (!auth) return null;
+  return (
+    <LayoutInner
+      auth={auth}
+      title={title}
+      subtitle={subtitle}
+      noPadding={noPadding}
+      titleClassName={titleClassName}
+      subtitleClassName={subtitleClassName}
+    >
+      {children}
+    </LayoutInner>
+  );
+}
+
+function LayoutInner({
+  auth,
+  children,
+  title,
+  subtitle,
+  noPadding,
+  titleClassName,
+  subtitleClassName,
+}: LayoutProps & { auth: AuthContextType }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = auth;
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const stored = localStorage.getItem('sidebarCollapsed');
@@ -245,7 +272,7 @@ export function Layout({ children, title, subtitle, noPadding, titleClassName, s
       {/* Main content */}
       <div className={`transition-all duration-300 ${desktopMargin}`}>
         <SubscriptionBanner />
-        <UnverifiedEmailBanner />
+        <UnverifiedEmailBanner user={user} />
         <PendingInvitationsBanner />
         <Topbar
           title={title}
@@ -270,6 +297,7 @@ export function Layout({ children, title, subtitle, noPadding, titleClassName, s
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
           <ErrorBoundary>
             <DeliveryOpsReturnStrip />
+            <WorkerProfileCompletionBanner />
             <ActivationPageCoach />
             {children}
           </ErrorBoundary>
@@ -280,8 +308,8 @@ export function Layout({ children, title, subtitle, noPadding, titleClassName, s
 
       {/* Global overlays */}
       <GlobalSearchModal isOpen={globalSearchOpen} onClose={() => setGlobalSearchOpen(false)} />
-      <OnboardingTour />
-      <GuidedStepsPopup />
+      {!isWorkerAccount(user) ? <OnboardingTour /> : null}
+      {!isWorkerAccount(user) ? <GuidedStepsPopup /> : null}
     </div>
   );
 }

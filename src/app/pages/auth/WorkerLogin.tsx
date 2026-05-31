@@ -8,6 +8,7 @@ import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbo
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
+import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -73,7 +74,7 @@ export function WorkerLogin() {
     setIsSubmitting(false);
 
     if (result.success) {
-      navigate(result.redirectTo || '/saas/worker');
+      navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
       return;
     }
 
