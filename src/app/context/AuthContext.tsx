@@ -712,6 +712,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isSelfUpdate = Boolean(targetId && actorIds.includes(targetId));
       if (isSelfUpdate) {
         flushSync(() => setSessionUser(mergedUser));
+      } else {
+        // Edición de otro usuario (alta laboral, permisos, admin…): nunca adoptar su perfil.
+        // Re-sincroniza con la cookie httpOnly por si quedó JS antiguo o caché mezclada.
+        try {
+          const me = await fetchCurrentUserRequest();
+          const meId = String(me.user?.user_id || me.user?.id || '').trim();
+          if (me.user && meId && actorIds.includes(meId)) {
+            flushSync(() => setSessionUser(me.user as User));
+          }
+        } catch {
+          /* sin red: mantener sesión actual */
+        }
       }
       return { success: true, user: mergedUser };
     } catch (error) {

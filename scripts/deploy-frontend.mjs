@@ -107,6 +107,12 @@ if (upload.status !== 0) {
 // tener que ejecutar `npm run deploy:fix-dist` a mano tras cada deploy.
 const permsScript = `set -e
 DIST=${shellQuote(remotePath.replace(/\/+$/, ''))}
+# Sin rsync --delete quedan JS viejos; el SW/PWA puede seguir sirviendo el bundle anterior.
+if [ -d "$DIST/assets" ]; then
+  for pattern in 'index-*.js' 'index.es-*.js'; do
+    ls -t "$DIST/assets"/$pattern 2>/dev/null | tail -n +2 | xargs -r rm -f
+  done
+fi
 chown -R www-data:www-data "$DIST"
 find "$DIST" -type d -exec chmod 755 {} +
 find "$DIST" -type f -exec chmod 644 {} +
