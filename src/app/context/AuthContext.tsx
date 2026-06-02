@@ -702,20 +702,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const updated = response.user as User;
       const mergedUser = mergeProfilePatch(updated, data);
-      const requestId = String(userId || '').trim();
-      const currentIds = [user?.user_id, user?.id].map((id) => String(id || '').trim()).filter(Boolean);
-      const updatedIds = [updated.user_id, updated.id].map((id) => String(id || '').trim()).filter(Boolean);
-      const idsMatch = requestId && (
-        currentIds.includes(requestId)
-        || updatedIds.includes(requestId)
-        || (currentIds.length > 0 && updatedIds.some((id) => currentIds.includes(id)))
-      );
-      const emailMatch = Boolean(
-        user?.email
-        && updated.email
-        && String(user.email).trim().toLowerCase() === String(updated.email).trim().toLowerCase(),
-      );
-      if (idsMatch || emailMatch || !user) {
+      const targetId = String(userId || '').trim();
+      const actorIds = [user?.user_id, user?.id]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean);
+      // Solo actualizar la sesión activa si el usuario editado es quien está logueado.
+      // Antes, `updatedIds.includes(requestId)` era siempre true al editar a un tercero
+      // (p. ej. alta laboral en Equipo) y la UI pasaba a la cuenta del trabajador.
+      const isSelfUpdate = Boolean(targetId && actorIds.includes(targetId));
+      if (isSelfUpdate) {
         flushSync(() => setSessionUser(mergedUser));
       }
       return { success: true, user: mergedUser };
