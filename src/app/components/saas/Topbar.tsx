@@ -112,7 +112,12 @@ export function Topbar({
                       <select
                         id="vertial-active-store-select"
                         className="mt-1 w-full text-xs border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 truncate"
-                        value={activeStore.activeSalesPointId || ''}
+                        value={
+                          activeStore.activeSalesPointId &&
+                          activeStore.pointsOfSale.some((p) => p._id === activeStore.activeSalesPointId)
+                            ? activeStore.activeSalesPointId
+                            : activeStore.pointsOfSale[0]?._id || ''
+                        }
                         onChange={(e) => {
                           const v = e.target.value;
                           if (v) activeStore.setActiveSalesPoint(v);

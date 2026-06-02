@@ -14,16 +14,36 @@ export const WORKER_OWNED_FIELD_DEFS = [
 ];
 
 export const WORKER_PAYROLL_FIELD_DEFS = WORKER_OWNED_FIELD_DEFS.filter((f) => f.phase === 'payroll');
+export const WORKER_IDENTITY_SETUP_PATH = '/saas/worker/setup-profile';
 export const WORKER_PAYROLL_SETUP_PATH = '/saas/worker/complete-payroll';
 export const WORKER_LEGACY_HOME_PATH = '/saas/worker';
 export const WORKER_DEFAULT_LANDING_PATH = '/saas/worker/tasks';
 
+export function isEphemeralWorkerSetupPath(path) {
+  const trimmed = String(path || '').trim();
+  return trimmed === WORKER_IDENTITY_SETUP_PATH || trimmed === WORKER_PAYROLL_SETUP_PATH;
+}
+
 export function normalizeWorkerLandingPage(path) {
   const trimmed = String(path || '').trim();
-  if (!trimmed || trimmed === WORKER_LEGACY_HOME_PATH) {
+  if (!trimmed || trimmed === WORKER_LEGACY_HOME_PATH || isEphemeralWorkerSetupPath(trimmed)) {
     return WORKER_DEFAULT_LANDING_PATH;
   }
   return trimmed;
+}
+
+export function resolveWorkerSessionEntryPath(account) {
+  if (!account) return WORKER_DEFAULT_LANDING_PATH;
+  if (account.accountType === 'company') return '/auth/gate';
+  if (account.accountType === 'user' && !String(account.linkedBusinessId || '').trim()) {
+    return '/saas/user-dashboard';
+  }
+  if (needsWorkerPayrollSetup(account)) return WORKER_PAYROLL_SETUP_PATH;
+  const landing = String(account.landingPage || '').trim();
+  if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing)) {
+    return normalizeWorkerLandingPage(landing);
+  }
+  return WORKER_DEFAULT_LANDING_PATH;
 }
 
 export const HR_OWNED_FIELD_DEFS = [
@@ -187,12 +207,12 @@ export function hasWorkerPayrollFieldsComplete(account) {
   return getWorkerPayrollMissingIds(account).length === 0;
 }
 
-/** Paso 2: datos de nómina obligatorios tras unirse a una empresa. */
+/** Paso 2 (solo con empresa vinculada): identidad + nómina pendientes tras aceptar invitación. */
 export function needsWorkerPayrollSetup(account) {
   if (!account) return false;
   if (!String(account.linkedBusinessId || '').trim()) return false;
   if (!isWorkerProfileSubject(account)) return false;
-  if (!hasMinimumWorkerIdentity(account)) return false;
+  if (!hasMinimumWorkerIdentity(account)) return true;
   return !hasWorkerPayrollFieldsComplete(account);
 }
 
@@ -201,7 +221,7 @@ export function resolveRedirectAfterInvitationAccept(account) {
     return WORKER_PAYROLL_SETUP_PATH;
   }
   const landing = String(account.landingPage || '').trim();
-  if (landing.startsWith('/saas/') && landing !== WORKER_PAYROLL_SETUP_PATH) {
+  if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing)) {
     return normalizeWorkerLandingPage(landing);
   }
   return WORKER_DEFAULT_LANDING_PATH;

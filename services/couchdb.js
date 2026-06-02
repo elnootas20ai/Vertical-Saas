@@ -3110,6 +3110,17 @@ function sanitizeAddress(addr) {
   };
 }
 
+/** Rellena address/ciudad/CP desde la dirección principal del TPV si faltan en el nivel raíz. */
+function resolveClientLocationFields(client) {
+  const addrs = Array.isArray(client?.addresses) ? client.addresses : [];
+  const primary = addrs.find((a) => a?.isPrimary) || addrs[0];
+  return {
+    address: String(client?.address || '').trim() || String(primary?.street || '').trim(),
+    city: String(client?.city || '').trim() || String(primary?.city || '').trim(),
+    postalCode: String(client?.postalCode || '').trim() || String(primary?.postalCode || '').trim(),
+  };
+}
+
 function sanitizeSocialLink(link) {
   if (!link || typeof link !== 'object') return null;
   return {
@@ -3138,6 +3149,13 @@ export function buildClientDocument(userId, data = {}, existing = null) {
   const rawAddresses = Array.isArray(data.addresses) ? data.addresses : (existing?.addresses || []);
   const rawSocialLinks = Array.isArray(data.socialLinks) ? data.socialLinks : (existing?.socialLinks || []);
   const rawContacts = Array.isArray(data.contacts) ? data.contacts : (existing?.contacts || []);
+  const addresses = rawAddresses.map(sanitizeAddress).filter(Boolean);
+  const location = resolveClientLocationFields({
+    address: data.address ?? existing?.address,
+    city: data.city ?? existing?.city,
+    postalCode: data.postalCode ?? existing?.postalCode,
+    addresses,
+  });
 
   return {
     _id: id,
@@ -3158,10 +3176,10 @@ export function buildClientDocument(userId, data = {}, existing = null) {
     fiscalPostalCode: String(data.fiscalPostalCode || existing?.fiscalPostalCode || '').trim(),
     fiscalCountry: String(data.fiscalCountry || existing?.fiscalCountry || 'España').trim(),
     commercialStatus: normalizeCommercialStatus(data.commercialStatus || existing?.commercialStatus),
-    address: String(data.address || '').trim(),
-    city: String(data.city || '').trim(),
-    postalCode: String(data.postalCode || '').trim(),
-    addresses: rawAddresses.map(sanitizeAddress).filter(Boolean),
+    address: location.address,
+    city: location.city,
+    postalCode: location.postalCode,
+    addresses,
     socialLinks: rawSocialLinks.map(sanitizeSocialLink).filter(Boolean),
     contacts: rawContacts.map(sanitizeContactPerson).filter(Boolean),
     status: normalizeClientStatus(data.status),
@@ -3200,6 +3218,7 @@ function normalizePaymentMethod(value) {
 
 export function sanitizeClient(client) {
   if (!client) return null;
+  const location = resolveClientLocationFields(client);
   return {
     _rev: client._rev,
     type: 'client',
@@ -3218,9 +3237,9 @@ export function sanitizeClient(client) {
     fiscalPostalCode: client.fiscalPostalCode || '',
     fiscalCountry: client.fiscalCountry || 'España',
     commercialStatus: client.commercialStatus || 'active',
-    address: client.address || '',
-    city: client.city || '',
-    postalCode: client.postalCode || '',
+    address: location.address,
+    city: location.city,
+    postalCode: location.postalCode,
     addresses: Array.isArray(client.addresses) ? client.addresses : [],
     socialLinks: Array.isArray(client.socialLinks) ? client.socialLinks : [],
     contacts: Array.isArray(client.contacts) ? client.contacts : [],
@@ -4568,13 +4587,43 @@ export async function listGdprRequestsByUser(req, userId) {
 
 // ─── Business (multi-tenant) ──────────────────────────────────────────────────
 
-function generateCompanyCode() {
+function generateShortAccessCode(length = 6) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < length; i++) {
     code += chars[Math.floor(Math.random() * chars.length)];
   }
   return code;
+}
+
+function generateCompanyCode() {
+  return generateShortAccessCode(6);
+}
+
+/** Código de activación de tablet TPV (6 caracteres, único por PDV). */
+export function generateTerminalCode() {
+  return generateShortAccessCode(6);
+}
+
+export function generatePosPin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+export function normalizePosPin(pin) {
+  return String(pin || '').trim();
+}
+
+export function isValidPosPin(pin) {
+  return /^\d{4,6}$/.test(normalizePosPin(pin));
+}
+
+export function hashPosPin(pin) {
+  return hashPassword(normalizePosPin(pin));
+}
+
+export function verifyPosPin(pin, hash) {
+  if (!hash) return false;
+  return verifyPassword(normalizePosPin(pin), hash);
 }
 
 export function buildBusinessDocument({ ownerUserId, name, legalName = '', taxId = '', address = '', city = '', phone = '', email = '', logo = '', groupId = null, businessType = 'carDealership', companyCode = '' }) {
@@ -4869,6 +4918,11 @@ export async function listPartsByUser(req, userId) {
 
 export function getDeliveryDbName() {
   return normalizeDbName(process.env.VITE_DELIVERY_DB || `${getDbPrefix()}-delivery`);
+}
+
+export function getWorkCentersDbName() {
+  const base = process.env.VITE_COUCHDB_DB || getDbPrefix();
+  return normalizeDbName(`${base}-sales-points`);
 }
 
 export function getCatalogDbName() {
@@ -5418,6 +5472,10 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
       }))
     : existing?.terminals || [];
 
+  const terminalCode = String(
+    data.terminalCode || existing?.terminalCode || generateTerminalCode(),
+  ).trim().toUpperCase();
+
   return {
     _id: id,
     _rev: existing?._rev,
@@ -5427,6 +5485,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     workCenterId: String(data.workCenterId || existing?.workCenterId || ''),
     name: String(data.name || existing?.name || ''),
     code: String(data.code || existing?.code || ''),
+    terminalCode,
     address: String(data.address || existing?.address || ''),
     terminals,
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
@@ -5446,6 +5505,7 @@ export function sanitizePointOfSale(doc) {
     workCenterId: doc.workCenterId || '',
     name: doc.name || '',
     code: doc.code || '',
+    terminalCode: String(doc.terminalCode || '').trim().toUpperCase(),
     address: doc.address || '',
     terminals: Array.isArray(doc.terminals)
       ? doc.terminals.map((t) => ({
@@ -5464,6 +5524,76 @@ export function sanitizePointOfSale(doc) {
   };
 }
 
+function pickNewerPointOfSaleDoc(a, b) {
+  return String(b.updatedAt || b.createdAt || '') >= String(a.updatedAt || a.createdAt || '') ? b : a;
+}
+
+/** Un PDV activo por `workCenterId`; huérfanos por nombre (misma regla que el front). */
+export function dedupeActivePointsOfSale(docs) {
+  if (!Array.isArray(docs)) return [];
+  const byWc = new Map();
+  const byName = new Map();
+  const rest = [];
+
+  for (const p of docs) {
+    if (!p || p.deletedAt || p.active === false) continue;
+    const wcId = String(p.workCenterId || '').trim();
+    const nameKey = String(p.name || '').trim().toLowerCase();
+    if (wcId) {
+      const prev = byWc.get(wcId);
+      byWc.set(wcId, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+      continue;
+    }
+    if (nameKey) {
+      const prev = byName.get(nameKey);
+      byName.set(nameKey, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+      continue;
+    }
+    rest.push(p);
+  }
+
+  const linkedNames = new Set(
+    [...byWc.values()].map((p) => String(p.name || '').trim().toLowerCase()).filter(Boolean),
+  );
+  const orphanByName = [...byName.values()].filter(
+    (p) => !linkedNames.has(String(p.name || '').trim().toLowerCase()),
+  );
+
+  const byId = new Map();
+  for (const p of [...byWc.values(), ...orphanByName, ...rest]) {
+    const id = String(p._id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id);
+    byId.set(id, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+  }
+  return [...byId.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export function findActivePointOfSaleForWorkCenter(docs, workCenterId) {
+  const wcId = String(workCenterId || '').trim();
+  if (!wcId) return null;
+  let match = null;
+  for (const p of docs) {
+    if (!p || p.deletedAt || p.active === false) continue;
+    if (String(p.workCenterId || '').trim() !== wcId) continue;
+    match = match ? pickNewerPointOfSaleDoc(match, p) : p;
+  }
+  return match;
+}
+
+export function findOrphanPointOfSaleByName(docs, name) {
+  const nameKey = String(name || '').trim().toLowerCase();
+  if (!nameKey) return null;
+  let match = null;
+  for (const p of docs) {
+    if (!p || p.deletedAt || p.active === false) continue;
+    if (String(p.workCenterId || '').trim()) continue;
+    if (String(p.name || '').trim().toLowerCase() !== nameKey) continue;
+    match = match ? pickNewerPointOfSaleDoc(match, p) : p;
+  }
+  return match;
+}
+
 export async function listPointsOfSaleByUser(req, userId) {
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
@@ -5471,6 +5601,77 @@ export async function listPointsOfSaleByUser(req, userId) {
   return docs
     .filter((doc) => doc?.type === 'point_of_sale' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export async function findWorkCenterById(req, workCenterId) {
+  const wcId = String(workCenterId || '').trim();
+  if (!wcId) return null;
+  const db = getWorkCentersDbName();
+  await ensureDatabase(req, db);
+  const doc = await getDocument(req, db, wcId);
+  if (!doc || doc.type !== 'sales_point' || doc.deletedAt) return null;
+  return doc;
+}
+
+export async function findPointOfSaleByTerminalCode(req, terminalCode, excludePdvId = '') {
+  const code = String(terminalCode || '').trim().toUpperCase();
+  if (!code) return null;
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  const exclude = String(excludePdvId || '').trim();
+  return docs.find((d) =>
+    d?.type === 'point_of_sale' &&
+    !d?.deletedAt &&
+    d.active !== false &&
+    String(d.terminalCode || '').toUpperCase() === code &&
+    (!exclude || d._id !== exclude),
+  ) || null;
+}
+
+export async function findTeamMemberByPosPin(req, businessId, pin) {
+  if (!businessId || !pin) return null;
+  const business = await findBusinessById(req, businessId);
+  if (!business) return null;
+
+  const memberIds = new Set(
+    (Array.isArray(business.members) ? business.members : [])
+      .map((m) => String(m.user_id || '').trim())
+      .filter(Boolean),
+  );
+  if (business.owner_user_id) memberIds.add(String(business.owner_user_id).trim());
+
+  const accounts = await listAccounts(req);
+  for (const account of accounts) {
+    if (!memberIds.has(account.user_id)) continue;
+    if (account.deletedAt || account.status === 'inactive') continue;
+    if (account.posPinHash && verifyPosPin(pin, account.posPinHash)) {
+      return account;
+    }
+  }
+  return null;
+}
+
+export function workerCanAccessPdvForTablet(account, business, pdv) {
+  if (!account || !business || !pdv) return false;
+
+  const isOwner = business.owner_user_id === account.user_id;
+  const isMember = Array.isArray(business.members)
+    && business.members.some((m) => m.user_id === account.user_id);
+  if (!isOwner && !isMember) return false;
+
+  const role = String(account.role || '').trim();
+  const isAdmin = isOwner || role === 'Admin';
+  const salesPointId = String(account.employment?.salesPointId || '').trim();
+  if (isAdmin && !salesPointId) return true;
+  if (!salesPointId) return false;
+
+  const wcId = String(pdv.workCenterId || '').trim();
+  const pdvId = String(pdv._id || '').trim();
+  if (salesPointId === pdvId || salesPointId === wcId || salesPointId === `wc:${wcId}`) {
+    return true;
+  }
+  return false;
 }
 
 // ─── TPV REGISTER SESSIONS ────────────────────────────────────────────────────

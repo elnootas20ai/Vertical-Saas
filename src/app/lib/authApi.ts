@@ -218,6 +218,8 @@ export interface BillingSubscription {
   moneiPaymentId?: string;
   /** PDV adicionales sin cobro (solo editable por superadmin). */
   extraPointOfSaleSlots?: number;
+  /** Marcas comerciales extra sin cobro (solo superadmin; no cuenta la marca «General»). */
+  extraCommercialBrandSlots?: number;
   /** PRO manual sin pasarela (solo superadmin). */
   adminProAccess?: boolean;
 }

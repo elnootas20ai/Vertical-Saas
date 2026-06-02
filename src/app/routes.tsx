@@ -1,9 +1,13 @@
 import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
+import { isWorkerAccount } from './lib/authApi';
+import { resolveWorkerSessionEntryPath } from './lib/workerProfileCompletion';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
 import { Entry } from './pages/auth/Entry';
 import { Login } from './pages/auth/Login';
 import { TeamLogin } from './pages/auth/TeamLogin';
+import { TpvTabletLogin } from './pages/auth/TpvTabletLogin';
 import { WorkerLogin } from './pages/auth/WorkerLogin';
 import { Recover } from './pages/auth/Recover';
 import { ResetPassword } from './pages/auth/ResetPassword';
@@ -314,6 +318,21 @@ function CatchAll() {
   return <Navigate to="/saas/dashboard" replace />;
 }
 
+/** /saas y /saas/ no tenían hijo index → Outlet vacío (pantalla en blanco). */
+function SaasIndexRedirect() {
+  const { user } = useAuth();
+  if (!user) {
+    return <Navigate to="/auth/login" replace />;
+  }
+  if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim()) {
+    return <Navigate to="/saas/user-dashboard" replace />;
+  }
+  if (isWorkerAccount(user)) {
+    return <Navigate to={resolveWorkerSessionEntryPath(user)} replace />;
+  }
+  return <Navigate to="/saas/dashboard" replace />;
+}
+
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -358,6 +377,10 @@ export const router = createBrowserRouter([
       {
         path: 'auth/team-login',
         Component: TeamLogin,
+      },
+      {
+        path: 'auth/tpv-tablet',
+        Component: TpvTabletLogin,
       },
       {
         path: 'auth/worker-login',
@@ -456,6 +479,7 @@ export const router = createBrowserRouter([
         path: 'saas',
         Component: SaasRoot,
         children: [
+          { index: true, element: <SaasIndexRedirect /> },
           { path: 'dashboard', element: <RequireBusinessOwner><Dashboard /></RequireBusinessOwner> },
           { path: 'onboarding', Component: SetupOnboarding },
           { path: 'delivery/primer-pdv', element: <Navigate to="/saas/dashboard" replace /> },

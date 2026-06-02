@@ -9,10 +9,9 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
+  coerceSelectedPdvId,
   readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
-  resolvePreferenceToPdvId,
-  pickDefaultActivePdvId,
   notifyDeliveryActiveStoreChanged,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
@@ -173,7 +172,11 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
       {pdvs.length > 1 ? (
         <select
           className={sel}
-          value={filters.salesPointId || ''}
+          value={
+            filters.salesPointId && pdvs.some((p) => p._id === filters.salesPointId)
+              ? filters.salesPointId
+              : ''
+          }
           onChange={(e) => onChange({ ...filters, salesPointId: e.target.value || undefined })}
         >
           <option value="">Todas las tiendas</option>
@@ -931,13 +934,35 @@ export function DeliveryOpsCenter() {
       return;
     }
     const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-    const pdvId =
-      resolvePreferenceToPdvId(data.pointsOfSale, saved) || pickDefaultActivePdvId(activePdvs);
+    const pdvId = coerceSelectedPdvId(activePdvs, saved);
     if (pdvId) {
       setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
     }
     restoredOpsPdvSelectionRef.current = true;
   }, [data?.pointsOfSale, currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+
+  /** Si el filtro apunta a un PDV que no está en esta empresa, corregirlo. */
+  useEffect(() => {
+    const list = data?.pointsOfSale?.filter((p) => p.active !== false) ?? [];
+    if (list.length === 0) return;
+    const current = filters.salesPointId?.trim();
+    if (current && list.some((p) => p._id === current)) return;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const saved = bid && dataUserId ? readDeliveryOpsSelectedPdvId(bid, dataUserId) : null;
+    const pdvId = coerceSelectedPdvId(list, saved || activeStoreScope.activeSalesPointId);
+    setFilters((f) => {
+      const next = pdvId || undefined;
+      if (f.salesPointId === next) return f;
+      return { ...f, salesPointId: next };
+    });
+  }, [
+    data?.pointsOfSale,
+    filters.salesPointId,
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    dataUserId,
+    activeStoreScope.activeSalesPointId,
+  ]);
 
   /** Selector global (Topbar) o sidebar: misma clave localStorage → alinear filtro Ops sin recargar. */
   useEffect(() => {
@@ -947,10 +972,10 @@ export function DeliveryOpsCenter() {
       const list = data?.pointsOfSale;
       if (!list?.length) return;
       const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-      const pdvId =
-        resolvePreferenceToPdvId(list, saved) ||
-        activeStoreScope.activeSalesPointId ||
-        pickDefaultActivePdvId(list);
+      const pdvId = coerceSelectedPdvId(
+        list,
+        saved || activeStoreScope.activeSalesPointId,
+      );
       if (pdvId) {
         setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
       }

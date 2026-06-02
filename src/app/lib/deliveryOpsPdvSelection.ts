@@ -102,6 +102,21 @@ export function deliveryOrderMatchesPdvFilter(
   return orderPdv === filterId;
 }
 
+/**
+ * PDV válido para la lista actual (preferencia guardada o el primero activo).
+ * Evita errores de `<select>` cuando la tienda guardada no pertenece a esta empresa.
+ */
+export function coerceSelectedPdvId(
+  pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean; createdAt?: string }>,
+  preferred: string | null | undefined,
+): string | null {
+  const active = pointsOfSale.filter((p) => p.active !== false);
+  if (active.length === 0) return null;
+  const resolved = resolvePreferenceToPdvId(active, preferred ?? null);
+  if (resolved) return resolved;
+  return pickDefaultActivePdvId(active);
+}
+
 /** Si la preferencia es `wc:…`, devuelve el `_id` del PDV y opcionalmente reescribe storage al id estable. */
 export function normalizeStoredPdvPreference(
   pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean }>,

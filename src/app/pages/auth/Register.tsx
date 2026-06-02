@@ -51,7 +51,7 @@ function destinationAfterSignup(opts: {
   if (opts.emailVerified === false) {
     return '/auth/verify-email-pending';
   }
-  return opts.redirectTo ?? (opts.isUserAccount ? '/saas/worker/setup-profile' : '/auth/onboarding/business-type');
+  return opts.redirectTo ?? (opts.isUserAccount ? '/saas/user-dashboard' : '/auth/onboarding/business-type');
 }
 
 export function Register() {
@@ -253,16 +253,16 @@ export function Register() {
               <VertialLogo size="lg" />
             </div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              {isUserAccount ? 'Crear cuenta de usuario' : 'Crear cuenta de empresa'}
+              {isUserAccount ? 'Crear cuenta de trabajador' : 'Crear cuenta de empresa'}
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
               {isUserAccount
-                ? 'Registro rápido — podrás unirte a empresas después'
+                ? 'Alta personal — podrás unirte a tu empresa cuando te inviten'
                 : 'Crea tu espacio de trabajo en minutos'}
             </p>
             <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
               {isUserAccount ? (
-                <><User className="w-3.5 h-3.5" /> Cuenta personal</>
+                <><User className="w-3.5 h-3.5" /> Cuenta de trabajador</>
               ) : (
                 <><Building2 className="w-3.5 h-3.5" /> Cuenta de empresa</>
               )}

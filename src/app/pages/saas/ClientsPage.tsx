@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import { DuplicatesMergeModal } from '../../components/saas/DuplicatesMergeModal';
 import { SegmentBuilder, applySegmentFilters, type FilterCondition } from '../../components/saas/SegmentBuilder';
 import { useColumnPreferences, type ColumnDef } from '../../hooks/useColumnPreferences';
+import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { ColumnCustomizer } from '../../components/saas/ColumnCustomizer';
 import {
   createClientInvoiceRequest,
@@ -62,7 +63,7 @@ import {
 // ─── Column definitions ───────────────────────────────────────────────────────
 
 type LeadColId = 'nombre' | 'estado' | 'vehiculo' | 'responsable' | 'fecha';
-type ClientColId = 'nombre' | 'estado' | 'ciudad' | 'responsable' | 'docs';
+type ClientColId = 'nombre' | 'estado' | 'direccion' | 'ciudad' | 'responsable' | 'docs';
 
 const LEAD_COL_DEFS: ColumnDef<LeadColId>[] = [
   { id: 'nombre',      label: 'Nombre',       required: true },
@@ -75,6 +76,7 @@ const LEAD_COL_DEFS: ColumnDef<LeadColId>[] = [
 const CLIENT_COL_DEFS: ColumnDef<ClientColId>[] = [
   { id: 'nombre',      label: 'Cliente',      required: true },
   { id: 'estado',      label: 'Estado' },
+  { id: 'direccion',   label: 'Calle' },
   { id: 'ciudad',      label: 'Ciudad' },
   { id: 'responsable', label: 'Responsable' },
   { id: 'docs',        label: 'Docs' },
@@ -1588,15 +1590,17 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   );
 
   const baseClients = useMemo<Client[]>(() => {
-    const fromCtx = (contextClients || []).map((c, i) => ({
+    const fromCtx = (contextClients || []).map((c, i) => {
+      const location = resolveClientLocationFields(c);
+      return {
       id: c.id,
       name: c.name,
       dni: c.dni || `${12000000 + i}X`,
       phone: c.phone,
       email: c.email,
-      address: c.address,
-      city: c.city,
-      postalCode: c.postalCode,
+      address: location.address,
+      city: location.city,
+      postalCode: location.postalCode,
       status: c.status,
       responsible: c.responsible || 'Sin asignar',
       branch_id: c.branch_id || '',
@@ -1607,7 +1611,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       vehiclesPurchased: c.vehiclesPurchased || [],
       vehiclesSold: c.vehiclesSold || [],
       documentsCount: c.documentsCount || c.documentsList?.length || 0,
-    }));
+    };
+    });
     return fromCtx;
   }, [contextClients]);
   const allClients = useMemo(() => baseClients, [baseClients]);
@@ -2254,6 +2259,34 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     setLeadToConvert(null);
   };
 
+  const handleExportClients = async () => {
+    if (filteredClients.length === 0) {
+      toast.error('No hay clientes para exportar');
+      return;
+    }
+    try {
+      const rows = filteredClients.map((c) => ({
+        Nombre: c.name,
+        Teléfono: c.phone,
+        Email: c.email,
+        'DNI/NIF': c.dni,
+        Calle: c.address || '',
+        Ciudad: c.city || '',
+        'C.P.': c.postalCode || '',
+        Estado: c.status === 'active' ? 'Activo' : 'Inactivo',
+        Responsable: c.responsible || '',
+      }));
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+      XLSX.writeFile(wb, `clientes_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast.success(`Exportados ${rows.length} clientes`);
+    } catch {
+      toast.error('No se pudo exportar el Excel');
+    }
+  };
+
   const handleExportInvoices = () => {
     if (filteredBilling.length === 0) {
       return;
@@ -2657,7 +2690,17 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <ViewToggle view={clientsView} setView={setClientsView} />
         </div>
 
-        <div className={isDeliveryBusiness ? 'ml-auto flex-shrink-0' : ''}>
+        <div className={`flex items-center gap-2 flex-shrink-0 ${isDeliveryBusiness ? 'ml-auto' : ''}`}>
+          <button
+            type="button"
+            onClick={() => void handleExportClients()}
+            disabled={filteredClients.length === 0}
+            title="Exportar clientes a Excel"
+            className="flex items-center gap-1.5 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-semibold transition-colors disabled:opacity-40"
+          >
+            <Download className="w-4 h-4" />
+            <span className="hidden sm:inline">Excel</span>
+          </button>
           <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
             <AddButtonDropdown
               label="Cliente"
@@ -2809,6 +2852,11 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                         renderOption={opt => <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${opt === 'Activo' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{opt}</span>} />
                     </th>
                   )}
+                  {visibleClientCols.includes('direccion') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Calle
+                    </th>
+                  )}
                   {visibleClientCols.includes('ciudad') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Ciudad" options={cCityOptions} selected={cFilterCity} onChange={setCFilterCity}
@@ -2833,6 +2881,11 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                       </td>
                     )}
                     {visibleClientCols.includes('estado') && <td className="px-5 py-3.5"><ClientStatusBadge status={client.status} /></td>}
+                    {visibleClientCols.includes('direccion') && (
+                      <td className="px-5 py-3.5">
+                        <span className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{client.address || '—'}</span>
+                      </td>
+                    )}
                     {visibleClientCols.includes('ciudad') && <td className="px-5 py-3.5"><span className="text-sm text-gray-600 dark:text-gray-400">{client.city || '—'}</span></td>}
                     {visibleClientCols.includes('responsable') && <td className="px-5 py-3.5"><span className="text-xs text-gray-500 dark:text-gray-400">{client.responsible}</span></td>}
                     {visibleClientCols.includes('docs') && <td className="px-5 py-3.5 text-right"><span className="text-sm font-bold text-gray-700 dark:text-gray-300">{client.documentsCount || 0}</span></td>}

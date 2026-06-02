@@ -48,6 +48,7 @@ import {
   LoaderCircle,
   Search,
   Store,
+  Tag,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -70,7 +71,16 @@ import {
   getEffectivePointOfSaleLimit,
   resolvePlanTier,
 } from '../../lib/pointOfSaleLimits';
+import {
+  getBaseCommercialBrandLimit,
+  getEffectiveCommercialBrandLimit,
+} from '../../lib/tenantEntitlements';
 import type { AuthUser } from '../../lib/authApi';
+import {
+  getCompanyVerificationSnapshot,
+  getVerificationBadgeLabel,
+} from '../../lib/onboardingCompanyVerification';
+import { AdminCompanyVerificationPanel } from '../../components/saas/admin/AdminCompanyVerificationPanel';
 import {
   getPlanPricingConfig,
   savePlanPricingConfig,
@@ -221,6 +231,10 @@ function getAncoverAccess(account: AuthUser) {
   return Boolean(od.ancoverAccess);
 }
 
+function getAccountVerification(account: AuthUser) {
+  return getCompanyVerificationSnapshot(account.onboardingData);
+}
+
 // ─── Modal de edición de cliente ─────────────────────────────────────────────
 
 interface EditModalProps {
@@ -230,7 +244,8 @@ interface EditModalProps {
 }
 
 function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
-  const { updateUser, resetUserPassword } = useAuth();
+  const { updateUser, resetUserPassword, user: adminUser } = useAuth();
+  const adminLabel = adminUser?.email || adminUser?.fullName || 'admin';
 
   const [companyName, setCompanyName] = useState(account.companyName || '');
   const [email, setEmail] = useState(account.email || '');
@@ -243,6 +258,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   );
   const [extraPointOfSaleSlots, setExtraPointOfSaleSlots] = useState(
     String(account.subscription?.extraPointOfSaleSlots ?? 0),
+  );
+  const [extraCommercialBrandSlots, setExtraCommercialBrandSlots] = useState(
+    String(account.subscription?.extraCommercialBrandSlots ?? 0),
   );
   const [adminProAccess, setAdminProAccess] = useState(
     Boolean(account.subscription?.adminProAccess),
@@ -301,6 +319,10 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
         status: subscriptionStatus as AuthUser['subscription'] extends { status: infer S } ? S : never,
         cancelAtPeriodEnd: account.subscription?.cancelAtPeriodEnd ?? false,
         extraPointOfSaleSlots: Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0))),
+        extraCommercialBrandSlots: Math.max(
+          0,
+          Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)),
+        ),
         adminProAccess,
       },
     });
@@ -365,11 +387,14 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const basePdvLimit = getBasePointOfSaleLimit(planTier);
   const extraPdv = Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0)));
   const totalPdvLimit = basePdvLimit + extraPdv;
+  const baseBrandLimit = getBaseCommercialBrandLimit(planTier);
+  const extraBrands = Math.max(0, Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)));
+  const totalBrandLimit = baseBrandLimit + extraBrands;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center shrink-0">
@@ -389,6 +414,13 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           </button>
         </div>
         <div className="p-6 space-y-5">
+          <AdminCompanyVerificationPanel
+            account={account}
+            adminLabel={adminLabel}
+            onSaved={onSaved}
+            onSave={updateUser}
+          />
+
           <div className={`flex items-center justify-between rounded-2xl px-4 py-3 ${isBlocked ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
             <div className="flex items-center gap-2">
               {isBlocked ? <Lock className="w-4 h-4 text-red-600" /> : <Unlock className="w-4 h-4 text-green-600" />}
@@ -442,8 +474,8 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               Ventajas sin cobro (superadmin)
             </p>
             <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">
-              Para clientes que no pagan por pasarela: amplía PDV y/o funciones PRO. El plan del desplegable sigue contando como base (
-              {basePdvLimit} PDV en {planName}).
+              Para clientes que no pagan por pasarela: amplía PDV, marcas comerciales y/o funciones PRO. El plan del desplegable sigue
+              contando como base ({basePdvLimit} PDV, {baseBrandLimit} marca comercial en {planName}).
             </p>
             <label className="flex items-start gap-3 cursor-pointer">
               <input
@@ -474,6 +506,23 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
                 Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
                 Ej.: plan Pro (2) + 2 extra = 4 tiendas.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200 mb-1.5">
+                Marcas comerciales extra (además del plan)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={extraCommercialBrandSlots}
+                onChange={(e) => setExtraCommercialBrandSlots(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+              />
+              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
+                Cupo total: <strong>{totalBrandLimit}</strong> líneas comerciales ({baseBrandLimit} del plan + {extraBrands}{' '}
+                extra). No cuenta la marca por defecto «General». Ej.: plan Básico (0) + 1 extra = puede crear Pizzería, Burger…
               </p>
             </div>
           </div>
@@ -611,13 +660,15 @@ type SortField =
   | 'email'
   | 'plan'
   | 'pdvMax'
+  | 'brandMax'
   | 'status'
   | 'trial'
   | 'createdAt'
   | 'card'
   | 'pixel'
   | 'import'
-  | 'ancover';
+  | 'ancover'
+  | 'verification';
 type SortDir = 'asc' | 'desc';
 
 function SortableHeader({
@@ -666,6 +717,15 @@ function getAccountPdvMaxInfo(account: AuthUser) {
   };
 }
 
+function getAccountBrandMaxInfo(account: AuthUser) {
+  const sub = account.subscription;
+  const total = getEffectiveCommercialBrandLimit(sub);
+  const tier = resolvePlanTier(sub?.selectedPlanId || '', sub?.planName || '');
+  const base = getBaseCommercialBrandLimit(tier);
+  const extra = Math.max(0, Math.floor(Number(sub?.extraCommercialBrandSlots) || 0));
+  return { total, base, extra };
+}
+
 function getAccountSortValue(account: AuthUser, field: SortField): string | number {
   switch (field) {
     case 'fullName': return (account.fullName || '').toLowerCase();
@@ -673,6 +733,7 @@ function getAccountSortValue(account: AuthUser, field: SortField): string | numb
     case 'email': return (account.email || '').toLowerCase();
     case 'plan': return (account.subscription?.planName || 'Basic').toLowerCase();
     case 'pdvMax': return getAccountPdvMaxInfo(account).total;
+    case 'brandMax': return getAccountBrandMaxInfo(account).total;
     case 'status': return account.subscription?.status || '';
     case 'createdAt': return account.createdAt || '';
     case 'card': return getCardStatus(account) ? 1 : 0;
@@ -688,6 +749,13 @@ function getAccountSortValue(account: AuthUser, field: SortField): string | numb
     }
     case 'import': return getImportProgress(account).done;
     case 'ancover': return getAncoverAccess(account) ? 1 : 0;
+    case 'verification': {
+      const v = getAccountVerification(account);
+      if (v.needsReview) return 2;
+      if (v.review?.status === 'approved') return 1;
+      if (v.hasDocuments) return 0;
+      return -1;
+    }
     default: return '';
   }
 }
@@ -753,6 +821,7 @@ function ClientsTab({
   const [filterStatus, setFilterStatus] = useState('');
   const [filterBlocked, setFilterBlocked] = useState<'' | 'active' | 'blocked'>('');
   const [filterCard, setFilterCard] = useState<'' | 'yes' | 'no'>('');
+  const [filterVerification, setFilterVerification] = useState<'' | 'pending'>('');
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -835,6 +904,9 @@ function ClientsTab({
     } else if (filterCard === 'no') {
       result = result.filter((a) => !getCardStatus(a));
     }
+    if (filterVerification === 'pending') {
+      result = result.filter((a) => getAccountVerification(a).needsReview);
+    }
 
     result = [...result].sort((a, b) => {
       const va = getAccountSortValue(a, sortField);
@@ -849,26 +921,52 @@ function ClientsTab({
     });
 
     return result;
-  }, [ownerAccountsBase, searchQuery, filterPlan, filterStatus, filterBlocked, filterCard, sortField, sortDir]);
+  }, [ownerAccountsBase, searchQuery, filterPlan, filterStatus, filterBlocked, filterCard, filterVerification, sortField, sortDir]);
 
-  const activeFilterCount = [filterPlan, filterStatus, filterBlocked, filterCard].filter(Boolean).length;
+  const pendingVerificationCount = useMemo(
+    () => ownerAccountsBase.filter((a) => getAccountVerification(a).needsReview).length,
+    [ownerAccountsBase],
+  );
+
+  const activeFilterCount = [filterPlan, filterStatus, filterBlocked, filterCard, filterVerification].filter(Boolean).length;
 
   const clearFilters = () => {
     setFilterPlan('');
     setFilterStatus('');
     setFilterBlocked('');
     setFilterCard('');
+    setFilterVerification('');
   };
 
   return (
     <>
       <div className="space-y-6">
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Clientes propietarios</p>
             <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{ownerAccountsBase.length}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              setFilterVerification('pending');
+              setShowFilters(true);
+            }}
+            className={`text-left rounded-2xl border p-5 transition-colors ${
+              pendingVerificationCount > 0
+                ? 'border-amber-200 bg-amber-50 hover:bg-amber-100/80 dark:border-amber-800 dark:bg-amber-950/30'
+                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-2 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Verificación pendiente
+            </p>
+            <p className={`text-3xl font-bold ${pendingVerificationCount > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'}`}>
+              {pendingVerificationCount}
+            </p>
+          </button>
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Invitados excluidos</p>
             <p className="text-3xl font-bold text-amber-600">{invitedAccounts.length}</p>
@@ -998,6 +1096,18 @@ function ClientsTab({
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                 </div>
 
+                <div className="relative">
+                  <select
+                    value={filterVerification}
+                    onChange={(e) => setFilterVerification(e.target.value as '' | 'pending')}
+                    className="appearance-none pl-3 pr-8 py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 focus:border-blue-500 outline-none cursor-pointer"
+                  >
+                    <option value="">Verificación: todas</option>
+                    <option value="pending">Pendiente de revisión</option>
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                </div>
+
                 {activeFilterCount > 0 && (
                   <button
                     type="button"
@@ -1025,6 +1135,7 @@ function ClientsTab({
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Contraseña</th>
                   <SortableHeader label="Plan" field="plan" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="PDV máx." field="pdvMax" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Marcas máx." field="brandMax" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Estado" field="status" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Trial" field="trial" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Alta" field="createdAt" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
@@ -1032,12 +1143,13 @@ function ClientsTab({
                   <SortableHeader label="Tarjeta" field="card" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Importar" field="import" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Ancover" field="ancover" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Verificación" field="verification" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAndSorted.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={14} className="px-4 py-12 text-center">
+                    <td colSpan={16} className="px-4 py-12 text-center">
                       <Search className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                       <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -1092,6 +1204,26 @@ function ClientsTab({
                                 <span className="inline-flex w-fit rounded-full bg-violet-100 dark:bg-violet-900/40 px-1.5 py-0.5 text-[9px] font-bold text-violet-800 dark:text-violet-200">
                                   PRO admin
                                 </span>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const brands = getAccountBrandMaxInfo(account);
+                          return (
+                            <div className="flex flex-col gap-1 min-w-[4.5rem]">
+                              <span className="inline-flex items-center gap-1.5 text-sm font-bold text-gray-900 dark:text-gray-100">
+                                <Tag className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
+                                {brands.total}
+                              </span>
+                              {brands.extra > 0 ? (
+                                <span className="text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {brands.base}+{brands.extra} extra
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500">plan</span>
                               )}
                             </div>
                           );
@@ -1181,6 +1313,27 @@ function ClientsTab({
                             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${hasAncover ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
                               {hasAncover ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldX className="w-3.5 h-3.5" />}
                               {hasAncover ? 'Permitido' : 'Denegado'}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const ver = getAccountVerification(account);
+                          const label = getVerificationBadgeLabel(ver);
+                          const tone = ver.needsReview
+                            ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200'
+                            : ver.review?.status === 'approved'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : ver.review?.status === 'rejected'
+                                ? 'bg-red-50 text-red-700'
+                                : ver.hasDocuments
+                                  ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                                  : 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500';
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${tone}`}>
+                              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                              {label}
                             </span>
                           );
                         })()}

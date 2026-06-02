@@ -100,6 +100,26 @@ async function ensureDb() {
   await ensureCouchDb(WORK_CENTERS_DB, () => req(`/api/couch/db/${encodeURIComponent(WORK_CENTERS_DB)}`, { method: 'PUT' }));
 }
 
+/** CouchDB legacy: algunos centros usan `account:{userId}` en lugar del UUID directo. */
+function normalizeAccountUserId(userId: string): string {
+  const value = String(userId || '').trim();
+  return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
+function addAllowedUserId(allowed: Set<string>, userId: string): void {
+  const id = String(userId || '').trim();
+  if (!id) return;
+  allowed.add(id);
+  allowed.add(normalizeAccountUserId(id));
+  if (!id.startsWith('account:')) allowed.add(`account:${id}`);
+}
+
+function isAllowedUserId(allowed: Set<string>, userId: string): boolean {
+  const raw = String(userId || '').trim();
+  if (!raw) return false;
+  return allowed.has(raw) || allowed.has(normalizeAccountUserId(raw));
+}
+
 function normalizeWorkCenter(value: unknown): WorkCenter | null {
   if (!value || typeof value !== 'object') return null;
   const doc = value as Partial<WorkCenter> & { _id?: string; id?: string; type?: string };
@@ -125,7 +145,11 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     id,
     type: 'sales_point',
     user_id: String(doc.user_id || ''),
-    businessId: (doc as Record<string, unknown>).businessId ? String((doc as Record<string, unknown>).businessId) : undefined,
+    businessId: (() => {
+      const raw = doc as Record<string, unknown>;
+      const bid = String(raw.businessId || raw.business_id || '').trim();
+      return bid || undefined;
+    })(),
     name: String(doc.name || ''),
     centerType: (['oficina', 'punto_de_venta', 'almacen', 'custom'].includes(doc.centerType as string)
       ? doc.centerType!
@@ -180,14 +204,14 @@ export async function listWorkCentersForDelivery(
   if (!id) return [];
   await ensureDb();
   const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
-  const allowed = new Set<string>([id]);
+  const allowed = new Set<string>();
+  addAllowedUserId(allowed, id);
   for (const m of business?.members || []) {
-    const uid = String(m.user_id || '').trim();
-    if (uid) allowed.add(uid);
+    addAllowedUserId(allowed, String(m.user_id || '').trim());
   }
   return ((payload.docs || []) as unknown[])
     .map(normalizeWorkCenter)
-    .filter((wc): wc is WorkCenter => wc !== null && allowed.has(wc.user_id))
+    .filter((wc): wc is WorkCenter => wc !== null && isAllowedUserId(allowed, wc.user_id))
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
@@ -198,13 +222,15 @@ export async function createWorkCenter(
   await ensureDb();
   const now = new Date().toISOString();
   const id = `wc-${uuidv4()}`;
-  const wc: WorkCenter = {
+  const businessId = payload.businessId ? String(payload.businessId).trim() : '';
+  const wc: WorkCenter & { business_id?: string } = {
     ...payload,
     _id: id,
     id,
     type: 'sales_point',
     user_id: userId,
-    businessId: payload.businessId || undefined,
+    businessId: businessId || undefined,
+    ...(businessId ? { business_id: businessId } : {}),
     active: payload.active !== false,
     createdAt: now,
     updatedAt: now,
@@ -218,7 +244,12 @@ export async function createWorkCenter(
 
 export async function updateWorkCenter(wc: WorkCenter): Promise<WorkCenter> {
   await ensureDb();
-  const updated = { ...wc, updatedAt: new Date().toISOString() };
+  const businessId = wc.businessId ? String(wc.businessId).trim() : '';
+  const updated = {
+    ...wc,
+    updatedAt: new Date().toISOString(),
+    ...(businessId ? { business_id: businessId } : {}),
+  } as WorkCenter & { business_id?: string };
   const result = await req<{ rev: string }>(
     `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wc._id)}`,
     { method: 'PUT', body: JSON.stringify(updated) },

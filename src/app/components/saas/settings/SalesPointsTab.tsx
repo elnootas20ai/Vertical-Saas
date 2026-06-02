@@ -8,16 +8,18 @@ import {
   isDeliveryBusinessType,
   bootstrapRetailStoreAfterCreate,
   loadDeliveryStores,
+  clearDeliveryStoresSessionCache,
   notifyDeliveryWorkCentersChanged,
   selectDeliveryPointOfSale,
   DELIVERY_WORK_CENTERS_CHANGED,
+  readWorkCenterBusinessId,
+  resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
 import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
 import {
-  listWorkCenters,
   createWorkCenter,
   updateWorkCenter,
   deleteWorkCenter,
@@ -42,6 +44,7 @@ import {
   pointOfSaleDisplayLabel,
   sanitizePdvCodeInput,
   sanitizeRetailTextField,
+  sanitizeRetailTextFieldInput,
   sanitizeStoreDisplayName,
   stripPdvDisplayNameBase,
   suggestNextPdvCode,
@@ -87,7 +90,13 @@ import {
   ArrowRight,
   AlertTriangle,
   ChevronDown,
+  RefreshCw,
+  Copy,
+  Monitor,
+  ExternalLink,
 } from 'lucide-react';
+import { regenerateTerminalCodeRequest } from '../../../lib/tpvTabletApi';
+import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
 
@@ -109,6 +118,8 @@ const CENTER_TYPE_ICONS: Record<WorkCenterType, React.ReactNode> = {
 
 const EMPTY_PDV_CODES: readonly string[] = [];
 
+const PDV_MOBILE_ADDRESS_LABEL = 'PDV móvil';
+
 const CENTER_TYPE_COLORS: Record<WorkCenterType, string> = {
   oficina: 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400',
   punto_de_venta: 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400',
@@ -125,21 +136,6 @@ export type WorkCenterSaveData = Partial<WorkCenter> & {
 
 function isRetailWorkCenterType(centerType: WorkCenterType): boolean {
   return centerType === 'punto_de_venta' || centerType === 'almacen';
-}
-
-/** En delivery, la 2.ª tienda retail entra inactiva si ya hay otra activa. */
-function resolveActiveOnCreate(
-  isDelivery: boolean,
-  existingCenters: WorkCenter[],
-  centerType: WorkCenterType,
-  requestedActive?: boolean,
-): boolean {
-  if (requestedActive === false) return false;
-  if (!isDelivery || !isRetailWorkCenterType(centerType)) return requestedActive !== false;
-  const hasActiveRetail = existingCenters.some(
-    (wc) => wc.active !== false && isRetailWorkCenterType(wc.centerType),
-  );
-  return hasActiveRetail ? false : true;
 }
 
 interface WorkCenterModalProps {
@@ -215,6 +211,7 @@ function WorkCenterModal({
   const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
   const [pdvCode, setPdvCode] = useState('');
   const [pdvCodeManual, setPdvCodeManual] = useState(false);
+  const [isMobilePdv, setIsMobilePdv] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const isRetailCenter =
@@ -263,6 +260,11 @@ function WorkCenterModal({
     setStep('general');
     setFieldErrors({});
     setPdvMoreOpen(null);
+    setIsMobilePdv(
+      String(editItem?.address || '')
+        .trim()
+        .toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase(),
+    );
     setPdvCode(editPdvCode || '');
     setPdvCodeManual(Boolean(editPdvCode));
     setOpeningHours(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG);
@@ -354,68 +356,138 @@ function WorkCenterModal({
   const stepHasFieldError = (sid: WizardStepId) => {
     const keys =
       sid === 'general'
-        ? (['name', 'customTypeName', 'expectedStaffCount'] as const)
+        ? (['name', 'customTypeName', 'expectedStaffCount', 'pdvCode'] as const)
         : sid === 'ubicacion'
-          ? (['address', 'city', 'postalCode', 'phone'] as const)
-          : (['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'] as const);
+          ? (['address', 'city', 'postalCode', 'phone', 'email'] as const)
+          : sid === 'horarios'
+            ? (['horarios'] as const)
+            : (['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'] as const);
     return keys.some((k) => Boolean(fieldErrors[k]));
   };
 
-  const handleSubmit = async () => {
+  const validateWizardForm = (
+    onlyStep?: WizardStepId,
+  ): { errors: Record<string, string>; nameValidation: string | null; staffCount: number } => {
     const nextErr: Record<string, string> = {};
     const nameErr = validateStoreDisplayName(form.name);
-    if (nameErr) nextErr.name = ' ';
-    if (form.centerType === 'custom') {
-      const custom = sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax);
-      if (!custom) nextErr.customTypeName = ' ';
-      else if (form.customTypeName.trim().length > PDV_RETAIL_LIMITS.customTypeMax) nextErr.customTypeName = ' ';
-    }
-    const staffCount = Number(form.expectedStaffCount || 0);
-    if (
-      !String(form.expectedStaffCount ?? '').trim() ||
-      !Number.isFinite(staffCount) ||
-      staffCount < 1 ||
-      staffCount > 999
-    ) {
-      nextErr.expectedStaffCount = ' ';
-    }
-    if (!form.address.trim() || form.address.trim().length > PDV_RETAIL_LIMITS.addressMax) nextErr.address = ' ';
-    if (!form.city.trim() || form.city.trim().length > PDV_RETAIL_LIMITS.cityMax) nextErr.city = ' ';
-    if (!form.postalCode.trim() || form.postalCode.trim().length > PDV_RETAIL_LIMITS.postalCodeMax) {
-      nextErr.postalCode = ' ';
-    }
-    if (!form.phone.trim() || form.phone.trim().length > PDV_RETAIL_LIMITS.phoneMax) nextErr.phone = ' ';
-    if (form.email.trim().length > PDV_RETAIL_LIMITS.emailMax) nextErr.email = ' ';
-    if (form.notes.trim().length > PDV_RETAIL_LIMITS.notesMax) nextErr.notes = ' ';
 
-    if (form.ownership === 'propiedad') {
-      if (!form.purchaseDate.trim()) nextErr.purchaseDate = ' ';
-      const pp = Number(String(form.purchasePrice).replace(',', '.'));
-      if (!String(form.purchasePrice ?? '').trim() || !Number.isFinite(pp) || pp < 0) {
-        nextErr.purchasePrice = ' ';
+    const validateGeneral = () => {
+      if (nameErr) nextErr.name = nameErr;
+      if (form.centerType === 'custom') {
+        const custom = sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax);
+        if (!custom) nextErr.customTypeName = 'Indica el nombre del tipo personalizado';
+        else if (form.customTypeName.trim().length > PDV_RETAIL_LIMITS.customTypeMax) {
+          nextErr.customTypeName = `Máximo ${PDV_RETAIL_LIMITS.customTypeMax} caracteres`;
+        }
       }
-    } else {
-      if (!form.landlord.trim()) nextErr.landlord = ' ';
-      if (!form.contractStartDate.trim()) nextErr.contractStartDate = ' ';
-      const mp = parseSpanishMoneyInput(form.monthlyPrice);
-      if (!String(form.monthlyPrice ?? '').trim() || !Number.isFinite(mp) || mp <= 0) {
-        nextErr.monthlyPrice = ' ';
+      const staffCount = Number(form.expectedStaffCount || 0);
+      if (
+        !String(form.expectedStaffCount ?? '').trim() ||
+        !Number.isFinite(staffCount) ||
+        staffCount < 1 ||
+        staffCount > 999
+      ) {
+        nextErr.expectedStaffCount = 'Indica cuántos trabajadores prevés (1–999)';
       }
-    }
+      return staffCount;
+    };
 
-    if (includeOpeningHours && !hasValidBusinessHoursConfig(openingHours)) {
-      nextErr.horarios = ' ';
+    const validateUbicacion = () => {
+      if (!form.address.trim()) nextErr.address = 'Indica la dirección del local';
+      else if (form.address.trim().length > PDV_RETAIL_LIMITS.addressMax) {
+        nextErr.address = `Máximo ${PDV_RETAIL_LIMITS.addressMax} caracteres`;
+      }
+      if (!form.city.trim()) nextErr.city = 'Indica la ciudad';
+      else if (form.city.trim().length > PDV_RETAIL_LIMITS.cityMax) {
+        nextErr.city = `Máximo ${PDV_RETAIL_LIMITS.cityMax} caracteres`;
+      }
+      if (!form.postalCode.trim()) nextErr.postalCode = 'Indica el código postal';
+      else if (form.postalCode.trim().length > PDV_RETAIL_LIMITS.postalCodeMax) {
+        nextErr.postalCode = `Máximo ${PDV_RETAIL_LIMITS.postalCodeMax} caracteres`;
+      }
+      if (!form.phone.trim()) nextErr.phone = 'Indica un teléfono de contacto del centro';
+      else if (form.phone.trim().length > PDV_RETAIL_LIMITS.phoneMax) {
+        nextErr.phone = `Máximo ${PDV_RETAIL_LIMITS.phoneMax} caracteres`;
+      }
+      if (form.email.trim().length > PDV_RETAIL_LIMITS.emailMax) {
+        nextErr.email = `Máximo ${PDV_RETAIL_LIMITS.emailMax} caracteres`;
+      }
+      if (form.notes.trim().length > PDV_RETAIL_LIMITS.notesMax) {
+        nextErr.notes = `Máximo ${PDV_RETAIL_LIMITS.notesMax} caracteres`;
+      }
+    };
+
+    const validatePropiedad = () => {
+      if (form.ownership === 'propiedad') {
+        const ppRaw = String(form.purchasePrice ?? '').trim();
+        const pp = ppRaw === '' && simplifyPdvCreate ? 0 : Number(ppRaw.replace(',', '.'));
+        if (!ppRaw && !simplifyPdvCreate) {
+          nextErr.purchasePrice = 'Indica el precio de compra (puedes poner 0)';
+        } else if (!Number.isFinite(pp) || pp < 0) {
+          nextErr.purchasePrice = 'Precio de compra no válido';
+        }
+        if (!simplifyPdvCreate && !form.purchaseDate.trim()) {
+          nextErr.purchaseDate = 'Indica la fecha de compra';
+        }
+      } else {
+        if (!form.landlord.trim()) nextErr.landlord = 'Indica el nombre del arrendador';
+        if (!form.contractStartDate.trim()) {
+          nextErr.contractStartDate = 'Indica el inicio del contrato';
+        }
+        const mp = parseSpanishMoneyInput(form.monthlyPrice);
+        if (!String(form.monthlyPrice ?? '').trim() || !Number.isFinite(mp) || mp <= 0) {
+          nextErr.monthlyPrice = 'Indica el precio mensual del alquiler';
+        }
+      }
+    };
+
+    const validateHorarios = () => {
+      if (includeOpeningHours && !hasValidBusinessHoursConfig(openingHours)) {
+        nextErr.horarios =
+          'Activa al menos un día con hora de apertura y cierre distintas (o usa «Aplicar a días abiertos»).';
+      }
+    };
+
+    let staffCount = Number(form.expectedStaffCount || 0);
+    if (!onlyStep || onlyStep === 'general') staffCount = validateGeneral();
+    if (!onlyStep || onlyStep === 'ubicacion') validateUbicacion();
+    if (!onlyStep || onlyStep === 'propiedad') validatePropiedad();
+    if (!onlyStep || onlyStep === 'horarios') validateHorarios();
+
+    return { errors: nextErr, nameValidation: nameErr, staffCount };
+  };
+
+  const focusFirstWizardError = (nextErr: Record<string, string>) => {
+    const s1 = ['name', 'customTypeName', 'expectedStaffCount', 'pdvCode'].some((k) => nextErr[k]);
+    const s2 = ['address', 'city', 'postalCode', 'phone', 'email', 'notes'].some((k) => nextErr[k]);
+    const s3 = ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].some(
+      (k) => nextErr[k],
+    );
+    if (s1) setStep('general');
+    else if (s2) setStep('ubicacion');
+    else if (s3) setStep('propiedad');
+    else if (nextErr.horarios) setStep('horarios');
+    const summary = Object.values(nextErr).filter(Boolean).slice(0, 2).join(' · ');
+    toast.error(summary || 'Revisa los campos marcados en rojo');
+  };
+
+  const goNextValidated = () => {
+    const { errors } = validateWizardForm(step);
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      focusFirstWizardError(errors);
+      return;
     }
+    setFieldErrors({});
+    goNext();
+  };
+
+  const handleSubmit = async () => {
+    const { errors: nextErr, nameValidation: nameErr, staffCount } = validateWizardForm();
 
     if (Object.keys(nextErr).length > 0) {
       setFieldErrors(nextErr);
-      const s1 = ['name', 'customTypeName', 'expectedStaffCount'].some((k) => nextErr[k]);
-      const s2 = ['address', 'city', 'postalCode', 'phone'].some((k) => nextErr[k]);
-      const s3 = ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].some((k) => nextErr[k]);
-      if (s1) setStep('general');
-      else if (s2) setStep('ubicacion');
-      else if (s3) setStep('propiedad');
-      else if (nextErr.horarios) setStep('horarios');
+      focusFirstWizardError(nextErr);
       return;
     }
     setFieldErrors({});
@@ -478,8 +550,12 @@ function WorkCenterModal({
         ownership: form.ownership,
         contract,
         purchasePrice:
-          form.ownership === 'propiedad' && String(form.purchasePrice ?? '').trim()
-            ? Number(String(form.purchasePrice).replace(',', '.'))
+          form.ownership === 'propiedad'
+            ? (() => {
+                const raw = String(form.purchasePrice ?? '').trim();
+                if (!raw && simplifyPdvCreate) return 0;
+                return raw ? Number(raw.replace(',', '.')) : undefined;
+              })()
             : undefined,
         purchaseDate: form.ownership === 'propiedad' ? form.purchaseDate || undefined : undefined,
         cadastralReference: form.cadastralReference.trim() || undefined,
@@ -593,7 +669,7 @@ function WorkCenterModal({
   }));
 
   const modalTitle = simplifyPdvCreate
-    ? 'Nuevo punto de venta (TPV)'
+    ? 'Nuevo punto de venta (PDV)'
     : editItem
       ? 'Editar centro de trabajo'
       : 'Nuevo centro de trabajo';
@@ -632,7 +708,7 @@ function WorkCenterModal({
           onCancel={onClose}
           showBack={activeStepIndex > 0}
           onBack={goBack}
-          onNext={goNext}
+          onNext={goNextValidated}
           onSave={handleSubmit}
           isLastStep={isLastStep}
           saving={saving}
@@ -648,7 +724,7 @@ function WorkCenterModal({
             <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
               {simplifyPdvCreate ? (
                 <p className="text-xs text-emerald-800 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2 shrink-0">
-                  Tipo: <span className="font-semibold">Punto de venta</span> — se creará el TPV de caja automáticamente.
+                  Tipo: <span className="font-semibold">Punto de venta</span> — se creará el PDV de caja automáticamente.
                 </p>
               ) : (
               <div>
@@ -767,6 +843,9 @@ function WorkCenterModal({
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Máx. {PDV_RETAIL_LIMITS.storeNameMax} caracteres (menú, sidebar y caja).
                 </p>
+                {fieldErrors.name ? (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.name}</p>
+                ) : null}
               </div>
               {showPdvCodeField && (
                 <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
@@ -803,6 +882,11 @@ function WorkCenterModal({
                     setForm(f => ({ ...f, expectedStaffCount: e.target.value }));
                   }}
                 />
+                {fieldErrors.expectedStaffCount ? (
+                  <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">
+                    {fieldErrors.expectedStaffCount}
+                  </p>
+                ) : null}
               </div>
 
               <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
@@ -946,6 +1030,29 @@ function WorkCenterModal({
 
           {step === 'ubicacion' && (
             <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
+              {simplifyPdvCreate ? (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300"
+                    checked={isMobilePdv}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsMobilePdv(checked);
+                      clearFieldError('address');
+                      setForm((f) => ({
+                        ...f,
+                        address: checked
+                          ? PDV_MOBILE_ADDRESS_LABEL
+                          : f.address.trim().toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase()
+                            ? ''
+                            : f.address,
+                      }));
+                    }}
+                  />
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">PDV móvil</span>
+                </label>
+              ) : null}
               <div>
                 <label className={labelClass}>Dirección *</label>
                 <input
@@ -955,10 +1062,9 @@ function WorkCenterModal({
                   maxLength={PDV_RETAIL_LIMITS.addressMax}
                   onChange={(e) => {
                     clearFieldError('address');
-                    setForm((f) => ({
-                      ...f,
-                      address: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.addressMax),
-                    }));
+                    const next = sanitizeRetailTextFieldInput(e.target.value, PDV_RETAIL_LIMITS.addressMax);
+                    setIsMobilePdv(next.trim().toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase());
+                    setForm((f) => ({ ...f, address: next }));
                   }}
                 />
               </div>
@@ -974,10 +1080,13 @@ function WorkCenterModal({
                       clearFieldError('city');
                       setForm((f) => ({
                         ...f,
-                        city: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.cityMax),
+                        city: sanitizeRetailTextFieldInput(e.target.value, PDV_RETAIL_LIMITS.cityMax),
                       }));
                     }}
                   />
+                  {fieldErrors.city ? (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.city}</p>
+                  ) : null}
                 </div>
                 <div>
                   <label className={labelClass}>Provincia{simplifyPdvCreate ? '' : ''}</label>
@@ -989,7 +1098,7 @@ function WorkCenterModal({
                     onChange={(e) =>
                       setForm((f) => ({
                         ...f,
-                        province: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.cityMax),
+                        province: sanitizeRetailTextFieldInput(e.target.value, PDV_RETAIL_LIMITS.cityMax),
                       }))
                     }
                   />
@@ -1009,8 +1118,14 @@ function WorkCenterModal({
                       }));
                     }}
                   />
+                  {fieldErrors.postalCode ? (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.postalCode}</p>
+                  ) : null}
                 </div>
               </div>
+              {fieldErrors.address ? (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium">{fieldErrors.address}</p>
+              ) : null}
               <div className={simplifyPdvCreate ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-2 gap-4'}>
                 <div>
                   <label className={labelClass}>Teléfono del centro *</label>
@@ -1023,10 +1138,13 @@ function WorkCenterModal({
                       clearFieldError('phone');
                       setForm((f) => ({
                         ...f,
-                        phone: sanitizeRetailTextField(e.target.value, PDV_RETAIL_LIMITS.phoneMax),
+                        phone: sanitizeRetailTextFieldInput(e.target.value, PDV_RETAIL_LIMITS.phoneMax),
                       }));
                     }}
                   />
+                  {fieldErrors.phone ? (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.phone}</p>
+                  ) : null}
                 </div>
                 <div>
                   <label className={labelClass}>Email{simplifyPdvCreate ? ' (opc.)' : ''}</label>
@@ -1102,9 +1220,14 @@ function WorkCenterModal({
                       setForm(f => ({ ...f, purchasePrice: e.target.value }));
                     }}
                   />
+                  {fieldErrors.purchasePrice ? (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.purchasePrice}</p>
+                  ) : null}
                 </div>
                 <div>
-                  <label className={labelClass}>Fecha de compra *</label>
+                  <label className={labelClass}>
+                    Fecha de compra{simplifyPdvCreate ? ' (opc.)' : ' *'}
+                  </label>
                   <input
                     type="date"
                     className={inputClass('purchaseDate')}
@@ -1114,11 +1237,14 @@ function WorkCenterModal({
                       setForm(f => ({ ...f, purchaseDate: e.target.value }));
                     }}
                   />
+                  {fieldErrors.purchaseDate ? (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.purchaseDate}</p>
+                  ) : null}
                 </div>
               </div>
               {simplifyPdvCreate && (
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Datos mínimos de propiedad. Puedes dejar precio en 0 si no aplica.
+                  Precio en 0 si no aplica; la fecha de compra es opcional en el alta rápida.
                 </p>
               )}
             </div>
@@ -1318,9 +1444,7 @@ function WorkCenterModal({
           {step === 'horarios' && includeOpeningHours && (
             <div className="space-y-3">
               {fieldErrors.horarios ? (
-                <p className="text-xs text-red-600 dark:text-red-400 font-medium">
-                  Indica al menos un día abierto con hora de inicio y fin.
-                </p>
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium">{fieldErrors.horarios}</p>
               ) : null}
               <BusinessHoursEditor
                 config={openingHours}
@@ -1339,7 +1463,8 @@ function WorkCenterModal({
 
 export function SalesPointsTab() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
+  const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const hasProAccess = useHasProAccess();
   const navigate = useNavigate();
@@ -1362,37 +1487,74 @@ export function SalesPointsTab() {
   const [deliveryPdvCodes, setDeliveryPdvCodes] = useState<string[]>([]);
   const [deliveryPdvNames, setDeliveryPdvNames] = useState<string[]>([]);
   const [deliveryPdvsByWorkCenter, setDeliveryPdvsByWorkCenter] = useState<
-    Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId'>>
+    Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId' | 'terminalCode'>>
   >({});
-  const loadData = useCallback(async () => {
-    if (!dataUserId || !user) return;
-    try {
-      const state = await loadDeliveryStores(user, currentBusiness);
-      setWorkCenters(state.workCenters);
-      const pdvList = state.pointsOfSale;
-      setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
-      setDeliveryPdvNames(pdvList.map((p) => String(p.name || '').trim()).filter(Boolean));
-      const byWc: Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId'>> = {};
-      for (const p of pdvList) {
-        const wcId = String(p.workCenterId || '').trim();
-        if (wcId) {
-          byWc[wcId] = {
-            _id: p._id,
-            _rev: p._rev,
-            code: p.code,
-            name: String(p.name || ''),
-            address: p.address,
-            workCenterId: wcId,
-          };
-        }
-      }
-      setDeliveryPdvsByWorkCenter(byWc);
-    } catch {
-      toast.error('Error al cargar los centros de trabajo');
-    } finally {
+  const [regeneratingTerminal, setRegeneratingTerminal] = useState<string | null>(null);
+  const saveInProgressRef = useRef(false);
+  const loadSeqRef = useRef(0);
+  const businessScopeId = resolveBusinessScopeId(currentBusiness);
+
+  useEffect(() => {
+    if (isDelivery && !businessScopeId) {
+      setWorkCenters([]);
       setLoading(false);
+      return;
     }
-  }, [dataUserId, user, currentBusiness]);
+    setLoading(true);
+  }, [businessScopeId, isDelivery]);
+
+  const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadDeliveryStores>>) => {
+    setWorkCenters(state.workCenters);
+    const pdvList = state.pointsOfSale;
+    setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
+    setDeliveryPdvNames(pdvList.map((p) => String(p.name || '').trim()).filter(Boolean));
+    const byWc: Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId' | 'terminalCode'>> = {};
+    for (const p of pdvList) {
+      const wcId = String(p.workCenterId || '').trim();
+      if (wcId) {
+        byWc[wcId] = {
+          _id: p._id,
+          _rev: p._rev,
+          code: p.code,
+          name: String(p.name || ''),
+          address: p.address,
+          workCenterId: wcId,
+          terminalCode: p.terminalCode,
+        };
+      }
+    }
+    setDeliveryPdvsByWorkCenter(byWc);
+  }, []);
+
+  const loadData = useCallback(async (options?: { skipPdvMerge?: boolean }) => {
+    if (!dataUserId || !user) {
+      setLoading(false);
+      return;
+    }
+    const bid = resolveBusinessScopeId(currentBusiness);
+    if (isDelivery && !bid) {
+      setWorkCenters([]);
+      setLoading(false);
+      return;
+    }
+    const seq = ++loadSeqRef.current;
+    const skipPdvMerge = options?.skipPdvMerge ?? true;
+    try {
+      const state = await loadDeliveryStores(user, currentBusiness, {
+        skipPdvMerge,
+        accountBusinessCount: accountBusinessCount ?? (businesses.length > 0 ? businesses.length : undefined),
+      });
+      if (seq !== loadSeqRef.current) return;
+      if (resolveBusinessScopeId(currentBusiness) !== bid) return;
+      applyDeliveryStoresState(state);
+    } catch {
+      if (seq === loadSeqRef.current) {
+        toast.error('Error al cargar los centros de trabajo');
+      }
+    } finally {
+      if (seq === loadSeqRef.current) setLoading(false);
+    }
+  }, [dataUserId, user, currentBusiness, accountBusinessCount, businesses.length, isDelivery, applyDeliveryStoresState]);
 
   useEffect(() => {
     loadData();
@@ -1400,6 +1562,7 @@ export function SalesPointsTab() {
 
   useEffect(() => {
     const onChanged = () => {
+      if (saveInProgressRef.current) return;
       void loadData();
     };
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
@@ -1410,6 +1573,50 @@ export function SalesPointsTab() {
     };
   }, [loadData]);
 
+  const handleRegenerateTerminalCode = async (wc: WorkCenter) => {
+    const linked = deliveryPdvsByWorkCenter[wc._id];
+    if (!linked?._id || !dataUserId) return;
+    if (!window.confirm('¿Generar un nuevo código de tablet? Las tablets ya activadas deberán reconfigurarse.')) {
+      return;
+    }
+    setRegeneratingTerminal(wc._id);
+    try {
+      const updated = await regenerateTerminalCodeRequest(dataUserId, linked._id);
+      setDeliveryPdvsByWorkCenter((prev) => ({
+        ...prev,
+        [wc._id]: { ...prev[wc._id], terminalCode: updated.terminalCode, _rev: updated._rev },
+      }));
+      toast.success(`Nuevo código tablet: ${updated.terminalCode || '—'}`);
+      clearDeliveryStoresSessionCache(resolveBusinessScopeId(currentBusiness ?? null));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo regenerar el código');
+    } finally {
+      setRegeneratingTerminal(null);
+    }
+  };
+
+  const handleCopyTerminalCode = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success('Código copiado');
+    } catch {
+      toast.error('No se pudo copiar');
+    }
+  };
+
+  const tabletActivationUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${AUTH_PATHS.tpvTabletLogin}`
+    : AUTH_PATHS.tpvTabletLogin;
+
+  const handleCopyTabletActivationUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(tabletActivationUrl);
+      toast.success('Enlace de activación copiado — ábrelo en la tablet');
+    } catch {
+      toast.error('No se pudo copiar el enlace');
+    }
+  };
+
   const pointOfSaleCount = useMemo(
     () => workCenters.filter((wc) => wc.centerType === 'punto_de_venta').length,
     [workCenters],
@@ -1419,16 +1626,7 @@ export function SalesPointsTab() {
     hasProAccess || pointOfSaleCount === 0 || pointOfSaleAccess.devUnlimitedPdv;
   const forceFirstCenterAsPdv = !hasProAccess && !editingItem && pointOfSaleCount === 0;
 
-  const defaultActiveOnCreate = useMemo(
-    () =>
-      resolveActiveOnCreate(
-        isDelivery,
-        workCenters,
-        'punto_de_venta',
-        true,
-      ),
-    [isDelivery, workCenters],
-  );
+  const defaultActiveOnCreate = true;
 
   const primaryPdvId = useMemo(() => {
     const pdvs = workCenters.filter((wc) => wc.centerType === 'punto_de_venta');
@@ -1628,11 +1826,17 @@ export function SalesPointsTab() {
         : 'Necesitas PRO para crear un segundo PDV.');
       throw new Error('pdv limit required');
     }
+    saveInProgressRef.current = true;
     try {
       const { pdvCode: pdvCodeToSave, ...wcPayload } = wcData;
 
       if (editingItem) {
-        const updated = await updateWorkCenter({ ...editingItem, ...wcPayload } as WorkCenter);
+        const businessIdForWc = resolveBusinessScopeId(currentBusiness ?? null);
+        const updated = await updateWorkCenter({
+          ...editingItem,
+          ...wcPayload,
+          businessId: businessIdForWc || editingItem.businessId,
+        } as WorkCenter);
         if (
           isDelivery &&
           (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
@@ -1660,20 +1864,47 @@ export function SalesPointsTab() {
               pdvName: displayName,
             });
           }
-          notifyDeliveryWorkCentersChanged();
+          clearDeliveryStoresSessionCache(businessIdForWc);
+          notifyDeliveryWorkCentersChanged(businessIdForWc);
           notifyDeliveryActiveStoreChanged();
         }
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
-        await loadData();
+        clearDeliveryStoresSessionCache(businessIdForWc);
+        notifyDeliveryWorkCentersChanged(businessIdForWc);
+        setShowModal(false);
+        setEditingItem(null);
+        setForceCreatePdv(false);
         toast.success(`"${updated.name}" actualizado`);
+        void loadData({ skipPdvMerge: true });
       } else {
-        const createActive = resolveActiveOnCreate(
-          isDelivery,
-          workCenters,
-          requestedCenterType,
-          wcData.active,
-        );
+        const businessIdForWc = resolveBusinessScopeId(currentBusiness ?? null);
+        if (isDelivery && !businessIdForWc) {
+          toast.error('Selecciona una empresa activa arriba antes de crear la tienda.');
+          throw new Error('missing business');
+        }
+        const newNameNorm = sanitizeStoreDisplayName(String(wcData.name || '')).toLowerCase();
+        if (
+          newNameNorm &&
+          (requestedCenterType === 'punto_de_venta' || requestedCenterType === 'almacen')
+        ) {
+          const existingDup = workCenters.find((wc) => {
+            if (wc.deletedAt) return false;
+            if (wc.centerType !== 'punto_de_venta' && wc.centerType !== 'almacen') return false;
+            const bid = readWorkCenterBusinessId(wc);
+            if (businessIdForWc) {
+              if (bid && bid !== businessIdForWc) return false;
+              if (!bid) return false;
+            }
+            return sanitizeStoreDisplayName(wc.name).toLowerCase() === newNameNorm;
+          });
+          if (existingDup) {
+            toast.error(
+              `Ya existe una tienda «${existingDup.name}» en esta empresa. Edítala en lugar de crear otra.`,
+            );
+            throw new Error('duplicate store name');
+          }
+        }
         const created = await createWorkCenter(dataUserId, {
           name: wcData.name!,
           centerType: requestedCenterType,
@@ -1683,7 +1914,7 @@ export function SalesPointsTab() {
           purchasePrice: wcData.purchasePrice,
           purchaseDate: wcData.purchaseDate,
           cadastralReference: wcData.cadastralReference,
-          active: createActive,
+          active: wcData.active !== false,
           address: wcData.address,
           city: wcData.city,
           postalCode: wcData.postalCode,
@@ -1694,43 +1925,79 @@ export function SalesPointsTab() {
           squareMeters: wcData.squareMeters,
           notes: wcData.notes,
           openingHours: wcData.openingHours,
-          businessId: currentBusiness?.business_id || currentBusiness?.id,
+          businessId: businessIdForWc || undefined,
         });
+        let createdPdv: Awaited<ReturnType<typeof ensureDeliveryPdvForWorkCenter>> = null;
         if (
           isDelivery &&
           (requestedCenterType === 'punto_de_venta' || requestedCenterType === 'almacen')
         ) {
           const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
-          const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
+          createdPdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
             business: currentBusiness ?? null,
             pdvCode: normCode || undefined,
             pdvName: sanitizeStoreDisplayName(String(wcData.name || '')),
           });
-          if (pdv) {
-            await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
-              workCenter: created,
-              pointOfSale: pdv,
-              storeName: String(wcData.name || ''),
-            });
+          if (!createdPdv) {
+            setWorkCenters((prev) =>
+              [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')),
+            );
+            notifyWorkCentersChanged();
+            clearDeliveryStoresSessionCache(businessIdForWc);
+            notifyDeliveryWorkCentersChanged(businessIdForWc);
+            setShowModal(false);
+            setEditingItem(null);
+            setForceCreatePdv(false);
+            toast.error(
+              'La tienda se guardó, pero falta el PDV de caja (dirección completa, mín. 5 caracteres). Aparece abajo: edítala y guarda de nuevo.',
+            );
+            void loadData({ skipPdvMerge: true });
+            return;
           }
+          await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
+            workCenter: created,
+            pointOfSale: createdPdv,
+            storeName: String(wcData.name || ''),
+          });
+          selectDeliveryPointOfSale(currentBusiness, dataUserId, createdPdv._id);
         }
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
+        if (createdPdv) {
+          const code = String(createdPdv.code || '').trim();
+          const name = String(createdPdv.name || '').trim();
+          if (code) setDeliveryPdvCodes((prev) => (prev.includes(code) ? prev : [...prev, code]));
+          if (name) setDeliveryPdvNames((prev) => (prev.includes(name) ? prev : [...prev, name]));
+          setDeliveryPdvsByWorkCenter((prev) => ({
+            ...prev,
+            [created._id]: {
+              _id: createdPdv._id,
+              _rev: createdPdv._rev,
+              code: createdPdv.code,
+              name,
+              address: createdPdv.address,
+              workCenterId: created._id,
+            },
+          }));
+        }
         notifyWorkCentersChanged();
-        await loadData();
+        clearDeliveryStoresSessionCache(businessIdForWc);
+        notifyDeliveryWorkCentersChanged(businessIdForWc);
+        setShowModal(false);
+        setEditingItem(null);
+        setForceCreatePdv(false);
         toast.success(
-          created.active !== false
-            ? `"${created.name}" creada`
-            : `"${created.name}" creada (inactiva). Actívala en la tarjeta para usarla en caja.`,
+          createdPdv
+            ? `"${created.name}" y PDV ${pointOfSaleDisplayLabel(createdPdv)} guardados`
+            : `"${created.name}" creada`,
         );
+        await loadData({ skipPdvMerge: true });
       }
-
-      setShowModal(false);
-      setEditingItem(null);
-      setForceCreatePdv(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error al guardar';
       toast.error(msg && msg !== 'save failed' && msg !== 'pro required' && msg !== 'pdv limit required' ? msg : 'Error al guardar');
       throw err instanceof Error ? err : new Error('save failed');
+    } finally {
+      saveInProgressRef.current = false;
     }
   };
 
@@ -1758,8 +2025,10 @@ export function SalesPointsTab() {
         setWorkCenters((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
       }
       notifyWorkCentersChanged();
-      notifyDeliveryWorkCentersChanged();
+      clearDeliveryStoresSessionCache(resolveBusinessScopeId(currentBusiness));
+      notifyDeliveryWorkCentersChanged(resolveBusinessScopeId(currentBusiness));
       notifyDeliveryActiveStoreChanged();
+      await loadData();
       if (isDelivery && updated.active !== false && linkedPdvId) {
         selectDeliveryPointOfSale(currentBusiness, dataUserId, linkedPdvId);
       }
@@ -1927,7 +2196,7 @@ export function SalesPointsTab() {
         </div>
         <ActivationFieldWrap fieldKey="create-store" activeKey={isFocused('create-store') ? 'create-store' : activationFocus}>
           <AddButtonDropdown
-            label={isDelivery ? 'Nueva tienda' : 'Nuevo centro'}
+            label={isDelivery ? 'Crear Tienda/PDV' : 'Nuevo centro'}
             onQuickAdd={() => requestCreateWorkCenter(isDelivery)}
             quickAddLabel={isDelivery ? 'Nueva tienda / PDV' : 'Alta rápida'}
             quickAddDesc={isDelivery ? 'Formulario compacto + TPV de caja' : 'Formulario de centro de trabajo'}
@@ -1936,7 +2205,15 @@ export function SalesPointsTab() {
       </div>
 
       {/* Lista de centros */}
-      {loading ? (
+      {isDelivery && !businessScopeId ? (
+        <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-amber-200 dark:border-amber-800">
+          <Building2 className="w-12 h-12 text-amber-300 mb-3" />
+          <p className="font-semibold text-gray-900 dark:text-gray-100">Selecciona una empresa</p>
+          <p className="text-sm mt-1 text-center max-w-md">
+            Las tiendas se muestran por empresa. Elige modomio, pizzas u otra en el selector superior.
+          </p>
+        </div>
+      ) : loading ? (
         <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
           <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full mr-3" />
           Cargando centros de trabajo...
@@ -1947,9 +2224,13 @@ export function SalesPointsTab() {
           <p className="font-semibold">
             {workCenters.length === 0 ? 'No hay centros de trabajo configurados' : 'Sin resultados'}
           </p>
-          <p className="text-sm mt-1">
+          <p className="text-sm mt-1 text-center max-w-md">
             {workCenters.length === 0
-              ? 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
+              ? isDelivery
+                ? currentBusiness?.name
+                  ? `No hay tiendas en «${currentBusiness.name}». Si las creaste en otra empresa, cámbiala arriba en la barra.`
+                  : 'Selecciona una empresa arriba y crea la primera tienda.'
+                : 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
               : 'Prueba con otros términos de búsqueda'}
           </p>
           {workCenters.length === 0 && (
@@ -2055,6 +2336,60 @@ export function SalesPointsTab() {
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <Phone className="w-3.5 h-3.5 shrink-0" />
                     <span>{wc.phone}</span>
+                  </div>
+                )}
+                {isDelivery && wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
+                  <div className="rounded-lg border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-950/30 px-2.5 py-2 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
+                          Código para activar tablet
+                        </p>
+                        <p className="font-mono text-sm font-bold tracking-widest text-indigo-900 dark:text-indigo-100">
+                          {deliveryPdvsByWorkCenter[wc._id]?.terminalCode}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          title="Copiar código"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleCopyTerminalCode(String(deliveryPdvsByWorkCenter[wc._id]?.terminalCode || ''));
+                          }}
+                          className="p-1.5 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          title="Regenerar código"
+                          disabled={regeneratingTerminal === wc._id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleRegenerateTerminalCode(wc);
+                          }}
+                          className="p-1.5 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${regeneratingTerminal === wc._id ? 'animate-spin' : ''}`} />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] leading-snug text-indigo-800/90 dark:text-indigo-200/90">
+                      La activación es en la tablet: Acceso → TPV en tablet → este código + PIN del trabajador.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleCopyTabletActivationUrl();
+                      }}
+                      className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 hover:underline inline-flex items-center gap-1"
+                    >
+                      <Monitor className="w-3 h-3" />
+                      Copiar enlace para la tablet
+                      <ExternalLink className="w-3 h-3 opacity-70" />
+                    </button>
                   </div>
                 )}
                 {wc.email && (

@@ -6,7 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
-  clearOnboardingTourForBusiness,
+  armOnboardingTourForBusiness,
   isOnboardingTourActive,
   isOnboardingTourCompleted,
   markOnboardingTourCompleted,
@@ -54,14 +54,13 @@ export function OnboardingTour({ onComplete }: Props) {
 
   const accountUserId = resolveAccountUserId(user);
   const businessId = String(currentBusiness?.business_id || '').trim();
-  const businessType = String(currentBusiness?.businessType || '').trim();
   const [stepIndex, setStepIndex] = useState(0);
-  /** loading = aún no sabemos; hide = no mostrar; show = tour visible */
   const [tourGate, setTourGate] = useState<'loading' | 'hide' | 'show'>('loading');
   const [exiting, setExiting] = useState(false);
-  const [closedThisSession, setClosedThisSession] = useState(false);
-  // Recordamos a quién pertenece la sesión actual para evitar carry-over entre logins.
+  const [pausedThisSession, setPausedThisSession] = useState(false);
   const ownerRef = useRef<string>('');
+  /** Evita que re-renders del contexto empresa oculten el tour a mitad de recorrido. */
+  const showLockRef = useRef(false);
 
   useEffect(() => {
     if (isWorkerAccount(user)) {
@@ -69,24 +68,28 @@ export function OnboardingTour({ onComplete }: Props) {
         markOnboardingTourCompleted(accountUserId, businessId);
         setOnboardingTourActive(accountUserId, businessId, false);
       }
+      showLockRef.current = false;
       setTourGate('hide');
       return;
     }
 
     if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) {
-      setTourGate('loading');
+      if (!showLockRef.current) setTourGate('loading');
       return;
     }
 
-    const ownerKey = `${accountUserId}::${businessId}::${businessType || 'unknown'}`;
+    const ownerKey = `${accountUserId}::${businessId}`;
     if (ownerRef.current !== ownerKey) {
       ownerRef.current = ownerKey;
-      setClosedThisSession(false);
-      setTourGate('loading');
+      if (!showLockRef.current) {
+        setPausedThisSession(false);
+        setTourGate('loading');
+      }
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
     if (alreadySeen) {
+      showLockRef.current = false;
       setOnboardingTourActive(accountUserId, businessId, false);
       setTourGate('hide');
       return;
@@ -96,10 +99,13 @@ export function OnboardingTour({ onComplete }: Props) {
 
     const openTour = () => {
       if (isOnboardingTourCompleted(accountUserId, businessId)) {
+        showLockRef.current = false;
         setOnboardingTourActive(accountUserId, businessId, false);
         setTourGate('hide');
         return;
       }
+      showLockRef.current = true;
+      setPausedThisSession(false);
       setOnboardingTourActive(accountUserId, businessId, true);
       setTourGate('show');
     };
@@ -109,20 +115,27 @@ export function OnboardingTour({ onComplete }: Props) {
       if (detail?.userId === accountUserId && detail?.businessId === businessId) {
         setStepIndex(0);
         setOnboardingTourStep(accountUserId, businessId, 0, 'welcome');
-        setClosedThisSession(false);
         openTour();
       }
     };
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
 
+    if (showLockRef.current) {
+      setOnboardingTourActive(accountUserId, businessId, true);
+      setTourGate('show');
+      return () => {
+        window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
+      };
+    }
+
     let timer: ReturnType<typeof setTimeout> | null = null;
-    if (!closedThisSession) {
+    if (!pausedThisSession) {
       if (wasActive) {
         openTour();
       } else {
         setTourGate('hide');
-        timer = setTimeout(openTour, 800);
+        timer = setTimeout(openTour, 600);
       }
     } else {
       setTourGate('hide');
@@ -135,9 +148,8 @@ export function OnboardingTour({ onComplete }: Props) {
   }, [
     accountUserId,
     businessId,
-    businessType,
     businessesFetchSettled,
-    closedThisSession,
+    pausedThisSession,
     currentBusiness,
     user,
   ]);
@@ -147,39 +159,51 @@ export function OnboardingTour({ onComplete }: Props) {
     setStepIndex(resolveOnboardingTourStepIndex(steps, accountUserId, businessId));
   }, [accountUserId, businessId, businessesFetchSettled, currentBusiness, steps]);
 
-  const closeTour = useCallback(
-    (completed = false) => {
-      // Persistimos «ya visto» de forma SÍNCRONA al pulsar (no dentro del timeout de
-      // la animación) para que, si el usuario recarga durante la salida, ya quede
-      // guardado en localStorage según contrato del checklist:
-      // «al saltar o terminar no vuelve al recargar».
-      if (accountUserId && businessId) {
+  const hideTourUi = useCallback(
+    (options?: { markCompleted?: boolean; pauseForSession?: boolean }) => {
+      const markCompleted = options?.markCompleted ?? false;
+      const pauseForSession = options?.pauseForSession ?? false;
+
+      if (markCompleted && accountUserId && businessId) {
         markOnboardingTourCompleted(accountUserId, businessId);
+        showLockRef.current = false;
+      } else if (pauseForSession && accountUserId && businessId) {
+        setOnboardingTourActive(accountUserId, businessId, true);
+        showLockRef.current = false;
+        setPausedThisSession(true);
       }
+
       setExiting(true);
       setTimeout(() => {
         setTourGate('hide');
         setExiting(false);
-        setClosedThisSession(true);
-        if (completed) onComplete?.();
+        if (options?.markCompleted) onComplete?.();
       }, 250);
     },
     [onComplete, accountUserId, businessId],
   );
+
+  const finishTour = useCallback(() => {
+    hideTourUi({ markCompleted: true });
+  }, [hideTourUi]);
+
+  const pauseTour = useCallback(() => {
+    hideTourUi({ pauseForSession: true });
+  }, [hideTourUi]);
 
   const handleNext = useCallback(() => {
     const next = stepIndex + 1;
     const step = steps[next];
 
     if (next >= steps.length) {
-      closeTour(true);
+      finishTour();
       return;
     }
 
     setStepIndex(next);
     setOnboardingTourStep(accountUserId, businessId, next, step?.id);
     tourRouteNavigate(navigate, step?.route);
-  }, [stepIndex, closeTour, navigate, steps, accountUserId, businessId]);
+  }, [stepIndex, finishTour, navigate, steps, accountUserId, businessId]);
 
   const handlePrev = useCallback(() => {
     if (stepIndex > 0) {
@@ -201,7 +225,7 @@ export function OnboardingTour({ onComplete }: Props) {
     [navigate, steps, accountUserId, businessId],
   );
 
-  useModalClose(tourGate === 'show', closeTour);
+  useModalClose(tourGate === 'show', pauseTour);
 
   if (isWorkerAccount(user) || tourGate !== 'show') return null;
 
@@ -227,9 +251,9 @@ export function OnboardingTour({ onComplete }: Props) {
         </div>
 
         <button
-          onClick={() => closeTour()}
+          onClick={finishTour}
           className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors z-10"
-          title="Saltar tour"
+          title="Cerrar tour"
         >
           <X className="w-4 h-4 text-gray-400 dark:text-gray-500" />
         </button>
@@ -280,6 +304,7 @@ export function OnboardingTour({ onComplete }: Props) {
             {steps.map((s, idx) => (
               <button
                 key={s.id}
+                type="button"
                 onClick={() => handleDotClick(idx)}
                 className={`rounded-full transition-all duration-200 ${idx === stepIndex ? 'w-5 h-2 bg-amber-500 dark:bg-amber-400' : idx < stepIndex ? 'w-2 h-2 bg-emerald-400 dark:bg-emerald-500' : 'w-2 h-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'}`}
               />
@@ -289,6 +314,7 @@ export function OnboardingTour({ onComplete }: Props) {
           <div className="flex items-center gap-2">
             {stepIndex > 0 && (
               <button
+                type="button"
                 onClick={handlePrev}
                 className="flex items-center gap-1.5 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 transition-colors"
               >
@@ -297,6 +323,7 @@ export function OnboardingTour({ onComplete }: Props) {
               </button>
             )}
             <button
+              type="button"
               onClick={handleNext}
               className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-gray-900 dark:bg-white hover:bg-black dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-xl text-sm font-semibold transition-colors"
             >
@@ -321,10 +348,11 @@ export function OnboardingTour({ onComplete }: Props) {
 
           {!isLast && (
             <button
-              onClick={() => closeTour()}
+              type="button"
+              onClick={finishTour}
               className="w-full mt-2 py-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors text-center"
             >
-              Saltar tour
+              Saltar tour (no volver a mostrar)
             </button>
           )}
         </div>
@@ -339,15 +367,10 @@ export function useRestartTour() {
   const restart = useCallback(() => {
     const accountUserId = resolveAccountUserId(user);
     const businessId = String(currentBusiness?.business_id || '').trim();
-    if (!accountUserId || !businessId) return;
-    // Borramos cualquier marca de «ya visto» para que el evento ARM pueda reabrirlo
-    // y para que tampoco se considere completado tras cerrar (relanzamos de cero).
-    clearOnboardingTourForBusiness(accountUserId, businessId);
-    window.dispatchEvent(
-      new CustomEvent(ONBOARDING_TOUR_ARM_EVENT, {
-        detail: { userId: accountUserId, businessId },
-      }),
-    );
+    if (!accountUserId) return false;
+    if (!businessId) return false;
+    armOnboardingTourForBusiness(accountUserId, businessId);
+    return true;
   }, [user, currentBusiness?.business_id]);
   return restart;
 }

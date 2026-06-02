@@ -13,6 +13,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { listBrandsRequest, createBrandRequest, type Brand } from '../../lib/brandsApi';
 import {
   normalizeImportCategory,
+  formatUnmatchedCommercialBrandWarning,
   resolveBrandIdsFromImportText,
   resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
@@ -1451,7 +1452,7 @@ export function CatalogPage() {
     { key: 'name', label: 'Nombre' },
     { key: 'itemType', label: 'Tipo (product/service/combo)' },
     { key: 'category', label: 'Categoría (bebidas, complementos…)' },
-    { key: 'marca', label: 'Marca (General, …)' },
+    { key: 'marca', label: 'Línea comercial (nombre en Ajustes → Marca)' },
     { key: 'price', label: 'Precio' },
     { key: 'description', label: 'Descripción' },
     { key: 'allergens', label: 'Alérgenos' },
@@ -1462,7 +1463,7 @@ export function CatalogPage() {
     { key: 'sku', label: 'SKU', example: 'SKU-001' },
     { key: 'itemType', label: 'Tipo', example: 'product' },
     { key: 'category', label: 'Categoría', example: 'principales' },
-    { key: 'marca', label: 'Marca', example: 'General' },
+    { key: 'marca', label: 'Línea comercial (opcional)', example: 'modomio' },
     { key: 'price', label: 'Precio', example: '' },
     { key: 'costPrice', label: 'Coste', example: '' },
     { key: 'description', label: 'Descripción', example: '' },
@@ -1473,6 +1474,7 @@ export function CatalogPage() {
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!user?.id) return;
     let brandCache = [...brands];
+    const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
     for (const entry of entries) {
       const name = String(entry.name || '').trim();
@@ -1484,6 +1486,7 @@ export function CatalogPage() {
         const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
         brandCache = resolved.cache;
         brandIds = resolved.brandIds;
+        unmatchedCommercialBrands.push(...resolved.unmatchedNames);
       }
       items.push({
         name,
@@ -1504,7 +1507,8 @@ export function CatalogPage() {
         module: 'catalog' as const,
       });
     }
-    if (brandCache.length !== brands.length) setBrands(brandCache);
+    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
+    if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
     if (items.length === 0) {
       toast.error('No hay productos válidos para importar');
       return;
@@ -1530,7 +1534,7 @@ export function CatalogPage() {
     const zipProvided = Object.keys(imageZipMap).length > 0;
     const unmatchedImageRefs: string[] = [];
     let brandCache = [...brands];
-    const createdBrandNames: string[] = [];
+    const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
 
     for (let index = 0; index < entries.length; index += 1) {
@@ -1545,7 +1549,7 @@ export function CatalogPage() {
         const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
         brandCache = resolved.cache;
         brandIds = resolved.brandIds;
-        createdBrandNames.push(...resolved.createdNames);
+        unmatchedCommercialBrands.push(...resolved.unmatchedNames);
       }
 
       const imageFromZip =
@@ -1581,12 +1585,8 @@ export function CatalogPage() {
       });
     }
 
-    if (createdBrandNames.length > 0) {
-      setBrands(brandCache);
-      toast.message(`Marcas creadas en import: ${[...new Set(createdBrandNames)].join(', ')}`);
-    } else if (brandCache.length !== brands.length) {
-      setBrands(brandCache);
-    }
+    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
+    if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
 
     if (items.length === 0) {
       toast.error('No hay productos válidos para importar');

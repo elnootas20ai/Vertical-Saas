@@ -6,6 +6,8 @@
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "dev": "vite",
+    "dev:3016": "vite --port 3016 --strictPort",
+    "dev:3017": "vite --port 3017 --strictPort",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node index.js",

@@ -535,7 +535,8 @@ function SidebarInner({
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, user } = auth;
-  const { businesses, currentBusiness, switchBusiness } = useBusiness();
+  const { businesses, businessesFetchSettled, currentBusiness, switchBusiness } = useBusiness();
+  const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const {
     subscription,
     setDevSubscriptionPlan,
@@ -612,11 +613,13 @@ function SidebarInner({
     try {
       const sps = await listSalesPoints(dataUserId);
       const businessId = resolveBusinessScopeId(currentBusiness);
-      const scoped = filterWorkCentersForBusinessScope(sps, businessId);
+      const scoped = filterWorkCentersForBusinessScope(sps, businessId, {
+        accountBusinessCount,
+      });
       setSalesPoints(
         scoped.filter(
           (sp) =>
-            sp.active &&
+            sp.active !== false &&
             (vertical !== 'delivery' ||
               sp.centerType === 'punto_de_venta' ||
               sp.centerType === 'almacen'),
@@ -625,26 +628,18 @@ function SidebarInner({
     } catch {
       // silent
     }
-  }, [user?.user_id, currentBusiness?.business_id, vertical]);
+  }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount]);
 
   const activeStore = useActiveStoreScope();
 
   useEffect(() => {
     if (vertical === 'delivery') return;
-    loadSalesPoints();
+    void loadSalesPoints();
   }, [loadSalesPoints, vertical]);
 
   useEffect(() => {
-    if (vertical !== 'delivery' || typeof window === 'undefined') return;
-    const onChanged = () => {
-      void loadSalesPoints();
-    };
-    window.addEventListener('work-centers:changed', onChanged);
-    return () => window.removeEventListener('work-centers:changed', onChanged);
-  }, [vertical, loadSalesPoints]);
-
-  useEffect(() => {
-    if (vertical !== 'delivery' || activeStore.retailWorkCenters.length === 0) return;
+    if (vertical !== 'delivery') return;
+    if (activeStore.retailWorkCenters.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
   }, [vertical, activeStore.retailWorkCenters.length]);
 
@@ -683,7 +678,7 @@ function SidebarInner({
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
     home: false,
     'worker-main': true,
-    salesPoints: false,
+    salesPoints: true,
     ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
     ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
   }));
@@ -797,22 +792,14 @@ function SidebarInner({
               )
             : [];
         const row = rows.find((r) => r.rowId === rawId);
-        if (row?.needsPdv) {
-          toast.info('Esta tienda aún no tiene PDV de caja. Complétala en Ajustes → Tiendas.');
-          handleNavigate('/saas/settings/tienda');
-          return;
-        }
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
-        if (pdv?.active === false || row?.inactive) {
-          toast.info('Tienda inactiva. Actívala en Ajustes → Tiendas para usarla en caja.');
-          handleNavigate('/saas/settings/tienda');
-          return;
-        }
-        const isDeliveryPdvRow = activeStore.pointsOfSale.some((p) => p._id === rawId);
-        if (isDeliveryPdvRow) {
-          activeStore.setActiveSalesPoint(rawId);
+        const pdvId = row?.pdvId || pdv?._id;
+        if (pdvId && activeStore.pointsOfSale.some((p) => p._id === pdvId)) {
+          activeStore.setActiveSalesPoint(pdvId);
         } else if (row?.workCenterId) {
           activeStore.setActiveWorkCenterPreference(row.workCenterId);
+        } else if (activeStore.pointsOfSale.length === 1) {
+          activeStore.setActiveSalesPoint(activeStore.pointsOfSale[0]._id);
         }
       }
       handleNavigate('/saas/delivery-ops');
@@ -1024,7 +1011,7 @@ function SidebarInner({
             id: `sp-${row.rowId}`,
             label: row.title,
             subLabel: subParts.length ? subParts.join(' · ') : undefined,
-            inactive: row.inactive || row.needsPdv,
+            inactive: row.inactive,
             icon: <Store className="w-3.5 h-3.5" />,
             path: '#',
           };
@@ -1078,7 +1065,7 @@ function SidebarInner({
       }))
       .filter((group) => group.items.length > 0);
     const [home, ...rest] = mapped;
-    return [home, salesPointsGroup, ...rest];
+    return home ? [home, salesPointsGroup, ...rest] : [salesPointsGroup];
   })();
 
   const bottomItemIds = allowedBottom;

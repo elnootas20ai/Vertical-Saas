@@ -27,6 +27,8 @@ export function validatePdvCodeInput(raw: string): string | null;
 
 export function sanitizeRetailTextField(raw: string, maxLen: number): string;
 
+export function sanitizeRetailTextFieldInput(raw: string, maxLen: number): string;
+
 export function truncateStoreLabelForUi(raw: string, maxLen?: number): string;
 export function derivePdvCodePrefix(displayName: string): string;
 

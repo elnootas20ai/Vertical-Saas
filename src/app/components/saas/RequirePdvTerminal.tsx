@@ -7,7 +7,10 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listPointsOfSaleRequest, type PointOfSale } from '../../lib/deliveryApi';
 import { anyActiveRetailStoreHasOpeningHours } from '../../lib/businessHoursUtils';
 import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
-import { workCentersStrictlyForBusiness } from '../../lib/deliverySetup';
+import {
+  filterPointsOfSaleForWorkCenters,
+  workCentersStrictlyForBusiness,
+} from '../../lib/deliverySetup';
 
 function hasActiveTerminal(pdvs: PointOfSale[]): boolean {
   return (pdvs || []).some((p) => Boolean(p.active) && (p.terminals || []).some((t) => Boolean(t.active)));
@@ -38,13 +41,26 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     let cancelled = false;
-    if (businessLoading || !dataUserId) return;
+    if (businessLoading || !dataUserId || !businessId) return;
     setPdvs(null);
-    listPointsOfSaleRequest(dataUserId)
-      .then((r) => { if (!cancelled) setPdvs(r || []); })
-      .catch(() => { if (!cancelled) setPdvs([]); });
+    Promise.all([
+      listPointsOfSaleRequest(dataUserId),
+      listWorkCentersForDelivery(dataUserId, currentBusiness ?? null),
+    ])
+      .then(([rawPdvs, allWcs]) => {
+        if (cancelled) return;
+        const retail = workCentersStrictlyForBusiness(allWcs, businessId).filter(
+          (wc) =>
+            wc.active !== false &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
+        setPdvs(filterPointsOfSaleForWorkCenters(rawPdvs || [], retail));
+      })
+      .catch(() => {
+        if (!cancelled) setPdvs([]);
+      });
     return () => { cancelled = true; };
-  }, [businessLoading, dataUserId]);
+  }, [businessLoading, dataUserId, businessId, currentBusiness]);
 
   useEffect(() => {
     let cancelled = false;

@@ -64,18 +64,35 @@ export function countCommercialBrands(brands: Array<{ isDefault?: boolean }>): n
   return brands.filter((b) => !b.isDefault).length;
 }
 
+export function clampExtraCommercialBrandSlots(value: unknown): number {
+  const n = Math.floor(Number(value) || 0);
+  return Math.max(0, Math.min(99, n));
+}
+
+export function getBaseCommercialBrandLimit(planTier: SubscriptionPlanTier): number {
+  return INCLUDED_COMMERCIAL_BRANDS[planTier];
+}
+
 export function getEffectiveCommercialBrandLimit(
-  subscription: Pick<BillingSubscription, 'status' | 'selectedPlanId' | 'planName'> | null | undefined,
+  subscription: Pick<
+    BillingSubscription,
+    'status' | 'selectedPlanId' | 'planName' | 'extraCommercialBrandSlots'
+  > | null | undefined,
 ): number {
   const tier = resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
-  const extra = Math.max(0, Math.floor(Number((subscription as { extraCommercialBrandSlots?: number })?.extraCommercialBrandSlots) || 0));
+  const extra = clampExtraCommercialBrandSlots(subscription?.extraCommercialBrandSlots);
   return INCLUDED_COMMERCIAL_BRANDS[tier] + extra;
 }
 
 export function resolveTenantEntitlements(
   subscription: Pick<
     BillingSubscription,
-    'status' | 'selectedPlanId' | 'planName' | 'adminProAccess' | 'extraPointOfSaleSlots'
+    | 'status'
+    | 'selectedPlanId'
+    | 'planName'
+    | 'adminProAccess'
+    | 'extraPointOfSaleSlots'
+    | 'extraCommercialBrandSlots'
   > | null | undefined,
   counts: TenantEntitlementCounts,
 ): TenantEntitlementAccess {

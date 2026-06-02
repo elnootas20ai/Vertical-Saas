@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
@@ -16,6 +16,7 @@ import {
   markWorkerIdentityBypass,
   mergePersonalData,
   resolveLandingAfterWorkerSetup,
+  resolveWorkerSessionEntryPath,
   skipWorkerProfileGates,
   WORKER_DEFAULT_LANDING_PATH,
 } from '../../../lib/workerProfileCompletion';
@@ -108,6 +109,12 @@ function validateForm(
 export function WorkerIdentitySetup() {
   const navigate = useNavigate();
   const { user, updateUser } = useAuth();
+
+  /** Paso 1 obsoleto: redirigir al destino correcto (ya no se usa tras login). */
+  useEffect(() => {
+    if (!user) return;
+    navigate(resolveWorkerSessionEntryPath(user), { replace: true });
+  }, [user, navigate]);
 
   const birthDateRef = useRef<BirthDateEsFieldHandle>(null);
   const errorBannerRef = useRef<HTMLDivElement>(null);

@@ -7,6 +7,7 @@ import {
 } from '../lib/deliveryActivationChecklist';
 import { listCatalogItemsRequest, listPointsOfSaleRequest } from '../lib/deliveryApi';
 import {
+  DELIVERY_BRANDS_CHANGED,
   DELIVERY_CATALOG_CHANGED,
   filterPointsOfSaleForWorkCenters,
   isDeliveryBusinessType,
@@ -18,7 +19,9 @@ import { anyActiveRetailStoreHasOpeningHours } from '../lib/businessHoursUtils';
 import {
   activationInProgressKey,
   isActivationChecklistDismissed,
+  isActivationChecklistForceVisible,
   setActivationChecklistDismissed,
+  setActivationChecklistForceVisible,
 } from '../lib/onboardingLocalKeys';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import { useApp } from './AppContext';
@@ -126,11 +129,17 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const bizAddress = currentBusiness?.address ?? '';
   const bizPhone = currentBusiness?.phone ?? '';
   const [isDismissed, setIsDismissed] = useState(false);
+  const [forceVisible, setForceVisible] = useState(false);
 
   useEffect(() => {
     setIsDismissed(
       accountUserId && businessId
         ? isActivationChecklistDismissed(accountUserId, businessId)
+        : false,
+    );
+    setForceVisible(
+      accountUserId && businessId
+        ? isActivationChecklistForceVisible(accountUserId, businessId)
         : false,
     );
   }, [accountUserId, businessId]);
@@ -225,13 +234,18 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         void load();
       }, 400);
     };
+    const onBrandsChanged = () => {
+      void load();
+    };
     window.addEventListener('work-centers:changed', scheduleLoad);
     window.addEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
+    window.addEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
     return () => {
       cancelled = true;
       if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
       window.removeEventListener('work-centers:changed', scheduleLoad);
       window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
+      window.removeEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
     };
   }, [isDelivery, dataUserId, businessId, bizName, bizTaxId, bizAddress, bizPhone, user, currentBusiness]);
 
@@ -346,6 +360,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     if (completionPct !== 100 || !accountUserId || !businessId) return;
+    if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
     setIsDismissed(true);
     setActivationChecklistDismissed(accountUserId, businessId, true);
   }, [completionPct, accountUserId, businessId]);
@@ -370,8 +385,10 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
   const restore = useCallback(() => {
     setIsDismissed(false);
+    setForceVisible(true);
     if (accountUserId && businessId) {
       setActivationChecklistDismissed(accountUserId, businessId, false);
+      setActivationChecklistForceVisible(accountUserId, businessId, true);
     }
   }, [accountUserId, businessId]);
 
@@ -381,7 +398,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, []);
 
   const isVisible =
-    totalSteps > 0 && completionPct < 100 && !isDismissed;
+    totalSteps > 0 && !isDismissed && (completionPct < 100 || forceVisible);
 
   return (
     <ActivationChecklistContext.Provider

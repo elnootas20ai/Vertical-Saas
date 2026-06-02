@@ -1,6 +1,8 @@
 import { X, HelpCircle, MessageCircle, Mail, FileText, ExternalLink, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import { useRestartTour } from '../saas/OnboardingTour';
+import { useActivationChecklist } from '../../context/ActivationChecklistContext';
 import { useModalClose } from '../../hooks/useModalClose';
 
 interface Props {
@@ -11,6 +13,7 @@ interface Props {
 export function SAAS__HelpModal({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const restartTour = useRestartTour();
+  const { restore: restoreActivationGuide } = useActivationChecklist();
 
   useModalClose(isOpen, onClose);
 
@@ -137,7 +140,17 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => { onClose(); restartTour(); }}
+                onClick={() => {
+                  onClose();
+                  restoreActivationGuide();
+                  if (restartTour()) {
+                    toast.success('Tour iniciado desde el paso 1');
+                  } else {
+                    toast.error(
+                      'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
+                    );
+                  }
+                }}
                 className="flex items-center gap-3 w-full px-4 py-3 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/30 border border-violet-200 dark:border-violet-800/50 hover:border-violet-300 dark:hover:border-violet-700/50 rounded-xl transition-all"
               >
                 <div className="w-9 h-9 bg-violet-500 rounded-xl flex items-center justify-center flex-shrink-0">

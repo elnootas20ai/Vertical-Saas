@@ -26,10 +26,10 @@ import {
   readStoredOnboardingBusinessType,
 } from '../lib/deliverySetup';
 import {
-  clearWorkerIdentityBypass,
-  hasMinimumWorkerIdentity,
+  clearWorkerPayrollBypass,
   hasSkippedWorkerProfileGates,
-  hasWorkerIdentityBypass,
+  hasWorkerPayrollBypass,
+  needsWorkerPayrollSetup,
   WORKER_IDENTITY_SETUP_PATH,
   WORKER_PAYROLL_SETUP_PATH,
 } from '../lib/workerProfileCompletion';
@@ -119,31 +119,32 @@ function SaasContent() {
 
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
-    if (!isWorkerAccount(user)) return;
-    if (hasMinimumWorkerIdentity(user)) {
-      clearWorkerIdentityBypass();
+    if (!needsWorkerPayrollSetup(user)) {
+      clearWorkerPayrollBypass(String(user.user_id || user.id || '').trim() || undefined);
       return;
     }
 
     const userId = String(user.user_id || user.id || '').trim();
     if (hasSkippedWorkerProfileGates(userId)) return;
 
-    const navState = location.state as { identityCompleted?: boolean } | null;
-    if (navState?.identityCompleted || hasWorkerIdentityBypass(userId || undefined)) return;
+    const navState = location.state as { payrollCompleted?: boolean } | null;
+    if (navState?.payrollCompleted || hasWorkerPayrollBypass(userId || undefined)) return;
 
     const allowed = [
-      WORKER_IDENTITY_SETUP_PATH,
       WORKER_PAYROLL_SETUP_PATH,
       '/auth/verify-email-pending',
-      '/saas/user-dashboard',
       '/saas/invitations',
     ];
     if (allowed.some((path) => location.pathname === path || location.pathname.startsWith(`${path}/`))) {
       return;
     }
-    if (location.pathname.startsWith('/saas/worker')) return;
 
-    navigate(WORKER_IDENTITY_SETUP_PATH, { replace: true });
+    if (location.pathname === WORKER_IDENTITY_SETUP_PATH) {
+      navigate(WORKER_PAYROLL_SETUP_PATH, { replace: true });
+      return;
+    }
+
+    navigate(WORKER_PAYROLL_SETUP_PATH, { replace: true });
   }, [isInitializing, isAuthenticated, user, location.pathname, location.state, navigate]);
 
 
@@ -352,9 +353,11 @@ function SaasContent() {
 
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker) {
-
-    return null;
-
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Preparando espacio de trabajo" />
+      </div>
+    );
   }
 
 

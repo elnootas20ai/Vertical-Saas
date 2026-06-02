@@ -65,3 +65,99 @@ export function formatVerificationFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/** Revisión interna Vertial (panel superadmin). */
+export type CompanyVerificationReviewStatus = 'pending' | 'approved' | 'rejected';
+
+export type CompanyVerificationReview = {
+  status: CompanyVerificationReviewStatus;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  adminNote?: string;
+};
+
+export type CompanyVerificationSnapshot = {
+  documents: OnboardingVerificationDocument[];
+  note: string;
+  taxId: string;
+  tradeName: string;
+  legalName: string;
+  businessType: string;
+  review: CompanyVerificationReview | null;
+  /** Sin docs */
+  hasDocuments: boolean;
+  /** Docs subidos y aún sin aprobar/rechazar */
+  needsReview: boolean;
+};
+
+function parseVerificationDocuments(raw: unknown): OnboardingVerificationDocument[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (d): d is OnboardingVerificationDocument =>
+      Boolean(d) &&
+      typeof d === 'object' &&
+      typeof (d as OnboardingVerificationDocument).id === 'string' &&
+      typeof (d as OnboardingVerificationDocument).fileName === 'string' &&
+      typeof (d as OnboardingVerificationDocument).dataUrl === 'string',
+  );
+}
+
+function parseVerificationReview(raw: unknown): CompanyVerificationReview | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const status = (raw as CompanyVerificationReview).status;
+  if (status !== 'pending' && status !== 'approved' && status !== 'rejected') return null;
+  return {
+    status,
+    reviewedAt: (raw as CompanyVerificationReview).reviewedAt,
+    reviewedBy: (raw as CompanyVerificationReview).reviewedBy,
+    adminNote: (raw as CompanyVerificationReview).adminNote,
+  };
+}
+
+/** Extrae verificación de empresa desde onboardingData de la cuenta. */
+export function getCompanyVerificationSnapshot(
+  onboardingData: Record<string, unknown> | undefined | null,
+): CompanyVerificationSnapshot {
+  const od = onboardingData || {};
+  const cp = (od.companyProfile && typeof od.companyProfile === 'object'
+    ? od.companyProfile
+    : {}) as Record<string, unknown>;
+  const documents = parseVerificationDocuments(cp.verificationDocuments);
+  const review = parseVerificationReview(cp.verificationReview);
+  const hasDocuments = documents.length > 0;
+  const needsReview =
+    hasDocuments && (!review || review.status === 'pending');
+
+  return {
+    documents,
+    note: String(cp.verificationNote || '').trim(),
+    taxId: String(cp.taxId || '').trim(),
+    tradeName: String(cp.tradeName || '').trim(),
+    legalName: String(cp.legalName || '').trim(),
+    businessType: String(od.businessType || '').trim(),
+    review,
+    hasDocuments,
+    needsReview,
+  };
+}
+
+export function getVerificationBadgeLabel(snapshot: CompanyVerificationSnapshot): string {
+  if (!snapshot.hasDocuments) return 'Sin docs';
+  if (snapshot.review?.status === 'approved') return 'Aprobada';
+  if (snapshot.review?.status === 'rejected') return 'Rechazada';
+  return `${snapshot.documents.length} doc${snapshot.documents.length === 1 ? '' : 's'} · Revisar`;
+}
+
+export function patchCompanyVerificationReview(
+  onboardingData: Record<string, unknown> | undefined | null,
+  review: CompanyVerificationReview,
+): Record<string, unknown> {
+  const od = { ...(onboardingData || {}) };
+  const cp = {
+    ...((od.companyProfile && typeof od.companyProfile === 'object'
+      ? od.companyProfile
+      : {}) as Record<string, unknown>),
+    verificationReview: review,
+  };
+  return { ...od, companyProfile: cp };
+}

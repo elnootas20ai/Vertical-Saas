@@ -16,6 +16,7 @@ import {
   type DeliveryOrderPdvFilterOptions,
 } from './deliveryOpsPdvSelection';
 import { resolveBusinessDataUserId } from './tenantUserId';
+import type { WorkCenter } from './workCentersApi';
 import type { PointOfSale } from './deliveryApi';
 
 export { deliveryOrderMatchesPdvFilter, pickDefaultActivePdvId };
@@ -56,7 +57,6 @@ export function filterOrdersForActivePdv<T extends { salesPointId?: string | nul
   );
 }
 
-/** Resuelve PDV `_id` desde referencia (PDV id o centro de trabajo). */
 export function resolvePdvIdFromStoreRef(
   pointsOfSale: PointOfSale[],
   ref: string | null | undefined,
@@ -80,6 +80,55 @@ export function resolvePdvIdFromStoreRef(
     };
   }
   return { pdvId: null, pdvName: null, workCenterId: r };
+}
+
+export function isInvitedWorkerUser(user: AuthUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.accountType === 'user') return true;
+  return Boolean(String((user as { invitedBy?: string }).invitedBy || '').trim());
+}
+
+/** Trabajador invitado: solo su tienda/PDV asignado en Equipo (`employment.salesPointId`). */
+export function filterStoresForWorkerAssignment(
+  pointsOfSale: PointOfSale[],
+  workCenters: WorkCenter[],
+  salesPointRef: string | null | undefined,
+): {
+  pointsOfSale: PointOfSale[];
+  workCenters: WorkCenter[];
+  assignedPdvId: string | null;
+} {
+  const ref = String(salesPointRef || '').trim();
+  if (!ref) {
+    return { pointsOfSale: [], workCenters: [], assignedPdvId: null };
+  }
+
+  const resolved = resolvePdvIdFromStoreRef(pointsOfSale, ref);
+  const wcId = String(resolved.workCenterId || '').trim();
+
+  if (resolved.pdvId) {
+    const pdv = pointsOfSale.find((p) => p._id === resolved.pdvId) || null;
+    const linkedWcId = wcId || String(pdv?.workCenterId || '').trim();
+    return {
+      pointsOfSale: pdv ? [pdv] : [],
+      workCenters: linkedWcId
+        ? workCenters.filter((wc) => wc._id === linkedWcId)
+        : workCenters,
+      assignedPdvId: resolved.pdvId,
+    };
+  }
+
+  if (wcId) {
+    const wcPdvs = pointsOfSale.filter((p) => String(p.workCenterId || '').trim() === wcId);
+    const primary = wcPdvs[0] || null;
+    return {
+      pointsOfSale: wcPdvs,
+      workCenters: workCenters.filter((wc) => wc._id === wcId),
+      assignedPdvId: primary?._id || null,
+    };
+  }
+
+  return { pointsOfSale: [], workCenters: [], assignedPdvId: null };
 }
 
 /** Catálogo visible en una tienda según marcas asignadas (work center id). */

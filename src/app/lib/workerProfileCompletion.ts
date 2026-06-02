@@ -156,12 +156,47 @@ export const WORKER_PAYROLL_SETUP_PATH = '/saas/worker/complete-payroll';
 export const WORKER_LEGACY_HOME_PATH = '/saas/worker';
 export const WORKER_DEFAULT_LANDING_PATH = '/saas/worker/tasks';
 
+/** Rutas de onboarding puntual: no deben persistirse como landing tras login. */
+export function isEphemeralWorkerSetupPath(path?: string | null): boolean {
+  const trimmed = String(path || '').trim();
+  return trimmed === WORKER_IDENTITY_SETUP_PATH || trimmed === WORKER_PAYROLL_SETUP_PATH;
+}
+
 export function normalizeWorkerLandingPage(path?: string | null): string {
   const trimmed = String(path || '').trim();
-  if (!trimmed || trimmed === WORKER_LEGACY_HOME_PATH) {
+  if (!trimmed || trimmed === WORKER_LEGACY_HOME_PATH || isEphemeralWorkerSetupPath(trimmed)) {
     return WORKER_DEFAULT_LANDING_PATH;
   }
   return trimmed;
+}
+
+/** Destino al entrar en sesión (login, gate, rutas obsoletas). */
+export function resolveWorkerSessionEntryPath(
+  user?: Pick<
+    AuthUser,
+    | 'accountType'
+    | 'linkedBusinessId'
+    | 'landingPage'
+    | 'invitedBy'
+    | 'role'
+    | 'workerProfileCompletion'
+    | 'phone'
+    | 'personalData'
+    | 'employment'
+    | 'workerIdentityCompleted'
+  > | null,
+): string {
+  if (!user) return WORKER_DEFAULT_LANDING_PATH;
+  if (user.accountType === 'company') return '/auth/gate';
+  if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim()) {
+    return '/saas/user-dashboard';
+  }
+  if (needsWorkerPayrollSetup(user)) return WORKER_PAYROLL_SETUP_PATH;
+  const landing = String(user.landingPage || '').trim();
+  if (landing.startsWith('/saas/') && !isEphemeralWorkerSetupPath(landing)) {
+    return normalizeWorkerLandingPage(landing);
+  }
+  return WORKER_DEFAULT_LANDING_PATH;
 }
 
 export function getWorkerPayrollMissingIds(
@@ -180,14 +215,14 @@ export function hasWorkerPayrollFieldsComplete(
   return getWorkerPayrollMissingIds(user).length === 0;
 }
 
-/** Paso 2: datos de nómina obligatorios tras unirse a una empresa. */
+/** Paso 2 (solo con empresa vinculada): identidad + nómina pendientes tras aceptar invitación. */
 export function needsWorkerPayrollSetup(
   user?: Pick<AuthUser, 'linkedBusinessId' | 'accountType' | 'invitedBy' | 'role' | 'workerProfileCompletion' | 'phone' | 'personalData' | 'employment' | 'workerIdentityCompleted'> | null,
 ): boolean {
   if (!user) return false;
   if (!String(user.linkedBusinessId || '').trim()) return false;
   if (!isWorkerProfileSubject(user)) return false;
-  if (!hasMinimumWorkerIdentity(user)) return false;
+  if (!hasMinimumWorkerIdentity(user)) return true;
   return !hasWorkerPayrollFieldsComplete(user);
 }
 

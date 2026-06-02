@@ -19,6 +19,7 @@ import { listUsersRequest, getAuthHeaders, type AuthUser } from '../../lib/authA
 import { getDniOrNieError } from '../../lib/dniCifValidator';
 import { sendAppointmentReminderRequest } from '../../lib/crmApi';
 import { getApiBase } from '../../lib/apiBase';
+import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 
 async function generatePortalLinkRequest(userId: string, clientId: string): Promise<string | null> {
   try {
@@ -227,6 +228,12 @@ interface Interaction {
   user: string;
 }
 
+const CLIENT_PREDEFINED_TAGS = [
+  'interesado en eléctrico', 'financiación', 'comprador recurrente',
+  'compra inmediata', 'segunda mano', 'cambio de vehículo',
+  'empresa / flota', 'joven conductor', 'alta gama',
+];
+
 export function ClientDetail() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -357,15 +364,17 @@ export function ClientDetail() {
       return null;
     }
 
+    const location = resolveClientLocationFields(found);
+
     return {
       id: found.id,
       name: found.name,
       dni: found.dni || '',
       phone: found.phone,
       email: found.email,
-      address: found.address || '',
-      city: found.city || '',
-      postalCode: found.postalCode || '',
+      address: location.address,
+      city: location.city,
+      postalCode: location.postalCode,
       status: found.status,
       responsible: found.responsible || 'Sin asignar',
       createdAt: found.createdAt instanceof Date ? found.createdAt.toISOString() : String(found.createdAt),
@@ -388,6 +397,33 @@ export function ClientDetail() {
       socialLinks: (found as any).socialLinks || [],
     };
   }, [clients, id]);
+
+  useEffect(() => {
+    if (!client) {
+      return;
+    }
+
+    const location = resolveClientLocationFields(client);
+
+    setEditForm({
+      name: client.name,
+      dni: client.dni,
+      phone: client.phone,
+      email: client.email,
+      address: location.address,
+      city: location.city,
+      postalCode: location.postalCode,
+      responsible: client.responsible,
+      notes: client.notes || '',
+      referralCode: (client as Record<string, unknown>).referralCode as string || '',
+      status: client.status,
+    });
+  }, [client]);
+
+  const ctxClient = useMemo(() => clients.find((c) => c.id === id), [clients, id]);
+  const [newTag, setNewTag] = useState('');
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   const interactions = useMemo<Interaction[]>(() => client?.interactions || [], [client]);
   const documents = useMemo(() => client?.documentsList || [], [client]);
@@ -554,6 +590,261 @@ export function ClientDetail() {
     );
   }
 
+  const tagSearch = newTag.toLowerCase().trim();
+  const clientTagSuggestions = CLIENT_PREDEFINED_TAGS.filter(
+    (s) => !(ctxClient?.tags || []).includes(s) && (tagSearch === '' || s.toLowerCase().includes(tagSearch)),
+  );
+
+  const handleAddTag = async (tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed || !ctxClient) return;
+    const currentTags = ctxClient.tags || [];
+    if (currentTags.includes(trimmed)) return;
+    await updateClient(ctxClient.id, { tags: [...currentTags, trimmed] });
+    setNewTag('');
+  };
+
+  const handleRemoveTag = async (tag: string) => {
+    if (!ctxClient) return;
+    const currentTags = ctxClient.tags || [];
+    await updateClient(ctxClient.id, { tags: currentTags.filter((t) => t !== tag) });
+  };
+
+  const handleUpdateConsent = async (
+    type: ConsentHistoryEntry['type'],
+    value: boolean,
+    method: ConsentHistoryEntry['method'],
+  ) => {
+    if (!ctxClient) return;
+    const entry: ConsentHistoryEntry = {
+      timestamp: new Date().toISOString(),
+      type,
+      value,
+      method,
+      user: authUser?.fullName || 'Sistema',
+    };
+    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
+    const newConsents = {
+      dataProcessing: type === 'dataProcessing' ? value : (ctxClient.consents?.dataProcessing ?? false),
+      commercial: type === 'commercial' ? value : (ctxClient.consents?.commercial ?? false),
+      thirdParty: type === 'thirdParty' ? value : (ctxClient.consents?.thirdParty ?? false),
+    };
+    await updateClient(ctxClient.id, {
+      consents: newConsents,
+      gdpr: {
+        ...currentGdpr,
+        consentHistory: [entry, ...(currentGdpr.consentHistory || [])],
+      },
+    });
+  };
+
+  const handleRequestDeletion = async () => {
+    if (!ctxClient || !window.confirm('¿Confirmas la solicitud de borrado? Este cliente será anonimizado.')) return;
+    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
+    await updateClient(ctxClient.id, {
+      gdpr: {
+        ...currentGdpr,
+        deletionRequested: true,
+        deletionRequestedAt: new Date().toISOString(),
+      },
+    });
+  };
+
+  const handleExportPersonalData = () => {
+    if (!ctxClient) return;
+    const location = resolveClientLocationFields(ctxClient);
+    const data = {
+      exportDate: new Date().toISOString(),
+      name: ctxClient.name,
+      phone: ctxClient.phone,
+      email: ctxClient.email,
+      dni: ctxClient.dni || '',
+      address: location.address,
+      city: location.city,
+      postalCode: location.postalCode,
+      consents: ctxClient.consents,
+      gdpr: ctxClient.gdpr,
+      interactions: ctxClient.interactions,
+      vehiclesPurchased: ctxClient.vehiclesPurchased,
+      createdAt: ctxClient.createdAt,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `datos-personales-${ctxClient.name.replace(/\s+/g, '-').toLowerCase()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
+    void updateClient(ctxClient.id, {
+      gdpr: { ...currentGdpr, dataExportRequestedAt: new Date().toISOString() },
+    });
+  };
+
+  const renderGdprTab = () => {
+    const gdpr = ctxClient?.gdpr || { deletionRequested: false, consentHistory: [] };
+    const consents = ctxClient?.consents || { dataProcessing: false, commercial: false, thirdParty: false };
+
+    const consentDefs: { key: ConsentHistoryEntry['type']; label: string; desc: string }[] = [
+      { key: 'dataProcessing', label: 'Tratamiento de datos', desc: 'Permite el tratamiento de datos personales para la gestión de la relación comercial.' },
+      { key: 'commercial',     label: 'Comunicaciones comerciales', desc: 'Acepta recibir ofertas, promociones y comunicaciones de marketing.' },
+      { key: 'thirdParty',     label: 'Cesión a terceros', desc: 'Autoriza la cesión de datos a terceras empresas para fines comerciales.' },
+    ];
+
+    const methodOptions: { value: ConsentHistoryEntry['method']; label: string }[] = [
+      { value: 'presential', label: 'Presencial' },
+      { value: 'web',        label: 'Web' },
+      { value: 'email',      label: 'Email' },
+      { value: 'phone',      label: 'Teléfono' },
+      { value: 'written',    label: 'Escrito' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        {gdpr.deletionRequested && (
+          <div className="flex items-start gap-3 p-4 bg-red-50 border-2 border-red-200 rounded-xl">
+            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-red-800">Borrado solicitado</p>
+              <p className="text-sm text-red-700 mt-0.5">
+                Solicitud recibida el {gdpr.deletionRequestedAt ? new Date(gdpr.deletionRequestedAt).toLocaleString('es-ES') : '—'}.
+                {gdpr.deletionCompletedAt ? ` Completado el ${new Date(gdpr.deletionCompletedAt).toLocaleString('es-ES')}.` : ' Pendiente de proceso.'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Shield className="w-5 h-5 text-blue-600" />
+              Consentimientos RGPD
+            </h3>
+            <select
+              value={consentMethod}
+              onChange={(e) => setConsentMethod(e.target.value as ConsentHistoryEntry['method'])}
+              className="text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800"
+            >
+              {methodOptions.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-4">
+            {consentDefs.map(({ key, label, desc }) => {
+              const value = consents[key as keyof typeof consents] ?? false;
+              return (
+                <div key={key} className={`flex items-start justify-between gap-4 p-4 rounded-xl border-2 transition-all ${value ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className={`font-semibold text-sm ${value ? 'text-emerald-800' : 'text-gray-700 dark:text-gray-300'}`}>{label}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{desc}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {value
+                      ? <CheckCircle className="w-4 h-4 text-emerald-500" />
+                      : <XCircle className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                    }
+                    <button
+                      onClick={() => void handleUpdateConsent(key, !value, consentMethod)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                        value
+                          ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                          : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                      }`}
+                    >
+                      {value ? 'Revocar' : 'Aceptar'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {gdpr.consentHistory && gdpr.consentHistory.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800">
+              <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <History className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                Historial de consentimientos
+              </h3>
+            </div>
+            <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
+              {gdpr.consentHistory.map((entry, idx) => (
+                <div key={idx} className="px-6 py-3 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    {entry.value
+                      ? <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    }
+                    <div>
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        {entry.type === 'dataProcessing' ? 'Tratamiento de datos'
+                          : entry.type === 'commercial' ? 'Comunicaciones'
+                          : 'Cesión a terceros'}
+                        {' '}— <span className={entry.value ? 'text-emerald-600' : 'text-red-600'}>{entry.value ? 'Aceptado' : 'Revocado'}</span>
+                      </p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500">{entry.method} · {entry.user || 'Sistema'}</p>
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+                    {new Date(entry.timestamp).toLocaleString('es-ES')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
+          <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            <Shield className="w-5 h-5 text-purple-600" />
+            Derechos del interesado
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              onClick={handleExportPersonalData}
+              className="flex items-center gap-3 p-4 border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all text-left group"
+            >
+              <div className="w-9 h-9 rounded-xl bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center flex-shrink-0 transition-colors">
+                <Download className="w-4 h-4 text-blue-700" />
+              </div>
+              <div>
+                <p className="font-semibold text-blue-900 text-sm">Exportar datos personales</p>
+                <p className="text-xs text-blue-600">Derecho de acceso (Art. 15 RGPD)</p>
+                {ctxClient?.gdpr?.dataExportRequestedAt && (
+                  <p className="text-[10px] text-blue-400 mt-0.5">
+                    Última exportación: {new Date(ctxClient.gdpr.dataExportRequestedAt).toLocaleString('es-ES')}
+                  </p>
+                )}
+              </div>
+            </button>
+
+            <button
+              onClick={() => void handleRequestDeletion()}
+              disabled={gdpr.deletionRequested}
+              className="flex items-center gap-3 p-4 border-2 border-red-200 hover:border-red-400 bg-red-50 hover:bg-red-100 rounded-xl transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div className="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition-colors">
+                <Trash2 className="w-4 h-4 text-red-700" />
+              </div>
+              <div>
+                <p className="font-semibold text-red-900 text-sm">Solicitar borrado</p>
+                <p className="text-xs text-red-600">Derecho al olvido (Art. 17 RGPD)</p>
+                {gdpr.deletionRequested && (
+                  <p className="text-[10px] text-red-400 mt-0.5">Ya solicitado</p>
+                )}
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const backToClients = () => {
     const st = (location.state || {}) as any;
     if (st?.returnToOps) {
@@ -594,26 +885,6 @@ export function ClientDetail() {
       default: return 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300';
     }
   };
-
-  useEffect(() => {
-    if (!client) {
-      return;
-    }
-
-    setEditForm({
-      name: client.name,
-      dni: client.dni,
-      phone: client.phone,
-      email: client.email,
-      address: client.address || '',
-      city: client.city || '',
-      postalCode: client.postalCode || '',
-      responsible: client.responsible,
-      notes: client.notes || '',
-      referralCode: (client as Record<string, unknown>).referralCode as string || '',
-      status: client.status,
-    });
-  }, [client]);
 
   const handleSaveClient = async () => {
     if (!client) {
@@ -2223,113 +2494,6 @@ export function ClientDetail() {
     </div>
   );
 
-  // ─── Obtener el cliente del contexto (con gdpr y tags) ────────────────────
-
-  const ctxClient = useMemo(() => clients.find((c) => c.id === id), [clients, id]);
-
-  // ─── Tag management ────────────────────────────────────────────────────────
-
-  const [newTag, setNewTag] = useState('');
-  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
-  const tagInputRef = useRef<HTMLInputElement>(null);
-
-  const tagSearch = newTag.toLowerCase().trim();
-  const clientTagSuggestions = LEAD_PREDEFINED_TAGS.filter(
-    (s) => !(ctxClient?.tags || []).includes(s) && (tagSearch === '' || s.toLowerCase().includes(tagSearch)),
-  );
-
-  const handleAddTag = async (tag: string) => {
-    const trimmed = tag.trim();
-    if (!trimmed || !ctxClient) return;
-    const currentTags = ctxClient.tags || [];
-    if (currentTags.includes(trimmed)) return;
-    await updateClient(ctxClient.id, { tags: [...currentTags, trimmed] });
-    setNewTag('');
-  };
-
-  const handleRemoveTag = async (tag: string) => {
-    if (!ctxClient) return;
-    const currentTags = ctxClient.tags || [];
-    await updateClient(ctxClient.id, { tags: currentTags.filter((t) => t !== tag) });
-  };
-
-  // ─── GDPR handlers ─────────────────────────────────────────────────────────
-
-  const handleUpdateConsent = async (
-    type: ConsentHistoryEntry['type'],
-    value: boolean,
-    method: ConsentHistoryEntry['method'],
-  ) => {
-    if (!ctxClient) return;
-    const entry: ConsentHistoryEntry = {
-      timestamp: new Date().toISOString(),
-      type,
-      value,
-      method,
-      user: authUser?.fullName || 'Sistema',
-    };
-    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
-    const newConsents = {
-      dataProcessing: type === 'dataProcessing' ? value : (ctxClient.consents?.dataProcessing ?? false),
-      commercial: type === 'commercial' ? value : (ctxClient.consents?.commercial ?? false),
-      thirdParty: type === 'thirdParty' ? value : (ctxClient.consents?.thirdParty ?? false),
-    };
-    await updateClient(ctxClient.id, {
-      consents: newConsents,
-      gdpr: {
-        ...currentGdpr,
-        consentHistory: [entry, ...(currentGdpr.consentHistory || [])],
-      },
-    });
-  };
-
-  const handleRequestDeletion = async () => {
-    if (!ctxClient || !window.confirm('¿Confirmas la solicitud de borrado? Este cliente será anonimizado.')) return;
-    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
-    await updateClient(ctxClient.id, {
-      gdpr: {
-        ...currentGdpr,
-        deletionRequested: true,
-        deletionRequestedAt: new Date().toISOString(),
-      },
-    });
-  };
-
-  const handleExportPersonalData = () => {
-    if (!ctxClient) return;
-    const data = {
-      exportDate: new Date().toISOString(),
-      name: ctxClient.name,
-      phone: ctxClient.phone,
-      email: ctxClient.email,
-      dni: ctxClient.dni || '',
-      address: ctxClient.address || '',
-      city: ctxClient.city || '',
-      postalCode: ctxClient.postalCode || '',
-      consents: ctxClient.consents,
-      gdpr: ctxClient.gdpr,
-      interactions: ctxClient.interactions,
-      vehiclesPurchased: ctxClient.vehiclesPurchased,
-      createdAt: ctxClient.createdAt,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `datos-personales-${ctxClient.name.replace(/\s+/g, '-').toLowerCase()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    // Register export in GDPR record
-    const currentGdpr: GdprRecord = ctxClient.gdpr || { deletionRequested: false, consentHistory: [] };
-    void updateClient(ctxClient.id, {
-      gdpr: { ...currentGdpr, dataExportRequestedAt: new Date().toISOString() },
-    });
-  };
-
-  // ─── Timeline unificado ────────────────────────────────────────────────────
-
   const renderTimelineTab = () => {
     // C-01: Timeline visual con el nuevo componente InteractionTimeline
     const findUserAvatar = (userName?: string) => {
@@ -2341,7 +2505,7 @@ export function ClientDetail() {
     };
 
     const timelineEvents: TimelineEvent[] = [
-      ...(ctxClient?.interactions || []).map((i) => ({
+      ...(Array.isArray(ctxClient?.interactions) ? ctxClient.interactions : []).map((i) => ({
         id: i.id,
         type: i.type as TimelineEvent['type'],
         title: i.title,
@@ -2350,7 +2514,7 @@ export function ClientDetail() {
         user: i.user,
         userAvatar: findUserAvatar(i.user),
       })),
-      ...(ctxClient?.documentsList || []).map((d) => ({
+      ...(Array.isArray(ctxClient?.documentsList) ? ctxClient.documentsList : []).map((d) => ({
         id: d.id,
         type: 'document' as const,
         title: d.name,
@@ -2380,174 +2544,6 @@ export function ClientDetail() {
             events={timelineEvents}
             emptyLabel="Aún no hay eventos registrados para este cliente"
           />
-        </div>
-      </div>
-    );
-  };
-
-  // ─── GDPR Tab ──────────────────────────────────────────────────────────────
-
-  const renderGdprTab = () => {
-    const gdpr = ctxClient?.gdpr || { deletionRequested: false, consentHistory: [] };
-    const consents = ctxClient?.consents || { dataProcessing: false, commercial: false, thirdParty: false };
-
-    const consentDefs: { key: ConsentHistoryEntry['type']; label: string; desc: string }[] = [
-      { key: 'dataProcessing', label: 'Tratamiento de datos', desc: 'Permite el tratamiento de datos personales para la gestión de la relación comercial.' },
-      { key: 'commercial',     label: 'Comunicaciones comerciales', desc: 'Acepta recibir ofertas, promociones y comunicaciones de marketing.' },
-      { key: 'thirdParty',     label: 'Cesión a terceros', desc: 'Autoriza la cesión de datos a terceras empresas para fines comerciales.' },
-    ];
-
-    const methodOptions: { value: ConsentHistoryEntry['method']; label: string }[] = [
-      { value: 'presential', label: 'Presencial' },
-      { value: 'web',        label: 'Web' },
-      { value: 'email',      label: 'Email' },
-      { value: 'phone',      label: 'Teléfono' },
-      { value: 'written',    label: 'Escrito' },
-    ];
-
-    return (
-      <div className="space-y-6">
-        {/* Banner de baja si está solicitada */}
-        {gdpr.deletionRequested && (
-          <div className="flex items-start gap-3 p-4 bg-red-50 border-2 border-red-200 rounded-xl">
-            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold text-red-800">Borrado solicitado</p>
-              <p className="text-sm text-red-700 mt-0.5">
-                Solicitud recibida el {gdpr.deletionRequestedAt ? new Date(gdpr.deletionRequestedAt).toLocaleString('es-ES') : '—'}.
-                {gdpr.deletionCompletedAt ? ` Completado el ${new Date(gdpr.deletionCompletedAt).toLocaleString('es-ES')}.` : ' Pendiente de proceso.'}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Consentimientos actuales */}
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <Shield className="w-5 h-5 text-blue-600" />
-              Consentimientos RGPD
-            </h3>
-            <select
-              value={consentMethod}
-              onChange={(e) => setConsentMethod(e.target.value as ConsentHistoryEntry['method'])}
-              className="text-xs border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800"
-            >
-              {methodOptions.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-4">
-            {consentDefs.map(({ key, label, desc }) => {
-              const value = consents[key as keyof typeof consents] ?? false;
-              return (
-                <div key={key} className={`flex items-start justify-between gap-4 p-4 rounded-xl border-2 transition-all ${value ? 'bg-emerald-50 border-emerald-200' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'}`}>
-                  <div className="flex-1 min-w-0">
-                    <p className={`font-semibold text-sm ${value ? 'text-emerald-800' : 'text-gray-700 dark:text-gray-300'}`}>{label}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{desc}</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {value
-                      ? <CheckCircle className="w-4 h-4 text-emerald-500" />
-                      : <XCircle className="w-4 h-4 text-gray-400 dark:text-gray-500" />
-                    }
-                    <button
-                      onClick={() => void handleUpdateConsent(key, !value, consentMethod)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                        value
-                          ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                          : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                      }`}
-                    >
-                      {value ? 'Revocar' : 'Aceptar'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Historial de consentimientos */}
-        {gdpr.consentHistory && gdpr.consentHistory.length > 0 && (
-          <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800">
-              <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <History className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                Historial de consentimientos
-              </h3>
-            </div>
-            <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
-              {gdpr.consentHistory.map((entry, idx) => (
-                <div key={idx} className="px-6 py-3 flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    {entry.value
-                      ? <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                      : <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                    }
-                    <div>
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
-                        {entry.type === 'dataProcessing' ? 'Tratamiento de datos'
-                          : entry.type === 'commercial' ? 'Comunicaciones'
-                          : 'Cesión a terceros'}
-                        {' '}— <span className={entry.value ? 'text-emerald-600' : 'text-red-600'}>{entry.value ? 'Aceptado' : 'Revocado'}</span>
-                      </p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500">{entry.method} · {entry.user || 'Sistema'}</p>
-                    </div>
-                  </div>
-                  <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
-                    {new Date(entry.timestamp).toLocaleString('es-ES')}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Derechos RGPD */}
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            <Shield className="w-5 h-5 text-purple-600" />
-            Derechos del interesado
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <button
-              onClick={handleExportPersonalData}
-              className="flex items-center gap-3 p-4 border-2 border-blue-200 hover:border-blue-400 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all text-left group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-blue-100 group-hover:bg-blue-200 flex items-center justify-center flex-shrink-0 transition-colors">
-                <Download className="w-4 h-4 text-blue-700" />
-              </div>
-              <div>
-                <p className="font-semibold text-blue-900 text-sm">Exportar datos personales</p>
-                <p className="text-xs text-blue-600">Derecho de acceso (Art. 15 RGPD)</p>
-                {ctxClient?.gdpr?.dataExportRequestedAt && (
-                  <p className="text-[10px] text-blue-400 mt-0.5">
-                    Última exportación: {new Date(ctxClient.gdpr.dataExportRequestedAt).toLocaleString('es-ES')}
-                  </p>
-                )}
-              </div>
-            </button>
-
-            <button
-              onClick={() => void handleRequestDeletion()}
-              disabled={gdpr.deletionRequested}
-              className="flex items-center gap-3 p-4 border-2 border-red-200 hover:border-red-400 bg-red-50 hover:bg-red-100 rounded-xl transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition-colors">
-                <Trash2 className="w-4 h-4 text-red-700" />
-              </div>
-              <div>
-                <p className="font-semibold text-red-900 text-sm">Solicitar borrado</p>
-                <p className="text-xs text-red-600">Derecho al olvido (Art. 17 RGPD)</p>
-                {gdpr.deletionRequested && (
-                  <p className="text-[10px] text-red-400 mt-0.5">Ya solicitado</p>
-                )}
-              </div>
-            </button>
-          </div>
         </div>
       </div>
     );

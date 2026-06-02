@@ -538,6 +538,8 @@ export interface Subscription {
   cancelAtPeriodEnd: boolean;
   /** Cupo extra de PDV concedido por superadmin (sin cobro). */
   extraPointOfSaleSlots?: number;
+  /** Cupo extra de marcas comerciales concedido por superadmin (sin cobro). */
+  extraCommercialBrandSlots?: number;
   /** Funciones PRO activadas manualmente por superadmin. */
   adminProAccess?: boolean;
 }
@@ -841,6 +843,7 @@ function deserializeSubscription(
     lastPaymentAt: subscription.lastPaymentAt ? new Date(subscription.lastPaymentAt) : undefined,
     cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
     extraPointOfSaleSlots: subscription.extraPointOfSaleSlots,
+    extraCommercialBrandSlots: subscription.extraCommercialBrandSlots,
     adminProAccess: Boolean(subscription.adminProAccess),
   };
 }

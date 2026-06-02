@@ -9,9 +9,9 @@ import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
   updateTpvRegisterSessionRequest,
-  listPointsOfSaleRequest,
-  mergePointsOfSaleWithRetailWorkCenters,
   pointOfSaleDisplayLabel,
+  buildDeliverySidebarStoreRows,
+  type DeliverySidebarStoreRow,
   type TpvRegisterSession,
   type TpvRegisterTransaction,
   type CashDenominationCount,
@@ -20,7 +20,14 @@ import {
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import {
+  filterStoresForWorkerAssignment,
+  isInvitedWorkerUser,
+} from '../../lib/pdvScope';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
+import { loadTpvPointsOfSaleForBusiness } from '../../lib/deliverySetup';
+import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import type { WorkCenter } from '../../lib/workCentersApi';
 import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
@@ -183,14 +190,20 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOptions, restrictedToPdvId, onClearStorePick }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
+  workCenters: WorkCenter[];
   workerOptions: { id: string; name: string }[];
   /** Gerente: PDV acotado (tienda elegida en Centro de operaciones o al abrir caja). */
   restrictedToPdvId?: string | null;
   onClearStorePick?: () => void;
+  /** true = encargado/gerente elige tienda; false = trabajador con tienda ya asignada. */
+  isManagerView?: boolean;
+  /** Tablet TPV: tienda fijada en activación; solo contar efectivo y abrir. */
+  isTabletMode?: boolean;
+  tabletStoreLabel?: string;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -202,14 +215,28 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   const total = calcDenominationTotal(counts);
   const hasCounted = total > 0 || Object.values(counts).some(v => v !== undefined && v > 0);
 
-  const allActivePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);
+  const storeRows = useMemo(
+    () => buildDeliverySidebarStoreRows(workCenters, pointsOfSale).filter((r) => !r.inactive),
+    [workCenters, pointsOfSale],
+  );
+
+  const openablePdvs = useMemo(() => {
+    const ids = new Set(
+      storeRows.filter((r) => r.pdvId && !r.needsPdv).map((r) => String(r.pdvId)),
+    );
+    const linked = pointsOfSale.filter((p) => p.active !== false && ids.has(p._id));
+    if (linked.length > 0) return linked;
+    return pointsOfSale.filter((p) => p.active !== false);
+  }, [storeRows, pointsOfSale]);
+
+  const allActivePdvs = useMemo(() => openablePdvs, [openablePdvs]);
   const displayPdvs = useMemo(() => {
     if (!restrictedToPdvId) return allActivePdvs;
     return allActivePdvs.filter((p) => p._id === restrictedToPdvId);
   }, [allActivePdvs, restrictedToPdvId]);
 
-  const hasPdvs = allActivePdvs.length > 0;
-  const pointOfSaleAccess = usePointOfSaleAccess(pointsOfSale.length);
+  const hasStores = allActivePdvs.length > 0 || storeRows.some((r) => r.needsPdv);
+  const pointOfSaleAccess = usePointOfSaleAccess(Math.max(allActivePdvs.length, storeRows.length));
   const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId);
   const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
@@ -266,6 +293,29 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     }
   }, [selectedPdv, selectedTerminalId, availableTerminals]);
 
+  // Tablet: terminal y trabajador fijos al activar la tienda.
+  useEffect(() => {
+    if (!isTabletMode || !selectedPdv || selectedTerminalId) return;
+    if (availableTerminals.length > 0) {
+      setSelectedTerminalId(availableTerminals[0].id);
+    }
+  }, [isTabletMode, selectedPdv, selectedTerminalId, availableTerminals]);
+
+  useEffect(() => {
+    if (!isTabletMode || !user) return;
+    const uid = String(user.user_id || user.id || '').trim();
+    if (uid) setSelectedWorkerId(uid);
+  }, [isTabletMode, user]);
+
+  const handleSelectStoreRow = (row: DeliverySidebarStoreRow) => {
+    if (row.needsPdv || !row.pdvId) {
+      toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) para activar la caja.');
+      navigate('/saas/settings/tienda');
+      return;
+    }
+    handleSelectPdv(row.pdvId);
+  };
+
   const handleSelectPdv = (pdvId: string) => {
     setSelectedPdvId(pdvId);
     setSelectedTerminalId('');
@@ -288,6 +338,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
 
   const goBack = () => {
+    if (isTabletMode) {
+      navigate('/auth/tpv-tablet');
+      return;
+    }
     try {
       if (window.history.length > 1) window.history.back();
       else navigate('/saas/delivery-ops');
@@ -335,10 +389,18 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
   const [showScrollHint, setShowScrollHint] = useState(false);
 
   const openingSteps = useMemo(() => {
+    if (isTabletMode) {
+      return [{
+        id: 'cash',
+        label: 'Abrir caja',
+        done: hasCounted,
+        current: !hasCounted,
+      }];
+    }
     const steps: { id: string; label: string; done: boolean; current: boolean }[] = [];
     const wDone = Boolean(effectiveWorkerName());
     steps.push({ id: 'worker', label: 'Trabajador', done: wDone, current: !wDone });
-    if (!restrictedToPdvId && hasPdvs) {
+    if (isManagerView && !restrictedToPdvId && hasStores) {
       const pDone = Boolean(selectedPdvId);
       steps.push({ id: 'pdv', label: 'Tienda', done: pDone, current: wDone && !pDone });
     }
@@ -357,9 +419,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
     });
     return steps;
   }, [
+    isTabletMode,
     effectiveWorkerName,
+    isManagerView,
     restrictedToPdvId,
-    hasPdvs,
+    hasStores,
     selectedPdvId,
     selectedTerminalId,
     hasCounted,
@@ -387,32 +451,38 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
       el.removeEventListener('scroll', updateScrollHint);
       ro.disconnect();
     };
-  }, [updateScrollHint, selectedPdvId, selectedTerminalId, hasWorkers, hasPdvs]);
+  }, [updateScrollHint, selectedPdvId, selectedTerminalId, hasWorkers, hasStores]);
+
+  const pdvById = useMemo(() => new Map(pointsOfSale.map((p) => [p._id, p])), [pointsOfSale]);
 
   useEffect(() => {
     if (!selectedPdvId || selectedTerminalId) return;
     terminalSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [selectedPdvId, selectedTerminalId]);
 
+  const displayStoreName = selectedPdv
+    ? pointOfSaleDisplayLabel(selectedPdv)
+    : tabletStoreLabel || '';
+
   return (
     <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-3 sm:p-4 overflow-hidden">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl mx-auto flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${isTabletMode ? 'max-w-2xl' : 'max-w-6xl'} mx-auto flex-1 min-h-0 flex flex-col overflow-hidden`}>
         {/* Header */}
         <div className="px-5 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 relative">
           <div className="w-11 h-11 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0">
             <Unlock className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="flex-1 min-w-0">
-            {selectedPdv ? (
+            {isTabletMode || selectedPdv ? (
               <>
                 <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate">
                   <Store className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span className="truncate">{pointOfSaleDisplayLabel(selectedPdv)}</span>
+                  <span className="truncate">{displayStoreName || 'Tu tienda'}</span>
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
-                  Apertura de caja
-                  {selectedPdv.code ? ` · ${selectedPdv.code}` : ''}
-                  {selectedTerminal ? ` · Terminal ${selectedTerminal.code || selectedTerminal.name}` : ''}
+                  {isTabletMode
+                    ? `Abrir caja · ${effectiveWorkerName() || 'Trabajador'}`
+                    : `Apertura de caja${selectedPdv?.code ? ` · ${selectedPdv.code}` : ''}${selectedTerminal ? ` · Terminal ${selectedTerminal.code || selectedTerminal.name}` : ''}`}
                 </p>
               </>
             ) : (
@@ -440,9 +510,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
 
         {/* Pasos visibles (scroll abajo en móvil) */}
         <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 text-center sm:text-left">
-            Completa en orden · desplázate hacia abajo si no ves todo
-          </p>
+          {isTabletMode ? (
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 text-center sm:text-left">
+              Cuenta el efectivo inicial y abre la caja
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
             {openingSteps.map((s, idx) => (
               <span
@@ -468,12 +540,13 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
           </div>
         </div>
 
-        {/* Body: 2 columns on lg+ */}
+        {/* Body: 2 columns on lg+ (tablet = solo efectivo) */}
         <div
           ref={bodyScrollRef}
-          className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden relative"
+          className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden'} relative`}
         >
-          {/* Left panel: who + where */}
+          {/* Left panel: who + where (oculto en tablet) */}
+          {!isTabletMode && (
           <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-5 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
             {/* Worker */}
             <div>
@@ -500,11 +573,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               )}
             </div>
 
-            {/* Point of Sale selection (gerente con tienda ya elegida en el hub: oculto) */}
-            {hasPdvs && !restrictedToPdvId && (
+            {/* Tiendas / PDV — solo gerente elige; trabajador entra con tienda asignada al invitar */}
+            {isManagerView && !restrictedToPdvId && hasStores && (
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><MapPin className="w-3 h-3 inline mr-1" />Punto de venta *</label>
+                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><MapPin className="w-3 h-3 inline mr-1" />Tienda *</label>
                   <button
                     type="button"
                     onClick={handlePointOfSaleAction}
@@ -520,18 +593,51 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
                   </button>
                 </div>
                 <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                  {displayPdvs.map(pdv => (
-                    <button key={pdv._id} onClick={() => handleSelectPdv(pdv._id)}
-                      className={`p-2.5 rounded-xl border-2 text-left transition-all ${selectedPdvId === pdv._id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                      <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate"><Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" /><span className="truncate">{pointOfSaleDisplayLabel(pdv)}</span></div>
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{pdv.code || '—'} · {pdv.terminals.filter(t => t.active).length} TPV{pdv.terminals.length !== 1 ? 's' : ''}</div>
-                    </button>
-                  ))}
+                  {(storeRows.length > 0
+                    ? storeRows
+                    : allActivePdvs.map((pdv) => ({
+                        rowId: pdv._id,
+                        pdvId: pdv._id,
+                        workCenterId: pdv.workCenterId,
+                        title: pointOfSaleDisplayLabel(pdv),
+                        code: pdv.code,
+                        inactive: false,
+                        needsPdv: false,
+                      }))
+                  ).map((row) => {
+                    const pdv = row.pdvId ? pdvById.get(row.pdvId) : undefined;
+                    const selected = Boolean(row.pdvId && selectedPdvId === row.pdvId);
+                    const termCount = pdv?.terminals.filter((t) => t.active).length ?? 0;
+                    return (
+                      <button
+                        key={row.rowId}
+                        type="button"
+                        onClick={() => handleSelectStoreRow(row)}
+                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${
+                          selected
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
+                            : row.needsPdv
+                              ? 'border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10 hover:border-amber-300'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        }`}
+                      >
+                        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate">
+                          <Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span className="truncate">{row.title}</span>
+                        </div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                          {row.needsPdv
+                            ? 'Completa dirección en Ajustes'
+                            : `${row.code || pdv?.code || '—'} · ${termCount} TPV${termCount !== 1 ? 's' : ''}`}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
-            {restrictedToPdvId && hasPdvs && displayPdvs.length === 0 && onClearStorePick && (
+            {restrictedToPdvId && hasStores && displayPdvs.length === 0 && onClearStorePick && (
               <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-900 dark:text-amber-100">
                 <p className="font-semibold">Esta tienda ya no está disponible.</p>
                 <button type="button" onClick={onClearStorePick} className="mt-3 px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs">
@@ -540,29 +646,32 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               </div>
             )}
 
-            {!hasPdvs && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">No hay PDV configurados</p>
-                <p className="text-xs text-amber-700/90 dark:text-amber-200/90 mt-1">
-                  Para abrir caja necesitas un punto de venta con dirección completa y al menos un terminal TPV. Desde
-                  Ajustes indicas nombre, dirección, ciudad y código postal; el sistema crea el TPV base.
+            {restrictedToPdvId && hasStores && displayPdvs.length > 0 && (
+              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">Tu tienda</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <Store className="w-4 h-4 text-emerald-600 shrink-0" />
+                  {pointOfSaleDisplayLabel(displayPdvs[0])}
                 </p>
-                <div className="mt-3 flex gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => navigate('/saas/settings/tienda?action=new-pdv')}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors inline-flex items-center gap-1.5"
-                  >
-                    Crear mi primera tienda / PDV
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/saas/settings/tienda')}
-                    className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
-                  >
-                    Ir a centros de trabajo
-                  </button>
-                </div>
+              </div>
+            )}
+
+            {isManagerView && !restrictedToPdvId && !hasStores && !parentLoading && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 text-sm text-gray-600 dark:text-gray-400">
+                <p>No hay PDV activos en esta empresa.</p>
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/settings/tienda')}
+                  className="mt-2 text-emerald-600 dark:text-emerald-400 font-semibold hover:underline"
+                >
+                  Configurar tiendas en Ajustes
+                </button>
+              </div>
+            )}
+
+            {parentLoading && !hasStores && (
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 text-sm text-gray-500 dark:text-gray-400">
+                Cargando tiendas y PDV…
               </div>
             )}
 
@@ -608,9 +717,22 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
               </div>
             )}
           </div>
+          )}
+
+          {isTabletMode && parentLoading && !selectedPdv && (
+            <div className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+              Cargando tu tienda…
+            </div>
+          )}
+
+          {isTabletMode && !parentLoading && selectedPdv && !selectedTerminalId && availableTerminals.length === 0 && (
+            <div className="mx-5 mb-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
+              Esta tienda no tiene terminal activo. Configúralo en Ajustes → Tiendas.
+            </div>
+          )}
 
           {/* Right panel: cash count */}
-          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4">
+          <div className={`${isTabletMode ? 'flex-1' : 'lg:col-span-2'} p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4`}>
             {selectedTerminalId && !hasCounted && (
               <div className="lg:hidden flex items-center justify-center gap-2 mb-3 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-semibold">
                 <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
@@ -649,14 +771,14 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workerOpt
             onClick={goBack}
             className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            Volver
+            {isTabletMode ? 'Cambiar trabajador' : 'Volver'}
           </button>
           <button
             onClick={handleSubmit}
             disabled={!canOpen || parentLoading}
             className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}
           >
-            <Unlock className="w-4 h-4" /> Abrir caja{selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''} — {total.toFixed(2)}€ de fondo
+            <Unlock className="w-4 h-4" /> {isTabletMode ? 'Abrir caja y empezar' : `Abrir caja${selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''}`} — {total.toFixed(2)}€ de fondo
           </button>
         </div>
       </div>
@@ -1082,15 +1204,19 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness, isLoading: businessLoading } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled, isLoading: businessLoading, switchBusiness } = useBusiness();
+  const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const { createNotification } = useApp();
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
 
+  const [tabletBinding] = useState(() => readTpvTabletBinding());
+
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
+  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showClosing, setShowClosing] = useState(false);
   const [showCashCount, setShowCashCount] = useState(false);
@@ -1098,11 +1224,41 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const skipManagerAutoPdvRef = useRef(false);
+  const loadSeqRef = useRef(0);
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
 
-  const isWorkerUser = useMemo(
-    () => Boolean(user && (user.accountType === 'user' || Boolean((user as { invitedBy?: string }).invitedBy))),
-    [user],
-  );
+  const isTabletSession = Boolean(tabletBinding?.pdvId && tabletBinding.businessId);
+
+  const tabletRestrictedPdvId = isTabletSession ? tabletBinding!.pdvId : null;
+
+  useEffect(() => {
+    if (!tabletBinding?.businessId || !businessesFetchSettled) return;
+    const activeBid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (tabletBinding.businessId !== activeBid) {
+      switchBusiness(tabletBinding.businessId);
+    }
+  }, [tabletBinding, businessesFetchSettled, currentBusiness, switchBusiness]);
+
+  useEffect(() => {
+    if (!isTabletSession || !tabletRestrictedPdvId) return;
+    setManagerPdvPickId(tabletRestrictedPdvId);
+    skipManagerAutoPdvRef.current = false;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (bid && tabletBinding?.dataUserId) {
+      writeDeliveryOpsSelectedPdvId(bid, tabletBinding.dataUserId, tabletRestrictedPdvId);
+    }
+  }, [isTabletSession, tabletRestrictedPdvId, currentBusiness, tabletBinding?.dataUserId]);
+
+  const isWorkerUser = useMemo(() => isInvitedWorkerUser(user), [user]);
+
+  const workerAssignedPdvId = useMemo(() => {
+    if (!isWorkerUser) return null;
+    return filterStoresForWorkerAssignment(
+      pointsOfSale,
+      workCenters,
+      user?.employment?.salesPointId,
+    ).assignedPdvId;
+  }, [isWorkerUser, pointsOfSale, workCenters, user?.employment?.salesPointId]);
 
   useEffect(() => {
     if (isWorkerUser || managerPdvPickId || skipManagerAutoPdvRef.current) return;
@@ -1124,40 +1280,97 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
 
   const activeSession = useMemo(() => {
     const open = sessions.filter((s) => s.status === 'open');
-    if (isWorkerUser) return open[0] || null;
+    if (isTabletSession && tabletRestrictedPdvId) {
+      return open.find((s) => String(s.pointOfSaleId || '').trim() === tabletRestrictedPdvId) || null;
+    }
+    if (isWorkerUser) {
+      if (workerAssignedPdvId) {
+        return open.find((s) => String(s.pointOfSaleId || '').trim() === workerAssignedPdvId) || null;
+      }
+      return open[0] || null;
+    }
     if (managerPdvPickId) {
       return open.find((s) => String(s.pointOfSaleId || '').trim() === managerPdvPickId) || null;
     }
     if (open.length === 1) return open[0];
     return null;
-  }, [sessions, isWorkerUser, managerPdvPickId]);
+  }, [sessions, isTabletSession, tabletRestrictedPdvId, isWorkerUser, workerAssignedPdvId, managerPdvPickId]);
 
   const loadData = useCallback(async () => {
-    if (!dataUserId) return;
+    if (!dataUserId || !user) return;
+    const biz = currentBusiness;
+    const bidAtStart = String(biz?.business_id || biz?.id || '').trim();
+    const seq = ++loadSeqRef.current;
     try {
-      const [sessData, pdvDataRaw] = await Promise.all([
-        listTpvRegisterSessionsRequest(dataUserId),
-        listPointsOfSaleRequest(dataUserId),
-      ]);
-      setSessions(sessData);
-      const merged = await mergePointsOfSaleWithRetailWorkCenters(dataUserId, pdvDataRaw, {
-        business: currentBusiness,
-      });
-      setPointsOfSale(merged);
+      const sessData = await listTpvRegisterSessionsRequest(dataUserId);
+      if (seq !== loadSeqRef.current) return;
+
+      let scopedPdvs: PointOfSale[] = [];
+      let scopedWorkCenters: WorkCenter[] = [];
+      if (bidAtStart) {
+        const state = await loadTpvPointsOfSaleForBusiness(user, biz ?? null, {
+          accountBusinessCount,
+        });
+        if (seq !== loadSeqRef.current) return;
+        scopedPdvs = state.pointsOfSale;
+        scopedWorkCenters = state.workCenters.filter(
+          (wc) =>
+            wc.active !== false &&
+            !wc.deletedAt &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
+
+        if (isInvitedWorkerUser(user)) {
+          const scoped = filterStoresForWorkerAssignment(
+            scopedPdvs,
+            scopedWorkCenters,
+            user?.employment?.salesPointId,
+          );
+          scopedPdvs = scoped.pointsOfSale;
+          scopedWorkCenters = scoped.workCenters;
+        }
+      }
+
+      const activeBid = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
+      if (seq !== loadSeqRef.current || activeBid !== bidAtStart) return;
+
+      const scopedIds = new Set(scopedPdvs.map((p) => p._id));
+      setWorkCenters(scopedWorkCenters);
+      setPointsOfSale(scopedPdvs);
+      setSessions(
+        sessData.filter((s) => {
+          const pid = String(s.pointOfSaleId || '').trim();
+          return !pid || scopedIds.has(pid);
+        }),
+      );
     } catch {
-      // silent
+      if (seq === loadSeqRef.current) {
+        setPointsOfSale([]);
+        setWorkCenters([]);
+        setSessions([]);
+      }
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, [dataUserId, currentBusiness]);
+  }, [dataUserId, user, currentBusiness, accountBusinessCount]);
+
+  useEffect(() => {
+    setPointsOfSale([]);
+    setWorkCenters([]);
+    setSessions([]);
+    setManagerPdvPickId(null);
+    skipManagerAutoPdvRef.current = false;
+    loadSeqRef.current += 1;
+  }, [businessId]);
 
   useEffect(() => {
     if (businessLoading || !dataUserId) {
       setLoading(true);
       return;
     }
-    loadData();
-  }, [businessLoading, dataUserId, loadData]);
+    setLoading(true);
+    void loadData();
+  }, [businessLoading, dataUserId, businessId, loadData]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
@@ -1402,24 +1615,101 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   }
 
   if (!activeSession) {
-    const members = (currentBusiness?.members || []).map((m: any) => ({
-      id: String(m.user_id || m.id || '').trim(),
-      name: String(m.fullName || m.email || 'Trabajador').trim(),
-    })).filter((m: any) => m.id && m.name);
-    const uniq = new Map<string, { id: string; name: string }>();
-    for (const m of members) uniq.set(m.id, m);
-    if (user?.id) uniq.set(String(user.id), { id: String(user.id), name: String(user.fullName || user.email || 'Gerente').trim() });
-    const workerOptions = Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    if (isWorkerUser && !isTabletSession && !loading && !user?.employment?.salesPointId?.trim()) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
+            <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Store className="w-7 h-7 text-amber-600" />
+            </div>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Sin tienda asignada</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              Tu gerente debe asignarte un local en <span className="font-semibold">Equipo</span> antes de abrir caja en el TPV.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/worker/tasks')}
+              className="w-full py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold"
+            >
+              Volver a Mi trabajo
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (isWorkerUser && !isTabletSession && !loading && user?.employment?.salesPointId?.trim() && pointsOfSale.length === 0) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
+            <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-7 h-7 text-amber-600" />
+            </div>
+            <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Tienda no disponible</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+              El local asignado aún no tiene PDV de caja listo. Pide al gerente que complete la dirección de la tienda en Ajustes.
+            </p>
+            <button
+              type="button"
+              onClick={() => void loadData()}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold mb-2"
+            >
+              Reintentar
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/worker/tasks')}
+              className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold"
+            >
+              Volver a Mi trabajo
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    const workerOptions = isTabletSession && user
+      ? [{
+          id: String(user.user_id || user.id || '').trim(),
+          name: String(user.fullName || user.email || 'Trabajador').trim(),
+        }].filter((w) => w.id && w.name)
+      : isWorkerUser && user
+      ? [{
+          id: String(user.user_id || user.id || '').trim(),
+          name: String(user.fullName || user.email || 'Trabajador').trim(),
+        }].filter((w) => w.id && w.name)
+      : (() => {
+          const members = (currentBusiness?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
+            id: String(m.user_id || m.id || '').trim(),
+            name: String(m.fullName || m.email || 'Trabajador').trim(),
+          })).filter((m) => m.id && m.name);
+          const uniq = new Map<string, { id: string; name: string }>();
+          for (const m of members) uniq.set(m.id, m);
+          if (user?.id) {
+            uniq.set(String(user.id), {
+              id: String(user.id),
+              name: String(user.fullName || user.email || 'Gerente').trim(),
+            });
+          }
+          return Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+        })();
+
+    const openingRestrictedPdvId = tabletRestrictedPdvId
+      || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
 
     return (
       <OpeningScreen
         onOpen={handleOpen}
         loading={loading}
         pointsOfSale={pointsOfSale}
+        workCenters={workCenters}
         workerOptions={workerOptions}
-        restrictedToPdvId={!isWorkerUser ? managerPdvPickId : null}
+        isManagerView={!isWorkerUser && !isTabletSession}
+        isTabletMode={isTabletSession}
+        tabletStoreLabel={tabletBinding?.pdvName}
+        restrictedToPdvId={openingRestrictedPdvId}
         onClearStorePick={
-          !isWorkerUser
+          !isWorkerUser && !isTabletSession
             ? () => {
                 const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
                 if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, null);

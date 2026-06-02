@@ -523,7 +523,7 @@ export function Dashboard() {
     };
   }, []);
 
-  const showGeneral = generalView && businesses.length > 1;
+  const showGeneral = generalView;
 
   const goGeneral = useCallback(() => {
     setGeneralView(true);

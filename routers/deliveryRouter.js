@@ -41,6 +41,7 @@ import {
   createPointOfSale,
   updatePointOfSale,
   removePointOfSale,
+  regeneratePointOfSaleTerminalCode,
   getDeliveryConfig,
   updateDeliveryConfig,
   getOpsCenter,
@@ -83,12 +84,29 @@ deliveryRouter.param('userId', async (req, res, next, rawUserId) => {
     if (!rawUserId) return next();
     // Evitar resolver dos veces si ya pasó por aquí (rutas anidadas).
     if (req.callerUserId) return next();
-    const { ownerUserId, account, isInvited } = await resolveDataOwnerUserId(req, rawUserId);
-    req.callerUserId = rawUserId;
-    req.callerAccount = account || null;
-    req.callerIsWorker = isInvited;
-    if (isInvited && ownerUserId && ownerUserId !== rawUserId) {
-      req.params.userId = ownerUserId;
+
+    const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+    const authResolution = authUserId
+      ? await resolveDataOwnerUserId(req, authUserId)
+      : { ownerUserId: authUserId, account: null, isInvited: false };
+    const urlResolution = await resolveDataOwnerUserId(req, rawUserId);
+
+    const callerIsWorker = Boolean(authResolution.isInvited);
+    const callerAccount = callerIsWorker ? authResolution.account : urlResolution.account;
+    const callerUserId = callerIsWorker ? authUserId : rawUserId;
+
+    let dataUserId = rawUserId;
+    if (callerIsWorker && authResolution.ownerUserId) {
+      dataUserId = authResolution.ownerUserId;
+    } else if (urlResolution.isInvited && urlResolution.ownerUserId) {
+      dataUserId = urlResolution.ownerUserId;
+    }
+
+    req.callerUserId = callerUserId;
+    req.callerAccount = callerAccount;
+    req.callerIsWorker = callerIsWorker;
+    if (dataUserId && dataUserId !== rawUserId) {
+      req.params.userId = dataUserId;
     }
     return next();
   } catch (err) {
@@ -142,6 +160,7 @@ deliveryRouter.delete('/tpv-sessions/:userId/:sessionId', removeTpvRegisterSessi
 deliveryRouter.get('/points-of-sale/:userId', listPointsOfSale);
 deliveryRouter.post('/points-of-sale/:userId', createPointOfSale);
 deliveryRouter.put('/points-of-sale/:userId/:pdvId', updatePointOfSale);
+deliveryRouter.post('/points-of-sale/:userId/:pdvId/regenerate-terminal-code', regeneratePointOfSaleTerminalCode);
 deliveryRouter.delete('/points-of-sale/:userId/:pdvId', removePointOfSale);
 
 deliveryRouter.get('/drivers/:userId', listDrivers);

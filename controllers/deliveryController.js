@@ -25,6 +25,11 @@ import {
   buildPointOfSaleDocument,
   sanitizePointOfSale,
   listPointsOfSaleByUser,
+  dedupeActivePointsOfSale,
+  findActivePointOfSaleForWorkCenter,
+  findOrphanPointOfSaleByName,
+  generateTerminalCode,
+  findPointOfSaleByTerminalCode,
   buildScaleDeviceDocument,
   sanitizeScaleDevice,
   listScaleDevicesByUser,
@@ -1378,6 +1383,21 @@ export async function listTpvRegisterSessions(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     let sessions = await listTpvRegisterSessionsByUser(req, userId);
+    if (req.callerIsWorker) {
+      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      if (workerSalesPoint) {
+        const pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+        const allowedPdvIds = new Set(
+          pdvs
+            .filter((p) => p._id === workerSalesPoint || p.workCenterId === workerSalesPoint)
+            .map((p) => p._id),
+        );
+        sessions = sessions.filter((s) => {
+          const pid = String(s.pointOfSaleId || '').trim();
+          return !pid || allowedPdvIds.has(pid);
+        });
+      }
+    }
     const pdvFilter = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
     if (pdvFilter) {
       sessions = sessions.filter((s) => String(s.pointOfSaleId || '') === pdvFilter);
@@ -1497,13 +1517,32 @@ async function ensurePointOfSaleOwner(req, userId, pdvId) {
   return doc;
 }
 
+async function ensureTerminalCodeOnPdv(req, pdv) {
+  if (String(pdv?.terminalCode || '').trim()) return pdv;
+  const db = getDeliveryDbName();
+  let code = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const candidate = generateTerminalCode();
+    const clash = await findPointOfSaleByTerminalCode(req, candidate);
+    if (!clash) {
+      code = candidate;
+      break;
+    }
+  }
+  if (!code) throw new Error('No se pudo generar un código de terminal único');
+  const doc = buildPointOfSaleDocument(pdv.user_id, { terminalCode: code }, pdv);
+  const saved = await putDocument(req, db, doc._id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
 export async function listPointsOfSale(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let pdvs = await listPointsOfSaleByUser(req, userId);
+    let pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+    pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));
     // Trabajadores con PDV asignado en empleo: solo ven ese centro (id PDV o workCenter enlazado).
     if (req.callerIsWorker) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
@@ -1531,6 +1570,47 @@ export async function createPointOfSale(req, res) {
     await ensureDatabase(req, db);
     let body = { ...pointOfSale };
     const existing = await listPointsOfSaleByUser(req, userId);
+    const wcId = String(body.workCenterId || '').trim();
+
+    const respondReusedPointOfSale = async (linked, patch = {}) => {
+      const codes = existing
+        .filter((p) => p._id !== linked._id)
+        .map((d) => String(d.code || '').trim())
+        .filter(Boolean);
+      const updates = { ...patch, workCenterId: wcId || linked.workCenterId || '' };
+      if (body.name) {
+        const nextName = sanitizeStoreDisplayName(body.name);
+        if (nextName) updates.name = nextName;
+      }
+      if (body.address && String(body.address).trim().length >= 5) {
+        updates.address = String(body.address).trim();
+      }
+      if (body.active !== undefined) updates.active = Boolean(body.active);
+      if (body.code) {
+        const nextCode = sanitizePdvCodeInput(String(body.code || '').trim());
+        if (nextCode && !isPdvCodeAlreadyUsed(nextCode, codes)) updates.code = nextCode;
+      }
+      const doc = buildPointOfSaleDocument(userId, { ...linked, ...updates }, linked);
+      const saved = await putDocument(req, db, doc._id, doc);
+      return res.json({
+        ok: true,
+        reused: true,
+        pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }),
+      });
+    };
+
+    if (wcId) {
+      const linked = findActivePointOfSaleForWorkCenter(existing, wcId);
+      if (linked) {
+        return respondReusedPointOfSale(linked);
+      }
+      const rawName = sanitizeStoreDisplayName(body.name) || '';
+      const orphan = rawName ? findOrphanPointOfSaleByName(existing, rawName) : null;
+      if (orphan) {
+        return respondReusedPointOfSale(orphan);
+      }
+    }
+
     const codes = existing.map((d) => String(d.code || '').trim()).filter(Boolean);
     const names = existing.map((d) => String(d.name || '').trim()).filter(Boolean);
     const rawName = sanitizeStoreDisplayName(body.name) || 'PDV';
@@ -1563,6 +1643,14 @@ export async function createPointOfSale(req, res) {
     }
     const createErr = validatePointOfSaleCreateBody(body);
     if (createErr) return badRequest(res, createErr);
+
+    if (wcId) {
+      const again = findActivePointOfSaleForWorkCenter(await listPointsOfSaleByUser(req, userId), wcId);
+      if (again) {
+        return respondReusedPointOfSale(again);
+      }
+    }
+
     const doc = buildPointOfSaleDocument(userId, body);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
@@ -1580,7 +1668,7 @@ export async function createPointOfSale(req, res) {
 export async function updatePointOfSale(req, res) {
   try {
     const { userId, pdvId } = req.params;
-    const { pointOfSale } = req.body || {};
+    let pointOfSale = req.body?.pointOfSale;
     if (!pointOfSale || typeof pointOfSale !== 'object') return badRequest(res, 'Faltan datos');
     if (Object.prototype.hasOwnProperty.call(pointOfSale, 'address')) {
       const a = String(pointOfSale.address || '').trim();
@@ -1640,6 +1728,44 @@ export async function removePointOfSale(req, res) {
     return res.json({ ok: true, id: pdvId });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar punto de venta' });
+  }
+}
+
+export async function regeneratePointOfSaleTerminalCode(req, res) {
+  try {
+    const { userId, pdvId } = req.params;
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const existing = await ensurePointOfSaleOwner(req, userId, pdvId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+
+    const db = getDeliveryDbName();
+    let code = null;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const candidate = generateTerminalCode();
+      const clash = await findPointOfSaleByTerminalCode(req, candidate, pdvId);
+      if (!clash) {
+        code = candidate;
+        break;
+      }
+    }
+    if (!code) return res.status(500).json({ ok: false, error: 'No se pudo generar un código único' });
+
+    const doc = buildPointOfSaleDocument(userId, { terminalCode: code }, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'point_of_sale',
+      action: `Regeneró código TPV tablet de "${doc.name}"`,
+      entityId: doc._id,
+      entityLabel: doc.name,
+      metadata: { terminalCode: code },
+    });
+    return res.json({ ok: true, pointOfSale: sanitizePointOfSale({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al regenerar código de terminal' });
   }
 }
 

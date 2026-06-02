@@ -14,30 +14,34 @@ import { useBusinessOptional, type BusinessContextType } from './BusinessContext
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
+  coerceSelectedPdvId,
   notifyDeliveryActiveStoreChanged,
-  normalizeStoredPdvPreference,
-  pickDefaultActivePdvId,
   readDeliveryOpsSelectedPdvId,
-  resolvePreferenceToPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
-import { pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
-import { isDeliveryBusinessType, loadDeliveryStores } from '../lib/deliverySetup';
+import { dedupePointsOfSale, pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
+import {
+  isDeliveryBusinessType,
+  loadDeliveryStores,
+  loadTpvPointsOfSaleForBusiness,
+} from '../lib/deliverySetup';
+import { filterStoresForWorkerAssignment, isInvitedWorkerUser } from '../lib/pdvScope';
+import type { AuthUser } from '../lib/authApi';
+import {
+  readRetailScopeCache,
+  writeRetailScopeCache,
+  clearRetailScopeCache,
+} from '../lib/retailScopeCache';
 import type { WorkCenter } from '../lib/workCentersApi';
 
 export interface ActiveStoreScopeValue {
-  /** PDV activos (filtro operativo / pedidos / caja). */
   pointsOfSale: PointOfSale[];
-  /** Todos los PDV de la empresa (sidebar: incluye inactivos). */
   allPointsOfSale: PointOfSale[];
-  /** Centros retail de la empresa (para sidebar aunque falte PDV). */
   retailWorkCenters: WorkCenter[];
-  /** `_id` del documento PDV delivery (resuelto desde preferencia `wc:` o id). */
   activeSalesPointId: string | null;
   activePreferenceRaw: string | null;
   setActiveSalesPoint: (pdvId: string) => void;
   setActiveWorkCenterPreference: (workCenterId: string) => void;
-  /** Solo true en la primera carga sin datos en pantalla (no en refrescos). */
   loading: boolean;
   refresh: () => Promise<void>;
   displayLabelForActive: string;
@@ -58,58 +62,35 @@ const noopScope: ActiveStoreScopeValue = {
 
 const ActiveStoreScopeContext = createContext<ActiveStoreScopeValue>(noopScope);
 
-interface CachedStores {
-  retailWorkCenters: WorkCenter[];
-  allPointsOfSale: PointOfSale[];
-  pointsOfSale: PointOfSale[];
+function pickRetailWorkCenters(workCenters: WorkCenter[]): WorkCenter[] {
+  return workCenters.filter(
+    (wc) =>
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
 }
 
-function storesCacheKey(businessId: string) {
-  return `vertial_delivery_stores_cache:${businessId}`;
-}
+function scopeFromLoadState(
+  workCenters: WorkCenter[],
+  pointsOfSale: PointOfSale[],
+  authUser: AuthUser | null | undefined,
+): { retail: WorkCenter[]; allPdvs: PointOfSale[] } {
+  let retail = pickRetailWorkCenters(workCenters);
+  let allPdvs = dedupePointsOfSale(pointsOfSale);
 
-function readStoresCache(businessId: string): CachedStores | null {
-  if (!businessId) return null;
-  try {
-    const raw = sessionStorage.getItem(storesCacheKey(businessId));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as CachedStores;
-    if (!parsed || !Array.isArray(parsed.retailWorkCenters)) return null;
-    const hasData =
-      parsed.retailWorkCenters.length > 0 ||
-      (Array.isArray(parsed.allPointsOfSale) && parsed.allPointsOfSale.length > 0);
-    if (!hasData) return null;
-    return parsed;
-  } catch {
-    return null;
+  if (authUser && isInvitedWorkerUser(authUser)) {
+    const scoped = filterStoresForWorkerAssignment(
+      allPdvs,
+      retail,
+      authUser.employment?.salesPointId,
+    );
+    allPdvs = scoped.pointsOfSale;
+    retail = scoped.workCenters;
   }
+
+  return { retail, allPdvs };
 }
 
-function writeStoresCache(businessId: string, data: CachedStores) {
-  if (!businessId) return;
-  const hasData =
-    data.retailWorkCenters.length > 0 || data.allPointsOfSale.length > 0;
-  if (!hasData) return;
-  try {
-    sessionStorage.setItem(storesCacheKey(businessId), JSON.stringify(data));
-  } catch {
-    // ignore
-  }
-}
-
-function clearStoresCache(businessId: string) {
-  if (!businessId) return;
-  try {
-    sessionStorage.removeItem(storesCacheKey(businessId));
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Debe vivir bajo `BusinessProvider`. Si no hay contexto (árbol mal ordenado o HMR),
- * se renderizan los hijos sin romper; `useActiveStoreScope` usará el valor por defecto.
- */
 export function ActiveStoreScopeProvider({ children }: { children: ReactNode }) {
   const business = useBusinessOptional();
   if (!business) {
@@ -126,7 +107,8 @@ function ActiveStoreScopeProviderImpl({
   business: BusinessContextType;
 }) {
   const { user } = useAuth();
-  const { currentBusiness, businessesFetchSettled } = business;
+  const { currentBusiness, businessesFetchSettled, businesses } = business;
+  const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [allPointsOfSale, setAllPointsOfSale] = useState<PointOfSale[]>([]);
   const [retailWorkCenters, setRetailWorkCenters] = useState<WorkCenter[]>([]);
@@ -136,7 +118,7 @@ function ActiveStoreScopeProviderImpl({
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
-    [user?.user_id, currentBusiness?.business_id, currentBusiness?.id],
+    [user?.user_id, user?.id, currentBusiness?.business_id, currentBusiness?.id],
   );
 
   const currentBusinessRef = useRef(currentBusiness);
@@ -145,7 +127,10 @@ function ActiveStoreScopeProviderImpl({
   businessIdRef.current = businessId;
   const userRef = useRef(user);
   userRef.current = user;
+  const accountBusinessCountRef = useRef(accountBusinessCount);
+  accountBusinessCountRef.current = accountBusinessCount;
   const loadInflightRef = useRef<Promise<void> | null>(null);
+  const loadSeqRef = useRef(0);
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDisplayedStoresRef = useRef(false);
 
@@ -159,7 +144,6 @@ function ActiveStoreScopeProviderImpl({
     }
   }, []);
 
-  // Hidratar tiendas desde caché al cambiar de negocio (nunca reutilizar tiendas del negocio anterior).
   useLayoutEffect(() => {
     if (!businessId) {
       setPointsOfSale([]);
@@ -168,11 +152,13 @@ function ActiveStoreScopeProviderImpl({
       hasDisplayedStoresRef.current = false;
       return;
     }
-    hasDisplayedStoresRef.current = false;
-    const cached = readStoresCache(businessId);
+    loadInflightRef.current = null;
+    const cached = readRetailScopeCache(businessId);
     if (cached) {
+      hasDisplayedStoresRef.current = true;
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
     } else {
+      hasDisplayedStoresRef.current = false;
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
@@ -188,7 +174,12 @@ function ActiveStoreScopeProviderImpl({
 
     const run = async () => {
       const biz = currentBusinessRef.current;
-      if (!dataUserId || !user?.user_id) {
+      const bidAtStart = String(biz?.business_id || biz?.id || '');
+      const seq = ++loadSeqRef.current;
+      const authUser = userRef.current;
+      const uid = String(authUser?.user_id || authUser?.id || '').trim();
+
+      if (!uid || !bidAtStart) {
         if (!hasDisplayedStoresRef.current) {
           setPointsOfSale([]);
           setAllPointsOfSale([]);
@@ -196,6 +187,7 @@ function ActiveStoreScopeProviderImpl({
         }
         return;
       }
+
       if (!isDeliveryBusinessType(biz?.businessType)) {
         setPointsOfSale([]);
         setAllPointsOfSale([]);
@@ -207,27 +199,48 @@ function ActiveStoreScopeProviderImpl({
       const showInitialSpinner = !hasDisplayedStoresRef.current;
       if (showInitialSpinner) setInitialLoading(true);
 
+      const loadOpts = {
+        accountBusinessCount: accountBusinessCountRef.current,
+        skipPdvMerge: true as const,
+      };
+
       try {
-        const state = await loadDeliveryStores(userRef.current, biz ?? null);
-        const retail = state.workCenters.filter(
-          (wc) =>
-            !wc.deletedAt &&
-            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        const workerUser = isInvitedWorkerUser(authUser);
+        const state = workerUser
+          ? await loadTpvPointsOfSaleForBusiness(authUser, biz ?? null, loadOpts)
+          : await loadDeliveryStores(authUser, biz ?? null, loadOpts);
+
+        if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
+
+        const { retail, allPdvs } = scopeFromLoadState(
+          state.workCenters,
+          state.pointsOfSale,
+          authUser,
         );
-        const allPdvs = state.pointsOfSale;
         applyStores(retail, allPdvs);
-        const bid = String(biz?.business_id || biz?.id || '');
-        if (bid) {
-          writeStoresCache(bid, {
-            retailWorkCenters: retail,
-            allPointsOfSale: allPdvs,
-            pointsOfSale: allPdvs.filter((p) => p.active !== false),
-          });
+        writeRetailScopeCache(bidAtStart, { retailWorkCenters: retail, allPointsOfSale: allPdvs });
+
+        if (!workerUser) {
+          void loadDeliveryStores(authUser, biz ?? null, {
+            accountBusinessCount: accountBusinessCountRef.current,
+          })
+            .then((full) => {
+              if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
+              const enriched = scopeFromLoadState(full.workCenters, full.pointsOfSale, authUser);
+              applyStores(enriched.retail, enriched.allPdvs);
+              writeRetailScopeCache(bidAtStart, {
+                retailWorkCenters: enriched.retail,
+                allPointsOfSale: enriched.allPdvs,
+              });
+            })
+            .catch(() => {
+              /* mantener carga rápida */
+            });
         }
       } catch {
-        // Conservar última lista válida (caché o estado previo).
+        /* conservar caché / última lista */
       } finally {
-        if (showInitialSpinner) setInitialLoading(false);
+        if (seq === loadSeqRef.current && showInitialSpinner) setInitialLoading(false);
       }
     };
 
@@ -240,30 +253,30 @@ function ActiveStoreScopeProviderImpl({
         loadInflightRef.current = null;
       }
     }
-  }, [applyStores, dataUserId, user?.user_id]);
+  }, [applyStores]);
 
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  /** Referencia estable: evita bucles de refresh en Sidebar cuando `loading` cambia. */
   const refresh = useCallback(async () => {
     await loadRef.current();
   }, []);
 
-  /** Tras cargar negocios: una sola carga de tiendas/PDV (evita competir con listBusinesses). */
   useEffect(() => {
     if (!businessId || !businessesFetchSettled) return;
+    const uid = String(user?.user_id || user?.id || '').trim();
+    if (!uid) return;
     void load();
-  }, [businessId, businessesFetchSettled, load]);
+  }, [businessId, businessesFetchSettled, user?.user_id, user?.id, load]);
 
   useEffect(() => {
     const scheduleRefresh = () => {
-      clearStoresCache(businessIdRef.current);
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
       refreshDebounceRef.current = setTimeout(() => {
         refreshDebounceRef.current = null;
+        if (businessIdRef.current) clearRetailScopeCache(businessIdRef.current);
         void loadRef.current();
-      }, 500);
+      }, 250);
     };
     window.addEventListener('work-centers:changed', scheduleRefresh);
     return () => {
@@ -273,9 +286,7 @@ function ActiveStoreScopeProviderImpl({
   }, []);
 
   useEffect(() => {
-    const onExt = () => {
-      bump();
-    };
+    const onExt = () => bump();
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onExt);
   }, [bump]);
@@ -287,18 +298,20 @@ function ActiveStoreScopeProviderImpl({
 
   const activeSalesPointId = useMemo(() => {
     if (pointsOfSale.length === 0) return null;
-    const resolved = resolvePreferenceToPdvId(pointsOfSale, activePreferenceRaw);
-    if (resolved) return resolved;
-    return pickDefaultActivePdvId(pointsOfSale);
+    return coerceSelectedPdvId(pointsOfSale, activePreferenceRaw);
   }, [pointsOfSale, activePreferenceRaw]);
 
-  /** Normaliza preferencia (`wc:` → id PDV) y asegura siempre un PDV activo guardado. */
   useEffect(() => {
     if (!businessId || !dataUserId || pointsOfSale.length === 0) return;
     const raw = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    const normalized = normalizeStoredPdvPreference(pointsOfSale, raw);
-    const targetId = normalized || pickDefaultActivePdvId(pointsOfSale);
-    if (!targetId) return;
+    const targetId = coerceSelectedPdvId(pointsOfSale, raw);
+    if (!targetId) {
+      if (raw) {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
+        bump();
+      }
+      return;
+    }
     if (raw !== targetId) {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, targetId);
       bump();

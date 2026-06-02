@@ -26,6 +26,14 @@ import {
   findTeamMemberByUsername,
   findPendingJoinRequest,
   hashPassword,
+  hashPosPin,
+  generatePosPin,
+  isValidPosPin,
+  findPointOfSaleByTerminalCode,
+  findWorkCenterById,
+  findTeamMemberByPosPin,
+  workerCanAccessPdvForTablet,
+  sanitizePointOfSale,
   incrementFailedLoginAttempts,
   isAccountLocked,
   listAllBusinesses,
@@ -66,7 +74,10 @@ import {
   computeWorkerProfileCompletion,
   hasMinimumWorkerIdentity,
   resolveRedirectAfterInvitationAccept,
+  resolveWorkerSessionEntryPath,
+  needsWorkerPayrollSetup,
   WORKER_DEFAULT_LANDING_PATH,
+  WORKER_PAYROLL_SETUP_PATH,
   normalizeWorkerLandingPage,
 } from '../services/workerProfileCompletion.js';
 import { notifyManagersWorkerProfileEvents } from '../services/workerProfileNotifications.js';
@@ -113,9 +124,6 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
   if (pendingInvitationsCount > 0) {
     return '/saas/invitations';
   }
-  if (!hasMinimumWorkerIdentity(account)) {
-    return '/saas/worker/setup-profile';
-  }
 
   const isUserAccount = account.accountType === 'user';
   const isInvitedWorker = Boolean(String(account.invitedBy || '').trim());
@@ -124,15 +132,15 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
   const hasWorkerLanding = landing.startsWith('/saas/worker');
   const isWorker = isUserAccount || isInvitedWorker || (hasWorkerLanding && Boolean(linkedBusiness));
 
-  if (isUserAccount && !String(account.linkedBusinessId || '').trim()) {
+  if (isUserAccount && !linkedBusiness) {
     return '/saas/user-dashboard';
   }
 
   if (isWorker) {
-    if (landing && !ADMIN_ONLY_LANDINGS.has(landing)) {
-      return normalizeWorkerLandingPage(landing);
+    if (linkedBusiness && needsWorkerPayrollSetup(account)) {
+      return WORKER_PAYROLL_SETUP_PATH;
     }
-    return WORKER_DEFAULT_LANDING_PATH;
+    return resolveWorkerSessionEntryPath(account);
   }
 
   return '/auth/gate';
@@ -357,9 +365,7 @@ export async function register(req, res) {
     } else if (pendingInvitationsCount > 0) {
       redirectTo = '/saas/invitations';
     } else if (isUserAccount) {
-      redirectTo = hasMinimumWorkerIdentity(savedAccount)
-        ? '/saas/user-dashboard'
-        : '/saas/worker/setup-profile';
+      redirectTo = '/saas/user-dashboard';
     } else {
       redirectTo = '/auth/onboarding/business-type';
     }
@@ -796,11 +802,16 @@ export async function updateProfile(req, res) {
           const extra = Math.floor(Number(subscription.extraPointOfSaleSlots) || 0);
           merged.extraPointOfSaleSlots = Math.max(0, Math.min(99, extra));
         }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'extraCommercialBrandSlots')) {
+          const extraBrands = Math.floor(Number(subscription.extraCommercialBrandSlots) || 0);
+          merged.extraCommercialBrandSlots = Math.max(0, Math.min(99, extraBrands));
+        }
         if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
           merged.adminProAccess = Boolean(subscription.adminProAccess);
         }
       } else {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
+        merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;
         merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
       }
       nextSubscription = merged;
@@ -1165,6 +1176,13 @@ export async function inviteUser(req, res) {
         message,
       });
 
+    let plainPosPin = String(req.body?.posPin || '').trim();
+    if (plainPosPin && !isValidPosPin(plainPosPin)) {
+      return badRequest(res, 'El PIN de TPV debe tener entre 4 y 6 dígitos numéricos');
+    }
+    if (!plainPosPin) plainPosPin = generatePosPin();
+    invitationDoc.posPinHash = hashPosPin(plainPosPin);
+
     // Si la invitación ya existía pero algún dato ha cambiado, actualizamos.
     if (existingInvitation) {
       invitationDoc.fullName = String(name || existingInvitation.fullName || '').trim();
@@ -1206,6 +1224,7 @@ export async function inviteUser(req, res) {
       isExistingUser: Boolean(existingAccount),
       companyCode: business?.companyCode || '',
       inviteExpiresAt: savedInvitation.expiresAt,
+      posPin: plainPosPin,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1486,6 +1505,7 @@ export async function acceptInvitation(req, res) {
       workerIdentityCompleted,
       pendingTeamInvite: null,
       inviteStatus: 'accepted',
+      posPinHash: invitation.posPinHash || account.posPinHash || '',
       updatedAt: now,
     });
 
@@ -2185,6 +2205,14 @@ async function sendAccountVerificationEmail(req, account) {
     html,
     requireDelivery: process.env.NODE_ENV === 'production',
   });
+  if (process.env.NODE_ENV !== 'production') {
+    const baseUrl = String(process.env.APP_URL || `http://localhost:${process.env.VITE_PORT || 3015}`).replace(/\/+$/, '');
+    const verifyUrl = `${baseUrl}/auth/verify-email-pending?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(fresh.email)}`;
+    logger.info(
+      { tag: 'AUTH_VERIFY_DEV', email: fresh.email, verifyUrl },
+      'Enlace de verificación (solo desarrollo — cópialo si no llega el correo)',
+    );
+  }
   const latest = await resolveFreshAccount(req, fresh);
   return persistEmailVerificationAfterSend(req, latest, rawToken);
 }
@@ -2285,6 +2313,9 @@ export async function saveOnboarding(req, res) {
     }
 
     const wasIncomplete = !account.onboardingCompleted;
+    const prevVerificationDocCount = Array.isArray(account.onboardingData?.companyProfile?.verificationDocuments)
+      ? account.onboardingData.companyProfile.verificationDocuments.length
+      : 0;
     const savedAccount = await saveAccount(req, {
       ...account,
       onboardingCompleted:
@@ -2292,6 +2323,27 @@ export async function saveOnboarding(req, res) {
       onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
       updatedAt: new Date().toISOString(),
     });
+
+    const nextVerificationDocCount = Array.isArray(
+      savedAccount.onboardingData?.companyProfile?.verificationDocuments,
+    )
+      ? savedAccount.onboardingData.companyProfile.verificationDocuments.length
+      : 0;
+    if (nextVerificationDocCount > prevVerificationDocCount) {
+      await logAccountActivity(req, {
+        actorUserId: savedAccount.user_id,
+        actorName: savedAccount.fullName,
+        targetUserId: savedAccount.user_id,
+        type: 'team',
+        action: 'Documentos de verificación de empresa subidos',
+        entityId: savedAccount.user_id,
+        entityLabel: savedAccount.companyName || savedAccount.fullName,
+        metadata: {
+          verificationDocumentCount: nextVerificationDocCount,
+          taxId: savedAccount.onboardingData?.companyProfile?.taxId || '',
+        },
+      }).catch(() => {});
+    }
 
     if (wasIncomplete && Boolean(onboardingCompleted)) {
       const onb = savedAccount.onboardingData || {};
@@ -2944,6 +2996,193 @@ export async function posSwitchUser(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al cambiar de usuario',
+    });
+  }
+}
+
+// ─── TPV Tablet: código de tienda + PIN del trabajador (fichaje + sesión TPV) ──
+
+async function resolveBusinessForPointOfSale(req, pdv) {
+  const wc = pdv.workCenterId ? await findWorkCenterById(req, pdv.workCenterId) : null;
+  const businessId = String(wc?.businessId || wc?.business_id || '').trim();
+  if (businessId) {
+    const business = await findBusinessById(req, businessId);
+    if (business) return business;
+  }
+  const all = await listAllBusinesses(req);
+  return all.find((b) => b.owner_user_id === pdv.user_id && !b.deletedAt) || null;
+}
+
+async function performTpvTabletLogin(req, res, { terminalCode, pin }) {
+  const ip = getClientIp(req);
+
+  if (!terminalCode || !pin) {
+    return badRequest(res, 'Código de tienda y PIN son obligatorios');
+  }
+  if (!isValidPosPin(pin)) {
+    return badRequest(res, 'El PIN debe tener entre 4 y 6 dígitos');
+  }
+
+  const pdv = await findPointOfSaleByTerminalCode(req, terminalCode);
+  if (!pdv) {
+    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+  }
+
+  const business = await resolveBusinessForPointOfSale(req, pdv);
+  if (!business) {
+    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+  }
+
+  const account = await findTeamMemberByPosPin(req, business.business_id, pin);
+  if (!account) {
+    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+  }
+
+  const lockStatus = isAccountLocked(account);
+  if (lockStatus.locked) {
+    const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
+    return res.status(423).json({
+      ok: false,
+      error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''}.`,
+      code: 'ACCOUNT_LOCKED',
+      lockUntil: lockStatus.lockUntil,
+    });
+  }
+
+  if (!workerCanAccessPdvForTablet(account, business, pdv)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'No tienes acceso a esta tienda. Pide al encargado que te asigne el local correcto.',
+      code: 'STORE_NOT_ASSIGNED',
+    });
+  }
+
+  const savedAccount = await saveAccount(req, {
+    ...account,
+    status: 'active',
+    linkedBusinessId: account.linkedBusinessId || business.business_id,
+    lastLoginAt: new Date().toISOString(),
+    failedLoginAttempts: 0,
+    lockUntil: null,
+    updatedAt: new Date().toISOString(),
+  });
+
+  await logAccountActivity(req, {
+    actorUserId: savedAccount.user_id,
+    actorName: savedAccount.fullName,
+    targetUserId: savedAccount.user_id,
+    type: 'login',
+    action: 'Inicio de sesión TPV tablet',
+    entityId: savedAccount.user_id,
+    entityLabel: savedAccount.fullName,
+    ip,
+    metadata: {
+      loginType: 'tpv-tablet',
+      terminalCode: String(terminalCode).trim().toUpperCase(),
+      pdvId: pdv._id,
+      businessId: business.business_id,
+      ip,
+      userAgent: req.headers['user-agent'] || '',
+    },
+  });
+
+  const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+
+  return res.json({
+    ok: true,
+    user: sanitizeAccount(savedAccount),
+    business: {
+      business_id: business.business_id,
+      name: business.name,
+      logo: business.logo || '',
+      owner_user_id: business.owner_user_id || '',
+    },
+    pointOfSale: sanitizePointOfSale(pdv),
+    terminalBinding: {
+      terminalCode: String(pdv.terminalCode || terminalCode).trim().toUpperCase(),
+      pdvId: pdv._id,
+      workCenterId: pdv.workCenterId || '',
+      businessId: business.business_id,
+      dataUserId: pdv.user_id,
+    },
+    accessToken,
+    refreshToken,
+    redirectTo: '/saas/worker/tpv',
+    needsClockIn: true,
+  });
+}
+
+export async function tpvTabletActivate(req, res) {
+  try {
+    const { terminalCode, pin } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode, pin });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al activar el TPV tablet',
+    });
+  }
+}
+
+export async function tpvTabletSwitch(req, res) {
+  try {
+    const { terminalCode, pin } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode, pin });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cambiar de trabajador en el TPV',
+    });
+  }
+}
+
+export async function setUserPosPin(req, res) {
+  try {
+    const targetUserId = String(req.params.userId || '').trim();
+    const { pin } = req.body || {};
+    const actor = req.authUser;
+
+    if (!targetUserId) return badRequest(res, 'Falta userId');
+    if (!isValidPosPin(pin)) {
+      return badRequest(res, 'El PIN debe tener entre 4 y 6 dígitos numéricos');
+    }
+
+    const target = await findAccountByUserId(req, targetUserId);
+    if (!target) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const actorAccount = actor?.userId ? await findAccountByUserId(req, actor.userId) : null;
+    let businessId = target.linkedBusinessId || actorAccount?.linkedBusinessId || '';
+    if (!businessId) {
+      const allBusinesses = await listAllBusinesses(req);
+      const owned = allBusinesses.find((b) => b.owner_user_id === target.user_id);
+      if (owned) businessId = owned.business_id;
+    }
+    if (!businessId) {
+      return res.status(403).json({ ok: false, error: 'No se puede determinar la empresa del usuario' });
+    }
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const actorId = actor?.userId || '';
+    const isOwner = business.owner_user_id === actorId;
+    const actorMember = (business.members || []).find((m) => m.user_id === actorId);
+    const canManage = isOwner || actorMember?.role === 'Admin' || actorAccount?.role === 'Admin';
+    if (!canManage) {
+      return res.status(403).json({ ok: false, error: 'No tienes permiso para cambiar el PIN TPV' });
+    }
+
+    const saved = await saveAccount(req, {
+      ...target,
+      posPinHash: hashPosPin(pin),
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.json({ ok: true, user: sanitizeAccount(saved) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar el PIN TPV',
     });
   }
 }

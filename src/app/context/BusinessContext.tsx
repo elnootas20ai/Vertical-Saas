@@ -202,7 +202,6 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       if (user?.user_id) {
         storeBusinessId(user.user_id, businessId);
       }
-      notifyDeliveryWorkCentersChanged();
     },
     [businesses, user?.user_id],
   );
@@ -220,9 +219,8 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
         setCurrentBusiness(response.business);
         storeBusinessId(user.user_id, response.business.business_id);
-        notifyDeliveryWorkCentersChanged();
-
         const newBusinessId = String(response.business.business_id || '').trim();
+        notifyDeliveryWorkCentersChanged(newBusinessId);
         if (newBusinessId) {
           void import('../lib/onboardingLocalKeys').then(
             ({ armOnboardingTourForBusiness, resetActivationGuidesForBusiness }) => {

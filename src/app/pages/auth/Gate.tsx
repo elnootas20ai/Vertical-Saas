@@ -22,13 +22,14 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useAuth } from '../../context/AuthContext';
-import { WORKER_DEFAULT_LANDING_PATH, normalizeWorkerLandingPage } from '../../lib/workerProfileCompletion';
+import { resolveWorkerSessionEntryPath } from '../../lib/workerProfileCompletion';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
 import { BadgeStatus } from '../../components/gate/BadgeStatus';
 import { BusinessGrid } from '../../components/gate/BusinessGrid';
 import { ModalProximamente } from '../../components/gate/ModalProximamente';
 import { ModalExportar } from '../../components/gate/ModalExportar';
+import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { ModalModulo } from '../../components/gate/ModalModulo';
 import { VehicleImportWizard } from '../../components/saas/VehicleImportWizard';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
@@ -103,11 +104,7 @@ export function Gate() {
     // Worker invitado a una empresa → directo a su zona de trabajador.
     const isWorker = Boolean(user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy);
     if (isWorker) {
-      const ADMIN_ONLY_LANDINGS = new Set(['/saas/dashboard', '/saas/finance', '/saas/reports', '/saas/team', '/saas/billing']);
-      const target = user.landingPage && !ADMIN_ONLY_LANDINGS.has(user.landingPage)
-        ? normalizeWorkerLandingPage(user.landingPage)
-        : WORKER_DEFAULT_LANDING_PATH;
-      navigate(target, { replace: true });
+      navigate(resolveWorkerSessionEntryPath(user), { replace: true });
     }
   }, [user, navigate]);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -928,13 +925,18 @@ export function Gate() {
         icon={<Users className="w-5 h-5 text-emerald-600" />}
         iconBgColor="bg-emerald-50 dark:bg-emerald-900/30"
         filenamePrefix="Clientes_Vertial"
-        data={clients as unknown as Record<string, unknown>[]}
+        data={
+          clients.map((c) => ({
+            ...c,
+            ...resolveClientLocationFields(c),
+          })) as unknown as Record<string, unknown>[]
+        }
         columns={[
           { key: 'name', label: 'Nombre' },
           { key: 'phone', label: 'Teléfono' },
           { key: 'email', label: 'Email' },
           { key: 'dni', label: 'DNI/NIF' },
-          { key: 'address', label: 'Dirección' },
+          { key: 'address', label: 'Calle / dirección' },
           { key: 'city', label: 'Ciudad' },
           { key: 'postalCode', label: 'Código postal' },
           { key: 'status', label: 'Estado' },

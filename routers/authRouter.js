@@ -41,7 +41,10 @@ import {
   saveOnboarding,
   saveBillingCard,
   searchBusinesses,
+  setUserPosPin,
   teamLogin,
+  tpvTabletActivate,
+  tpvTabletSwitch,
   updateNotificationPreferences,
   updatePassword,
   updateProfile,
@@ -66,7 +69,9 @@ import {
   registerSchema,
   resetPasswordSchema,
   saveBillingCardSchema,
+  setPosPinSchema,
   teamLoginSchema,
+  tpvTabletLoginSchema,
   updatePasswordSchema,
   userIdParamSchema,
 } from '../middleware/validate.js';
@@ -87,6 +92,9 @@ authRouter.post('/resend-verification', emailVerificationLimiter, validate(recov
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
 // Team login: miembros entran con código de empresa + usuario + contraseña
 authRouter.post('/team-login', authLimiter, validate(teamLoginSchema), teamLogin);
+// TPV tablet: código de tienda + PIN (activación o cambio de trabajador)
+authRouter.post('/tpv-tablet/activate', authLimiter, validate(tpvTabletLoginSchema), tpvTabletActivate);
+authRouter.post('/tpv-tablet/switch', authLimiter, validate(tpvTabletLoginSchema), tpvTabletSwitch);
 // POS switch: cambio rápido de usuario en TPV (requiere sesión activa)
 authRouter.post('/pos-switch', requireAuthAndEmailVerified, validate(posSwitchUserSchema), posSwitchUser);
 
@@ -103,6 +111,7 @@ authRouter.get('/users', requireAuthAndEmailVerified, listUsers);
 authRouter.get('/roles', requireAuthAndEmailVerified, listRoles);
 authRouter.put('/profile/:userId', requireAuthForProfileUpdate, validateParams(userIdParamSchema), updateProfile);
 authRouter.put('/profile/:userId/password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(updatePasswordSchema), updatePassword);
+authRouter.put('/profile/:userId/pos-pin', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(setPosPinSchema), setUserPosPin);
 authRouter.put('/profile/:userId/reset-password', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resetUserPassword);
 authRouter.post('/profile/:userId/resend-invite', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resendInvite);
 authRouter.get('/profile/:userId/card', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getBillingCard);

@@ -4,6 +4,7 @@ export const AUTH_PATHS = {
   companyLogin: '/auth/login',
   workerLogin: '/auth/worker-login',
   teamLogin: '/auth/team-login',
+  tpvTabletLogin: '/auth/tpv-tablet',
   register: '/auth/register',
   /** Panel público de afiliados (código de afiliado). */
   affiliatePortal: '/panel-afiliado',

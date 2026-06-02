@@ -20,8 +20,18 @@ const STEP_INDEX = 5;
 
 export function PaymentInfo() {
   const navigate = useNavigate();
-  const { saveBillingCard } = useAuth();
+  const { user, isInitializing, refreshCurrentUser, saveBillingCard } = useAuth();
   const { data, updateData, initializeTrial, advanceStep } = useOnboarding();
+
+  useEffect(() => {
+    if (isInitializing) return;
+    if (user?.user_id) return;
+    void refreshCurrentUser().then((result) => {
+      if (!result.ok) {
+        navigate('/auth/login', { replace: true, state: { from: '/auth/onboarding/payment-info' } });
+      }
+    });
+  }, [isInitializing, user?.user_id, refreshCurrentUser, navigate]);
 
   useEffect(() => {
     if (data.completedStep < STEP_INDEX - 1) {
@@ -129,6 +139,12 @@ export function PaymentInfo() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!user?.user_id) {
+      setSubmitError('Tu sesión ha caducado. Inicia sesión de nuevo para guardar la tarjeta.');
+      navigate('/auth/login', { replace: true, state: { from: '/auth/onboarding/payment-info' } });
+      return;
+    }
 
     if (validateForm()) {
       setIsSubmitting(true);

@@ -755,6 +755,8 @@ export interface PointOfSale {
   workCenterId?: string;
   name: string;
   code: string;
+  /** Código de activación TPV tablet (6 caracteres). */
+  terminalCode?: string;
   address: string;
   terminals: TerminalConfig[];
   active: boolean;
@@ -803,8 +805,25 @@ export function buildDeliverySidebarStoreRows(
       !wc.deletedAt &&
       (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
   );
+  const wcIds = new Set(retail.map((wc) => String(wc._id || '').trim()).filter(Boolean));
+  const pdvByWc = new Map<string, PointOfSale>();
+  for (const p of pointsOfSale) {
+    const wcId = String(p.workCenterId || '').trim();
+    if (!wcId || !wcIds.has(wcId)) continue;
+    const prev = pdvByWc.get(wcId);
+    if (!prev) {
+      pdvByWc.set(wcId, p);
+      continue;
+    }
+    const newer =
+      String(p.updatedAt || p.createdAt || '') >= String(prev.updatedAt || prev.createdAt || '')
+        ? p
+        : prev;
+    pdvByWc.set(wcId, newer);
+  }
+
   const rows: DeliverySidebarStoreRow[] = retail.map((wc) => {
-    const pdv = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === wc._id);
+    const pdv = pdvByWc.get(wc._id);
     const wcInactive = wc.active === false;
     if (pdv) {
       const lines = pointOfSaleSidebarLines(pdv);
@@ -827,20 +846,19 @@ export function buildDeliverySidebarStoreRows(
     };
   });
 
-  const linkedPdvIds = new Set(rows.map((r) => r.pdvId).filter(Boolean));
-  for (const pdv of pointsOfSale) {
-    if (!pdv._id || linkedPdvIds.has(pdv._id)) continue;
-    const lines = pointOfSaleSidebarLines(pdv);
+  const usedPdvIds = new Set(rows.map((r) => r.pdvId).filter(Boolean));
+  for (const p of pointsOfSale) {
+    if (p.active === false || usedPdvIds.has(p._id)) continue;
+    const lines = pointOfSaleSidebarLines(p);
     rows.push({
-      rowId: pdv._id,
-      pdvId: pdv._id,
-      workCenterId: String(pdv.workCenterId || '').trim() || undefined,
+      rowId: p._id,
+      pdvId: p._id,
+      workCenterId: String(p.workCenterId || '').trim() || undefined,
       title: lines.title,
       code: lines.code || undefined,
-      inactive: pdv.active === false,
+      inactive: false,
       needsPdv: false,
     });
-    linkedPdvIds.add(pdv._id);
   }
 
   return rows;
@@ -854,6 +872,7 @@ import {
   PDV_RETAIL_LIMITS,
   sanitizePdvCodeInput,
   sanitizeRetailTextField,
+  sanitizeRetailTextFieldInput,
   sanitizeStoreDisplayName,
   stripPdvDisplayNameBase,
   suggestNextPdvCode,
@@ -870,6 +889,7 @@ export {
   PDV_RETAIL_LIMITS,
   sanitizePdvCodeInput,
   sanitizeRetailTextField,
+  sanitizeRetailTextFieldInput,
   sanitizeStoreDisplayName,
   stripPdvDisplayNameBase,
   suggestNextPdvCode,
@@ -986,8 +1006,8 @@ export async function ensureDeliveryPdvForWorkCenter(
           address: nextAddr,
           active: pdvActive,
         });
-      } catch (err) {
-        throw err instanceof Error ? err : new Error('No se pudo actualizar el punto de venta');
+      } catch {
+        return linked;
       }
     }
     return linked;
@@ -1074,6 +1094,21 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
   let wcs: WorkCenter[] = [];
   try {
     wcs = await listWorkCentersForDelivery(id, options?.business ?? null);
+    const bid = String(
+      options?.business?.business_id || (options?.business as { id?: string } | null)?.id || '',
+    ).trim();
+    if (!bid) {
+      wcs = [];
+    } else {
+      wcs = wcs.filter((wc) => {
+        const wb = String(
+          (wc as WorkCenter & { business_id?: string }).businessId ||
+            (wc as WorkCenter & { business_id?: string }).business_id ||
+            '',
+        ).trim();
+        return wb === bid;
+      });
+    }
   } catch {
     return pdvData;
   }
@@ -1089,7 +1124,20 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
     else pdvData.push(ensured);
     pdvData = dedupePointsOfSale(pdvData);
   }
-  return pdvData;
+  return filterPointsOfSaleForWorkCenters(pdvData, wcs);
+}
+
+/** PDV enlazados solo a centros de la lista (misma regla que deliverySetup). */
+function filterPointsOfSaleForWorkCenters(
+  pointsOfSale: PointOfSale[],
+  workCenters: WorkCenter[],
+): PointOfSale[] {
+  const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
+  if (wcIds.size === 0) return [];
+  return pointsOfSale.filter((p) => {
+    const wcId = String(p.workCenterId || '').trim();
+    return wcId && wcIds.has(wcId);
+  });
 }
 
 export async function createPointOfSaleRequest(userId: string, data: Partial<PointOfSale>): Promise<PointOfSale> {

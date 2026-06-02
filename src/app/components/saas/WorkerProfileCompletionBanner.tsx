@@ -5,7 +5,6 @@ import { isWorkerAccount } from '../../lib/authApi';
 import {
   HR_OWNED_FIELD_DEFS,
   WORKER_OWNED_FIELD_DEFS,
-  hasMinimumWorkerIdentity,
   isWorkerProfileSubject,
 } from '../../lib/workerProfileCompletion';
 
@@ -14,7 +13,7 @@ export function WorkerProfileCompletionBanner() {
   const { user } = useAuth();
 
   if (!user || !isWorkerAccount(user) || !isWorkerProfileSubject(user)) return null;
-  if (!hasMinimumWorkerIdentity(user)) return null;
+  if (!String(user.linkedBusinessId || '').trim()) return null;
 
   const completion = user.workerProfileCompletion;
   if (!completion || completion.fullyCompleted) return null;

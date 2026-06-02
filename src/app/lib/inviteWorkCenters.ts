@@ -50,13 +50,16 @@ function formatInviteWorkCenterLabel(wc: WorkCenter): string {
 export async function loadInviteWorkCenters(
   authUser: AuthLike,
   business: Business | null | undefined,
+  options?: { accountBusinessCount?: number },
 ): Promise<WorkCenter[]> {
   const dataUserId = resolveBusinessDataUserId(authUser, business);
   if (!dataUserId) return [];
 
   const businessId = resolveBusinessScopeId(business);
   const all = await listWorkCentersForDelivery(dataUserId, business ?? null);
-  const scoped = filterWorkCentersForBusinessScope(all, businessId);
+  const scoped = filterWorkCentersForBusinessScope(all, businessId, {
+    accountBusinessCount: options?.accountBusinessCount,
+  });
 
   return scoped
     .filter(isAssignableWorkCenter)

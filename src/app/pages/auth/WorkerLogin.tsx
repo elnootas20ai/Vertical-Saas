@@ -188,13 +188,24 @@ export function WorkerLogin() {
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-            ¿Accedes con código de empresa?{' '}
+            ¿No tienes cuenta?{' '}
             <button
               type="button"
-              onClick={() => navigate(AUTH_PATHS.teamLogin)}
+              onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'user' as const } })}
               className="font-medium text-blue-600 hover:underline dark:text-blue-400"
             >
-              Entrar con código
+              Crear cuenta de trabajador
+            </button>
+          </p>
+
+          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
+            ¿Usas el TPV en tablet?{' '}
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+              className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              Entrar con código de tienda
             </button>
           </p>
 

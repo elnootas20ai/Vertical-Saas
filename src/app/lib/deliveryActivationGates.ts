@@ -1,6 +1,6 @@
 import type { DeliveryActivationFlags, DeliveryActivationStepDef } from './deliveryActivationChecklist';
 
-export const DELIVERY_TIENDA_SETTINGS_PATH = '/saas/settings/tienda';
+export const DELIVERY_TIENDA_SETTINGS_PATH = '/saas/settings/tienda?action=new-pdv';
 export const DELIVERY_MARCA_SETTINGS_PATH = '/saas/settings/marca';
 
 export function isDeliveryStoreAndPdvReady(

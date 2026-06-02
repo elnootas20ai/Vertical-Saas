@@ -96,8 +96,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
-import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
-import { filterWorkCentersForBusinessScope } from '../../lib/deliverySetup';
+import {
+  DELIVERY_WORK_CENTERS_CHANGED,
+  loadDeliveryStores,
+} from '../../lib/deliverySetup';
 import {
   ACTIVATION_FOCUS_PARAM,
   clearActivationFocusFromSearch,
@@ -1687,35 +1689,48 @@ function TabBusinesses() {
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'table'>('list');
 
-  type BusinessStats = { brands: number; stores: number; sedes: number; loading: boolean };
+  type BusinessStats = {
+    brands: number;
+    stores: number;
+    pdvCaja: number;
+    sedes: number;
+    loading: boolean;
+  };
   const [businessStats, setBusinessStats] = useState<Record<string, BusinessStats>>({});
 
-  useEffect(() => {
+  const reloadBusinessStats = useCallback(async () => {
     if (!user || businesses.length === 0) {
       setBusinessStats({});
       return;
     }
 
-    let cancelled = false;
     setBusinessStats((prev) => {
       const next: Record<string, BusinessStats> = {};
       for (const b of businesses) {
-        next[b.business_id] = prev[b.business_id] || { brands: 0, stores: 0, sedes: 0, loading: true };
+        next[b.business_id] = prev[b.business_id] || {
+          brands: 0,
+          stores: 0,
+          pdvCaja: 0,
+          sedes: 0,
+          loading: true,
+        };
       }
       return next;
     });
 
-    void Promise.all(
+    const results = await Promise.all(
       businesses.map(async (business) => {
         const dataUserId = resolveBusinessDataUserId(user, business);
-        const [brands, workCenters] = await Promise.all([
+        const [brands, deliveryState] = await Promise.all([
           listBrandsRequest(business.business_id).catch(() => []),
           dataUserId
-            ? listWorkCentersForDelivery(dataUserId, business).catch(() => [])
-            : Promise.resolve([]),
+            ? loadDeliveryStores(user, business).catch(() => ({
+                workCenters: [],
+                pointsOfSale: [],
+              }))
+            : Promise.resolve({ workCenters: [], pointsOfSale: [] }),
         ]);
-        const scopedStores = filterWorkCentersForBusinessScope(workCenters, business.business_id);
-        const active = scopedStores.filter((wc) => !wc.deletedAt && wc.active !== false);
+        const active = deliveryState.workCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
         const retail = active.filter(
           (wc) => wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen',
         );
@@ -1723,22 +1738,36 @@ function TabBusinesses() {
           businessId: business.business_id,
           brands: brands.filter((b) => !b.deletedAt).length,
           stores: retail.length,
+          pdvCaja: deliveryState.pointsOfSale.length,
           sedes: active.length,
         };
       }),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, BusinessStats> = {};
-      for (const r of results) {
-        next[r.businessId] = { brands: r.brands, stores: r.stores, sedes: r.sedes, loading: false };
-      }
-      setBusinessStats(next);
-    });
+    );
 
-    return () => {
-      cancelled = true;
-    };
+    const next: Record<string, BusinessStats> = {};
+    for (const r of results) {
+      next[r.businessId] = {
+        brands: r.brands,
+        stores: r.stores,
+        pdvCaja: r.pdvCaja,
+        sedes: r.sedes,
+        loading: false,
+      };
+    }
+    setBusinessStats(next);
   }, [businesses, user]);
+
+  useEffect(() => {
+    void reloadBusinessStats();
+  }, [reloadBusinessStats]);
+
+  useEffect(() => {
+    const onStoresChanged = () => {
+      void reloadBusinessStats();
+    };
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+  }, [reloadBusinessStats]);
 
   const filteredBusinesses = useMemo(() => {
     let result = [...businesses];
@@ -2242,6 +2271,10 @@ function TabBusinesses() {
                           label: 'Tiendas',
                           icon: <Store className="w-3.5 h-3.5" />,
                           value: stats?.stores ?? 0,
+                          hint:
+                            !loadingStats && stats && stats.pdvCaja < stats.stores
+                              ? `${stats.pdvCaja} con PDV caja`
+                              : undefined,
                           color: 'text-emerald-600 dark:text-emerald-400',
                           bg: 'bg-emerald-50 dark:bg-emerald-900/20',
                           border: 'border-emerald-100 dark:border-emerald-900/40',
@@ -2284,6 +2317,7 @@ function TabBusinesses() {
                             </div>
                             <div className="text-[10px] font-medium text-gray-500 dark:text-gray-400 truncate">
                               {it.label}
+                              {'hint' in it && it.hint ? ` · ${it.hint}` : ''}
                             </div>
                           </div>
                         </div>
@@ -2429,10 +2463,22 @@ function TabBusinesses() {
                           if (!stats || stats.loading) {
                             return <span className="inline-block w-5 h-3 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />;
                           }
+                          const pdvHint =
+                            stats.pdvCaja < stats.stores
+                              ? ` (${stats.pdvCaja} PDV)`
+                              : '';
                           return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-semibold"
+                              title={
+                                stats.pdvCaja < stats.stores
+                                  ? `${stats.pdvCaja} de ${stats.stores} tiendas tienen PDV de caja enlazado`
+                                  : undefined
+                              }
+                            >
                               <Store className="w-3 h-3" />
                               {stats.stores}
+                              {pdvHint}
                             </span>
                           );
                         })()}

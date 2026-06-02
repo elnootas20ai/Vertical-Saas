@@ -73,6 +73,35 @@ export function activationInProgressKey(userId: string, businessId: string): str
   return `vertial_onboarding_in_progress_step:${trimId(userId)}:${trimId(businessId)}`;
 }
 
+function activationForceVisibleKey(userId: string, businessId: string): string {
+  return `vertial_activation_force_visible:${trimId(userId)}:${trimId(businessId)}`;
+}
+
+/** Tras «Tour interactivo» en Ayuda: volver a mostrar la guía del sidebar aunque esté al 100 %. */
+export function setActivationChecklistForceVisible(
+  userId: string,
+  businessId: string,
+  visible: boolean,
+): void {
+  if (!userId || !businessId) return;
+  try {
+    const key = activationForceVisibleKey(userId, businessId);
+    if (visible) localStorage.setItem(key, '1');
+    else localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isActivationChecklistForceVisible(userId: string, businessId: string): boolean {
+  if (!userId || !businessId) return false;
+  try {
+    return localStorage.getItem(activationForceVisibleKey(userId, businessId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function isActivationChecklistDismissed(userId: string, businessId: string): boolean {
   if (!userId || !businessId) return false;
   try {
@@ -110,6 +139,11 @@ export function migrateLegacyOnboardingGuidesForBusinesses(
   if (!uid || businessIds.length === 0) return;
 
   try {
+    const migratedFlag = `vertial_onboarding_legacy_migrated:${uid}`;
+    if (localStorage.getItem(migratedFlag) === '1') {
+      return;
+    }
+
     const legacyTour = localStorage.getItem(onboardingTourCompletedLegacyKey(uid));
     if (legacyTour === ONBOARDING_TOUR_VERSION || legacyTour === '2') {
       for (const bid of businessIds) {
@@ -122,6 +156,7 @@ export function migrateLegacyOnboardingGuidesForBusinesses(
       }
       localStorage.removeItem(onboardingTourCompletedLegacyKey(uid));
     }
+    localStorage.setItem(migratedFlag, '1');
 
     const legacyDismissed =
       localStorage.getItem('vertial_activation_dismissed') === 'true' ||
@@ -188,14 +223,12 @@ export function clearOnboardingDraftForNewAccount(userId: string): void {
 
 export { clearLegacyOnboardingDraft, onboardingDataStorageKey, ONBOARDING_DATA_LEGACY_KEY };
 
-/** Tour ya terminado o saltado para esta empresa (cualquier versión guardada). */
+/** Tour ya terminado o saltado para esta empresa (solo clave por empresa; sin legacy global). */
 export function isOnboardingTourCompleted(userId: string, businessId: string): boolean {
   if (!userId || !businessId) return false;
   try {
     const perBusiness = localStorage.getItem(onboardingTourCompletedKey(userId, businessId));
-    if (perBusiness != null && perBusiness !== '') return true;
-    const legacy = localStorage.getItem(onboardingTourCompletedLegacyKey(userId));
-    return legacy != null && legacy !== '';
+    return perBusiness != null && perBusiness !== '';
   } catch {
     return false;
   }
@@ -309,6 +342,8 @@ export function clearOnboardingTourForBusiness(userId: string, businessId: strin
   if (!userId || !businessId) return;
   try {
     localStorage.removeItem(onboardingTourCompletedKey(userId, businessId));
+    localStorage.removeItem(onboardingTourCompletedLegacyKey(userId));
+    localStorage.removeItem('vertial_onboarding_completed');
     sessionStorage.removeItem(onboardingTourStepKey(userId, businessId));
     sessionStorage.removeItem(onboardingTourActiveKey(userId, businessId));
   } catch {

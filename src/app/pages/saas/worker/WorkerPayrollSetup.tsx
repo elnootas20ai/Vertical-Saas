@@ -8,15 +8,22 @@ import {
   AlertCircle,
   CheckCircle2,
   Wallet,
+  User,
+  Phone,
+  MapPin,
+  Calendar,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import {
   buildDefaultPersonalData,
+  hasMinimumWorkerIdentity,
   markWorkerPayrollBypass,
   mergePersonalData,
   skipWorkerProfileGates,
   WORKER_DEFAULT_LANDING_PATH,
 } from '../../../lib/workerProfileCompletion';
+import { normalizeBirthDateIso } from '../../../lib/birthDateIso';
+import { BirthDateEsField, type BirthDateEsFieldHandle } from '../../../components/saas/BirthDateEsField';
 import {
   formatIbanInput,
   IBAN_DISPLAY_MAX_LENGTH,
@@ -30,13 +37,17 @@ import {
 import { VertialLogo } from '../../../components/VertialLogo';
 import { toast } from 'sonner';
 
-type FieldKey =
+type PayrollFieldKey =
   | 'nationality'
   | 'socialSecurityNumber'
   | 'bankAccount'
   | 'bankName'
   | 'emergencyContact'
   | 'emergencyPhone';
+
+type IdentityFieldKey = 'dni' | 'birthDate' | 'phone' | 'address' | 'city';
+
+type FieldKey = PayrollFieldKey | IdentityFieldKey;
 
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
@@ -119,14 +130,39 @@ function validatePayrollForm(form: {
   return errors;
 }
 
+function validateIdentityFields(
+  form: { dni: string; phone: string; address: string; city: string },
+  birthDateIso: string,
+  birthDisplay: string,
+): FieldErrors {
+  const errors: FieldErrors = {};
+  if (!form.dni.trim()) errors.dni = 'El DNI / NIE es obligatorio';
+  if (!birthDateIso) {
+    errors.birthDate = birthDisplay.trim()
+      ? 'Fecha incompleta: escribe día, mes y año (4 dígitos)'
+      : 'La fecha de nacimiento es obligatoria';
+  }
+  if (!form.phone.trim()) errors.phone = 'El teléfono es obligatorio';
+  if (!form.address.trim()) errors.address = 'La dirección es obligatoria';
+  if (!form.city.trim()) errors.city = 'La ciudad es obligatoria';
+  return errors;
+}
+
 export function WorkerPayrollSetup() {
   const navigate = useNavigate();
   const { user, updateUser } = useAuth();
+  const needsIdentity = !hasMinimumWorkerIdentity(user);
+  const birthDateRef = useRef<BirthDateEsFieldHandle>(null);
   const errorBannerRef = useRef<HTMLDivElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form, setForm] = useState({
+    dni: user?.personalData?.dni || '',
+    birthDate: normalizeBirthDateIso(user?.personalData?.birthDate || ''),
+    phone: user?.phone || '',
+    address: user?.personalData?.address || '',
+    city: user?.personalData?.city || '',
     nationality: user?.personalData?.nationality || 'España',
     postalCode: user?.personalData?.postalCode || '',
     socialSecurityNumber: user?.personalData?.socialSecurityNumber || '',
@@ -175,9 +211,22 @@ export function WorkerPayrollSetup() {
       return;
     }
 
-    const errors = validatePayrollForm(form);
+    const birthDateIso = birthDateRef.current?.commit()
+      || normalizeBirthDateIso(form.birthDate);
+    const birthDisplay = birthDateRef.current?.getDisplay() || '';
+
+    const identityErrors = needsIdentity
+      ? validateIdentityFields(form, birthDateIso, birthDisplay)
+      : {};
+    const payrollErrors = validatePayrollForm(form);
+    const errors = { ...identityErrors, ...payrollErrors };
     if (Object.keys(errors).length > 0) {
-      showValidationErrors(errors, 'Completa todos los campos obligatorios de nómina.');
+      showValidationErrors(
+        errors,
+        needsIdentity
+          ? 'Completa tus datos de identidad y nómina marcados con *.'
+          : 'Completa todos los campos obligatorios de nómina.',
+      );
       return;
     }
 
@@ -187,12 +236,21 @@ export function WorkerPayrollSetup() {
 
     try {
       const payrollPersonal = buildDefaultPersonalData({
+        ...(needsIdentity
+          ? {
+              dni: form.dni.trim(),
+              birthDate: birthDateIso,
+              address: form.address.trim(),
+              city: form.city.trim(),
+            }
+          : {}),
         nationality: form.nationality.trim(),
         postalCode: form.postalCode.trim(),
         socialSecurityNumber: form.socialSecurityNumber.trim(),
       });
 
       const result = await updateUser(userId, {
+        ...(needsIdentity ? { phone: form.phone.trim() } : {}),
         personalData: mergePersonalData(user?.personalData, payrollPersonal),
         employment: {
           bankAccount: normalizeIbanInput(form.bankAccount),
@@ -233,11 +291,15 @@ export function WorkerPayrollSetup() {
           <p className="mb-1 text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
             Paso 2 de 2
           </p>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Datos de nómina</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            {needsIdentity ? 'Alta en la empresa' : 'Datos de nómina'}
+          </h1>
+          {user?.fullName ? (
+            <p className="mt-1 text-sm font-medium text-gray-800 dark:text-gray-200">{user.fullName}</p>
+          ) : null}
           <p className="mt-2 max-w-md text-sm text-gray-500 dark:text-gray-400">
-            Ya formas parte de una empresa. Para darte de alta y pagarte la nómina necesitamos
-            estos datos. Todos los campos con
-            <span className="text-red-500"> *</span> son obligatorios.
+            Ya formas parte de una empresa. Completa esta ficha para el alta laboral y la nómina.
+            Los campos con <span className="text-red-500">*</span> son obligatorios.
           </p>
           {user?.companyName ? (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
@@ -266,6 +328,72 @@ export function WorkerPayrollSetup() {
             </div>
           ) : null}
 
+          {needsIdentity ? (
+            <div className="space-y-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Identidad
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <FormField label="DNI / NIE" htmlFor="payroll-dni" required error={fieldErrors.dni} icon={<User className="h-3.5 w-3.5" />}>
+                    <input
+                      id="payroll-dni"
+                      className={inputClassFor('dni')}
+                      value={form.dni}
+                      onChange={(e) => setField('dni', e.target.value)}
+                      placeholder="12345678A"
+                      autoCapitalize="characters"
+                    />
+                  </FormField>
+                </div>
+                <FormField label="Fecha de nacimiento" htmlFor="payroll-birthDate" required error={fieldErrors.birthDate} icon={<Calendar className="h-3.5 w-3.5" />}>
+                  <BirthDateEsField
+                    ref={birthDateRef}
+                    id="payroll-birthDate"
+                    value={form.birthDate}
+                    onChange={(iso) => setField('birthDate', iso)}
+                    className={inputClassFor('birthDate')}
+                    error={fieldErrors.birthDate}
+                  />
+                </FormField>
+                <FormField label="Teléfono" htmlFor="payroll-phone" required error={fieldErrors.phone} icon={<Phone className="h-3.5 w-3.5" />}>
+                  <input
+                    id="payroll-phone"
+                    className={inputClassFor('phone')}
+                    value={form.phone}
+                    onChange={(e) => setField('phone', e.target.value)}
+                    type="tel"
+                    autoComplete="tel"
+                  />
+                </FormField>
+                <div className="sm:col-span-2">
+                  <FormField label="Dirección" htmlFor="payroll-address" required error={fieldErrors.address} icon={<MapPin className="h-3.5 w-3.5" />}>
+                    <input
+                      id="payroll-address"
+                      className={inputClassFor('address')}
+                      value={form.address}
+                      onChange={(e) => setField('address', e.target.value)}
+                      autoComplete="street-address"
+                    />
+                  </FormField>
+                </div>
+                <FormField label="Ciudad" htmlFor="payroll-city" required error={fieldErrors.city}>
+                  <input
+                    id="payroll-city"
+                    className={inputClassFor('city')}
+                    value={form.city}
+                    onChange={(e) => setField('city', e.target.value)}
+                    autoComplete="address-level2"
+                  />
+                </FormField>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              Nómina
+            </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <FormField label="Nacionalidad" htmlFor="payroll-nationality" required error={fieldErrors.nationality}>
               <input
@@ -374,6 +502,7 @@ export function WorkerPayrollSetup() {
                 autoComplete="tel"
               />
             </FormField>
+          </div>
           </div>
 
           <div className="space-y-2">

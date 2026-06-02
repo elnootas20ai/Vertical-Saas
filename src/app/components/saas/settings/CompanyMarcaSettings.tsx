@@ -52,7 +52,7 @@ import { DeliveryActivationGatePanel } from '../DeliveryActivationGatePanel';
 import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap, ActivationFocusBanner } from '../ActivationGuideUi';
 import { useDeliveryStorePdvGate } from '../../../hooks/useDeliveryStorePdvGate';
-import { ensureDeliveryDefaultBrand } from '../../../lib/deliverySetup';
+import { ensureDeliveryDefaultBrand, notifyDeliveryBrandsChanged } from '../../../lib/deliverySetup';
 import { readImageFileAsDataUrl } from '../../../lib/readImageAsDataUrl';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
@@ -337,7 +337,7 @@ function BrandLineModal({
   );
 
   const wizardSubtitle = editingBrand
-    ? 'Revisa y ajusta cómo se muestra esta línea en catálogo, TPV e informes.'
+    ? 'Revisa y ajusta cómo se muestra esta línea en catálogo, PDV e informes.'
     : 'Configura la identidad de la marca y en qué tiendas estará disponible.';
 
   const handleSubmit = async () => {
@@ -534,7 +534,7 @@ function BrandLineModal({
             {step === 'identidad' && (
               <div className={settingsWizardSectionClass}>
                 <p className={settingsWizardLeadClass}>
-                  Así verán tu marca en el catálogo, el TPV y los informes. El nombre es lo que identifica la línea de venta.
+                  Así verán tu marca en el catálogo, el PDV y los informes. El nombre es lo que identifica la línea de venta.
                 </p>
                 <ActivationFieldWrap fieldKey="brand-name" activeKey={activationHighlight}>
                   <div>
@@ -664,7 +664,7 @@ function BrandLineModal({
                             onChange={(e) => setForm((f) => ({ ...f, primaryColor: e.target.value }))}
                           />
                           <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                            Se usa en la vista previa, catálogo, TPV e informes. El fondo lateral se adapta a este color.
+                            Se usa en la vista previa, catálogo, PDV e informes. El fondo lateral se adapta a este color.
                           </p>
                         </div>
                       </div>
@@ -755,7 +755,7 @@ function BrandLineModal({
             {step === 'operacion' && (
               <div className={settingsWizardSectionClass}>
                 <p className={settingsWizardLeadClass}>
-                  Define cómo se organiza el catálogo y los códigos que verás en TPV e informes.
+                  Define cómo se organiza el catálogo y los códigos que verás en PDV e informes.
                 </p>
                 {isDelivery ? (
                   <div>
@@ -807,7 +807,7 @@ function BrandLineModal({
                   </div>
                 ) : null}
                 <div>
-                  <label className={settingsLabelClass}>Código corto (TPV / informes)</label>
+                  <label className={settingsLabelClass}>Código corto (PDV / informes)</label>
                   <input
                     className={settingsInputClass}
                     placeholder="Ej. PIZ, BUR (opcional)"
@@ -874,7 +874,7 @@ function BrandMarcaHero({
             {brand.description ? (
               <p className="mt-2 line-clamp-2 text-sm text-white/85">{brand.description}</p>
             ) : (
-              <p className="mt-2 text-sm text-white/70">Catálogo, TPV e informes usarán este color y logo.</p>
+              <p className="mt-2 text-sm text-white/70">Catálogo, PDV e informes usarán este color y logo.</p>
             )}
           </div>
           <button
@@ -913,7 +913,8 @@ function BrandMarcaHero({
 export function CompanyMarcaSettings() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
+  const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const businessId = currentBusiness?.business_id || '';
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const isDelivery = (currentBusiness as { businessType?: string } | null)?.businessType === 'delivery';
@@ -976,7 +977,9 @@ export function CompanyMarcaSettings() {
     try {
       const wcs = await listWorkCentersForDelivery(dataUserId, currentBusiness ?? null);
       const scopeId = resolveBusinessScopeId(currentBusiness);
-      const scoped = filterWorkCentersForBusinessScope(wcs, scopeId);
+      const scoped = filterWorkCentersForBusinessScope(wcs, scopeId, {
+        accountBusinessCount,
+      });
       setStores(scoped);
       if (scopeId && isDelivery) {
         const firstRetail = scoped.find(
@@ -993,7 +996,7 @@ export function CompanyMarcaSettings() {
     } catch {
       setStores([]);
     }
-  }, [dataUserId, currentBusiness, isDelivery]);
+  }, [dataUserId, currentBusiness, isDelivery, accountBusinessCount]);
 
   useEffect(() => {
     void loadAll();
@@ -1117,8 +1120,9 @@ export function CompanyMarcaSettings() {
             : `«${created.name}» creada como inactiva. Actívala cuando quieras usarla.`,
         );
       }
-    } catch {
-      toast.error('No se pudo guardar la marca');
+      notifyDeliveryBrandsChanged();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo guardar la marca');
       throw new Error('save failed');
     }
   };
@@ -1130,6 +1134,7 @@ export function CompanyMarcaSettings() {
       await deleteBrandRequest(businessId, brand._id);
       setBrands((prev) => prev.filter((b) => b._id !== brand._id));
       toast.success('Marca eliminada');
+      notifyDeliveryBrandsChanged();
     } catch {
       toast.error('No se pudo eliminar');
     }
@@ -1141,6 +1146,7 @@ export function CompanyMarcaSettings() {
       const updated = await updateBrandRequest(businessId, { ...brand, active: nextActive });
       setBrands((prev) => sortBrandsForDisplay(prev.map((b) => (b._id === updated._id ? updated : b))));
       toast.success(nextActive ? `"${updated.name}" activada` : `"${updated.name}" desactivada`);
+      notifyDeliveryBrandsChanged();
     } catch {
       toast.error('Error al actualizar la marca');
     } finally {
@@ -1528,7 +1534,7 @@ export function CompanyMarcaSettings() {
                   <span className="font-semibold text-gray-800 dark:text-gray-200">
                     {deactivateBrandTarget.name}
                   </span>{' '}
-                  dejará de estar disponible en catálogo, TPV e informes hasta que la vuelvas a activar.
+                  dejará de estar disponible en catálogo, PDV e informes hasta que la vuelvas a activar.
                 </p>
               </div>
             </div>
@@ -1569,10 +1575,11 @@ export function CompanyMarcaSettings() {
                 ? ` y ${entitlements.commercialBrands} línea comercial adicional.`
                 : ' sin líneas comerciales extra (p. ej. Pizzería, Burger).'}
               {' '}
-              Para añadir otra marca de catálogo, activa PRO o contrata ampliación.
+              Para añadir otra línea (Pizzería, Burger…), activa PRO, contrata ampliación o pide a soporte que
+              amplíe el cupo en el panel de administración.
             </p>
             <p className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 dark:border-violet-900 dark:bg-violet-950/20 dark:text-violet-200">
-              Marcas comerciales actuales: {commercialBrandCount} / {entitlements.commercialBrands}
+              Marcas comerciales (sin contar «General»): {commercialBrandCount} / {entitlements.commercialBrands}
             </p>
             <div className="mt-5 flex gap-2">
               <button

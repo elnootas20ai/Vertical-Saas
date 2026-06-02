@@ -7,8 +7,8 @@ import {
   Users,
   BriefcaseBusiness,
   UserCheck,
-  KeyRound,
   Handshake,
+  Monitor,
 } from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
@@ -99,7 +99,7 @@ export function Entry() {
               </div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Trabajador</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Alta personal; te unes por invitación o código de empresa.
+                Alta personal; te unes por invitación de tu empresa.
               </p>
               <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
                 {roleHighlights.employee.map((item) => (
@@ -206,11 +206,11 @@ export function Entry() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate(AUTH_PATHS.teamLogin)}
-                className="w-full px-5 py-3 border-2 border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 rounded-xl font-medium hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors flex items-center justify-center gap-2"
+                onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+                className="w-full px-5 py-3 border-2 border-indigo-200 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 rounded-xl font-medium hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors flex items-center justify-center gap-2"
               >
-                <KeyRound className="w-4 h-4" />
-                Entrar con código de empresa
+                <Monitor className="w-4 h-4" />
+                TPV en tablet
               </button>
             </div>
           </div>

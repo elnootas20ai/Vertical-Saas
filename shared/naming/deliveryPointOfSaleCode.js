@@ -136,12 +136,23 @@ export function validatePdvCodeInput(raw) {
   return null;
 }
 
+/** Normaliza al guardar (sin espacios al inicio/fin). */
 export function sanitizeRetailTextField(raw, maxLen) {
   return clampText(
     String(raw || '')
       .replace(CONTROL_CHARS_RE, '')
       .trim()
       .replace(/\s+/g, ' '),
+    maxLen,
+  );
+}
+
+/** Misma limpieza que {@link sanitizeRetailTextField} pero sin trim: permite espacios mientras se escribe. */
+export function sanitizeRetailTextFieldInput(raw, maxLen) {
+  return clampText(
+    String(raw || '')
+      .replace(CONTROL_CHARS_RE, '')
+      .replace(/\s{2,}/g, ' '),
     maxLen,
   );
 }

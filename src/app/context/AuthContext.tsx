@@ -48,6 +48,7 @@ import {
   updateProfileRequest,
   verifyEmailRequest,
 } from '../lib/authApi';
+import { tpvTabletActivateRequest, tpvTabletSwitchRequest } from '../lib/tpvTabletApi';
 
 type User = AuthUser;
 
@@ -170,6 +171,24 @@ export interface AuthContextType {
     success: boolean;
     error?: string;
     switchedFrom?: string;
+  }>;
+  tpvTabletLogin: (terminalCode: string, pin: string, isSwitch?: boolean) => Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    lockUntil?: string;
+    user?: User;
+    business?: { business_id: string; name: string; logo: string; owner_user_id?: string };
+    pointOfSale?: import('../lib/deliveryApi').PointOfSale;
+    terminalBinding?: {
+      terminalCode: string;
+      pdvId: string;
+      workCenterId: string;
+      businessId: string;
+      dataUserId: string;
+    };
+    needsClockIn?: boolean;
   }>;
 }
 
@@ -855,6 +874,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const tpvTabletLogin = async (terminalCode: string, pin: string, isSwitch = false): Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    lockUntil?: string;
+    user?: User;
+    business?: { business_id: string; name: string; logo: string; owner_user_id?: string };
+    pointOfSale?: import('../lib/deliveryApi').PointOfSale;
+    terminalBinding?: {
+      terminalCode: string;
+      pdvId: string;
+      workCenterId: string;
+      businessId: string;
+      dataUserId: string;
+    };
+    needsClockIn?: boolean;
+  }> => {
+    try {
+      const response = isSwitch
+        ? await tpvTabletSwitchRequest(terminalCode, pin)
+        : await tpvTabletActivateRequest(terminalCode, pin);
+      if (!response.user) {
+        return { success: false, error: 'No se recibió usuario desde el backend' };
+      }
+      setSessionUser(response.user);
+      return {
+        success: true,
+        redirectTo: response.redirectTo,
+        user: response.user,
+        business: response.business,
+        pointOfSale: response.pointOfSale,
+        terminalBinding: response.terminalBinding,
+        needsClockIn: response.needsClockIn,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al iniciar sesión en el TPV';
+      if (message.includes('bloqueada')) {
+        return { success: false, error: message, code: 'ACCOUNT_LOCKED' };
+      }
+      return { success: false, error: message };
+    }
+  };
+
   const updateOnboardingData = async (data: Record<string, unknown>) => {
     const nextCompanyName =
       typeof data.companyProfile === 'object' &&
@@ -914,6 +977,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         revokeOtherSessions,
         teamLogin,
         posSwitchUser,
+        tpvTabletLogin,
       }}
     >
       {children}
