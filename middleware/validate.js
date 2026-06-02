@@ -164,7 +164,6 @@ export const posSwitchUserSchema = z.object({
 
 export const tpvTabletLoginSchema = z.object({
   terminalCode: z.string().min(4, 'El código de tienda es obligatorio').max(12).trim(),
-  pin: z.string().regex(/^\d{4,6}$/, 'El PIN debe tener entre 4 y 6 dígitos'),
 });
 
 export const setPosPinSchema = z.object({

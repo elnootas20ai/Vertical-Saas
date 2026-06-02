@@ -15,8 +15,10 @@ import {
   Coffee,
   DollarSign,
   Download,
+  Edit2,
   Eye,
   File,
+  Save,
   FileText,
   FolderOpen,
   Loader2,
@@ -43,6 +45,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatIbanInput } from '../../lib/employmentBankUtils';
+import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type {
@@ -79,6 +82,15 @@ import {
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { toast } from 'sonner';
+import {
+  computeWorkerProfileCompletion,
+  HR_OWNED_FIELD_DEFS,
+} from '../../lib/workerProfileCompletion';
+
+const HR_MANAGER_ROLES = new Set(['Admin', 'Superadmin', 'Gerente', 'Administrador', 'Encargado']);
+
+const inputClassName =
+  'w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100';
 
 type DetailTab = 'info' | 'labor-cost' | 'schedule' | 'clockins' | 'vacations' | 'assignments' | 'permissions' | 'documents' | 'message';
 
@@ -140,6 +152,8 @@ function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
     emergencyContact: emp?.emergencyContact || '',
     emergencyPhone: emp?.emergencyPhone || '',
     salesPointId: emp?.salesPointId || '',
+    contributionGroup: emp?.contributionGroup || '',
+    mutualInsurance: emp?.mutualInsurance || '',
     grossSalary: emp?.grossSalary,
     socialSecurityCost: emp?.socialSecurityCost,
     otherCosts: emp?.otherCosts,
@@ -493,6 +507,14 @@ export function TeamMemberDetail() {
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [showPayrollUpload, setShowPayrollUpload] = useState(false);
   const [payrollDeleting, setPayrollDeleting] = useState<string | null>(null);
+  const [editingHr, setEditingHr] = useState(false);
+  const [hrForm, setHrForm] = useState<EmploymentInfo>(() => buildEmploymentInfo());
+  const [savingHr, setSavingHr] = useState(false);
+
+  const canManageHr = HR_MANAGER_ROLES.has(String(user?.role || ''));
+  const profileCompletion = member
+    ? (member.workerProfileCompletion || computeWorkerProfileCompletion(member))
+    : null;
 
   // ─── Load member ────────────────────────────────────────────────────────────
 
@@ -510,6 +532,45 @@ export function TeamMemberDetail() {
       })
       .finally(() => setLoading(false));
   }, [userId, currentBusiness?.business_id]);
+
+  useEffect(() => {
+    if (!member) return;
+    setHrForm(buildEmploymentInfo(member.employment));
+    setEditingHr(false);
+  }, [member]);
+
+  const handleSaveHr = async () => {
+    if (!member) return;
+    setSavingHr(true);
+    try {
+      const employment = buildEmploymentInfo({
+        ...member.employment,
+        ...hrForm,
+        startDate: hrForm.startDate,
+        contributionGroup: hrForm.contributionGroup?.trim() || '',
+        mutualInsurance: hrForm.mutualInsurance?.trim() || '',
+        contractType: hrForm.contractType,
+        workday: hrForm.workday,
+        salary: hrForm.salary?.trim() || '',
+        department: hrForm.department?.trim() || '',
+        position: hrForm.position?.trim() || '',
+        schedule: hrForm.schedule?.trim() || '',
+      });
+      const result = await updateUser(member.user_id, { employment });
+      if (!result.success || !result.user) {
+        toast.error(result.error || 'No se pudo guardar el alta laboral');
+        return;
+      }
+      setMember(result.user);
+      setHrForm(buildEmploymentInfo(result.user.employment));
+      setEditingHr(false);
+      toast.success('Alta laboral guardada');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setSavingHr(false);
+    }
+  };
 
   // ─── Load tab data ──────────────────────────────────────────────────────────
 
@@ -854,6 +915,22 @@ export function TeamMemberDetail() {
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'info' && (
           <div className="space-y-6">
+            {profileCompletion && !profileCompletion.hrCompleted && (
+              <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-900/20">
+                <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">
+                  Pendiente de alta laboral (RRHH / gestoría)
+                </p>
+                <p className="mt-0.5 text-xs text-violet-700 dark:text-violet-300">
+                  Faltan:{' '}
+                  {HR_OWNED_FIELD_DEFS
+                    .filter((f) => profileCompletion.hrMissing?.includes(f.id))
+                    .map((f) => f.label)
+                    .join(', ') || 'datos de gestoría'}
+                  . Complétalos abajo y pulsa Guardar.
+                </p>
+              </div>
+            )}
+
             {/* Datos personales */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
@@ -870,36 +947,181 @@ export function TeamMemberDetail() {
               </div>
             </div>
 
-            {/* Datos laborales */}
-            <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <Briefcase className="w-4 h-4 text-emerald-500" />
-                Datos laborales
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <InfoField label="Rol" value={member.role} />
-                <InfoField label="Departamento" value={emp.department} />
-                <InfoField label="Cargo / Posición" value={emp.position} />
-                <InfoField label="Fecha de alta" value={emp.startDate ? new Date(emp.startDate).toLocaleDateString('es-ES') : undefined} />
-                <InfoField label="Tipo de contrato" value={emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] || emp.contractType : undefined} />
-                <InfoField label="Jornada" value={emp.workday ? WORKDAY_LABELS[emp.workday] || emp.workday : undefined} />
-                <InfoField label="Horario" value={emp.schedule} />
-                {emp.notes && (
-                  <div className="sm:col-span-2 lg:col-span-3">
-                    <InfoField label="Notas" value={emp.notes} />
-                  </div>
+            {/* Alta laboral — RRHH / gestoría (editable) */}
+            <div className="rounded-2xl border border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-800 p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-violet-500" />
+                  Alta laboral (RRHH / gestoría)
+                </h3>
+                {canManageHr && !editingHr && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingHr(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 dark:border-violet-700 dark:bg-violet-900/30 dark:text-violet-200 dark:hover:bg-violet-900/50"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    Editar alta laboral
+                  </button>
                 )}
               </div>
+
+              {!canManageHr && (
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  Solo Admin o Gerente puede completar el alta. Los datos bancarios los rellena el trabajador en su ficha.
+                </p>
+              )}
+
+              {editingHr && canManageHr ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-violet-800 dark:text-violet-300">
+                        Fecha de alta *
+                      </label>
+                      <input
+                        type="date"
+                        className={inputClassName}
+                        value={hrForm.startDate?.slice(0, 10) || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-violet-800 dark:text-violet-300">
+                        Grupo de cotización *
+                      </label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.contributionGroup || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, contributionGroup: e.target.value }))}
+                        placeholder="Ej: 05"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-violet-800 dark:text-violet-300">
+                        Mutua *
+                      </label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.mutualInsurance || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, mutualInsurance: e.target.value }))}
+                        placeholder="Nombre de la mutua"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Departamento</label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.department || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, department: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Cargo / Posición</label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.position || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, position: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Tipo de contrato</label>
+                      <select
+                        className={inputClassName}
+                        value={hrForm.contractType || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, contractType: e.target.value }))}
+                      >
+                        <option value="">Sin especificar</option>
+                        <option value="indefinido">Indefinido</option>
+                        <option value="temporal">Temporal</option>
+                        <option value="practicas">Prácticas</option>
+                        <option value="formacion">Formación</option>
+                        <option value="autonomo">Autónomo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Jornada</label>
+                      <select
+                        className={inputClassName}
+                        value={hrForm.workday || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, workday: e.target.value }))}
+                      >
+                        <option value="">Sin especificar</option>
+                        <option value="completa">Completa</option>
+                        <option value="parcial">Parcial</option>
+                        <option value="media">Media jornada</option>
+                        <option value="flexible">Flexible</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Salario bruto anual</label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.salary || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, salary: e.target.value }))}
+                        placeholder="Ej: 28.000 €"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Horario</label>
+                      <input
+                        className={inputClassName}
+                        value={hrForm.schedule || ''}
+                        onChange={(e) => setHrForm((prev) => ({ ...prev, schedule: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={savingHr}
+                      onClick={() => void handleSaveHr()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                    >
+                      {savingHr ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Guardar alta laboral
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingHr}
+                      onClick={() => {
+                        setHrForm(buildEmploymentInfo(member.employment));
+                        setEditingHr(false);
+                      }}
+                      className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <InfoField label="Rol" value={member.role} />
+                  <InfoField label="Fecha de alta" value={emp.startDate ? new Date(emp.startDate).toLocaleDateString('es-ES') : undefined} />
+                  <InfoField label="Grupo de cotización" value={emp.contributionGroup} />
+                  <InfoField label="Mutua" value={emp.mutualInsurance} />
+                  <InfoField label="Departamento" value={emp.department} />
+                  <InfoField label="Cargo / Posición" value={emp.position} />
+                  <InfoField label="Tipo de contrato" value={emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] || emp.contractType : undefined} />
+                  <InfoField label="Jornada" value={emp.workday ? WORKDAY_LABELS[emp.workday] || emp.workday : undefined} />
+                  <InfoField label="Salario bruto anual" value={emp.salary} />
+                  <InfoField label="Horario" value={emp.schedule} />
+                  {emp.notes && (
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <InfoField label="Notas" value={emp.notes} />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Datos administrativos (gestoría) */}
+            {/* Datos del trabajador (nómina — rellena el empleado) */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-purple-500" />
-                Datos administrativos (gestoría)
+                <Briefcase className="w-4 h-4 text-blue-500" />
+                Datos de nómina (trabajador)
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                <InfoField label="Salario bruto anual" value={emp.salary} />
                 <InfoField label="Cuenta bancaria (IBAN)" value={emp.bankAccount} monoLarge />
                 <InfoField label="Banco" value={emp.bankName} />
                 <InfoField label="Último acceso" value={member.lastLoginAt ? new Date(member.lastLoginAt).toLocaleString('es-ES') : undefined} />

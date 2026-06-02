@@ -1,5 +1,5 @@
 /**
- * Verificación E2E TPV tablet: login admin → PDV con terminalCode → PIN → activate.
+ * Verificación E2E TPV tablet: login admin → PDV con terminalCode → activate.
  * Uso: node scripts/verify-tpv-tablet.mjs
  */
 import dotenv from 'dotenv';
@@ -15,8 +15,6 @@ dotenv.config({ path: path.join(root, '.env') });
 const BASE = process.env.VERIFY_API_BASE || 'http://127.0.0.1:3001';
 const EMAIL = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
 const PASSWORD = String(process.env.SAAS_LOGIN_PASSWORD || '').trim();
-const TEST_PIN = '4321';
-
 async function api(route, { method = 'GET', body, token } = {}) {
   const res = await fetch(`${BASE}${route}`, {
     method,
@@ -91,51 +89,9 @@ async function main() {
   }
   console.log('OK  pdv', pdv.name, '· terminalCode=', pdv.terminalCode);
 
-  const usersRes = await api('/api/auth/users', { token });
-  const users = usersRes.data?.users || usersRes.data?.data || [];
-  let worker = users.find(
-    (u) =>
-      u.user_id !== admin.user_id &&
-      u.linkedBusinessId === business.business_id &&
-      String(u.employment?.salesPointId || '').trim(),
-  );
-  if (!worker) {
-    worker = users.find(
-      (u) => u.user_id !== admin.user_id && u.linkedBusinessId === business.business_id,
-    );
-  }
-  if (!worker?.user_id && business.owner_user_id === admin.user_id) {
-    worker = admin;
-  }
-  if (!worker?.user_id) {
-    console.error('FAIL — no hay trabajador en el equipo para probar PIN');
-    process.exit(1);
-  }
-  console.log('OK  worker', worker.fullName || worker.email);
-
-  const setPin = await api(`/api/auth/profile/${encodeURIComponent(worker.user_id)}/pos-pin`, {
-    method: 'PUT',
-    token,
-    body: { pin: TEST_PIN },
-  });
-  if (!setPin.data?.ok) {
-    console.error('FAIL — set pos-pin', setPin.data?.error || setPin.status);
-    process.exit(1);
-  }
-  console.log('OK  pos-pin asignado');
-
-  if (worker.employment?.salesPointId && pdv.workCenterId) {
-    const ref = String(worker.employment.salesPointId).trim();
-    const wcId = String(pdv.workCenterId).trim();
-    const matches = ref === pdv._id || ref === wcId || ref === `wc:${wcId}`;
-    if (!matches) {
-      console.warn('WARN — trabajador asignado a otra tienda; activate puede devolver 403');
-    }
-  }
-
   const activate = await api('/api/auth/tpv-tablet/activate', {
     method: 'POST',
-    body: { terminalCode: pdv.terminalCode, pin: TEST_PIN },
+    body: { terminalCode: pdv.terminalCode },
   });
   if (!activate.data?.ok || !activate.data?.accessToken) {
     console.error('FAIL — tpv-tablet/activate', activate.data?.error || activate.data?.code || activate.status);
@@ -147,7 +103,7 @@ async function main() {
 
   const switchRes = await api('/api/auth/tpv-tablet/switch', {
     method: 'POST',
-    body: { terminalCode: pdv.terminalCode, pin: TEST_PIN },
+    body: { terminalCode: pdv.terminalCode },
   });
   if (!switchRes.data?.ok) {
     console.error('FAIL — tpv-tablet/switch', switchRes.data?.error || switchRes.status);

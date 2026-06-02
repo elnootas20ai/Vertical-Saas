@@ -43,11 +43,10 @@ export interface TpvTabletLoginResult extends ApiEnvelope<AuthUser> {
 
 export async function tpvTabletActivateRequest(
   terminalCode: string,
-  pin: string,
 ): Promise<TpvTabletLoginResult> {
   const result = await apiRequest<TpvTabletLoginResult>('/api/auth/tpv-tablet/activate', {
     method: 'POST',
-    body: JSON.stringify({ terminalCode, pin }),
+    body: JSON.stringify({ terminalCode }),
   });
   if (result.accessToken) cacheAccessToken(result.accessToken);
   return result;
@@ -55,11 +54,10 @@ export async function tpvTabletActivateRequest(
 
 export async function tpvTabletSwitchRequest(
   terminalCode: string,
-  pin: string,
 ): Promise<TpvTabletLoginResult> {
   const result = await apiRequest<TpvTabletLoginResult>('/api/auth/tpv-tablet/switch', {
     method: 'POST',
-    body: JSON.stringify({ terminalCode, pin }),
+    body: JSON.stringify({ terminalCode }),
   });
   if (result.accessToken) cacheAccessToken(result.accessToken);
   return result;

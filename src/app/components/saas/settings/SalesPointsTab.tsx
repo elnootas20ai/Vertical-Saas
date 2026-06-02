@@ -2376,7 +2376,7 @@ export function SalesPointsTab() {
                       </div>
                     </div>
                     <p className="text-[10px] leading-snug text-indigo-800/90 dark:text-indigo-200/90">
-                      La activación es en la tablet: Acceso → TPV en tablet → este código + PIN del trabajador.
+                      La activación es en la tablet: Acceso → TPV en tablet → introduce este código.
                     </p>
                     <button
                       type="button"

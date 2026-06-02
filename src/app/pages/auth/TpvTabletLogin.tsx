@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, KeyRound, Monitor, Store } from 'lucide-react';
+import { ArrowLeft, Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
@@ -12,54 +12,28 @@ import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import { readTpvTabletBinding, writeTpvTabletBinding, clearTpvTabletBinding } from '../../lib/tpvTabletSession';
 
-type Step = 'terminal' | 'pin';
-
 export function TpvTabletLogin() {
   const navigate = useNavigate();
   const { tpvTabletLogin } = useAuth();
   const { switchBusiness, reloadBusinesses } = useBusiness();
   const binding = readTpvTabletBinding();
 
-  const [step, setStep] = useState<Step>(binding ? 'pin' : 'terminal');
   const [terminalCode, setTerminalCode] = useState(binding?.terminalCode || '');
-  const [pin, setPin] = useState('');
-  const [errors, setErrors] = useState<{ terminalCode?: string; pin?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{ terminalCode?: string; general?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [storeLabel, setStoreLabel] = useState(binding?.pdvName || binding?.businessName || '');
 
-  const pinRef = useRef<HTMLInputElement>(null);
   const terminalRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (step === 'pin') {
-      setTimeout(() => pinRef.current?.focus(), 80);
-    } else {
-      setTimeout(() => terminalRef.current?.focus(), 80);
-    }
-  }, [step]);
+    setTimeout(() => terminalRef.current?.focus(), 80);
+  }, []);
 
-  const handleTerminalNext = () => {
-    if (!terminalCode.trim()) {
-      setErrors({ terminalCode: 'Introduce el código de la tienda' });
-      return;
-    }
-    setErrors({});
-    setStep('pin');
-  };
-
-  const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleTerminalNext();
-    }
-  };
-
-  const performLogin = async (e: FormEvent) => {
-    e.preventDefault();
+  const performLogin = async (e?: FormEvent) => {
+    e?.preventDefault();
     const code = terminalCode.trim().toUpperCase();
     const nextErrors: typeof errors = {};
-    if (!code) nextErrors.terminalCode = 'Código de tienda obligatorio';
-    if (!/^\d{4,6}$/.test(pin.trim())) nextErrors.pin = 'PIN de 4–6 dígitos';
+    if (!code) nextErrors.terminalCode = 'Introduce el código de la tienda';
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -74,7 +48,7 @@ export function TpvTabletLogin() {
     setIsSubmitting(true);
     setErrors({});
 
-    const result = await tpvTabletLogin(code, pin.trim(), Boolean(binding));
+    const result = await tpvTabletLogin(code, Boolean(binding));
     setIsSubmitting(false);
 
     if (!result.success) {
@@ -139,11 +113,16 @@ export function TpvTabletLogin() {
     navigate(result.redirectTo || '/saas/worker/tpv');
   };
 
+  const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      void performLogin();
+    }
+  };
+
   const resetTerminal = () => {
     clearTpvTabletBinding();
-    setStep('terminal');
     setTerminalCode('');
-    setPin('');
     setStoreLabel('');
     setErrors({});
   };
@@ -163,11 +142,11 @@ export function TpvTabletLogin() {
             <div>
               <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">TPV Tablet</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {step === 'pin' && storeLabel
+                {storeLabel
                   ? storeLabel
                   : binding
-                    ? 'Cambio de trabajador — introduce tu PIN'
-                    : 'Activa la tablet de esta tienda (solo la primera vez pide el código)'}
+                    ? 'Introduce el código para entrar al TPV'
+                    : 'Activa la tablet con el código de tu tienda'}
               </p>
             </div>
           </div>
@@ -179,89 +158,42 @@ export function TpvTabletLogin() {
           )}
 
           <form onSubmit={performLogin} className="space-y-5">
-            {step === 'terminal' ? (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                    Código de tienda
-                  </label>
-                  <ACCESO__Input
-                    ref={terminalRef}
-                    value={terminalCode}
-                    onChange={(e) => {
-                      setTerminalCode(e.target.value.toUpperCase());
-                      setErrors((prev) => ({ ...prev, terminalCode: undefined, general: undefined }));
-                    }}
-                    onKeyDown={handleTerminalKeyDown}
-                    placeholder="Ej. ABC123"
-                    autoComplete="off"
-                    autoCapitalize="characters"
-                    className="font-mono uppercase tracking-widest text-center text-lg"
-                    icon={<Store className="w-4 h-4" />}
-                  />
-                  {errors.terminalCode && (
-                    <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
-                  )}
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    Lo encuentras en Ajustes → Tiendas, en la tienda que quieres activar.
-                  </p>
-                </div>
-                <ACCESO__Button
-                  type="button"
-                  onClick={handleTerminalNext}
-                  className="w-full"
-                  icon="next"
-                >
-                  Continuar
-                </ACCESO__Button>
-              </>
-            ) : (
-              <>
-                {!binding && (
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
-                    <span className="font-mono tracking-wider">{terminalCode}</span>
-                    <button type="button" onClick={resetTerminal} className="text-indigo-600 hover:underline">
-                      Cambiar tienda
-                    </button>
-                  </div>
-                )}
-                {binding && (
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
-                    <span className="font-mono tracking-wider">{binding.terminalCode}</span>
-                    <button type="button" onClick={resetTerminal} className="text-indigo-600 hover:underline">
-                      Otra tienda
-                    </button>
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                    PIN del trabajador
-                  </label>
-                  <ACCESO__Input
-                    ref={pinRef}
-                    type="password"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={pin}
-                    onChange={(e) => {
-                      setPin(e.target.value.replace(/\D/g, '').slice(0, 6));
-                      setErrors((prev) => ({ ...prev, pin: undefined, general: undefined }));
-                    }}
-                    placeholder="••••"
-                    autoComplete="off"
-                    className="font-mono text-center text-2xl tracking-[0.4em]"
-                    icon={<KeyRound className="w-4 h-4" />}
-                  />
-                  {errors.pin && <p className="mt-1 text-xs text-red-600">{errors.pin}</p>}
-                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    Al entrar se registra tu fichaje de entrada y se abre el TPV de este local.
-                  </p>
-                </div>
-                <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
-                  {isSubmitting ? 'Entrando…' : binding ? 'Cambiar trabajador' : 'Activar TPV'}
-                </ACCESO__Button>
-              </>
+            {binding && (
+              <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
+                <span>Tablet vinculada a esta tienda</span>
+                <button type="button" onClick={resetTerminal} className="text-indigo-600 hover:underline">
+                  Otra tienda
+                </button>
+              </div>
             )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                Código de tienda
+              </label>
+              <ACCESO__Input
+                ref={terminalRef}
+                value={terminalCode}
+                onChange={(e) => {
+                  setTerminalCode(e.target.value.toUpperCase());
+                  setErrors((prev) => ({ ...prev, terminalCode: undefined, general: undefined }));
+                }}
+                onKeyDown={handleTerminalKeyDown}
+                placeholder="Ej. ABC123"
+                autoComplete="off"
+                autoCapitalize="characters"
+                className="font-mono uppercase tracking-widest text-center text-lg"
+                icon={<Store className="w-4 h-4" />}
+              />
+              {errors.terminalCode && (
+                <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
+              )}
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Lo encuentras en Ajustes → Tiendas, en la tienda que quieres activar.
+              </p>
+            </div>
+            <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? 'Entrando…' : binding ? 'Entrar al TPV' : 'Activar TPV'}
+            </ACCESO__Button>
           </form>
         </div>
 
