@@ -265,6 +265,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [adminProAccess, setAdminProAccess] = useState(
     Boolean(account.subscription?.adminProAccess),
   );
+  const [billingExempt, setBillingExempt] = useState(
+    Boolean((account.subscription as { billingExempt?: boolean } | undefined)?.billingExempt),
+  );
   const [isBlocked, setIsBlocked] = useState(account.status === 'inactive');
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -277,7 +280,35 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [saveError, setSaveError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [grantingMonths, setGrantingMonths] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   const [grantResult, setGrantResult] = useState<{ ok: boolean; months?: number; error?: string } | null>(null);
+  const [reactivateResult, setReactivateResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  const handleReactivateAccount = async () => {
+    setReactivating(true);
+    setReactivateResult(null);
+    try {
+      const res = await apiFetch('/api/admin/monei/reactivate-account', {
+        method: 'POST',
+        body: JSON.stringify({ userId: account.user_id, billingExempt: true }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSubscriptionStatus('subscription_active');
+        setBillingExempt(true);
+        setReactivateResult({ ok: true });
+        const updated = await updateUser(account.user_id, {});
+        if (updated.user) onSaved(updated.user);
+      } else {
+        setReactivateResult({ ok: false, error: data.error || 'Error desconocido' });
+      }
+    } catch (err: unknown) {
+      setReactivateResult({ ok: false, error: err instanceof Error ? err.message : 'Error de red' });
+    } finally {
+      setReactivating(false);
+      setTimeout(() => setReactivateResult(null), 5000);
+    }
+  };
 
   const handleGrantFreeMonths = async (months: 1 | 2) => {
     setGrantingMonths(true);
@@ -324,6 +355,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)),
         ),
         adminProAccess,
+        billingExempt,
       },
     });
     setSaving(false);
@@ -491,6 +523,20 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 </span>
               </span>
             </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={billingExempt}
+                onChange={(e) => setBillingExempt(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
+              />
+              <span className="text-sm text-violet-900 dark:text-violet-100">
+                <span className="font-semibold block">Exento de suspensión automática</span>
+                <span className="text-xs text-violet-700 dark:text-violet-300">
+                  Mantiene la cuenta activa aunque Monei o el cron marquen impago (clientes sin cobro en pasarela).
+                </span>
+              </span>
+            </label>
             <div>
               <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200 mb-1.5">
                 PDV extra (además del plan)
@@ -573,6 +619,34 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
               <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
               <p className="text-sm text-red-700">{impersonateError}</p>
+            </div>
+          )}
+
+          {(subscriptionStatus === 'suspended' || account.subscription?.status === 'suspended') && (
+            <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
+              <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
+                Cuenta suspendida
+              </p>
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                Reactiva el acceso y marca la cuenta como exenta de suspensión automática (recomendado para Modomio y cuentas sin cobro en Monei).
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleReactivateAccount()}
+                disabled={reactivating}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
+              >
+                <CheckCircle className={`w-4 h-4 ${reactivating ? 'animate-spin' : ''}`} />
+                {reactivating ? 'Reactivando…' : 'Reactivar cuenta ahora'}
+              </button>
+              {reactivateResult?.ok && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
+                  Cuenta reactivada. El cliente puede volver a entrar al SaaS.
+                </p>
+              )}
+              {reactivateResult && !reactivateResult.ok && (
+                <p className="text-xs text-red-700 dark:text-red-300">{reactivateResult.error}</p>
+              )}
             </div>
           )}
 

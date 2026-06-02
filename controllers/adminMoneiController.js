@@ -339,6 +339,67 @@ export async function adminGrantFreeMonths(req, res) {
   }
 }
 
+/** Reactiva cuenta suspendida (soporte / superadmin). */
+export async function adminReactivateAccount(req, res) {
+  try {
+    const denied = requireAdmin(req);
+    if (denied) return res.status(denied.status).json(denied);
+
+    const { userId, billingExempt = true } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: 'userId es requerido' });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const sub = account.subscription || {};
+    const previousStatus = sub.status || '';
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const graceEnd = new Date(periodEnd);
+    graceEnd.setDate(graceEnd.getDate() + 7);
+
+    const updatedAccount = await saveAccount(req, {
+      ...account,
+      subscription: {
+        ...sub,
+        status: 'subscription_active',
+        billingExempt: Boolean(billingExempt),
+        currentPeriodEnd: periodEnd.toISOString(),
+        gracePeriodEndsAt: graceEnd.toISOString(),
+      },
+      updatedAt: now.toISOString(),
+    });
+
+    await writeChangelog(req, {
+      entity: 'subscription',
+      entityId: account.user_id,
+      entityLabel: account.fullName || account.email,
+      action: 'reactivate_account',
+      actorUserId: req.authUser?.userId || 'admin',
+      actorName: req.authUser?.fullName || 'Admin',
+      changes: {
+        status: { before: previousStatus, after: 'subscription_active' },
+        billingExempt: { before: Boolean(sub.billingExempt), after: Boolean(billingExempt) },
+      },
+    });
+
+    logger.info(
+      { userId, billingExempt: Boolean(billingExempt) },
+      `[Admin] Cuenta reactivada: ${account.fullName || account.email}`,
+    );
+
+    return res.json({ ok: true, subscription: updatedAccount.subscription });
+  } catch (error) {
+    logger.error(error, '[Admin] Error reactivando cuenta');
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+}
+
 export async function getDashboardStats(req, res) {
   try {
     const denied = requireAdmin(req);

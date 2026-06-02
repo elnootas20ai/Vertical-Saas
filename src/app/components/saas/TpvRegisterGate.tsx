@@ -232,8 +232,13 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const allActivePdvs = useMemo(() => openablePdvs, [openablePdvs]);
   const displayPdvs = useMemo(() => {
     if (!restrictedToPdvId) return allActivePdvs;
-    return allActivePdvs.filter((p) => p._id === restrictedToPdvId);
-  }, [allActivePdvs, restrictedToPdvId]);
+    const fromOpenable = allActivePdvs.filter((p) => p._id === restrictedToPdvId);
+    if (fromOpenable.length > 0) return fromOpenable;
+    const assigned = pointsOfSale.find(
+      (p) => p._id === restrictedToPdvId && p.active !== false,
+    );
+    return assigned ? [assigned] : [];
+  }, [allActivePdvs, restrictedToPdvId, pointsOfSale]);
 
   const hasStores = allActivePdvs.length > 0 || storeRows.some((r) => r.needsPdv);
   const pointOfSaleAccess = usePointOfSaleAccess(Math.max(allActivePdvs.length, storeRows.length));
@@ -1310,6 +1315,9 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       if (bidAtStart) {
         const state = await loadTpvPointsOfSaleForBusiness(user, biz ?? null, {
           accountBusinessCount,
+          priorityWorkCenterId: isInvitedWorkerUser(user)
+            ? String(user?.employment?.salesPointId || '').trim() || undefined
+            : undefined,
         });
         if (seq !== loadSeqRef.current) return;
         scopedPdvs = state.pointsOfSale;

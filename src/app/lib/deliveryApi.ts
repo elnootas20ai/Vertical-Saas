@@ -956,6 +956,49 @@ function dedupePointsOfSaleById(pdvs: PointOfSale[]): PointOfSale[] {
   return [...byId.values()];
 }
 
+const PDV_MOBILE_ADDRESS_LABEL = 'PDV móvil';
+
+/** Dirección válida para alta de PDV (mín. 5 caracteres); admite PDV móvil y nombre de tienda. */
+export function resolveWorkCenterPdvAddress(wc: WorkCenter): string {
+  const joined = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ').trim();
+  if (joined.length >= 5) return joined;
+  const street = String(wc.address || '').trim();
+  if (street.length >= 5) return street;
+  if (street.toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase()) return PDV_MOBILE_ADDRESS_LABEL;
+  const name = String(wc.name || '').trim();
+  if (name.length >= 5) return name;
+  return PDV_MOBILE_ADDRESS_LABEL;
+}
+
+function ensurePdvHasDefaultTerminal(pdv: PointOfSale): { pdv: PointOfSale; changed: boolean } {
+  const terminals = Array.isArray(pdv.terminals) ? [...pdv.terminals] : [];
+  const hasActive = terminals.some((t) => t.active !== false);
+  if (hasActive) return { pdv, changed: false };
+  const termId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    pdv: {
+      ...pdv,
+      terminals: [
+        ...terminals,
+        {
+          id: termId,
+          code: 'TPV-1',
+          name: 'Terminal principal',
+          datafonName: '',
+          printerName: '',
+          scaleDeviceId: '',
+          scaleName: '',
+          active: true,
+        },
+      ],
+    },
+    changed: true,
+  };
+}
+
 /**
  * Crea o enlaza el PDV de caja (delivery) para un centro de trabajo retail.
  * Idempotente: no duplica si ya hay PDV con el mismo `workCenterId` o nombre huérfano.
@@ -985,36 +1028,37 @@ export async function ensureDeliveryPdvForWorkCenter(
 
   const linked = pdvData.find((p) => String(p.workCenterId || '').trim() === wc._id);
   if (linked) {
-    const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
     const nextName =
       sanitizeStoreDisplayName(String(options?.pdvName || wc.name || '')) || linked.name;
     const nextCode =
       sanitizePdvCodeInput(String(options?.pdvCode || linked.code || '')) || linked.code;
-    const nextAddr =
-      (addr && String(addr).trim().length >= 5 ? addr : linked.address) || linked.address;
-    if (
+    const nextAddr = resolveWorkCenterPdvAddress(wc) || linked.address;
+    let next: PointOfSale = {
+      ...linked,
+      name: nextName,
+      code: nextCode,
+      address: nextAddr,
+      active: pdvActive,
+    };
+    const withTerminal = ensurePdvHasDefaultTerminal(next);
+    next = withTerminal.pdv;
+    const metaChanged =
       nextName !== linked.name ||
       nextCode !== linked.code ||
       nextAddr !== linked.address ||
-      pdvActive !== (linked.active !== false)
-    ) {
+      pdvActive !== (linked.active !== false);
+    if (metaChanged || withTerminal.changed) {
       try {
-        return await updatePointOfSaleRequest(id, {
-          ...linked,
-          name: nextName,
-          code: nextCode,
-          address: nextAddr,
-          active: pdvActive,
-        });
+        return await updatePointOfSaleRequest(id, next);
       } catch {
-        return linked;
+        return next;
       }
     }
-    return linked;
+    return next;
   }
 
   const nameLower = wc.name.trim().toLowerCase();
-  const addr = [wc.address, wc.postalCode, wc.city].filter(Boolean).join(', ');
+  const addr = resolveWorkCenterPdvAddress(wc);
   const explicitCode = sanitizePdvCodeInput(String(options?.pdvCode || ''));
   const orphanIdx =
     explicitCode || options?.pdvName
@@ -1035,8 +1079,6 @@ export async function ensureDeliveryPdvForWorkCenter(
       return orphan;
     }
   }
-
-  if (String(addr).trim().length < 5) return null;
 
   const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
   const existingNames = pdvData.map((p) => String(p.name || '').trim()).filter(Boolean);

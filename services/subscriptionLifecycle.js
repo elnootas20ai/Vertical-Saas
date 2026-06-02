@@ -179,6 +179,7 @@ export async function runSubscriptionLifecycle() {
     for (const account of companyAccounts) {
       const sub = account.subscription;
       if (!sub) continue;
+      if (sub.billingExempt) continue;
       processed++;
 
       const status = sub.status;

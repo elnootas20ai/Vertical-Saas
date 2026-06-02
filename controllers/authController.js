@@ -31,7 +31,6 @@ import {
   isValidPosPin,
   findPointOfSaleByTerminalCode,
   findWorkCenterById,
-  findTeamMemberByPosPin,
   workerCanAccessPdvForTablet,
   sanitizePointOfSale,
   incrementFailedLoginAttempts,
@@ -809,10 +808,14 @@ export async function updateProfile(req, res) {
         if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
           merged.adminProAccess = Boolean(subscription.adminProAccess);
         }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'billingExempt')) {
+          merged.billingExempt = Boolean(subscription.billingExempt);
+        }
       } else {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
         merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;
         merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
+        merged.billingExempt = Boolean(account.subscription?.billingExempt);
       }
       nextSubscription = merged;
     }
@@ -3000,7 +3003,7 @@ export async function posSwitchUser(req, res) {
   }
 }
 
-// ─── TPV Tablet: código de tienda + PIN del trabajador (fichaje + sesión TPV) ──
+// ─── TPV Tablet: código de tienda (fichaje + sesión TPV) ─────────────────────
 
 async function resolveBusinessForPointOfSale(req, pdv) {
   const wc = pdv.workCenterId ? await findWorkCenterById(req, pdv.workCenterId) : null;
@@ -3013,29 +3016,51 @@ async function resolveBusinessForPointOfSale(req, pdv) {
   return all.find((b) => b.owner_user_id === pdv.user_id && !b.deletedAt) || null;
 }
 
-async function performTpvTabletLogin(req, res, { terminalCode, pin }) {
+async function resolveTabletSessionAccount(req, business, pdv) {
+  const ownerId = String(business.owner_user_id || '').trim();
+  if (ownerId) {
+    const owner = await findAccountByUserId(req, ownerId);
+    if (owner && !owner.deletedAt && owner.status !== 'inactive') return owner;
+  }
+
+  const dataUserId = String(pdv.user_id || '').trim();
+  if (dataUserId && dataUserId !== ownerId) {
+    const dataUser = await findAccountByUserId(req, dataUserId);
+    if (dataUser && !dataUser.deletedAt && dataUser.status !== 'inactive') return dataUser;
+  }
+
+  const members = Array.isArray(business.members) ? business.members : [];
+  for (const member of members) {
+    const memberId = String(member.user_id || '').trim();
+    if (!memberId || memberId === ownerId) continue;
+    const account = await findAccountByUserId(req, memberId);
+    if (!account || account.deletedAt || account.status === 'inactive') continue;
+    if (workerCanAccessPdvForTablet(account, business, pdv)) return account;
+  }
+
+  return null;
+}
+
+async function performTpvTabletLogin(req, res, { terminalCode }) {
   const ip = getClientIp(req);
 
-  if (!terminalCode || !pin) {
-    return badRequest(res, 'Código de tienda y PIN son obligatorios');
-  }
-  if (!isValidPosPin(pin)) {
-    return badRequest(res, 'El PIN debe tener entre 4 y 6 dígitos');
+  if (!terminalCode) {
+    return badRequest(res, 'El código de tienda es obligatorio');
   }
 
   const pdv = await findPointOfSaleByTerminalCode(req, terminalCode);
   if (!pdv) {
-    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+    return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
   const business = await resolveBusinessForPointOfSale(req, pdv);
   if (!business) {
-    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+    return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
-  const account = await findTeamMemberByPosPin(req, business.business_id, pin);
+  const account = await resolveTabletSessionAccount(req, business, pdv);
   if (!account) {
-    return res.status(401).json({ ok: false, error: 'Código de tienda o PIN incorrectos' });
+    return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
   const lockStatus = isAccountLocked(account);
@@ -3114,8 +3139,8 @@ async function performTpvTabletLogin(req, res, { terminalCode, pin }) {
 
 export async function tpvTabletActivate(req, res) {
   try {
-    const { terminalCode, pin } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode, pin });
+    const { terminalCode } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode });
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -3126,12 +3151,12 @@ export async function tpvTabletActivate(req, res) {
 
 export async function tpvTabletSwitch(req, res) {
   try {
-    const { terminalCode, pin } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode, pin });
+    const { terminalCode } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error instanceof Error ? error.message : 'Error al cambiar de trabajador en el TPV',
+      error: error instanceof Error ? error.message : 'Error al acceder al TPV tablet',
     });
   }
 }

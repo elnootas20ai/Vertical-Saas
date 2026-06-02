@@ -3,6 +3,7 @@ import React, {
   useContext,
   useEffect,
   useLayoutEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -81,12 +82,25 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [businessesFetchSettled, setBusinessesFetchSettled] = useState(false);
+  const businessesLoadSeqRef = useRef(0);
 
   const resolveCurrentBusiness = useCallback(
-    (list: Business[], userId: string) => {
+    (list: Business[], userId: string, linkedBusinessId?: string | null) => {
       if (list.length === 0) {
         setCurrentBusiness(null);
         return;
+      }
+
+      const linkedId = String(linkedBusinessId || '').trim();
+      if (linkedId) {
+        const linkedBiz = list.find((b) => b.business_id === linkedId);
+        if (linkedBiz) {
+          setCurrentBusiness((prev) =>
+            prev?.business_id === linkedBiz.business_id ? prev : linkedBiz,
+          );
+          storeBusinessId(userId, linkedBiz.business_id);
+          return;
+        }
       }
 
       const storedId = getStoredBusinessId(userId);
@@ -113,6 +127,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     }
 
     const userId = user.user_id;
+    const loadSeq = ++businessesLoadSeqRef.current;
     const cachedBeforeFetch = readBusinessesCache(userId);
     if (cachedBeforeFetch.length === 0) {
       setIsLoading(true);
@@ -131,21 +146,34 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
     try {
       const list = await fetchWithRetry();
+      if (loadSeq !== businessesLoadSeqRef.current) return;
       setBusinesses(list);
-      resolveCurrentBusiness(list, userId);
+      resolveCurrentBusiness(list, userId, user?.linkedBusinessId);
       writeBusinessesCache(userId, list);
     } catch (error) {
       console.error('Error loading businesses:', error);
+      if (loadSeq !== businessesLoadSeqRef.current) return;
       const cached = readBusinessesCache(userId);
       if (cached.length > 0) {
         setBusinesses(cached);
-        resolveCurrentBusiness(cached, userId);
+        resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
       }
     } finally {
-      setIsLoading(false);
-      setBusinessesFetchSettled(true);
+      if (loadSeq === businessesLoadSeqRef.current) {
+        setIsLoading(false);
+        setBusinessesFetchSettled(true);
+      }
     }
-  }, [user?.user_id, isInitializing, resolveCurrentBusiness]);
+  }, [user?.user_id, user?.linkedBusinessId, isInitializing, resolveCurrentBusiness]);
+
+  useEffect(() => {
+    if (user?.user_id) return;
+    businessesLoadSeqRef.current += 1;
+    setBusinesses([]);
+    setCurrentBusiness(null);
+    setBusinessesFetchSettled(false);
+    setIsLoading(!isInitializing);
+  }, [user?.user_id, isInitializing]);
 
   // Hidratar empresas desde caché de sesión antes del primer fetch (F5 no vacía la UI).
   useLayoutEffect(() => {
@@ -154,7 +182,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     const cached = readBusinessesCache(userId);
     if (cached.length > 0) {
       setBusinesses(cached);
-      resolveCurrentBusiness(cached, userId);
+      resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
       setIsLoading(false);
       // Permite cargar tiendas/PDV en paralelo sin esperar listBusinesses.
       setBusinessesFetchSettled(true);
@@ -162,7 +190,17 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       setBusinessesFetchSettled(false);
       setIsLoading(true);
     }
-  }, [user?.user_id, resolveCurrentBusiness]);
+  }, [user?.user_id, user?.linkedBusinessId, resolveCurrentBusiness]);
+
+  // Trabajador invitado: la empresa activa debe ser la del empleador (`linkedBusinessId`).
+  useEffect(() => {
+    const linkedId = String(user?.linkedBusinessId || '').trim();
+    if (!linkedId || user?.accountType !== 'user' || businesses.length === 0) return;
+    const found = businesses.find((b) => b.business_id === linkedId);
+    if (!found || currentBusiness?.business_id === linkedId) return;
+    setCurrentBusiness(found);
+    if (user?.user_id) storeBusinessId(user.user_id, linkedId);
+  }, [user?.linkedBusinessId, user?.accountType, user?.user_id, businesses, currentBusiness?.business_id]);
 
   useEffect(() => {
     void reloadBusinesses();

@@ -2,6 +2,10 @@ import React, { createContext, useCallback, useContext, useEffect, useState, typ
 import { flushSync } from 'react-dom';
 import { hasMinimumWorkerIdentity, mergePersonalData, computeWorkerProfileCompletion } from '../lib/workerProfileCompletion';
 import {
+  clearVertialClientCaches,
+  SESSION_USER_STORAGE_KEY,
+} from '../lib/clientSessionStorage';
+import {
   type AccountActivityItem,
   type ActiveSession,
   type AuthUser,
@@ -172,7 +176,7 @@ export interface AuthContextType {
     error?: string;
     switchedFrom?: string;
   }>;
-  tpvTabletLogin: (terminalCode: string, pin: string, isSwitch?: boolean) => Promise<{
+  tpvTabletLogin: (terminalCode: string, isSwitch?: boolean) => Promise<{
     success: boolean;
     redirectTo?: string;
     error?: string;
@@ -196,10 +200,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function persistSession(nextUser: User | null) {
   if (nextUser) {
-    localStorage.setItem('vertial_session_user', JSON.stringify(nextUser));
+    localStorage.setItem(SESSION_USER_STORAGE_KEY, JSON.stringify(nextUser));
     return;
   }
-  localStorage.removeItem('vertial_session_user');
+  localStorage.removeItem(SESSION_USER_STORAGE_KEY);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -226,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthTokens();
     });
 
-    const sessionUser = localStorage.getItem('vertial_session_user');
+    const sessionUser = localStorage.getItem(SESSION_USER_STORAGE_KEY);
     if (!sessionUser) {
       setIsInitializing(false);
       return () => {
@@ -251,11 +255,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         const response = await fetchCurrentUserRequest();
-        if (cancelled || !response.user || !parsedFromStorage) return;
-        if (response.user.user_id !== parsedFromStorage.user_id) return;
-        setSessionUser(response.user);
+        if (cancelled) return;
+        if (response.user) {
+          // La cookie httpOnly manda: corrige mezcla gerente/trabajador en el mismo navegador.
+          setSessionUser(response.user);
+          return;
+        }
+        const authOutOfSync = response.ok === false && Boolean(parsedFromStorage);
+        if (authOutOfSync) {
+          persistSession(null);
+          setUser(null);
+          setIsAuthenticated(false);
+          clearAuthTokens();
+        }
       } catch {
-        // Sin red o sesión inválida: se mantiene el usuario leído de localStorage
+        // Sin red: se mantiene el usuario leído de localStorage hasta que vuelva /me.
       } finally {
         if (!cancelled) setIsInitializing(false);
       }
@@ -265,6 +279,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  // Otra pestaña inició/cerró sesión: alinear con localStorage + servidor.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SESSION_USER_STORAGE_KEY) return;
+      if (!event.newValue) {
+        setUser(null);
+        setIsAuthenticated(false);
+        clearAuthTokens();
+        return;
+      }
+      try {
+        const parsed = JSON.parse(event.newValue) as User;
+        const prevId = String(user?.user_id || user?.id || '').trim();
+        const nextId = String(parsed.user_id || parsed.id || '').trim();
+        if (prevId && nextId && prevId !== nextId) {
+          clearVertialClientCaches([SESSION_USER_STORAGE_KEY]);
+        }
+        setUser(parsed);
+        setIsAuthenticated(true);
+        void fetchCurrentUserRequest()
+          .then((res) => {
+            if (res.user) setSessionUser(res.user);
+          })
+          .catch(() => undefined);
+      } catch {
+        persistSession(null);
+        setUser(null);
+        setIsAuthenticated(false);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [setSessionUser, user?.user_id, user?.id]);
 
   const register = async (data: RegisterPayload): Promise<{
     success: boolean;
@@ -301,6 +350,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; redirectTo?: string; error?: string; code?: string; lockUntil?: string }> => {
     try {
+      clearVertialClientCaches();
       const response = await loginRequest(email, password);
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
@@ -327,6 +377,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     googleUser?: GoogleUserProfile;
   }> => {
     try {
+      clearVertialClientCaches();
       const response = await googleLoginRequest(credential);
 
       if (response.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && response.googleUser) {
@@ -355,6 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     const { clearAllDeliveryPdvSessionFlags } = await import('../lib/deliverySetup');
     clearAllDeliveryPdvSessionFlags();
+    clearVertialClientCaches();
     setUser(null);
     setIsAuthenticated(false);
     persistSession(null);
@@ -874,7 +926,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const tpvTabletLogin = async (terminalCode: string, pin: string, isSwitch = false): Promise<{
+  const tpvTabletLogin = async (terminalCode: string, isSwitch = false): Promise<{
     success: boolean;
     redirectTo?: string;
     error?: string;
@@ -894,8 +946,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }> => {
     try {
       const response = isSwitch
-        ? await tpvTabletSwitchRequest(terminalCode, pin)
-        : await tpvTabletActivateRequest(terminalCode, pin);
+        ? await tpvTabletSwitchRequest(terminalCode)
+        : await tpvTabletActivateRequest(terminalCode);
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
       }

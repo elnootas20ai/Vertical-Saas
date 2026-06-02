@@ -368,6 +368,13 @@ export async function confirmSubscription(req, res) {
     else if (moneiStatus === 'PAUSED') appStatus = 'grace_period';
     else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
 
+    if (
+      Boolean(account.subscription?.billingExempt) &&
+      ['suspended', 'payment_failed', 'grace_period'].includes(appStatus)
+    ) {
+      appStatus = 'subscription_active';
+    }
+
     const now = new Date();
     const fromMoneiMeta = subscriptionPlanFieldsFromMoneiMetadata(moneiSub.metadata);
     const updatedAccount = await saveAccount(req, {
@@ -453,6 +460,13 @@ export async function webhookSubscriptionStatus(req, res) {
     else if (moneiStatus === 'PAST_DUE') appStatus = 'payment_failed';
     else if (moneiStatus === 'PAUSED') appStatus = 'grace_period';
     else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
+
+    if (
+      Boolean(account.subscription?.billingExempt) &&
+      ['suspended', 'payment_failed', 'grace_period'].includes(appStatus)
+    ) {
+      appStatus = 'subscription_active';
+    }
 
     const fromWebhookMeta = subscriptionPlanFieldsFromMoneiMetadata(metadata);
 

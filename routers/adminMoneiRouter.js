@@ -13,6 +13,7 @@ import {
   adminTestPayment,
   getDashboardStats,
   adminGrantFreeMonths,
+  adminReactivateAccount,
 } from '../controllers/adminMoneiController.js';
 
 const adminMoneiRouter = Router();
@@ -29,5 +30,6 @@ adminMoneiRouter.post('/subscriptions/:id/resume', requireAuthAndEmailVerified, 
 adminMoneiRouter.post('/payments/:id/refund', requireAuthAndEmailVerified, adminRefundPayment);
 adminMoneiRouter.post('/test-payment', requireAuthAndEmailVerified, adminTestPayment);
 adminMoneiRouter.post('/grant-free-months', requireAuthAndEmailVerified, adminGrantFreeMonths);
+adminMoneiRouter.post('/reactivate-account', requireAuthAndEmailVerified, adminReactivateAccount);
 
 export { adminMoneiRouter };

@@ -283,6 +283,8 @@ export type LoadDeliveryStoresOptions = {
   skipPdvMerge?: boolean;
   /** Cuántas empresas tiene la cuenta (para no mostrar todas las tiendas en cada una). */
   accountBusinessCount?: number;
+  /** Centro asignado al trabajador (invitación): asegurar PDV aunque falte en el listado filtrado. */
+  priorityWorkCenterId?: string;
 };
 
 /** Fuente única: centros de trabajo + PDV de caja enlazados y deduplicados. */
@@ -342,12 +344,7 @@ export async function loadTpvPointsOfSaleForBusiness(
       await listPointsOfSaleRequest(state.dataUserId).catch(() => [] as PointOfSale[]),
     ).filter((p) => p.active !== false);
   }
-  const linkedWcIds = new Set(
-    pointsOfSale.map((p) => String(p.workCenterId || '').trim()).filter(Boolean),
-  );
-
   for (const wc of retail) {
-    if (linkedWcIds.has(wc._id)) continue;
     const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, wc, {
       business: business ?? null,
       existingPdvs: pointsOfSale,
@@ -356,7 +353,6 @@ export async function loadTpvPointsOfSaleForBusiness(
     const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
     if (idx >= 0) pointsOfSale[idx] = ensured;
     else pointsOfSale.push(ensured);
-    linkedWcIds.add(wc._id);
     pointsOfSale = dedupePointsOfSale(pointsOfSale);
   }
 
@@ -366,6 +362,25 @@ export async function loadTpvPointsOfSaleForBusiness(
   );
   if (pointsOfSale.length === 0 && beforeScopeFilter.length > 0) {
     pointsOfSale = beforeScopeFilter.filter((p) => p.active !== false);
+  }
+
+  const priorityWcId = String(options?.priorityWorkCenterId || '').trim();
+  if (priorityWcId) {
+    const priorityWc =
+      state.workCenters.find((wc) => wc._id === priorityWcId) ||
+      retail.find((wc) => wc._id === priorityWcId);
+    if (priorityWc) {
+      const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, priorityWc, {
+        business: business ?? null,
+        existingPdvs: pointsOfSale,
+      });
+      if (ensured) {
+        const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
+        if (idx >= 0) pointsOfSale[idx] = ensured;
+        else pointsOfSale.push(ensured);
+        pointsOfSale = dedupePointsOfSale(pointsOfSale);
+      }
+    }
   }
 
   return { ...state, pointsOfSale };
