@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import {
@@ -26,6 +27,8 @@ import {
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { isVerticalModuleEnabled } from '../../lib/verticalModuleVisibility';
 import {
   buildCommissionSummaries,
   buildDefaultRules,
@@ -962,6 +965,14 @@ function AgentIdeasChat({
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function Commissions() {
+  const { currentBusiness } = useBusiness();
+  if (!isVerticalModuleEnabled('commissions', currentBusiness?.businessType)) {
+    return <Navigate to="/saas/team" replace />;
+  }
+  return <CommissionsContent />;
+}
+
+function CommissionsContent() {
   const { user } = useAuth();
   const userId = user?.id ?? '';
 

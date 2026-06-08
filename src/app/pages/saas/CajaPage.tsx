@@ -27,8 +27,18 @@ import {
   ChevronDown, ChevronUp, Filter, Download, Calendar, Eye,
   ShieldCheck, ShieldX, MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin, Settings, Save, Bell,
-  ArrowLeft,
+  ArrowLeft, Plug,
 } from 'lucide-react';
+import {
+  buildAggregatorCashRows,
+  buildDailyAggregatorRows,
+  getClosingAggregatorPlatforms,
+  aggregatorRowsFromClosingTotals,
+  sumAggregatorRows,
+  type AggregatorCashRow,
+} from '../../lib/deliveryIntegrationsUi';
+import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
+import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +90,15 @@ const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; labe
   online: { icon: Wifi, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400', label: 'Online' },
 };
 
+const TPV_TX_LABELS: Record<string, string> = {
+  sale: 'Venta',
+  return: 'Devolución',
+  cash_in: 'Entrada',
+  cash_out: 'Salida',
+  expense: 'Gasto',
+  tip: 'Propina',
+};
+
 // ─── KPI Card ──────────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, sub, color = 'gray' }: { label: string; value: string; sub?: string; color?: string }) {
@@ -101,7 +120,15 @@ function KpiCard({ label, value, sub, color = 'gray' }: { label: string; value: 
 
 // ─── Open Register Card ──────────────────────────────────────────────────────
 
-function RegisterCard({ session, isDriver = false }: { session: TpvRegisterSession | DriverCashSession; isDriver?: boolean }) {
+function RegisterCard({
+  session,
+  isDriver = false,
+  onViewClosing,
+}: {
+  session: TpvRegisterSession | DriverCashSession;
+  isDriver?: boolean;
+  onViewClosing?: (session: TpvRegisterSession) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   if (isDriver) {
@@ -174,6 +201,15 @@ function RegisterCard({ session, isDriver = false }: { session: TpvRegisterSessi
                 {ts.status === 'open' && <span className="text-emerald-600 font-semibold">Efectivo: {expected.toFixed(2)}€</span>}
               </div>
             </div>
+            {ts.status === 'closed' && onViewClosing && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onViewClosing(ts); }}
+                className="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:opacity-90"
+              >
+                Ver cierre
+              </button>
+            )}
             {expanded ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
           </div>
         </div>
@@ -195,11 +231,25 @@ function RegisterCard({ session, isDriver = false }: { session: TpvRegisterSessi
               Último arqueo: {lastCount.difference >= 0 ? '+' : ''}{lastCount.difference.toFixed(2)}€
             </span>
           )}
+          {summary.totalCashIn > 0 && (
+            <span className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+              Entradas: {summary.totalCashIn.toFixed(2)}€
+            </span>
+          )}
+          {summary.totalCashOut > 0 && (
+            <span className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+              Salidas: {summary.totalCashOut.toFixed(2)}€
+            </span>
+          )}
         </div>
       </div>
 
       {expanded && (
         <div className="border-t border-gray-100 dark:border-gray-700 p-4 space-y-4">
+          {ts.status === 'closed' ? (
+            <RegisterClosingDetailPanel session={ts} />
+          ) : (
+          <>
           <div>
             <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Transacciones recientes</h4>
             <div className="space-y-1">
@@ -207,7 +257,7 @@ function RegisterCard({ session, isDriver = false }: { session: TpvRegisterSessi
                 <div key={tx.id} className="flex items-center justify-between text-xs py-1.5 px-2 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg">
                   <div className="flex items-center gap-2">
                     <span className="text-gray-400 w-10">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${tx.type === 'sale' ? 'bg-green-100 text-green-700' : tx.type === 'return' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{tx.type}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${tx.type === 'sale' ? 'bg-green-100 text-green-700' : tx.type === 'return' || tx.type === 'cash_out' ? 'bg-red-100 text-red-700' : tx.type === 'cash_in' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
                     <span className="text-gray-600 dark:text-gray-400 truncate max-w-[200px]">{tx.description || tx.orderNumber || '—'}</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -257,81 +307,71 @@ function RegisterCard({ session, isDriver = false }: { session: TpvRegisterSessi
               </div>
             </div>
           )}
+          </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+// ─── Cierre completo (solo lectura) ─────────────────────────────────────────
+
+function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
+        <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Cierre de caja</h2>
+            <p className="text-xs text-gray-500 mt-1">Resumen completo del turno</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-gray-500">✕</button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+          <RegisterClosingDetailPanel session={session} />
+        </div>
+        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700">
+          <button type="button" onClick={onClose} className="w-full py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Validation Modal ──────────────────────────────────────────────────────
 
-function ValidationModal({ session, onValidate, onReject, onCancel }: {
+function ValidationModal({ session, shiftOrders, onValidate, onReject, onCancel }: {
   session: TpvRegisterSession;
+  shiftOrders: DeliveryOrder[];
   onValidate: (notes: string) => void;
   onReject: (notes: string) => void;
   onCancel: () => void;
 }) {
   const [notes, setNotes] = useState('');
-  const summary = buildSummary(session);
+  const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
+  const autoAggregatorRows = useMemo(
+    () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
+    [closingPlatforms, session, shiftOrders],
+  );
+  const aggregatorRows = useMemo(() => {
+    if (session.aggregatorClosingTotals && Object.keys(session.aggregatorClosingTotals).length > 0) {
+      return aggregatorRowsFromClosingTotals(closingPlatforms, session.aggregatorClosingTotals);
+    }
+    return autoAggregatorRows;
+  }, [session, closingPlatforms, autoAggregatorRows]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-blue-500" /> Validar cierre de caja</h2>
-          <p className="text-xs text-gray-500 mt-1">{session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName} · {new Date(session.closedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}</p>
+          <p className="text-xs text-gray-500 mt-1">Revisa el cierre completo antes de validar o rechazar</p>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
-              <div className="text-xs text-green-600">Ventas</div>
-              <div className="text-lg font-bold text-green-700">{summary.totalSales.toFixed(2)}€</div>
-            </div>
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
-              <div className="text-xs text-red-600">Devoluciones</div>
-              <div className="text-lg font-bold text-red-700">{summary.totalReturns.toFixed(2)}€</div>
-            </div>
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-              <div className="text-xs text-blue-600">Operaciones</div>
-              <div className="text-lg font-bold text-blue-700">{summary.totalTransactions}</div>
-            </div>
-            <div className={`p-3 rounded-xl ${session.difference === 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-              <div className="text-xs text-gray-600">Diferencia</div>
-              <div className={`text-lg font-bold ${session.difference === 0 ? 'text-green-700' : 'text-red-700'}`}>{session.difference >= 0 ? '+' : ''}{session.difference.toFixed(2)}€</div>
-            </div>
-          </div>
-
-          <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-1.5 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Fondo apertura</span><span className="font-semibold">{session.initialCashAmount.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Efectivo esperado</span><span className="font-semibold">{session.expectedCash.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-gray-500">Efectivo contado</span><span className="font-semibold">{session.finalCashAmount.toFixed(2)}€</span></div>
-          </div>
-
-          <div className="flex gap-1.5 flex-wrap text-xs">
-            {Object.entries(summary.salesByMethod).map(([method, amount]) => {
-              if (amount <= 0) return null;
-              const badge = METHOD_BADGES[method];
-              if (!badge) return null;
-              const Icon = badge.icon;
-              return <span key={method} className={`px-2 py-0.5 rounded-lg font-medium flex items-center gap-1 ${badge.color}`}><Icon className="w-3 h-3" /> {badge.label}: {amount.toFixed(2)}€</span>;
-            })}
-          </div>
-
-          {session.cashCounts.length > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">Arqueos realizados</h4>
-              {session.cashCounts.map(cc => (
-                <div key={cc.id} className="text-xs text-gray-500 py-1">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — Dif: <span className={cc.difference === 0 ? 'text-green-600' : 'text-red-600'}>{cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€</span></div>
-              ))}
-            </div>
-          )}
-
-          {session.closingNotes && (
-            <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-xl">
-              <div className="text-xs font-bold text-amber-700 mb-1">Notas del trabajador</div>
-              <div className="text-sm text-gray-700 dark:text-gray-300">{session.closingNotes}</div>
-            </div>
-          )}
+          <RegisterClosingDetailPanel session={session} aggregatorRows={aggregatorRows} />
 
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Notas del gerente</label>
@@ -507,6 +547,7 @@ export function CajaPage() {
   const [filterPdv, setFilterPdv] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [validatingSession, setValidatingSession] = useState<TpvRegisterSession | null>(null);
+  const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
   const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -516,6 +557,12 @@ export function CajaPage() {
     return d.toISOString().slice(0, 10);
   });
   const [ordersTo, setOrdersTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [todayOrders, setTodayOrders] = useState<DeliveryOrder[]>([]);
+
+  const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
+  const handleViewClosing = useCallback((session: TpvRegisterSession) => {
+    setViewingClosingSession(session);
+  }, []);
 
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
@@ -537,6 +584,34 @@ export function CajaPage() {
   }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (tab !== 'estado') return undefined;
+    const id = window.setInterval(() => { void loadData(); }, 30000);
+    return () => window.clearInterval(id);
+  }, [tab, loadData]);
+
+  const loadTodayOrders = useCallback(async () => {
+    if (!dataUserId) {
+      setTodayOrders([]);
+      return;
+    }
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      const data = await filterDeliveryOrdersRequest(dataUserId, {
+        dateFrom: `${day}T00:00:00.000Z`,
+        dateTo: `${day}T23:59:59.999Z`,
+        limit: 500,
+      });
+      setTodayOrders(data.orders || []);
+    } catch {
+      setTodayOrders([]);
+    }
+  }, [dataUserId]);
+
+  useEffect(() => {
+    void loadTodayOrders();
+  }, [loadTodayOrders]);
 
   const pointsOfSale = activeStoreScope.pointsOfSale;
   const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
@@ -597,6 +672,22 @@ export function CajaPage() {
   }, [todaySessions]);
 
   const todayDifference = useMemo(() => todaySessions.filter(s => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0), [todaySessions]);
+
+  const todayAggregatorRows = useMemo(
+    () => buildDailyAggregatorRows(closingPlatforms, todayOrders, todayStr, sessions),
+    [closingPlatforms, todayOrders, todayStr, sessions],
+  );
+  const todayAggregatorTotals = useMemo(() => sumAggregatorRows(todayAggregatorRows), [todayAggregatorRows]);
+
+  const validationShiftOrders = useMemo(() => {
+    if (!validatingSession) return [];
+    const from = new Date(validatingSession.openedAt).getTime();
+    const to = new Date(validatingSession.closedAt || Date.now()).getTime();
+    return todayOrders.filter((o) => {
+      const ts = new Date(o.createdAt || o.updatedAt || 0).getTime();
+      return Number.isFinite(ts) && ts >= from && ts <= to;
+    });
+  }, [validatingSession, todayOrders]);
 
   const filteredSessions = useMemo(() => {
     let result = tab === 'estado' ? sessions : sessions;
@@ -764,6 +855,26 @@ export function CajaPage() {
           <KpiCard label="Descuadre hoy" value={`${todayDifference >= 0 ? '+' : ''}${todayDifference.toFixed(2)}€`} color={todayDifference === 0 ? 'green' : Math.abs(todayDifference) > 20 ? 'red' : 'amber'} />
         </div>
 
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Plug className="w-4 h-4 text-purple-600" />
+              Agregadores hoy (Glovo, Uber, Just Eat, Flipdish)
+            </h2>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/vertical/delivery/integraciones')}
+              className="text-xs font-semibold text-purple-600 hover:text-purple-800 dark:text-purple-400"
+            >
+              Integraciones
+            </button>
+          </div>
+          <AggregatorCashSummary rows={todayAggregatorRows} title="Totales declarados / sistema" />
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Total agregadores hoy: {todayAggregatorTotals.totalSales.toFixed(2)}€
+          </p>
+        </div>
+
         {/* Tabs */}
         <div className="flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
           {tabs.map(t => (
@@ -804,7 +915,7 @@ export function CajaPage() {
                 <p className="text-sm">No hay cajas abiertas</p>
               </div>
             )}
-            {openSessions.map(s => <RegisterCard key={s._id} session={s} />)}
+            {openSessions.map(s => <RegisterCard key={s._id} session={s} onViewClosing={handleViewClosing} />)}
             {openDriverSessions.map(s => <RegisterCard key={s._id} session={s as any} isDriver />)}
           </div>
         )}
@@ -914,7 +1025,7 @@ export function CajaPage() {
               </div>
             )}
             {filteredSessions.filter(s => s.status === 'closed').map(s => (
-              <RegisterCard key={s._id} session={s} />
+              <RegisterCard key={s._id} session={s} onViewClosing={handleViewClosing} />
             ))}
           </div>
         )}
@@ -952,9 +1063,17 @@ export function CajaPage() {
         {tab === 'configuracion' && <CashRegisterConfigTab config={deliveryConfig?.cashRegisterAlerts} onSave={handleSaveConfig} saving={savingConfig} />}
       </div>
 
+      {viewingClosingSession && (
+        <ClosingViewModal
+          session={viewingClosingSession}
+          onClose={() => setViewingClosingSession(null)}
+        />
+      )}
+
       {validatingSession && (
         <ValidationModal
           session={validatingSession}
+          shiftOrders={validationShiftOrders}
           onValidate={handleValidate}
           onReject={handleReject}
           onCancel={() => setValidatingSession(null)}

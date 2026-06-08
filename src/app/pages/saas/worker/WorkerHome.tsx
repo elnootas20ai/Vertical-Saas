@@ -55,6 +55,7 @@ import {
   formatMinutes,
 } from '../../../lib/clockinsApi';
 import { useGeolocation, isMobileDevice } from '../../../hooks/useGeolocation';
+import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 interface QuickAction {
   id: string;
@@ -354,7 +355,7 @@ export function WorkerHome() {
         {/* TPV Module CTA */}
         {tpvConfig && (
           <button
-            onClick={() => navigate('/saas/worker/tpv')}
+            onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
             className={`relative overflow-hidden rounded-2xl p-5 text-white transition-all hover:shadow-xl active:scale-[0.99] bg-gradient-to-br ${tpvConfig.gradient}`}
           >
             <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -translate-y-20 translate-x-20" />

@@ -3,7 +3,7 @@ import {
   Check, Car, Users, MapPin, FileText, Zap, Shield, Clock, ArrowRight,
   MessageCircle, CheckCircle, DollarSign, Building2, PhoneCall, Mail, ChevronDown,
   BarChart3, Package, Database, FolderOpen, Lock, Wrench, ShoppingCart, Truck, Target, Bell, Code, Webhook,
-  Star, Quote, TrendingUp, Award, Globe, Sparkles, Handshake
+  Star, Quote, TrendingUp, Award, Globe, Sparkles, Handshake, Monitor
 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
@@ -161,6 +161,13 @@ export function LandingNew() {
                 >
                   Probar como empresa
                   <ArrowRight className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+                  className="px-8 py-4 bg-indigo-500/90 text-white rounded-xl hover:bg-indigo-400 transition-all font-semibold flex items-center justify-center gap-2 border border-indigo-300/40"
+                >
+                  <Monitor className="w-5 h-5" />
+                  TPV en tablet
                 </button>
                 <button
                   onClick={() => navigate(AUTH_PATHS.workerLogin)}

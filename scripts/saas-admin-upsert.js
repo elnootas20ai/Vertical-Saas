@@ -29,7 +29,7 @@ const BASE = couchBaseUrl();
 
 const LOGIN_EMAIL = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
 const LOGIN_PASSWORD = String(process.env.SAAS_LOGIN_PASSWORD || '').trim();
-const FIRST_NAME = String(process.env.SAAS_LOGIN_FIRST_NAME || 'Usuario').trim();
+const FIRST_NAME = String(process.env.SAAS_LOGIN_FIRST_NAME || 'Uriel').trim();
 const LAST_NAME = String(process.env.SAAS_LOGIN_LAST_NAME || '').trim();
 const COMPANY = String(process.env.SAAS_LOGIN_COMPANY || 'Mi empresa').trim();
 
@@ -89,6 +89,9 @@ export async function upsertSaasLoginAdmin() {
     const prev = found.docs[0];
     const updated = {
       ...prev,
+      firstName: FIRST_NAME,
+      lastName: LAST_NAME,
+      fullName: `${FIRST_NAME} ${LAST_NAME}`.trim() || FIRST_NAME,
       password: LOGIN_PASSWORD,
       passwordHash: newHash,
       failedLoginAttempts: 0,

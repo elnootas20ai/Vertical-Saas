@@ -7,9 +7,8 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
-import { clockIn } from '../../lib/clockinsApi';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
-import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import { readTpvTabletBinding, writeTpvTabletBinding, clearTpvTabletBinding } from '../../lib/tpvTabletSession';
 
 export function TpvTabletLogin() {
@@ -92,24 +91,6 @@ export function TpvTabletLogin() {
       );
     }
 
-    if (user && business?.business_id && result.needsClockIn !== false) {
-      try {
-        if (isBrowserOnline()) {
-          await clockIn(business.business_id, user.user_id, user.fullName || user.email || '', {
-            device_type: 'tablet',
-          });
-        } else {
-          enqueueTpvOfflineItem('clock_in', {
-            businessId: business.business_id,
-            memberId: user.user_id,
-            memberName: user.fullName || user.email || '',
-          });
-        }
-      } catch {
-        /* fichaje activo u offline: continuar al TPV */
-      }
-    }
-
     navigate(result.redirectTo || '/saas/worker/tpv');
   };
 
@@ -187,9 +168,6 @@ export function TpvTabletLogin() {
               {errors.terminalCode && (
                 <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
               )}
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Lo encuentras en Ajustes → Tiendas, en la tienda que quieres activar.
-              </p>
             </div>
             <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? 'Entrando…' : binding ? 'Entrar al TPV' : 'Activar TPV'}

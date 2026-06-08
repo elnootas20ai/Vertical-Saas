@@ -64,9 +64,20 @@ import { GenericImportModal, type ImportFieldDef } from '../../components/saas/G
 import { bulkCreateCatalogItemsRequest } from '../../lib/deliveryApi';
 import { listBrandsRequest } from '../../lib/brandsApi';
 import {
+  mapImportEntryToCatalogItem,
   normalizeImportCategory,
-  resolveCatalogImportBrandIds,
+  formatUnmatchedCommercialBrandWarning,
+  activateCommercialLinesAfterCatalogImport,
+  syncTpvOrganizersAfterCatalogImport,
 } from '../../lib/deliveryCatalogImport';
+import { organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
+import {
+  DELIVERY_CATALOG_IMPORT_FIELDS,
+  DELIVERY_CATALOG_HEADER_ALIASES,
+  downloadDeliveryCatalogImportTemplate,
+  formatDeliveryCatalogImportValidationToast,
+  validateDeliveryCatalogImportEntries,
+} from '../../lib/deliveryCatalogExcelTemplate';
 import { notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
@@ -325,7 +336,8 @@ export function ConfiguracionGeneral() {
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
 
   const catalogImportFields: ImportFieldDef[] = useMemo(() => {
-    const fields: ImportFieldDef[] = [
+    if (biz?.businessType === 'delivery') return DELIVERY_CATALOG_IMPORT_FIELDS;
+    return [
       { key: 'name', label: 'Nombre', required: true, example: 'Artículo ejemplo' },
       { key: 'sku', label: 'SKU', example: 'SKU-001' },
       { key: 'description', label: 'Descripción', example: 'Descripción breve' },
@@ -338,40 +350,80 @@ export function ConfiguracionGeneral() {
       { key: 'minStock', label: 'Stock mínimo', example: '20' },
       { key: 'notes', label: 'Notas', example: '' },
     ];
-    return fields;
-  }, []);
+  }, [biz?.businessType]);
+
+  const handleDownloadCatalogTemplate = useCallback(async () => {
+    if (!bizId) return;
+    const brandList = await listBrandsRequest(bizId).catch(() => []);
+    const lines = organizerBrandsForCatalogTemplate(brandList);
+    if (lines.length === 0) {
+      toast.error('Configura al menos una línea comercial en Ajustes → Marca antes de descargar la plantilla');
+      return;
+    }
+    downloadDeliveryCatalogImportTemplate(lines);
+    toast.success(`Plantilla descargada (${lines.map((b) => b.name).join(', ')})`);
+  }, [bizId]);
 
   const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
     if (!user?.user_id) return 0;
     const businessType = biz?.businessType || 'delivery';
-    let brands = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
-    const items = entries
-      .map((entry) => {
-        const name = String(entry.name || '').trim();
-        if (!name) return null;
-        const category = normalizeImportCategory(entry.category || '');
-        return {
-          name,
-          description: entry.description || '',
-          category,
-          brandIds: resolveCatalogImportBrandIds([], category, brands),
-          unit: entry.unit || 'ud',
+    const isDelivery = businessType === 'delivery';
+    let brandCache = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
+
+    if (isDelivery) {
+      const validation = validateDeliveryCatalogImportEntries(entries, brandCache);
+      if (!validation.ok) {
+        toast.error('Revisa la plantilla antes de importar', {
+          description: formatDeliveryCatalogImportValidationToast(validation),
+          duration: 12000,
+        });
+        return 0;
+      }
+    }
+
+    const unmatchedCommercialBrands: string[] = [];
+    const items: Record<string, unknown>[] = [];
+
+    for (const entry of entries) {
+      if (isDelivery && bizId) {
+        const mapped = await mapImportEntryToCatalogItem(entry, { businessId: bizId, brandCache });
+        if (!mapped) continue;
+        brandCache = mapped.brandCache;
+        unmatchedCommercialBrands.push(...mapped.unmatchedLineNames);
+        items.push({
+          ...mapped.item,
           vertical: businessType,
-          module: 'catalog' as const,
-          unitPrice: Number(entry.unitPrice) || 0,
-          costPrice: Number(entry.costPrice) || 0,
-          stockQuantity: Number(entry.stockQuantity) || 0,
-          minStock: Number(entry.minStock) || 0,
-          active: true,
-          webVisible: true,
-          available: true,
           notes: entry.notes || '',
-          sku: entry.sku || undefined,
-          image: entry.image || undefined,
-          customFields: {},
-        };
-      })
-      .filter(Boolean) as Record<string, unknown>[];
+        });
+        continue;
+      }
+
+      const name = String(entry.name || '').trim();
+      if (!name) continue;
+      items.push({
+        name,
+        description: entry.description || '',
+        category: normalizeImportCategory(entry.category || ''),
+        brandIds: [],
+        unit: entry.unit || 'ud',
+        vertical: businessType,
+        module: 'catalog' as const,
+        unitPrice: Number(entry.unitPrice) || 0,
+        costPrice: Number(entry.costPrice) || 0,
+        stockQuantity: Number(entry.stockQuantity) || 0,
+        minStock: Number(entry.minStock) || 0,
+        active: true,
+        webVisible: true,
+        available: true,
+        notes: entry.notes || '',
+        sku: entry.sku || undefined,
+        image: entry.image || undefined,
+        customFields: {},
+      });
+    }
+
+    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
+    if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
 
     if (items.length === 0) {
       toast.error('No se detectaron filas válidas para importar');
@@ -382,6 +434,16 @@ export function ConfiguracionGeneral() {
 
     // Marcar como completado si se creó al menos 1.
     if (bizId && result.created > 0) {
+      if (isDelivery) {
+        await syncTpvOrganizersAfterCatalogImport(
+          bizId,
+          items as Array<{ brandIds?: string[]; category?: string }>,
+        ).catch(() => {});
+        await activateCommercialLinesAfterCatalogImport(
+          bizId,
+          items as Array<{ brandIds?: string[] }>,
+        ).catch(() => {});
+      }
       notifyDeliveryCatalogChanged();
       const nextStatus = {
         stock: resolvedImportStatus?.stock || 'pending',
@@ -917,9 +979,12 @@ export function ConfiguracionGeneral() {
           onClose={() => setImportPopup(null)}
           moduleLabel="Catálogo"
           importLabel="Catálogo"
-          templateFileName="plantilla_catalogo.xlsx"
+          templateFileName={biz?.businessType === 'delivery' ? 'plantilla_catalogo_delivery_tpv.xlsx' : 'plantilla_catalogo.xlsx'}
           fields={catalogImportFields}
           onImport={handleCatalogImport}
+          onDownloadTemplate={biz?.businessType === 'delivery' ? () => void handleDownloadCatalogTemplate() : undefined}
+          headerAliases={biz?.businessType === 'delivery' ? DELIVERY_CATALOG_HEADER_ALIASES : undefined}
+          skipMappingWhenComplete={biz?.businessType === 'delivery'}
         />
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}

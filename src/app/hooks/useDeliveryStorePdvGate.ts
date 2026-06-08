@@ -1,57 +1,55 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useCallback, useMemo } from 'react';
 import { useBusinessOptional } from '../context/BusinessContext';
-import { isDeliveryStoreAndPdvReady } from '../lib/deliveryActivationGates';
-import { DELIVERY_WORK_CENTERS_CHANGED, isDeliveryBusinessType, loadDeliveryStores } from '../lib/deliverySetup';
+import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
+import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
+import { isDeliveryBusinessType, resolveBusinessScopeId } from '../lib/deliverySetup';
 
+/**
+ * Gate delivery: tienda retail activa + PDV enlazado.
+ * Lee la misma fuente que el sidebar (ActiveStoreScope) para no bloquear el catálogo
+ * cuando ya ves centros con caja en el menú lateral.
+ */
 export function useDeliveryStorePdvGate() {
-  const { user } = useAuth();
-  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  const businessCtx = useBusinessOptional();
+  const currentBusiness = businessCtx?.currentBusiness ?? null;
+  const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const [ready, setReady] = useState(!isDelivery);
-  const [loading, setLoading] = useState(isDelivery);
+  const activeStore = useActiveStoreScope();
+
+  const businessId = resolveBusinessScopeId(currentBusiness);
+
+  const loading = Boolean(
+    isDelivery &&
+      (!businessesFetchSettled ||
+        !businessId ||
+        (activeStore.loading &&
+          activeStore.retailWorkCenters.length === 0 &&
+          activeStore.allPointsOfSale.length === 0)),
+  );
+
+  const ready = useMemo(() => {
+    if (!isDelivery) return true;
+    if (!businessesFetchSettled || !businessId) return false;
+
+    const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
+    if (retailActive.length === 0) return false;
+
+    const rows = buildDeliverySidebarStoreRows(
+      activeStore.retailWorkCenters,
+      activeStore.allPointsOfSale,
+    );
+    return rows.some((row) => !row.needsPdv && !row.inactive);
+  }, [
+    isDelivery,
+    businessesFetchSettled,
+    businessId,
+    activeStore.retailWorkCenters,
+    activeStore.allPointsOfSale,
+  ]);
 
   const reload = useCallback(async () => {
-    if (!isDelivery || !user) {
-      setReady(true);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const state = await loadDeliveryStores(user, currentBusiness);
-      const retailActive = state.workCenters.filter(
-        (wc) =>
-          wc.active !== false &&
-          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-      );
-      setReady(
-        isDeliveryStoreAndPdvReady({
-          hasActiveRetailStore: retailActive.length > 0,
-          hasActivePdv: state.pointsOfSale.length > 0,
-        }),
-      );
-    } catch {
-      setReady(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [isDelivery, user, currentBusiness]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  useEffect(() => {
-    if (!isDelivery) return;
-    const onChanged = () => void reload();
-    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-    window.addEventListener('work-centers:changed', onChanged);
-    return () => {
-      window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-      window.removeEventListener('work-centers:changed', onChanged);
-    };
-  }, [isDelivery, reload]);
+    await activeStore.refresh();
+  }, [activeStore.refresh]);
 
   return { isDelivery, ready, loading, reload };
 }

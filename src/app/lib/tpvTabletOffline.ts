@@ -1,8 +1,15 @@
-/** Cola local mínima para operaciones TPV sin conexión (fichajes, ventas). */
+/** Cola local para operaciones TPV sin conexión (pedidos, caja, fichajes). */
+
+export type TpvOfflineQueueItemType =
+  | 'clock_in'
+  | 'clock_out'
+  | 'sale'
+  | 'order_update'
+  | 'register_tx';
 
 export type TpvOfflineQueueItem = {
   id: string;
-  type: 'clock_in' | 'clock_out' | 'sale';
+  type: TpvOfflineQueueItemType;
   payload: Record<string, unknown>;
   createdAt: string;
 };
@@ -29,7 +36,7 @@ function writeQueue(items: TpvOfflineQueueItem[]): void {
 }
 
 export function enqueueTpvOfflineItem(
-  type: TpvOfflineQueueItem['type'],
+  type: TpvOfflineQueueItemType,
   payload: Record<string, unknown>,
 ): TpvOfflineQueueItem {
   const item: TpvOfflineQueueItem = {
@@ -44,6 +51,10 @@ export function enqueueTpvOfflineItem(
 
 export function listTpvOfflineQueue(): TpvOfflineQueueItem[] {
   return readQueue();
+}
+
+export function removeTpvOfflineItem(id: string): void {
+  writeQueue(readQueue().filter((i) => i.id !== id));
 }
 
 export function clearTpvOfflineQueue(): void {

@@ -33,7 +33,9 @@ import {
 } from '../../../lib/workCentersApi';
 import {
   DEFAULT_BUSINESS_HOURS_CONFIG,
+  getBusinessHoursIssue,
   hasValidBusinessHoursConfig,
+  normalizeBusinessHoursConfig,
 } from '../../../lib/businessHoursUtils';
 import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/settingsApi';
 import { BusinessHoursEditor } from './BusinessHoursEditor';
@@ -94,6 +96,7 @@ import {
   Copy,
   Monitor,
   ExternalLink,
+  Loader2,
 } from 'lucide-react';
 import { regenerateTerminalCodeRequest } from '../../../lib/tpvTabletApi';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
@@ -267,7 +270,7 @@ function WorkCenterModal({
     );
     setPdvCode(editPdvCode || '');
     setPdvCodeManual(Boolean(editPdvCode));
-    setOpeningHours(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG);
+    setOpeningHours(normalizeBusinessHoursConfig(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG));
     if (isOpen && initialWizardStep === 'horarios' && includeOpeningHours) {
       setStep('horarios');
     }
@@ -276,14 +279,14 @@ function WorkCenterModal({
   useEffect(() => {
     if (!isOpen || !includeOpeningHours) return;
     if (editItem?.openingHours) {
-      setOpeningHours(editItem.openingHours);
+      setOpeningHours(normalizeBusinessHoursConfig(editItem.openingHours));
       return;
     }
     if (!editItem || !legacyUserId) return;
     let cancelled = false;
     getBusinessHours(legacyUserId)
       .then((legacy) => {
-        if (!cancelled && legacy) setOpeningHours(legacy);
+        if (!cancelled && legacy) setOpeningHours(normalizeBusinessHoursConfig(legacy));
       })
       .catch(() => undefined);
     return () => {
@@ -442,10 +445,9 @@ function WorkCenterModal({
     };
 
     const validateHorarios = () => {
-      if (includeOpeningHours && !hasValidBusinessHoursConfig(openingHours)) {
-        nextErr.horarios =
-          'Activa al menos un día con hora de apertura y cierre distintas (o usa «Aplicar a días abiertos»).';
-      }
+      if (!includeOpeningHours) return;
+      const issue = getBusinessHoursIssue(openingHours);
+      if (issue) nextErr.horarios = issue;
     };
 
     let staffCount = Number(form.expectedStaffCount || 0);
@@ -569,7 +571,9 @@ function WorkCenterModal({
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: sanitizeRetailTextField(form.notes, PDV_RETAIL_LIMITS.notesMax) || undefined,
         active: editItem ? editItem.active !== false : defaultActiveOnCreate,
-        openingHours: includeOpeningHours ? openingHours : editItem?.openingHours,
+        openingHours: includeOpeningHours
+          ? normalizeBusinessHoursConfig(openingHours)
+          : editItem?.openingHours,
       });
       onClose();
     } catch {
@@ -702,7 +706,7 @@ function WorkCenterModal({
       activeStepId={step}
       onStepChange={(id) => setStep(id as WizardStepId)}
       maxHeight={simplifyPdvCreate ? 'min(88dvh,680px)' : 'min(90dvh,920px)'}
-      preview={storePreview}
+      preview={step === 'horarios' ? undefined : storePreview}
       footer={
         <SettingsWizardFooter
           onCancel={onClose}
@@ -1448,7 +1452,10 @@ function WorkCenterModal({
               ) : null}
               <BusinessHoursEditor
                 config={openingHours}
-                onChange={setOpeningHours}
+                onChange={(next) => {
+                  setOpeningHours(next);
+                  clearFieldError('horarios');
+                }}
                 storeLabel={storeHoursLabel}
                 compact
               />
@@ -1572,6 +1579,51 @@ export function SalesPointsTab() {
       window.removeEventListener('work-centers:changed', onChanged);
     };
   }, [loadData]);
+
+  const handleEnsurePdvTabletCode = async (wc: WorkCenter) => {
+    if (!dataUserId) return;
+    setRegeneratingTerminal(wc._id);
+    try {
+      let pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
+        business: currentBusiness ?? null,
+      });
+      if (!pdv?._id) {
+        toast.error('No se pudo crear la caja del local');
+        return;
+      }
+      if (!pdv.terminalCode) {
+        pdv = await regenerateTerminalCodeRequest(dataUserId, pdv._id);
+      }
+      if (!pdv?.terminalCode) {
+        toast.error('No se pudo generar el código de tablet');
+        return;
+      }
+      setDeliveryPdvsByWorkCenter((prev) => ({
+        ...prev,
+        [wc._id]: {
+          _id: pdv._id,
+          _rev: pdv._rev,
+          code: pdv.code,
+          name: String(pdv.name || ''),
+          address: pdv.address,
+          workCenterId: wc._id,
+          terminalCode: pdv.terminalCode,
+        },
+      }));
+      const pdvCode = String(pdv.code || '').trim();
+      if (pdvCode) {
+        setDeliveryPdvCodes((prev) => (prev.includes(pdvCode) ? prev : [...prev, pdvCode]));
+      }
+      clearDeliveryStoresSessionCache(resolveBusinessScopeId(currentBusiness ?? null));
+      notifyDeliveryWorkCentersChanged(resolveBusinessScopeId(currentBusiness ?? null));
+      toast.success(`Código tablet listo: ${pdv.terminalCode}`);
+      void loadData({ skipPdvMerge: true });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo enlazar la caja del local');
+    } finally {
+      setRegeneratingTerminal(null);
+    }
+  };
 
   const handleRegenerateTerminalCode = async (wc: WorkCenter) => {
     const linked = deliveryPdvsByWorkCenter[wc._id];
@@ -2336,6 +2388,32 @@ export function SalesPointsTab() {
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <Phone className="w-3.5 h-3.5 shrink-0" />
                     <span>{wc.phone}</span>
+                  </div>
+                )}
+                {isDelivery && wc.centerType === 'punto_de_venta' && !deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
+                  <div className="rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 space-y-1.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      Sin código de tablet
+                    </p>
+                    <p className="text-[10px] leading-snug text-amber-900/90 dark:text-amber-100/90">
+                      Este local no tiene caja enlazada en delivery. Genera el código para activar la tablet.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={regeneratingTerminal === wc._id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleEnsurePdvTabletCode(wc);
+                      }}
+                      className="text-[10px] font-semibold text-amber-900 dark:text-amber-100 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+                    >
+                      {regeneratingTerminal === wc._id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Monitor className="w-3 h-3" />
+                      )}
+                      Generar código tablet
+                    </button>
                   </div>
                 )}
                 {isDelivery && wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (

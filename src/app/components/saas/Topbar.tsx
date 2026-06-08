@@ -4,8 +4,11 @@ import { useTheme } from 'next-themes';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
+import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
+import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 import { SAAS__NotificationsDrawer } from '../design-system/SAAS__NotificationsDrawer';
 import { SAAS__ProfileModal } from '../design-system/SAAS__ProfileModal';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
@@ -27,6 +30,13 @@ export function Topbar({
   onOpenGlobalSearch,
 }: TopbarProps) {
   const { notifications } = useApp();
+  const { user } = useAuth();
+  const isWorker = isWorkerAccount(user);
+  const alertCenterBusinessId = useAlertCenterBusinessId();
+  const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
+    !isWorker ? alertCenterBusinessId : undefined,
+    { pollMs: 60_000 },
+  );
   const { setTheme, resolvedTheme } = useTheme();
   const { i18n, t } = useTranslation();
   const [mounted, setMounted] = useState(false);
@@ -56,7 +66,8 @@ export function Topbar({
     { code: 'fr', label: 'Français', flag: '🇫🇷' },
     { code: 'it', label: 'Italiano', flag: '🇮🇹' },
   ] as const;
-  const unreadCount = notifications.filter((notification) => !notification.read).length;
+  const legacyUnread = notifications.filter((notification) => !notification.read).length;
+  const unreadCount = isWorker ? legacyUnread : alertCenterUnresolved;
 
   const activeStore = useActiveStoreScope();
   const hasSavedStorePreference = Boolean(activeStore.activePreferenceRaw?.trim());
@@ -238,11 +249,11 @@ export function Topbar({
             <button
               onClick={() => setShowNotifications(true)}
               className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
-              title={t('topbar.notifications')}
+              title={isWorker ? t('topbar.notifications') : 'Centro de alertas'}
             >
-              <Bell className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+              <Bell className={`w-5 h-5 ${unreadCount > 0 && !isWorker ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center">
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}

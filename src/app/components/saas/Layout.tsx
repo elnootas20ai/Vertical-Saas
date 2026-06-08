@@ -145,23 +145,11 @@ function LayoutInner({
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 
   const isDashboard = location.pathname === '/saas/dashboard';
-  const isGeneralActive = isDashboard && (() => {
-    try { return localStorage.getItem('vertial_dash_general') === '1'; } catch { return false; }
-  })();
-
-  const handleSelectGeneral = useCallback(() => {
-    try { localStorage.setItem('vertial_dash_general', '1'); } catch { /* noop */ }
-    window.dispatchEvent(new CustomEvent('vertial:layout-general'));
-    navigate('/saas/dashboard');
-  }, [navigate]);
+  const showBusinessCarousel = isDashboard && businesses.length > 1;
 
   const handleSwitchBusiness = useCallback((businessId: string) => {
     switchBusiness(businessId);
-    if (isDashboard) {
-      try { localStorage.setItem('vertial_dash_general', '0'); } catch { /* noop */ }
-      window.dispatchEvent(new CustomEvent('vertial:layout-business'));
-    }
-  }, [switchBusiness, isDashboard]);
+  }, [switchBusiness]);
 
   // Two-key sequence tracking (G+D, N+V, etc.)
   const lastKeyRef = useRef<string | null>(null);
@@ -282,14 +270,12 @@ function LayoutInner({
           onToggleSidebar={handleToggleSidebar}
           onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
         />
-        {isDashboard && businesses.length > 1 && (
+        {showBusinessCarousel && (
           <div className="px-3 md:px-4 pt-3">
             <BusinessCarousel
               businesses={businesses}
               currentBusinessId={currentBusiness?.business_id}
               onSwitchBusiness={handleSwitchBusiness}
-              onSelectGeneral={handleSelectGeneral}
-              isGeneralActive={isGeneralActive}
             />
           </div>
         )}

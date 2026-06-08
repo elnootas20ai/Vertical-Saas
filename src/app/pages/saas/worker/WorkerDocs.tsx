@@ -210,7 +210,7 @@ export function WorkerDocs() {
                     </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 shrink-0">
                   {doc.fileData && doc.mimeType && (doc.mimeType.startsWith('image/') || doc.mimeType === 'application/pdf') && (
                     <button
                       onClick={() => handlePreview(doc)}
@@ -223,10 +223,11 @@ export function WorkerDocs() {
                   {doc.fileData && (
                     <button
                       onClick={() => handleDownload(doc)}
-                      className="p-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                      className="inline-flex items-center gap-1.5 p-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors text-gray-600 dark:text-gray-300"
                       title={t('worker.docs.download')}
                     >
-                      <Download className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <Download className="w-4 h-4" />
+                      <span className="text-xs font-medium sm:hidden">Descargar</span>
                     </button>
                   )}
                 </div>

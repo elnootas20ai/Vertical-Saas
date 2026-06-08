@@ -1,50 +1,74 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthOptional } from '../context/AuthContext';
 import { useBusinessOptional } from '../context/BusinessContext';
+import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
 import { listBrandsRequest } from '../lib/brandApi';
 import { isBrandSetupComplete, isDefaultCommercialBrand } from '../lib/brandUtils';
-import { isDeliveryStoreAndPdvReady } from '../lib/deliveryActivationGates';
-import { DELIVERY_WORK_CENTERS_CHANGED, isDeliveryBusinessType, loadDeliveryStores } from '../lib/deliverySetup';
+import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
+import { isDeliveryBusinessType, resolveBusinessScopeId } from '../lib/deliverySetup';
 
 /**
  * Flags para bloquear navegación delivery (sidebar, pestañas Ajustes).
  */
 export function useDeliveryActivationNav() {
   const user = useAuthOptional()?.user ?? null;
-  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  const businessCtx = useBusinessOptional();
+  const currentBusiness = businessCtx?.currentBusiness ?? null;
+  const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const businessId = currentBusiness?.business_id || '';
-  const [pdvReady, setPdvReady] = useState(!isDelivery);
+  const activeStore = useActiveStoreScope();
   const [brandReady, setBrandReady] = useState(!isDelivery);
-  const [loading, setLoading] = useState(isDelivery);
+  const [brandLoading, setBrandLoading] = useState(isDelivery);
 
-  const reload = useCallback(async () => {
+  const businessScopeId = resolveBusinessScopeId(currentBusiness);
+
+  const pdvReady = useMemo(() => {
+    if (!isDelivery) return true;
+    if (!businessesFetchSettled || !businessScopeId) return false;
+
+    const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
+    if (retailActive.length === 0) return false;
+
+    const rows = buildDeliverySidebarStoreRows(
+      activeStore.retailWorkCenters,
+      activeStore.allPointsOfSale,
+    );
+    return rows.some((row) => !row.needsPdv && !row.inactive);
+  }, [
+    isDelivery,
+    businessesFetchSettled,
+    businessScopeId,
+    activeStore.retailWorkCenters,
+    activeStore.allPointsOfSale,
+  ]);
+
+  const loading = Boolean(
+    isDelivery &&
+      (brandLoading ||
+        !businessesFetchSettled ||
+        !businessScopeId ||
+        (activeStore.loading &&
+          activeStore.retailWorkCenters.length === 0 &&
+          activeStore.allPointsOfSale.length === 0)),
+  );
+
+  const reloadBrands = useCallback(async () => {
     if (!isDelivery || !user) {
-      setPdvReady(true);
       setBrandReady(true);
-      setLoading(false);
+      setBrandLoading(false);
       return;
     }
-    setLoading(true);
+    if (!pdvReady || !businessId) {
+      setBrandReady(false);
+      setBrandLoading(false);
+      return;
+    }
+
+    setBrandLoading(true);
     try {
-      const state = await loadDeliveryStores(user, currentBusiness);
-      const retailActive = state.workCenters.filter(
-        (wc) =>
-          wc.active !== false &&
-          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-      );
-      const pdvOk = isDeliveryStoreAndPdvReady({
-        hasActiveRetailStore: retailActive.length > 0,
-        hasActivePdv: state.pointsOfSale.length > 0,
-      });
-      setPdvReady(pdvOk);
-
-      if (!pdvOk || !businessId) {
-        setBrandReady(false);
-        return;
-      }
-
       const brands = await listBrandsRequest(businessId).catch(() => []);
+      const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
       const primary =
         brands.find((b) => isDefaultCommercialBrand(b)) ??
         brands.find((b) => b.active !== false) ??
@@ -54,27 +78,20 @@ export function useDeliveryActivationNav() {
         primary ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount: retailActive.length }) : false,
       );
     } catch {
-      setPdvReady(false);
       setBrandReady(false);
     } finally {
-      setLoading(false);
+      setBrandLoading(false);
     }
-  }, [isDelivery, user, currentBusiness, businessId]);
+  }, [isDelivery, user, pdvReady, businessId, activeStore.retailWorkCenters]);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    void reloadBrands();
+  }, [reloadBrands]);
 
-  useEffect(() => {
-    if (!isDelivery) return;
-    const onChanged = () => void reload();
-    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-    window.addEventListener('work-centers:changed', onChanged);
-    return () => {
-      window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-      window.removeEventListener('work-centers:changed', onChanged);
-    };
-  }, [isDelivery, reload]);
+  const reload = useCallback(async () => {
+    await activeStore.refresh();
+    await reloadBrands();
+  }, [activeStore.refresh, reloadBrands]);
 
   return { isDelivery, pdvReady, brandReady, loading, reload };
 }

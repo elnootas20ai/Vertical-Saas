@@ -3,32 +3,43 @@ import { useNavigate } from 'react-router';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import {
+  fetchAlerts,
   fetchAlertSummary,
   SOURCE_LABELS,
   SOURCE_COLORS,
+  normalizeAlertSummary,
   type AlertSummary,
+  type AlertRecord,
   type AlertSource,
 } from '../../lib/alertCenterApi';
+import { ArrowRight, RefreshCw } from 'lucide-react';
 import {
-  Bell, AlertCircle, AlertTriangle, CheckCircle,
-  ArrowRight, RefreshCw,
-} from 'lucide-react';
+  AlertProShell,
+  AlertProKpiStrip,
+  AlertProRow,
+  AlertProEmpty,
+} from './alertCenterProUi';
 
-export function AlertSummaryWidget() {
+export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?._id?.replace('business:', '') || currentBusiness?.id || user?.userId || '';
 
   const [summary, setSummary] = useState<AlertSummary | null>(null);
+  const [recent, setRecent] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
-      const res = await fetchAlertSummary(businessId);
-      setSummary(res.summary);
+      const [summaryRes, alertsRes] = await Promise.all([
+        fetchAlertSummary(businessId),
+        fetchAlerts(businessId, { status: 'new,seen', order: 'desc', page: 1, limit: 4 }),
+      ]);
+      setSummary(normalizeAlertSummary(summaryRes.summary));
+      setRecent(alertsRes.alerts || []);
     } catch {
       /* silent */
     } finally {
@@ -36,108 +47,117 @@ export function AlertSummaryWidget() {
     }
   }, [businessId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
+
+  const goCenter = () => navigate('/saas/alerts');
 
   if (loading && !summary) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-        <RefreshCw className="h-5 w-5 animate-spin text-gray-400" />
+      <div className={`flex h-52 items-center justify-center rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${embedded ? 'border-dashed' : ''}`}>
+        <RefreshCw className="h-5 w-5 animate-spin text-zinc-400" />
       </div>
     );
   }
 
-  if (!summary || summary.total === 0) {
+  const hasAlerts = (summary?.unresolved ?? 0) > 0;
+  const highCount = summary?.byPriority?.high ?? 0;
+  const unresolved = summary?.unresolved ?? 0;
+
+  if (!hasAlerts) {
     return (
       <div
-        onClick={() => navigate('/saas/alerts')}
-        className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 bg-white/50 px-6 py-8 transition hover:border-gray-400 dark:border-gray-700 dark:bg-gray-800/30 dark:hover:border-gray-600"
+        role="button"
+        tabIndex={0}
+        onClick={goCenter}
+        onKeyDown={(e) => { if (e.key === 'Enter') goCenter(); }}
+        className={`group cursor-pointer overflow-hidden rounded-2xl border border-zinc-200/90 transition hover:shadow-lg dark:border-zinc-800 ${embedded ? '' : 'shadow-sm'}`}
       >
-        <CheckCircle className="h-8 w-8 text-emerald-400" />
-        <p className="mt-2 text-sm font-medium text-gray-600 dark:text-gray-300">Sin alertas pendientes</p>
-        <p className="mt-0.5 text-xs text-gray-400">Todo funciona correctamente</p>
+        <AlertProShell
+          compact
+          title="Centro de alertas"
+          subtitle="Visión ejecutiva del negocio"
+        />
+        <div className="bg-white dark:bg-zinc-950">
+          <AlertProEmpty />
+          <div className="border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-500 transition group-hover:text-zinc-900 dark:group-hover:text-zinc-200">
+              Abrir centro de alertas <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </div>
+        </div>
       </div>
     );
   }
 
-  const topSources = Object.entries(summary.bySource)
+  const topSources = Object.entries(summary?.bySource || {})
     .sort(([, a], [, b]) => (b as number) - (a as number))
     .slice(0, 4) as [AlertSource, number][];
 
   return (
     <div
-      onClick={() => navigate('/saas/alerts')}
-      className="group cursor-pointer rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+      className={`group cursor-pointer overflow-hidden rounded-2xl border border-zinc-200/90 transition hover:shadow-lg dark:border-zinc-800 ${embedded ? '' : 'shadow-sm'}`}
+      role="button"
+      tabIndex={0}
+      onClick={goCenter}
+      onKeyDown={(e) => { if (e.key === 'Enter') goCenter(); }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Bell className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-            {summary.byStatus.new > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-3 w-3">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
+      <AlertProShell
+        compact
+        title="Centro de alertas"
+        subtitle="Delivery · Finanzas · RRHH · Operaciones"
+        badge={
+          unresolved > 0 ? (
+            <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-300 ring-1 ring-red-500/30">
+              {unresolved} activas
+            </span>
+          ) : undefined
+        }
+        kpis={(
+          <AlertProKpiStrip
+            compact
+            unresolved={unresolved}
+            high={highCount}
+            newCount={summary?.byStatus?.new ?? 0}
+          />
+        )}
+      />
+
+      <div className="space-y-2 bg-zinc-50 p-3 dark:bg-zinc-950">
+        {recent.slice(0, 3).map((alert) => (
+          <AlertProRow
+            key={alert.id}
+            alert={alert}
+            showArrow={false}
+            onClick={() => {
+              if (alert.route) navigate(alert.route);
+              else goCenter();
+            }}
+          />
+        ))}
+
+        {topSources.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-1 pt-1">
+            {topSources.map(([src, count]) => (
+              <span
+                key={src}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200/80 bg-white px-2 py-1 text-[10px] font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+              >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: SOURCE_COLORS[src] || '#71717a' }} />
+                {SOURCE_LABELS[src] || src}
+                <span className="font-bold text-zinc-900 dark:text-zinc-200">{count}</span>
               </span>
-            )}
+            ))}
           </div>
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Alertas globales</h3>
-        </div>
-        <ArrowRight className="h-4 w-4 text-gray-400 transition group-hover:translate-x-0.5 group-hover:text-indigo-600 dark:group-hover:text-indigo-400" />
-      </div>
+        )}
 
-      {/* Counters */}
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <div className="rounded-lg bg-red-50 px-3 py-2 dark:bg-red-950/30">
-          <div className="flex items-center gap-1.5">
-            <AlertCircle className="h-3.5 w-3.5 text-red-500" />
-            <span className="text-lg font-bold text-red-700 dark:text-red-400">{summary.byPriority.high}</span>
-          </div>
-          <p className="text-[10px] text-red-600/80 dark:text-red-400/60">Alta</p>
+        <div className="flex items-center justify-between border-t border-zinc-200/80 px-1 pt-3 dark:border-zinc-800">
+          <span className="text-[11px] text-zinc-500">
+            {summary?.byStatus?.new ?? 0} nuevas sin leer
+          </span>
+          <span className="text-[11px] font-semibold text-zinc-700 transition group-hover:text-zinc-900 dark:text-zinc-300 dark:group-hover:text-white">
+            Ver todas →
+          </span>
         </div>
-        <div className="rounded-lg bg-amber-50 px-3 py-2 dark:bg-amber-950/30">
-          <div className="flex items-center gap-1.5">
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-            <span className="text-lg font-bold text-amber-700 dark:text-amber-400">{summary.byPriority.medium}</span>
-          </div>
-          <p className="text-[10px] text-amber-600/80 dark:text-amber-400/60">Media</p>
-        </div>
-        <div className="rounded-lg bg-blue-50 px-3 py-2 dark:bg-blue-950/30">
-          <div className="flex items-center gap-1.5">
-            <Bell className="h-3.5 w-3.5 text-blue-500" />
-            <span className="text-lg font-bold text-blue-700 dark:text-blue-400">{summary.byPriority.low}</span>
-          </div>
-          <p className="text-[10px] text-blue-600/80 dark:text-blue-400/60">Baja</p>
-        </div>
-      </div>
-
-      {/* Top sources */}
-      {topSources.length > 0 && (
-        <div className="mt-4 space-y-1.5">
-          {topSources.map(([src, count]) => (
-            <div key={src} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: SOURCE_COLORS[src] || '#6B7280' }}
-                />
-                <span className="text-xs text-gray-600 dark:text-gray-400">
-                  {SOURCE_LABELS[src] || src}
-                </span>
-              </div>
-              <span className="text-xs font-medium text-gray-900 dark:text-gray-200">{count}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-700">
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          {summary.unresolved} sin resolver
-        </span>
-        <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400">
-          Ver todas →
-        </span>
       </div>
     </div>
   );

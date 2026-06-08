@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
@@ -76,6 +76,8 @@ import {
   listPayrollDocumentsRequest,
   createPayrollDocumentRequest,
   deletePayrollDocumentRequest,
+  finalizePayrollDocumentUpload,
+  payrollUploadSuccessMessage,
   getDocumentExpiryStatus,
   PAYROLL_DOC_TYPE_LABELS,
   type PayrollDocument,
@@ -314,6 +316,7 @@ function PayrollUploadModal({ member, currentUser, onClose, onUploaded }: Payrol
         uploadedByName: currentUser.fullName,
       });
       onUploaded(doc);
+      void finalizePayrollDocumentUpload(doc);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo subir el documento.');
@@ -469,6 +472,7 @@ function PayrollUploadModal({ member, currentUser, onClose, onUploaded }: Payrol
 export function TeamMemberDetail() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t, i18n } = useTranslation();
   const { user, listUsers, listRoles, updateUser } = useAuth();
   const { currentBusiness } = useBusiness();
@@ -479,6 +483,11 @@ export function TeamMemberDetail() {
   const [roles, setRoles] = useState<RoleDefinition[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<DetailTab>('info');
+
+  useEffect(() => {
+    const tabParam = searchParams.get('tab');
+    if (tabParam === 'clockins') setActiveTab('clockins');
+  }, [searchParams]);
 
   // Clockins
   const [clockins, setClockins] = useState<ClockinRecord[]>([]);
@@ -813,7 +822,7 @@ export function TeamMemberDetail() {
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button type="button" onClick={() => navigate(`/saas/clockins?memberId=${userId}`)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2.5 text-gray-500 hover:text-blue-600 hover:border-blue-300 dark:hover:border-blue-700 transition-colors" title="Ver fichajes">
+                <button type="button" onClick={() => setActiveTab('clockins')} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2.5 text-gray-500 hover:text-blue-600 hover:border-blue-300 dark:hover:border-blue-700 transition-colors" title="Ver fichajes">
                   <Clock className="w-4 h-4" />
                 </button>
                 <button type="button" onClick={() => navigate(`/saas/schedules?memberId=${userId}`)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2.5 text-gray-500 hover:text-emerald-600 hover:border-emerald-300 dark:hover:border-emerald-700 transition-colors" title="Ver horarios">
@@ -2064,7 +2073,7 @@ export function TeamMemberDetail() {
           onClose={() => setShowPayrollUpload(false)}
           onUploaded={(doc) => {
             setPayrollDocs((prev) => [doc, ...prev]);
-            toast.success(`Documento "${doc.name}" subido correctamente`);
+            toast.success(payrollUploadSuccessMessage(doc));
           }}
         />
       )}

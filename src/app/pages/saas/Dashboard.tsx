@@ -9,6 +9,9 @@ import { useBusiness } from '../../context/BusinessContext';
 import { fetchDashboardData, type DashboardServerData, type DashboardAlert, type QuickFinance, type SalesClosureKpis } from '../../lib/dashboardApi';
 import { fetchActiveNow, fetchClockinStats, formatMinutes, type ActiveMember, type ClockinStatsSummary } from '../../lib/clockinsApi';
 import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsApi';
+import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
+import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
+import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
 import { listDeliveryOrdersRequest, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
@@ -20,7 +23,7 @@ import { es } from 'date-fns/locale';
 import type { BusinessType } from '../../lib/businessApi';
 import { clientsRouteForVertical, DELIVERY_CRM_UI_ENABLED } from '../../lib/deliveryCrmFeature';
 
-import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
+import { isWorkerAccount } from '../../lib/authApi';
 import { GymDashboard } from './dashboards/GymDashboard';
 import { ClinicDashboard } from './dashboards/ClinicDashboard';
 import { HotelDashboard } from './dashboards/HotelDashboard';
@@ -53,7 +56,7 @@ import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardF
 
 // ─── Widget personalización ────────────────────────────────────────────────────
 
-type WidgetId = 'kpis_main' | 'quick_access' | 'alertas' | 'charts' | 'operations' | 'quick_finance' | 'funnel' | 'actividad' | 'clockins';
+type WidgetId = 'kpis_main' | 'quick_access' | 'alertas' | 'charts' | 'operations' | 'quick_finance' | 'funnel' | 'actividad' | 'clockins' | 'availability' | 'team_rrhh';
 
 interface WidgetConfig {
   id: WidgetId;
@@ -63,14 +66,15 @@ interface WidgetConfig {
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'kpis_main',     label: 'KPIs principales',       visible: true },
+  { id: 'alertas',       label: 'Centro de alertas',      visible: true },
   { id: 'quick_access',  label: 'Accesos rápidos',        visible: true },
-  { id: 'alertas',       label: 'Alertas inteligentes',   visible: true },
   { id: 'charts',        label: 'Gráficas principales',   visible: true },
   { id: 'operations',    label: 'Operativa del negocio',  visible: true },
   { id: 'quick_finance', label: 'Bloque financiero',      visible: true },
   { id: 'funnel',        label: 'Embudo de ventas CRM',   visible: true },
   { id: 'clockins',      label: 'Fichajes del equipo',    visible: true },
   { id: 'availability',  label: 'Disponibilidad equipo',  visible: true },
+  { id: 'team_rrhh',     label: 'Equipo y RRHH',          visible: true },
   { id: 'actividad',     label: 'Actividad reciente',     visible: true },
 ];
 
@@ -395,6 +399,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
     { label: 'Calendario', icon: <Calendar className="w-5 h-5" />, route: '/saas/calendar', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
     { label: 'Fichajes', icon: <Clock className="w-5 h-5" />, route: '/saas/clockins', color: 'text-gray-600', bg: 'bg-gray-50 dark:bg-gray-800' },
     { label: 'Horarios', icon: <CalendarRange className="w-5 h-5" />, route: '/saas/equipo/horarios-vacaciones', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+    { label: 'Nóminas', icon: <Receipt className="w-5 h-5" />, route: '/saas/payroll', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
   ];
 
   const verticalLinks: Record<string, QuickAccessItem[]> = {
@@ -507,39 +512,15 @@ const FUNNEL_STAGE_KEYS = [
 // ═══════════════════════════════════════════════════════════
 
 export function Dashboard() {
-  const { currentBusiness, businesses } = useBusiness();
-  const [generalView, setGeneralView] = useState(() => {
-    try { return localStorage.getItem('vertial_dash_general') === '1'; } catch { return false; }
-  });
-
   useEffect(() => {
-    const onGeneral = () => setGeneralView(true);
-    const onBusiness = () => setGeneralView(false);
-    window.addEventListener('vertial:layout-general', onGeneral);
-    window.addEventListener('vertial:layout-business', onBusiness);
-    return () => {
-      window.removeEventListener('vertial:layout-general', onGeneral);
-      window.removeEventListener('vertial:layout-business', onBusiness);
-    };
+    try {
+      localStorage.removeItem('vertial_dash_general');
+    } catch {
+      /* noop */
+    }
   }, []);
 
-  const showGeneral = generalView;
-
-  const goGeneral = useCallback(() => {
-    setGeneralView(true);
-    try { localStorage.setItem('vertial_dash_general', '1'); } catch { /* noop */ }
-  }, []);
-
-  const goBusiness = useCallback((_bid?: string) => {
-    setGeneralView(false);
-    try { localStorage.setItem('vertial_dash_general', '0'); } catch { /* noop */ }
-  }, []);
-
-  if (showGeneral) {
-    return <GeneralDashboard onSelectBusiness={goBusiness} />;
-  }
-
-  return <UnifiedDashboard onSelectGeneral={goGeneral} />;
+  return <UnifiedDashboard />;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -554,7 +535,12 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   const { t, i18n } = useTranslation();
 
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
-  const dashboardConfigScope = `${authUser?.user_id || 'anon'}:${currentBusiness?.business_id || 'default'}`;
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const teamMembers = useMemo(
+    () => (currentBusiness?.members || []).map((m) => ({ user_id: m.user_id, fullName: m.fullName })),
+    [currentBusiness?.members],
+  );
+  const dashboardConfigScope = `${authUser?.user_id || 'anon'}:${businessId || 'default'}`;
   const runtimeCacheScope = dashboardConfigScope;
 
   // ── Personalización ──
@@ -617,6 +603,8 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   const [clockinsStatsSummary, setClockinsStatsSummary] = useState<ClockinStatsSummary | null>(null);
   const [clockinsAlertsSummary, setClockinsAlertsSummary] = useState<AlertsSummary | null>(null);
   const [clockinsLoading, setClockinsLoading] = useState(false);
+  const [teamSnapshot, setTeamSnapshot] = useState<TeamDashboardSnapshot | null>(null);
+  const [teamLoading, setTeamLoading] = useState(false);
 
   useEffect(() => {
     try {
@@ -659,43 +647,46 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
 
   // Refresh silencioso en segundo plano para mantener el dashboard "vivo"
   useEffect(() => {
-    if (!authUser?.user_id) return;
+    if (!businessId) return;
     const intervalId = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      fetchDashboardData(authUser.user_id)
+      fetchDashboardData(authUser?.user_id || '')
         .then((data) => {
           setServerData(data);
           setServerUpdatedAt(data.updatedAt);
         })
         .catch(() => { /* noop */ });
       Promise.all([
-        fetchActiveNow(authUser.user_id),
-        fetchClockinStats(authUser.user_id),
-        fetchAlertsSummary(authUser.user_id),
+        fetchActiveNow(businessId),
+        fetchClockinStats(businessId),
+        fetchAlertsSummary(businessId),
       ])
         .then(([active, stats, alertsSummary]) => {
           setClockinsActive(Array.isArray(active) ? active : []);
-          setClockinsStatsSummary(stats || null);
+          setClockinsStatsSummary(stats?.summary || null);
           setClockinsAlertsSummary(alertsSummary || null);
         })
         .catch(() => { /* noop */ });
+      fetchTeamDashboardSnapshot(businessId, teamMembers)
+        .then(setTeamSnapshot)
+        .catch(() => { /* noop */ });
     }, 45000);
     return () => window.clearInterval(intervalId);
-  }, [authUser?.user_id]);
+  }, [businessId, authUser?.user_id, teamMembers]);
 
   useEffect(() => {
-    if (!authUser?.user_id) return;
+    if (!businessId) return;
     let cancelled = false;
     setClockinsLoading(true);
     Promise.all([
-      fetchActiveNow(authUser.user_id),
-      fetchClockinStats(authUser.user_id),
-      fetchAlertsSummary(authUser.user_id),
+      fetchActiveNow(businessId),
+      fetchClockinStats(businessId),
+      fetchAlertsSummary(businessId),
     ])
       .then(([active, stats, alertsSummary]) => {
         if (cancelled) return;
         setClockinsActive(Array.isArray(active) ? active : []);
-        setClockinsStatsSummary(stats || null);
+        setClockinsStatsSummary(stats?.summary || null);
         setClockinsAlertsSummary(alertsSummary || null);
         setClockinsLoading(false);
       })
@@ -707,7 +698,30 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
         setClockinsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [authUser?.user_id]);
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId) {
+      setTeamSnapshot(null);
+      return;
+    }
+    let cancelled = false;
+    setTeamLoading(true);
+    fetchTeamDashboardSnapshot(businessId, teamMembers)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setTeamSnapshot(snapshot);
+          setTeamLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTeamSnapshot(null);
+          setTeamLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [businessId, teamMembers]);
 
   useEffect(() => {
     try {
@@ -732,27 +746,42 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
     if (!authUser?.user_id || serverLoading) return;
     setServerLoading(true);
     setClockinsLoading(true);
+    setTeamLoading(true);
     fetchDashboardData(authUser.user_id)
       .then((data) => { setServerData(data); setServerUpdatedAt(data.updatedAt); setServerLoading(false); })
       .catch(() => setServerLoading(false));
-    Promise.all([
-      fetchActiveNow(authUser.user_id),
-      fetchClockinStats(authUser.user_id),
-      fetchAlertsSummary(authUser.user_id),
-    ])
-      .then(([active, stats, alertsSummary]) => {
-        setClockinsActive(Array.isArray(active) ? active : []);
-        setClockinsStatsSummary(stats || null);
-        setClockinsAlertsSummary(alertsSummary || null);
-        setClockinsLoading(false);
-      })
-      .catch(() => {
-        setClockinsActive([]);
-        setClockinsStatsSummary(null);
-        setClockinsAlertsSummary(null);
-        setClockinsLoading(false);
-      });
-  }, [authUser?.user_id, serverLoading]);
+    if (businessId) {
+      Promise.all([
+        fetchActiveNow(businessId),
+        fetchClockinStats(businessId),
+        fetchAlertsSummary(businessId),
+      ])
+        .then(([active, stats, alertsSummary]) => {
+          setClockinsActive(Array.isArray(active) ? active : []);
+          setClockinsStatsSummary(stats?.summary || null);
+          setClockinsAlertsSummary(alertsSummary || null);
+          setClockinsLoading(false);
+        })
+        .catch(() => {
+          setClockinsActive([]);
+          setClockinsStatsSummary(null);
+          setClockinsAlertsSummary(null);
+          setClockinsLoading(false);
+        });
+      fetchTeamDashboardSnapshot(businessId, teamMembers)
+        .then((snapshot) => {
+          setTeamSnapshot(snapshot);
+          setTeamLoading(false);
+        })
+        .catch(() => {
+          setTeamSnapshot(null);
+          setTeamLoading(false);
+        });
+    } else {
+      setClockinsLoading(false);
+      setTeamLoading(false);
+    }
+  }, [authUser?.user_id, businessId, teamMembers, serverLoading]);
 
   // ── KPI values (server → local fallback) ──
   const sk = serverData?.kpis;
@@ -1033,63 +1062,11 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
           </div>
         )}
 
-        {/* ═══ ALERTAS INTELIGENTES ═══ */}
+        {/* ═══ CENTRO DE ALERTAS ═══ */}
         {isVisible('alertas') && (
           <div style={{ order: getWidgetOrder('alertas') }}>
             <DraggableWidget id="alertas" {...dragProps}>
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Alertas</p>
-                    {alerts.length > 0 && (
-                      <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 text-[10px] font-bold rounded-full">
-                        {alerts.length}
-                      </span>
-                    )}
-                  </div>
-                  {alerts.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400">
-                        {alerts.filter(a => a.severity === 'error').length} críticas · {alerts.filter(a => a.severity === 'warning').length} avisos
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {alertsLoading ? (
-                    <div className="p-4 space-y-2.5 animate-pulse">
-                      {[...Array(3)].map((_, i) => (
-                        <div key={i} className="h-10 rounded-xl bg-gray-100 dark:bg-gray-700" />
-                      ))}
-                    </div>
-                  ) : alerts.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-10 px-5">
-                      <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center mb-3">
-                        <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-                      </div>
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Todo en orden</p>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">No hay alertas pendientes</p>
-                    </div>
-                  ) : (
-                    alerts.map((alert) => {
-                      const s = ALERT_SEVERITY_STYLES[alert.severity] || ALERT_SEVERITY_STYLES.info;
-                      return (
-                        <div key={alert.id} className={`flex items-center justify-between px-4 py-3 border-l-4 ${s.border} ${s.bg}`}>
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${s.icon}`} />
-                            <p className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{alert.message}</p>
-                          </div>
-                          <button onClick={() => navigate(alert.route)}
-                            className={`flex-shrink-0 flex items-center gap-1 ml-3 text-[11px] font-bold ${s.text} hover:underline`}>
-                            Ver <ArrowRight className="w-3 h-3" />
-                          </button>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+              <AlertSummaryWidget embedded />
             </DraggableWidget>
           </div>
         )}
@@ -1445,24 +1422,40 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                 <div className="p-5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="text-center p-3 rounded-xl bg-green-50 dark:bg-green-900/20">
-                      <p className="text-2xl font-bold text-green-700 dark:text-green-400">{clockinsActive.filter(a => a.status === 'active').length}</p>
+                      <p className="text-2xl font-bold text-green-700 dark:text-green-400">{teamSnapshot?.clockedInNow ?? clockinsActive.filter(a => a.status === 'active').length}</p>
                       <p className="text-[10px] font-medium text-green-600 dark:text-green-400/70 uppercase">Trabajando</p>
                     </div>
                     <div className="text-center p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20">
-                      <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">—</p>
+                      <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">{teamLoading ? '…' : teamSnapshot?.onVacationToday ?? 0}</p>
                       <p className="text-[10px] font-medium text-blue-600 dark:text-blue-400/70 uppercase">Vacaciones</p>
                     </div>
                     <div className="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20">
-                      <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">—</p>
+                      <p className="text-2xl font-bold text-amber-700 dark:text-amber-400">{teamLoading ? '…' : teamSnapshot?.onAbsenceToday ?? 0}</p>
                       <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400/70 uppercase">Ausencia</p>
                     </div>
                     <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-800">
-                      <p className="text-2xl font-bold text-slate-700 dark:text-slate-300">—</p>
+                      <p className="text-2xl font-bold text-slate-700 dark:text-slate-300">{teamLoading ? '…' : teamSnapshot?.noShiftToday ?? 0}</p>
                       <p className="text-[10px] font-medium text-slate-500 uppercase">Sin turno</p>
                     </div>
                   </div>
                 </div>
               </div>
+            </DraggableWidget>
+          </div>
+        )}
+
+        {/* ═══ EQUIPO / RRHH ═══ */}
+        {isVisible('team_rrhh') && (
+          <div style={{ order: getWidgetOrder('team_rrhh') }}>
+            <DraggableWidget id="team_rrhh" {...dragProps}>
+              <TeamRrhhDashboardWidget
+                snapshot={teamSnapshot}
+                loading={teamLoading}
+                onOpenTeam={() => navigate('/saas/team')}
+                onOpenClockins={() => navigate('/saas/clockins')}
+                onOpenSchedules={() => navigate('/saas/equipo/horarios-vacaciones')}
+                onOpenPayroll={() => navigate('/saas/payroll')}
+              />
             </DraggableWidget>
           </div>
         )}

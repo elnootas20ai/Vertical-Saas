@@ -24,6 +24,7 @@ import {
   Clock,
   ArrowRight,
   ScanLine,
+  Files,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -34,12 +35,15 @@ import {
   listPayrollDocumentsRequest,
   createPayrollDocumentRequest,
   deletePayrollDocumentRequest,
+  finalizePayrollDocumentUpload,
+  payrollUploadSuccessMessage,
   PAYROLL_DOC_TYPE_LABELS,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { toast } from 'sonner';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
+import { PayrollBulkUploadModal } from '../../components/saas/PayrollBulkUploadModal';
 
 type DocFilter = 'all' | PayrollDocumentType;
 
@@ -142,8 +146,9 @@ function PayrollUploadModal({ members, currentUser, onClose, onUploaded }: Uploa
         uploadedByName: currentUser.fullName,
       });
       onUploaded(doc);
+      void finalizePayrollDocumentUpload(doc);
       onClose();
-      toast.success('Documento subido correctamente');
+      toast.success(payrollUploadSuccessMessage(doc));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo subir el documento.');
     } finally {
@@ -157,7 +162,7 @@ function PayrollUploadModal({ members, currentUser, onClose, onUploaded }: Uploa
         <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-6 py-4">
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Subir documento</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Se asignará al perfil del trabajador</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Visible al instante en Documentos del trabajador</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
@@ -405,7 +410,7 @@ export function PayrollPage() {
   const [filterType, setFilterType] = useState<DocFilter>('all');
   const [filterWorker, setFilterWorker] = useState('');
   const [filterWorkCenter, setFilterWorkCenter] = useState<string>('all');
-  const [showUpload, setShowUpload] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [showOcr, setShowOcr] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<PayrollDocument | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -488,6 +493,22 @@ export function PayrollPage() {
 
   function handleUploaded(doc: PayrollDocument) {
     setDocuments((prev) => [doc, ...prev]);
+    setFilterWorker(doc.worker_id);
+    if (doc.documentType === 'nomina') {
+      setFilterType('nomina');
+    }
+    void finalizePayrollDocumentUpload(doc);
+  }
+
+  function handleBulkComplete(docs: PayrollDocument[]) {
+    if (docs.length === 0) return;
+    setDocuments((prev) => [...docs, ...prev]);
+    setFilterType('nomina');
+    if (docs.length === 1) {
+      setFilterWorker(docs[0].worker_id);
+    } else {
+      setFilterWorker('');
+    }
   }
 
   return (
@@ -527,6 +548,12 @@ export function PayrollPage() {
             </div>
             <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{uniqueWorkers.length}</p>
           </div>
+        </div>
+
+        {/* ZIP upload info */}
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+          <strong className="text-gray-900 dark:text-gray-100">Nóminas del mes:</strong> sube un ZIP con un PDF por trabajador.
+          El sistema lo reparte a cada uno automáticamente. Contratos u otros documentos sueltos → perfil del trabajador en Equipo.
         </div>
 
         {/* Clockins summary link */}
@@ -585,18 +612,18 @@ export function PayrollPage() {
             </select>
           )}
           <button
+            onClick={() => setShowBulkUpload(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-semibold text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors shadow-sm whitespace-nowrap"
+          >
+            <Files className="w-4 h-4" />
+            <span className="hidden sm:inline">Subir ZIP nóminas</span>
+          </button>
+          <button
             onClick={() => setShowOcr(true)}
             className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors shadow-sm whitespace-nowrap"
           >
             <ScanLine className="w-4 h-4" />
             <span className="hidden sm:inline">Escanear OCR</span>
-          </button>
-          <button
-            onClick={() => setShowUpload(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-semibold text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors shadow-sm whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Subir documento</span>
           </button>
         </div>
 
@@ -631,11 +658,11 @@ export function PayrollPage() {
             </p>
             {documents.length === 0 && (
               <button
-                onClick={() => setShowUpload(true)}
+                onClick={() => setShowBulkUpload(true)}
                 className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold hover:bg-black dark:hover:bg-white transition-colors"
               >
                 <Upload className="w-4 h-4" />
-                Subir el primero
+                Subir ZIP nóminas
               </button>
             )}
           </div>
@@ -747,12 +774,12 @@ export function PayrollPage() {
         )}
       </div>
 
-      {showUpload && user && (
-        <PayrollUploadModal
+      {showBulkUpload && user && (
+        <PayrollBulkUploadModal
           members={members}
           currentUser={user}
-          onClose={() => setShowUpload(false)}
-          onUploaded={handleUploaded}
+          onClose={() => setShowBulkUpload(false)}
+          onComplete={handleBulkComplete}
         />
       )}
 

@@ -78,6 +78,7 @@ export const DELIVERY_SIDEBAR_REQUIRES_PDV = new Set([
   'sala',
   'web-orders',
   'web-config',
+  'delivery-integrations',
 ]);
 
 /** Catálogo en sidebar: además exige marca configurada. */

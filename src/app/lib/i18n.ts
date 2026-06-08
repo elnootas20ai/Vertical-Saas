@@ -8,6 +8,7 @@ const es = {
     // ── Navegación ────────────────────────────────────────────────────────────
     nav: {
       dashboard: 'Dashboard',
+      alertas: 'Alertas',
       compraventaHub: 'Centro Operativo',
       publicacionVenta: 'Publicación y venta',
       purchaseOrders: 'Órdenes de compra',
@@ -37,7 +38,7 @@ const es = {
       workshop: 'Taller',
       parts: 'Recambios',
       tech: 'Vista mecánico',
-      commissions: 'Consumos y comisionado',
+      commissions: 'Comisiones',
       gastosPreparacion: 'Gastos preparación',
       dealershipWorkers: 'Rendimiento comercial',
       payroll: 'Nóminas y documentos',
@@ -56,6 +57,7 @@ const es = {
       caja: 'Caja',
       webOrders: 'Pedidos Web',
       webConfig: 'Web Pedidos',
+      deliveryIntegrations: 'Integraciones',
       cleaningHub: 'Centro de Limpieza',
       cleaningClients: 'Clientes',
       cleaningContracts: 'Servicios y Contratos',
@@ -1080,6 +1082,7 @@ const es = {
         roles: 'Roles y permisos',
         activity: 'Actividad del equipo',
         staffExpenses: 'Gastos del personal',
+        staffConsumptions: 'Consumos',
         payroll: 'Nóminas y otros documentos',
       },
       stats: {
@@ -1843,6 +1846,7 @@ const en = {
     // ── Navigation ────────────────────────────────────────────────────────────
     nav: {
       dashboard: 'Dashboard',
+      alertas: 'Alerts',
       purchaseOrders: 'Purchase Orders',
       vehicles: 'Vehicles',
       reservations: 'Reservations',
@@ -1888,6 +1892,7 @@ const en = {
       caja: 'Cash Register',
       webOrders: 'Web Orders',
       webConfig: 'Web Store',
+      deliveryIntegrations: 'Integrations',
       cleaningHub: 'Cleaning Hub',
       cleaningClients: 'Clients',
       cleaningContracts: 'Services & Contracts',
@@ -2912,6 +2917,7 @@ const en = {
         roles: 'Roles & permissions',
         activity: 'Team activity',
         staffExpenses: 'Staff expenses',
+        staffConsumptions: 'Staff consumptions',
         payroll: 'Payroll & documents',
       },
       stats: {
@@ -3669,6 +3675,7 @@ const pt = {
   translation: {
     nav: {
       dashboard: 'Dashboard',
+      alertas: 'Alertas',
       compraventaHub: 'Centro Operacional',
       purchaseOrders: 'Ordens de compra',
       vehicles: 'Veículos',
@@ -3695,7 +3702,7 @@ const pt = {
       workshop: 'Oficina',
       parts: 'Peças',
       tech: 'Vista mecânico',
-      commissions: 'Consumos e comissões',
+      commissions: 'Comissões',
       dealershipWorkers: 'Desempenho comercial',
       payroll: 'Folha de pagamento',
       tpv: 'TPV',
@@ -3713,6 +3720,7 @@ const pt = {
       caja: 'Caixa',
       webOrders: 'Pedidos Web',
       webConfig: 'Loja Web',
+      deliveryIntegrations: 'Integrações',
       cleaningHub: 'Central de Limpeza',
       cleaningClients: 'Clientes',
       cleaningContracts: 'Serviços e Contratos',
@@ -4703,6 +4711,7 @@ const pt = {
         roles: 'Funções e permissões',
         activity: 'Atividade da equipa',
         staffExpenses: 'Despesas do pessoal',
+        staffConsumptions: 'Consumos',
         payroll: 'Folha de pagamento e documentos',
       },
       stats: {
@@ -5136,6 +5145,7 @@ const fr = {
   translation: {
     nav: {
       dashboard: 'Tableau de bord',
+      alertas: 'Alertes',
       purchaseOrders: 'Bons de commande',
       vehicles: 'Véhicules',
       reservations: 'Réservations',
@@ -5161,7 +5171,7 @@ const fr = {
       workshop: 'Atelier',
       parts: 'Pièces détachées',
       tech: 'Vue mécanicien',
-      commissions: 'Consommations et commissions',
+      commissions: 'Commissions',
       payroll: 'Fiches de paie',
       tpv: 'TPE',
       tpvLocales: 'Locaux',
@@ -5178,6 +5188,7 @@ const fr = {
       caja: 'Caisse',
       webOrders: 'Commandes Web',
       webConfig: 'Boutique Web',
+      deliveryIntegrations: 'Intégrations',
       cleaningHub: 'Centre de Nettoyage',
       cleaningClients: 'Clients',
       cleaningContracts: 'Services et Contrats',
@@ -6168,6 +6179,7 @@ const fr = {
         roles: 'Rôles et permissions',
         activity: "Activité de l'équipe",
         staffExpenses: 'Dépenses du personnel',
+        staffConsumptions: 'Consommations',
         payroll: 'Fiches de paie et documents',
       },
       stats: {
@@ -6599,6 +6611,7 @@ const it = {
   translation: {
     nav: {
       dashboard: 'Dashboard',
+      alertas: 'Alerte',
       compraventaHub: 'Centro Operativo',
       purchaseOrders: 'Ordini di acquisto',
       vehicles: 'Veicoli',
@@ -6625,7 +6638,7 @@ const it = {
       workshop: 'Officina',
       parts: 'Ricambi',
       tech: 'Vista meccanico',
-      commissions: 'Consumi e commissioni',
+      commissions: 'Commissioni',
       payroll: 'Buste paga e documenti',
       tpv: 'POS',
       tpvLocales: 'Locali',
@@ -6642,6 +6655,7 @@ const it = {
       caja: 'Cassa',
       webOrders: 'Ordini Web',
       webConfig: 'Web Ordini',
+      deliveryIntegrations: 'Integrazioni',
       cleaningHub: 'Centro Pulizie',
       cleaningClients: 'Clienti',
       cleaningContracts: 'Servizi e Contratti',
@@ -7631,6 +7645,7 @@ const it = {
         roles: 'Ruoli e permessi',
         activity: "Attività del team",
         staffExpenses: 'Spese del personale',
+        staffConsumptions: 'Consumi',
         payroll: 'Buste paga e documenti',
       },
       stats: {

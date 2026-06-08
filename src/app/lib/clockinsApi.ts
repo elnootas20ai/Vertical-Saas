@@ -66,7 +66,7 @@ export interface ClockinRecord {
   entries: ClockEntry[];
   totalMinutes: number;
   breakMinutes: number;
-  status: 'active' | 'break' | 'completed';
+  status: 'active' | 'break' | 'completed' | 'offline';
   notes: string;
   scheduled_start?: string;
   scheduled_end?: string;
@@ -383,6 +383,7 @@ export function formatMinutes(minutes: number): string {
 export interface EnrichedClockinRecord extends ClockinRecord {
   member_role: string;
   member_email: string;
+  roster_placeholder?: boolean;
 }
 
 export interface ClockinStatsSummary {
@@ -480,11 +481,12 @@ export interface OrgClockEdge {
 
 export async function fetchClockins(
   businessId: string,
-  filters?: { date?: string; memberId?: string },
+  filters?: { date?: string; memberId?: string; recordsOnly?: boolean },
 ): Promise<EnrichedClockinRecord[]> {
   const params = new URLSearchParams();
   if (filters?.date) params.set('date', filters.date);
   if (filters?.memberId) params.set('memberId', filters.memberId);
+  if (filters?.recordsOnly) params.set('recordsOnly', '1');
   const qs = params.toString() ? `?${params}` : '';
   const data = await req<{ clockins: EnrichedClockinRecord[] }>(
     `/api/clockins/${encodeURIComponent(businessId)}${qs}`,

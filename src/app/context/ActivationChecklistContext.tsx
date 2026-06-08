@@ -169,7 +169,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const load = async () => {
       try {
         const [allWorkCenters, rawPdvs, brands, catalog] = await Promise.all([
-          listWorkCentersForDelivery(user, currentBusiness),
+          listWorkCentersForDelivery(dataUserId, currentBusiness),
           listPointsOfSaleRequest(dataUserId).catch(() => []),
           businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
           listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),

@@ -66,6 +66,10 @@ const CHANNELS = [
   { value: 'phone', label: 'Teléfono' },
   { value: 'web', label: 'Web' },
   { value: 'tpv', label: 'TPV' },
+  { value: 'glovo', label: 'Glovo' },
+  { value: 'justeat', label: 'Just Eat' },
+  { value: 'ubereats', label: 'Uber Eats' },
+  { value: 'flipdish', label: 'Flipdish' },
 ];
 
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: typeof CreditCard }[] = [

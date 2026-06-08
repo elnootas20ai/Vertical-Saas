@@ -53,7 +53,7 @@ export async function runSaasBootstrapIfEnabled() {
 
   const email = normalizeEmail(process.env.SAAS_LOGIN_EMAIL || '');
   const password = String(process.env.SAAS_LOGIN_PASSWORD || '').trim();
-  const firstName = String(process.env.SAAS_LOGIN_FIRST_NAME || 'Admin').trim();
+  const firstName = String(process.env.SAAS_LOGIN_FIRST_NAME || 'Uriel').trim();
   const lastName = String(process.env.SAAS_LOGIN_LAST_NAME || '').trim();
   const company = String(process.env.SAAS_LOGIN_COMPANY || 'Vertial').trim();
 
@@ -82,6 +82,11 @@ export async function runSaasBootstrapIfEnabled() {
       }
       await saveAccount(INIT_REQ, {
         ...existing,
+        firstName: firstName || existing.firstName,
+        lastName: lastName || existing.lastName,
+        fullName: `${firstName || existing.firstName || ''} ${lastName || existing.lastName || ''}`.trim()
+          || existing.fullName
+          || firstName,
         password,
         passwordHash: passHash,
         failedLoginAttempts: 0,

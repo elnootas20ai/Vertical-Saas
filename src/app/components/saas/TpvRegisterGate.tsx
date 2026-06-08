@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -8,7 +9,9 @@ import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
+  TpvRegisterSessionConflictError,
   updateTpvRegisterSessionRequest,
+  filterDeliveryOrdersRequest,
   pointOfSaleDisplayLabel,
   buildDeliverySidebarStoreRows,
   type DeliverySidebarStoreRow,
@@ -18,7 +21,18 @@ import {
   type TpvCashCount,
   type TpvRegisterSummary,
   type PointOfSale,
+  type DeliveryOrder,
+  isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
+import {
+  buildAggregatorCashRows,
+  applyManualAggregatorTotals,
+  getClosingAggregatorPlatforms,
+  aggregatorRowsFromClosingTotals,
+  type AggregatorCashRow,
+} from '../../lib/deliveryIntegrationsUi';
+import { AggregatorClosingEditor } from './AggregatorClosingEditor';
+import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   filterStoresForWorkerAssignment,
@@ -27,12 +41,32 @@ import {
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { loadTpvPointsOfSaleForBusiness } from '../../lib/deliverySetup';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import {
+  isMemberAssignedToStore,
+  loadClockedInStoreWorkers,
+  pickDefaultOrderTaker,
+  type TpvClockedInWorker,
+} from '../../lib/tpvClockedInWorkers';
+import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
+import { TpvCashOpsModal } from './TpvCashOpsModal';
+import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
+import {
+  clockIn,
+  clockOut,
+  startBreak,
+  endBreak,
+  listClockins,
+  type ClockinRecord,
+} from '../../lib/clockinsApi';
 import type { WorkCenter } from '../../lib/workCentersApi';
+import type { AuthUser } from '../../lib/authApi';
+import { getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 import {
   Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
-  MapPin, Store, Plus,
+  MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
 } from 'lucide-react';
 
 // ─── Denomination config (EUR) ──────────────────────────────────────────────
@@ -54,6 +88,13 @@ const DENOMINATIONS: { key: keyof CashDenominationCount; label: string; value: n
   { key: 'coins_002', label: '0,02€', value: 0.02, type: 'coin' },
   { key: 'coins_001', label: '0,01€', value: 0.01, type: 'coin' },
 ];
+
+function emptyCashDenominationCount(): CashDenominationCount {
+  return DENOMINATIONS.reduce((acc, d) => {
+    acc[d.key] = 0;
+    return acc;
+  }, {} as CashDenominationCount);
+}
 
 function calcDenominationTotal(counts: CashDenominationCount): number {
   return DENOMINATIONS.reduce((sum, d) => sum + (counts[d.key] || 0) * d.value, 0);
@@ -158,7 +199,7 @@ function CashCountGrid({ counts, onChange }: {
 
 // ─── Context for active register ────────────────────────────────────────────
 
-interface TpvRegisterContextType {
+export interface TpvRegisterContextType {
   session: TpvRegisterSession;
   addTransaction: (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
   performCashCount: (countedBy: string, denominations: CashDenominationCount, notes?: string) => Promise<void>;
@@ -167,19 +208,46 @@ interface TpvRegisterContextType {
   requestCashCount: () => void;
   requestIncident: () => void;
   expectedCash: number;
+  clockedInWorkers: TpvClockedInWorker[];
+  clockedInWorkersLoading: boolean;
+  selectedOrderTakerId: string | null;
+  setSelectedOrderTakerId: (workerId: string) => void;
+  refreshClockedInWorkers: () => Promise<void>;
 }
 
-const TpvRegisterContext = createContext<TpvRegisterContextType | null>(null);
+/** undefined = fuera del gate · null = dentro pero sin caja abierta · objeto = caja activa */
+const TpvRegisterContext = createContext<TpvRegisterContextType | null | undefined>(undefined);
 
-export function useTpvRegister() {
+export function TpvRegisterProvider({
+  value,
+  children,
+}: {
+  value: TpvRegisterContextType;
+  children: ReactNode;
+}) {
+  return <TpvRegisterContext.Provider value={value}>{children}</TpvRegisterContext.Provider>;
+}
+
+export function useTpvRegisterIfOpen(): TpvRegisterContextType | null {
   const ctx = useContext(TpvRegisterContext);
-  if (!ctx) throw new Error('useTpvRegister must be used within TpvRegisterGate');
+  if (ctx === undefined) {
+    throw new Error('useTpvRegister must be used within TpvRegisterGate');
+  }
+  return ctx;
+}
+
+export function useTpvRegister(): TpvRegisterContextType {
+  const ctx = useTpvRegisterIfOpen();
+  if (!ctx) {
+    throw new Error('Abre la caja antes de usar el TPV');
+  }
   return ctx;
 }
 
 // ─── Opening Screen ─────────────────────────────────────────────────────────
 
 interface OpeningData {
+  workerId?: string;
   workerName: string;
   pointOfSaleId: string;
   pointOfSaleName: string;
@@ -210,10 +278,15 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
-  const [counts, setCounts] = useState<CashDenominationCount>({});
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string>(() => (workerOptions.length === 1 ? workerOptions[0].id : ''));
+  const [counts, setCounts] = useState<CashDenominationCount>(() => emptyCashDenominationCount());
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string>(() => (
+    !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : ''
+  ));
+  const [tabletStep, setTabletStep] = useState<1 | 2>(1);
   const total = calcDenominationTotal(counts);
-  const hasCounted = total > 0 || Object.values(counts).some(v => v !== undefined && v > 0);
+  /** 0 € de fondo inicial es válido; en tablet basta con llegar al paso 2. */
+  const cashCountReady = isTabletMode ? tabletStep === 2 : true;
+  const hasNonZeroCount = total > 0;
 
   const storeRows = useMemo(
     () => buildDeliverySidebarStoreRows(workCenters, pointsOfSale).filter((r) => !r.inactive),
@@ -242,11 +315,16 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const hasStores = allActivePdvs.length > 0 || storeRows.some((r) => r.needsPdv);
   const pointOfSaleAccess = usePointOfSaleAccess(Math.max(allActivePdvs.length, storeRows.length));
-  const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId);
+  const selectedPdv = pointsOfSale.find(p => p._id === selectedPdvId)
+    || (isTabletMode && restrictedToPdvId
+      ? pointsOfSale.find((p) => p._id === restrictedToPdvId)
+      : undefined);
   const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
 
-  const effectiveTerminalName = selectedTerminal ? (selectedTerminal.code || selectedTerminal.name) : '';
+  const effectiveTerminalName = selectedTerminal
+    ? (selectedTerminal.code || selectedTerminal.name)
+    : (isTabletMode ? 'Tablet' : '');
   const effectiveDatafon = selectedTerminal?.datafonName || '';
   const effectivePrinter = selectedTerminal?.printerName || '';
 
@@ -256,10 +334,14 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   }, [workerOptions, selectedWorkerId]);
 
   const hasWorkers = workerOptions.length > 0;
-  const canOpen = hasWorkers && effectiveWorkerName() && !!selectedPdv && !!selectedTerminal;
+  const hasResolvedPdv = Boolean(selectedPdv) || (isTabletMode && Boolean(restrictedToPdvId));
+  const canOpen = hasWorkers
+    && Boolean(effectiveWorkerName())
+    && hasResolvedPdv
+    && (Boolean(selectedTerminal) || isTabletMode);
 
   useEffect(() => {
-    if (workerOptions.length === 0) return;
+    if (isTabletMode || workerOptions.length === 0) return;
     if (selectedWorkerId) return;
     // 1) Si solo hay un trabajador (típico cuenta nueva: el propio gerente), lo seleccionamos.
     if (workerOptions.length === 1) {
@@ -306,12 +388,6 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     }
   }, [isTabletMode, selectedPdv, selectedTerminalId, availableTerminals]);
 
-  useEffect(() => {
-    if (!isTabletMode || !user) return;
-    const uid = String(user.user_id || user.id || '').trim();
-    if (uid) setSelectedWorkerId(uid);
-  }, [isTabletMode, user]);
-
   const handleSelectStoreRow = (row: DeliverySidebarStoreRow) => {
     if (row.needsPdv || !row.pdvId) {
       toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) para activar la caja.');
@@ -329,11 +405,12 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const handleSubmit = () => {
     const wName = effectiveWorkerName();
     onOpen({
+      workerId: selectedWorkerId || undefined,
       workerName: wName,
-      pointOfSaleId: selectedPdv?._id || '',
-      pointOfSaleName: selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : '',
-      terminalId: selectedTerminal?.id || '',
-      terminalName: effectiveTerminalName,
+      pointOfSaleId: selectedPdv?._id || restrictedToPdvId || '',
+      pointOfSaleName: selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : (tabletStoreLabel || ''),
+      terminalId: selectedTerminal?.id || (isTabletMode ? `tablet-${selectedPdv?._id || restrictedToPdvId || 'default'}` : ''),
+      terminalName: effectiveTerminalName || 'Tablet',
       datafonName: effectiveDatafon,
       printerName: effectivePrinter,
       counts,
@@ -395,12 +472,27 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const openingSteps = useMemo(() => {
     if (isTabletMode) {
-      return [{
-        id: 'cash',
-        label: 'Abrir caja',
-        done: hasCounted,
-        current: !hasCounted,
-      }];
+      const wDone = Boolean(effectiveWorkerName());
+      return [
+        {
+          id: 'worker',
+          label: 'Quién abre',
+          done: wDone && tabletStep > 1,
+          current: tabletStep === 1,
+        },
+        {
+          id: 'cash',
+          label: 'Efectivo',
+          done: tabletStep === 2,
+          current: tabletStep === 2,
+        },
+        {
+          id: 'tpv',
+          label: 'TPV',
+          done: false,
+          current: false,
+        },
+      ];
     }
     const steps: { id: string; label: string; done: boolean; current: boolean }[] = [];
     const wDone = Boolean(effectiveWorkerName());
@@ -419,8 +511,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     steps.push({
       id: 'cash',
       label: 'Efectivo',
-      done: hasCounted,
-      current: wDone && tDone && !hasCounted,
+      done: wDone && tDone,
+      current: wDone && tDone && !hasNonZeroCount,
     });
     return steps;
   }, [
@@ -431,7 +523,9 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     hasStores,
     selectedPdvId,
     selectedTerminalId,
-    hasCounted,
+    hasNonZeroCount,
+    cashCountReady,
+    tabletStep,
   ]);
 
   const updateScrollHint = useCallback(() => {
@@ -486,7 +580,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
                   {isTabletMode
-                    ? `Abrir caja · ${effectiveWorkerName() || 'Trabajador'}`
+                    ? tabletStep === 1
+                      ? 'Paso 1 · Elige quién abre la caja hoy'
+                      : effectiveWorkerName()
+                        ? `Paso 2 · ${effectiveWorkerName()} cuenta el efectivo`
+                        : 'Paso 2 · Conteo de efectivo inicial'
                     : `Apertura de caja${selectedPdv?.code ? ` · ${selectedPdv.code}` : ''}${selectedTerminal ? ` · Terminal ${selectedTerminal.code || selectedTerminal.name}` : ''}`}
                 </p>
               </>
@@ -497,7 +595,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
               </>
             )}
           </div>
-          {hasCounted && (
+          {cashCountReady && (
             <span className="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
               Contado: {total.toFixed(2)}€
             </span>
@@ -506,8 +604,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
             type="button"
             onClick={goBack}
             className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
-            aria-label="Cerrar"
-            title="Cerrar"
+            aria-label="Salir"
+            title="Salir"
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
@@ -517,7 +615,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
         <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50">
           {isTabletMode ? (
             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 text-center sm:text-left">
-              Cuenta el efectivo inicial y abre la caja
+              {tabletStep === 1 ? 'Selecciona tu nombre para abrir la caja' : 'Cuenta el dinero en caja antes de empezar'}
             </p>
           ) : null}
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
@@ -550,6 +648,90 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
           ref={bodyScrollRef}
           className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden'} relative`}
         >
+          {isTabletMode && tabletStep === 1 && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                  <User className="w-3 h-3 inline mr-1" />
+                  ¿Quién abre la caja? *
+                </label>
+                {hasWorkers ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {workerOptions.map((w) => (
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => setSelectedWorkerId(w.id)}
+                        className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                          selectedWorkerId === w.id
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm'
+                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                            selectedWorkerId === w.id
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                          }`}>
+                            <User className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-bold text-base text-gray-900 dark:text-gray-100 truncate">{w.name}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">Toca para seleccionar</div>
+                          </div>
+                          {selectedWorkerId === w.id && (
+                            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 ml-auto" />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
+                    No hay miembros en el equipo. Añade trabajadores en <span className="font-bold">Equipo</span> para poder abrir caja.
+                  </div>
+                )}
+              </div>
+              {displayStoreName && (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">Tienda</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <Store className="w-4 h-4 text-emerald-600 shrink-0" />
+                    {displayStoreName}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isTabletMode && tabletStep === 2 && (
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 flex flex-col">
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Abre la caja</p>
+                  <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{effectiveWorkerName()}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setTabletStep(1)}
+                  className="text-xs font-semibold text-emerald-600 hover:underline shrink-0"
+                >
+                  Cambiar
+                </button>
+              </div>
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded-md">
+                  0 € también es válido
+                </span>
+              </div>
+              <div className="flex-1 min-h-0">
+                <CashCountGrid counts={counts} onChange={setCounts} />
+              </div>
+            </div>
+          )}
+
           {/* Left panel: who + where (oculto en tablet) */}
           {!isTabletMode && (
           <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-5 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
@@ -730,25 +912,20 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
             </div>
           )}
 
-          {isTabletMode && !parentLoading && selectedPdv && !selectedTerminalId && availableTerminals.length === 0 && (
-            <div className="mx-5 mb-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
-              Esta tienda no tiene terminal activo. Configúralo en Ajustes → Tiendas.
-            </div>
-          )}
-
-          {/* Right panel: cash count */}
-          <div className={`${isTabletMode ? 'flex-1' : 'lg:col-span-2'} p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4`}>
-            {selectedTerminalId && !hasCounted && (
+          {/* Right panel: cash count (solo modo gerente / no tablet) */}
+          {!isTabletMode && (
+          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4">
+            {selectedTerminalId && !hasNonZeroCount && (
               <div className="lg:hidden flex items-center justify-center gap-2 mb-3 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-semibold">
                 <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
-                Cuenta el efectivo en esta zona
+                Cuenta el efectivo en esta zona (0 € si la caja está vacía)
               </div>
             )}
             <div className="flex items-center justify-between gap-2 mb-3">
               <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
-              {!hasCounted && canOpen && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md">
-                  <AlertTriangle className="w-3 h-3" /> Cuenta antes de abrir
+              {canOpen && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded-md">
+                  0 € también es válido
                 </span>
               )}
             </div>
@@ -756,8 +933,9 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
               <CashCountGrid counts={counts} onChange={setCounts} />
             </div>
           </div>
+          )}
 
-          {showScrollHint && (
+          {showScrollHint && !isTabletMode && (
             <button
               type="button"
               onClick={() => bodyScrollRef.current?.scrollBy({ top: 220, behavior: 'smooth' })}
@@ -771,42 +949,138 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
         {/* Footer */}
         <div className="shrink-0 px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
+          {isTabletMode ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (tabletStep === 2) setTabletStep(1);
+                  else goBack();
+                }}
+                className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                {tabletStep === 2 ? 'Anterior' : 'Salir'}
+              </button>
+              {tabletStep === 1 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!effectiveWorkerName()) return;
+                    setTabletStep(2);
+                  }}
+                  disabled={!effectiveWorkerName() || parentLoading}
+                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                    effectiveWorkerName()
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  Siguiente — Contar efectivo
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={!canOpen || parentLoading || !cashCountReady}
+                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                    canOpen && cashCountReady
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Unlock className="w-4 h-4" />
+                  Abrir caja y entrar al TPV — {total.toFixed(2)}€
+                </button>
+              )}
+            </>
+          ) : (
+            <>
           <button
             type="button"
             onClick={goBack}
             className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            {isTabletMode ? 'Cambiar trabajador' : 'Volver'}
+            Volver
           </button>
           <button
             onClick={handleSubmit}
             disabled={!canOpen || parentLoading}
             className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}
           >
-            <Unlock className="w-4 h-4" /> {isTabletMode ? 'Abrir caja y empezar' : `Abrir caja${selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''}`} — {total.toFixed(2)}€ de fondo
+            <Unlock className="w-4 h-4" /> {`Abrir caja${selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''}`} — {total.toFixed(2)}€ de fondo
           </button>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
+/** Por encima de TpvFullscreenShell (z-50) y modales de pedidos (z-60). */
+const TPV_MODAL_Z = 'z-[100]';
+
+function TpvGatePortal({ children }: { children: ReactNode }) {
+  if (typeof document === 'undefined') return null;
+  return createPortal(children, document.body);
+}
+
 // ─── Closing Screen ─────────────────────────────────────────────────────────
 
-function ClosingScreen({ session, onClose, onCancel }: {
+function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
   session: TpvRegisterSession;
-  onClose: (counts: CashDenominationCount, notes: string) => void;
+  dataUserId: string;
+  onClose: (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[]) => void;
   onCancel: () => void;
 }) {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
+  const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
+  const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
+  const [manualInitialized, setManualInitialized] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
   const expected = calcExpectedCash(session);
   const diff = countedTotal - expected;
   const summary = buildSummary(session);
+  const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
+  const aggregatorRows = useMemo(
+    () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
+    [closingPlatforms, session, shiftOrders],
+  );
+  const finalAggregatorRows = useMemo(
+    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals),
+    [aggregatorRows, manualAggregatorTotals],
+  );
+
+  useEffect(() => {
+    if (manualInitialized || aggregatorRows.length === 0) return;
+    const initial: Record<string, string> = {};
+    for (const row of aggregatorRows) {
+      initial[row.platform.channel] = row.totalSales > 0 ? row.totalSales.toFixed(2) : '';
+    }
+    setManualAggregatorTotals(initial);
+    setManualInitialized(true);
+  }, [aggregatorRows, manualInitialized]);
+
+  const handleManualAggregatorChange = useCallback((channel: string, value: string) => {
+    setManualAggregatorTotals((prev) => ({ ...prev, [channel]: value }));
+  }, []);
+
+  useEffect(() => {
+    if (!dataUserId) return;
+    void filterDeliveryOrdersRequest(dataUserId, {
+      salesPointId: session.pointOfSaleId,
+      dateFrom: session.openedAt,
+      dateTo: new Date().toISOString(),
+      limit: 500,
+    })
+      .then((res) => setShiftOrders(res.orders || []))
+      .catch(() => setShiftOrders([]));
+  }, [dataUserId, session.pointOfSaleId, session.openedAt]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-4`}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
@@ -925,11 +1199,18 @@ function ClosingScreen({ session, onClose, onCancel }: {
             <textarea rows={2} className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
               placeholder="Observaciones del cierre..." value={notes} onChange={e => setNotes(e.target.value)} />
           </div>
+
+          <AggregatorClosingEditor
+            autoRows={aggregatorRows}
+            manualByChannel={manualAggregatorTotals}
+            onManualChange={handleManualAggregatorChange}
+            title="Cajas agregadores (turno)"
+          />
         </div>
 
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
-          <button onClick={onCancel} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancelar</button>
-          <button onClick={() => onClose(counts, notes)}
+          <button type="button" onClick={onCancel} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancelar</button>
+          <button type="button" onClick={() => onClose(counts, notes, finalAggregatorRows)}
             className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2">
             <Lock className="w-4 h-4" /> Confirmar cierre de caja
           </button>
@@ -939,23 +1220,360 @@ function ClosingScreen({ session, onClose, onCancel }: {
   );
 }
 
+// ─── Fichaje (TPV tablet / mostrador) ───────────────────────────────────────
+
+async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
+  const res = await fetch(
+    `${getApiBase()}/api/auth/users?businessId=${encodeURIComponent(businessId)}`,
+    { headers: getAuthHeaders() },
+  );
+  const data = await res.json().catch(() => ({})) as { users?: AuthUser[]; error?: string };
+  if (!res.ok) throw new Error(data.error || 'No se pudo cargar el equipo');
+  return data.users || [];
+}
+
+function ClockInModal({
+  storeLabel,
+  businessId,
+  ownerUserId,
+  pdvId,
+  workCenterId,
+  onCancel,
+  onChanged,
+}: {
+  storeLabel: string;
+  businessId: string;
+  ownerUserId: string;
+  pdvId: string;
+  workCenterId: string;
+  onCancel: () => void;
+  onChanged?: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [team, setTeam] = useState<AuthUser[]>([]);
+  const [clockins, setClockins] = useState<ClockinRecord[]>([]);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!businessId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [users, records] = await Promise.all([
+        fetchBusinessUsers(businessId),
+        listClockins(businessId),
+      ]);
+      const storeTeam = users
+        .filter((u) => u.status !== 'inactive' && isMemberAssignedToStore(u, ownerUserId, pdvId, workCenterId))
+        .sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || ''), 'es'));
+      setTeam(storeTeam);
+      setClockins(records);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
+    } finally {
+      setLoading(false);
+    }
+  }, [businessId, ownerUserId, pdvId, workCenterId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const todayRecords = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    const map = new Map<string, ClockinRecord>();
+    for (const r of clockins) {
+      if (r.date === today) map.set(r.member_id, r);
+    }
+    return map;
+  }, [clockins]);
+
+  const clockedInCount = team.filter((m) => {
+    const r = todayRecords.get(m.user_id);
+    return r && r.status !== 'completed';
+  }).length;
+
+  const handleClockIn = async (member: AuthUser) => {
+    setActingId(member.user_id);
+    try {
+      await clockIn(businessId, member.user_id, member.fullName || member.email || 'Trabajador', {
+        device_type: 'tablet',
+      });
+      toast.success(`${member.fullName || 'Trabajador'} — fichaje de entrada`);
+      await load();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo fichar');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleBreak = async (member: AuthUser) => {
+    const record = todayRecords.get(member.user_id);
+    if (!record) return;
+    setActingId(member.user_id);
+    try {
+      if (record.status === 'break') {
+        await endBreak(record);
+        toast.success(`${member.fullName || 'Trabajador'} — descanso finalizado`);
+      } else {
+        await startBreak(record);
+        toast.success(`${member.fullName || 'Trabajador'} — descanso iniciado`);
+      }
+      await load();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo registrar el descanso');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleFinish = async (member: AuthUser) => {
+    const record = todayRecords.get(member.user_id);
+    if (!record) return;
+    setActingId(member.user_id);
+    try {
+      await clockOut(record);
+      toast.success(`${member.fullName || 'Trabajador'} — jornada finalizada`);
+      await load();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo finalizar');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const btnBase = 'flex-1 min-w-0 py-2.5 px-1.5 rounded-xl text-[11px] sm:text-sm font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+
+  return (
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex p-3 sm:p-4 items-end sm:items-center`}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-auto flex flex-col overflow-hidden max-h-[min(92svh,720px)] sm:max-h-[min(88svh,680px)]">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 shrink-0">
+          <div className="w-10 h-10 sm:w-11 sm:h-11 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center shrink-0">
+            <LogIn className="w-5 h-5 text-violet-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">Fichaje manual</h2>
+            <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
+              {storeLabel || 'Tienda'} · Ficha a cada persona al entrar
+            </p>
+          </div>
+          {!loading && team.length > 0 && (
+            <span className="inline-flex px-2.5 py-1 rounded-full bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-[11px] sm:text-xs font-bold shrink-0">
+              {clockedInCount}/{team.length}
+            </span>
+          )}
+          <button type="button" onClick={() => void load()} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0" title="Actualizar">
+            <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button type="button" onClick={onCancel} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0" aria-label="Cerrar">
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-3 sm:py-4 space-y-2.5">
+          {error && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm">{error}</div>
+          )}
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Cargando equipo…
+            </div>
+          )}
+          {!loading && team.length === 0 && (
+            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-5 text-sm text-amber-900 dark:text-amber-100">
+              <p className="font-semibold mb-1">Sin trabajadores asignados a esta tienda</p>
+              <p className="text-amber-800 dark:text-amber-200">
+                Asigna el local en <span className="font-bold">Equipo</span> → cada trabajador → Tienda / centro de trabajo.
+              </p>
+            </div>
+          )}
+          {!loading && team.map((member) => {
+            const record = todayRecords.get(member.user_id);
+            const status = record?.status;
+            const isActive = status === 'active';
+            const isOnBreak = status === 'break';
+            const isWorking = isActive || isOnBreak;
+            const isDone = status === 'completed';
+            const canFichar = !record || isDone;
+            const canBreak = isWorking;
+            const canFinish = isWorking;
+            const clockInEntry = record?.entries.find((e) => e.type === 'clock_in');
+            const clockInTime = clockInEntry
+              ? new Date(clockInEntry.time).toLocaleTimeString('es-ES', { timeStyle: 'short' })
+              : null;
+            const busy = actingId === member.user_id;
+
+            return (
+              <div
+                key={member.user_id}
+                className={`p-3 sm:p-4 rounded-2xl border-2 ${
+                  canFichar && !isDone
+                    ? 'border-violet-300 bg-violet-50/50 dark:bg-violet-950/20 dark:border-violet-800 ring-1 ring-violet-200/60 dark:ring-violet-900/40'
+                    : isOnBreak
+                      ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800'
+                      : isActive
+                        ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 dark:border-emerald-800'
+                        : isDone
+                          ? 'border-gray-200 bg-gray-50 dark:bg-gray-900/40 dark:border-gray-700'
+                          : 'border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700'
+                }`}
+              >
+                <div className="flex items-start sm:items-center gap-3 mb-3">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                    isOnBreak
+                      ? 'bg-amber-500 text-white'
+                      : isActive
+                        ? 'bg-emerald-600 text-white'
+                        : isDone
+                          ? 'bg-gray-300 dark:bg-gray-600 text-white'
+                          : 'bg-violet-600 text-white'
+                  }`}>
+                    {isOnBreak ? <Coffee className="w-4 h-4" /> : isWorking ? <UserCheck className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm sm:text-base text-gray-900 dark:text-gray-100 truncate">
+                      {member.fullName || member.email}
+                    </div>
+                    <div className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {isOnBreak && clockInTime
+                        ? `En descanso · entrada ${clockInTime}`
+                        : isActive && clockInTime
+                          ? `Trabajando · entrada ${clockInTime}`
+                          : isDone
+                            ? 'Jornada finalizada — puedes volver a fichar'
+                            : 'Pulsa Fichar al entrar'}
+                    </div>
+                  </div>
+                  {canFichar && !isDone && (
+                    <span className="shrink-0 px-2 py-0.5 rounded-md bg-violet-600 text-white text-[10px] font-bold uppercase tracking-wide">
+                      Pendiente
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    disabled={busy || !canFichar}
+                    onClick={() => void handleClockIn(member)}
+                    title={canFichar ? 'Registrar entrada' : 'Ya está en turno'}
+                    className={`${btnBase} ${canFichar && !busy ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
+                  >
+                    {busy && canFichar ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4 shrink-0" />}
+                    Fichar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !canBreak}
+                    onClick={() => void handleBreak(member)}
+                    className={`${btnBase} ${canBreak && !busy
+                      ? isOnBreak
+                        ? 'bg-amber-500 text-white hover:bg-amber-600'
+                        : 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
+                  >
+                    {busy && canBreak ? <Loader2 className="w-4 h-4 animate-spin" /> : <Coffee className="w-4 h-4 shrink-0" />}
+                    Descanso
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !canFinish}
+                    onClick={() => void handleFinish(member)}
+                    className={`${btnBase} ${canFinish && !busy ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:opacity-90' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
+                  >
+                    {busy && canFinish ? <Loader2 className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4 shrink-0" />}
+                    Finalizar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 font-semibold text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 transition-colors"
+          >
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Status Bar (shown when register is open) ───────────────────────────────
 
-function RegisterStatusBar({ session, onRequestClose, onRequestCashCount, onRequestIncident }: {
+const TPV_CASH_TX_LABELS: Record<string, string> = {
+  cash_in: 'Entrada',
+  cash_out: 'Salida',
+  return: 'Devolución',
+};
+
+function isTpvCashMovementTx(type: string): boolean {
+  return type === 'cash_in' || type === 'cash_out' || type === 'return';
+}
+
+function RegisterCashOpsStrip({ session }: { session: TpvRegisterSession }) {
+  const ops = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
+  if (ops.length === 0) return null;
+  const recent = [...ops].slice(-5).reverse();
+  return (
+    <div className="relative z-10 bg-white/80 dark:bg-gray-900/50 border-b border-emerald-100 dark:border-emerald-900 px-4 py-1.5 flex items-center gap-2 overflow-x-auto text-[11px]">
+      <span className="font-semibold text-gray-500 dark:text-gray-400 shrink-0">Movimientos de caja:</span>
+      {recent.map((tx) => (
+        <span key={tx.id} className="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800">
+          <span className="text-gray-400">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
+          <span className="font-semibold text-gray-700 dark:text-gray-300">{TPV_CASH_TX_LABELS[tx.type] || tx.type}</span>
+          <span className={`font-bold ${tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'}`}>
+            {tx.type === 'cash_in' ? '+' : '−'}{tx.amount.toFixed(2)}€
+          </span>
+          {tx.description && <span className="text-gray-500 truncate max-w-[140px]">{tx.description}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RegisterStatusBar({
+  session,
+  onRequestClockIn,
+  onRequestClose,
+  onRequestCashCount,
+  onRequestIncident,
+  onRequestCashOps,
+  clockedInWorkers,
+  clockedInWorkersLoading,
+  selectedOrderTakerId,
+  onSelectOrderTaker,
+}: {
   session: TpvRegisterSession;
+  onRequestClockIn: () => void;
   onRequestClose: () => void;
   onRequestCashCount: () => void;
   onRequestIncident: () => void;
+  onRequestCashOps: () => void;
+  clockedInWorkers: TpvClockedInWorker[];
+  clockedInWorkersLoading: boolean;
+  selectedOrderTakerId: string | null;
+  onSelectOrderTaker: (workerId: string) => void;
 }) {
   const expected = calcExpectedCash(session);
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
 
   return (
-    <div className="bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2 flex items-center justify-between text-xs">
-      <div className="flex items-center gap-4 flex-wrap">
+    <div className="relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-4 py-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
+      <div className="flex items-center gap-4 flex-wrap min-w-0">
         <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta</span>
-        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><User className="w-3 h-3" /> {session.workerName}</span>
         {session.pointOfSaleName && <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><MapPin className="w-3 h-3" /> {session.pointOfSaleName}</span>}
         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><Monitor className="w-3 h-3" /> {session.terminalName}</span>
         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
@@ -963,14 +1581,29 @@ function RegisterStatusBar({ session, onRequestClose, onRequestCashCount, onRequ
         <span className="font-semibold text-emerald-700 dark:text-emerald-400"><Banknote className="w-3 h-3 inline mr-0.5" />{expected.toFixed(2)}€</span>
         {incidentCount > 0 && <span className="text-red-600 font-semibold flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {incidentCount}</span>}
       </div>
-      <div className="flex items-center gap-2">
-        <button onClick={onRequestCashCount} className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg font-semibold hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1">
+      <div className="flex items-center gap-3 flex-wrap min-w-0">
+        <ClockedInWorkerBubbles
+          workers={clockedInWorkers}
+          selectedId={selectedOrderTakerId}
+          onSelect={onSelectOrderTaker}
+          loading={clockedInWorkersLoading}
+          compact
+          label="Quién atiende"
+          emptyMessage="Sin fichajes"
+        />
+        <button type="button" onClick={onRequestClockIn} className="px-3 py-1.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 rounded-lg font-semibold hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors flex items-center gap-1">
+          <LogIn className="w-3 h-3" /> Fichar
+        </button>
+        <button type="button" onClick={onRequestCashOps} className="px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg font-semibold hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors flex items-center gap-1">
+          <Banknote className="w-3 h-3" /> Mov. caja
+        </button>
+        <button type="button" onClick={onRequestCashCount} className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-lg font-semibold hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1">
           <Calculator className="w-3 h-3" /> Arqueo
         </button>
-        <button onClick={onRequestIncident} className="px-3 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg font-semibold hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors flex items-center gap-1">
+        <button type="button" onClick={onRequestIncident} className="px-3 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-lg font-semibold hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors flex items-center gap-1">
           <AlertTriangle className="w-3 h-3" /> Incidencia
         </button>
-        <button onClick={onRequestClose} className="px-3 py-1.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg font-semibold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors flex items-center gap-1">
+        <button type="button" onClick={onRequestClose} className="px-3 py-1.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-lg font-semibold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors flex items-center gap-1">
           <Lock className="w-3 h-3" /> Cerrar caja
         </button>
       </div>
@@ -993,7 +1626,7 @@ function CashCountModal({ session, onConfirm, onCancel }: {
   const hasCounted = countedTotal > 0;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex p-3 sm:p-4">
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex p-3 sm:p-4`}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl mx-auto my-auto h-[calc(100svh-1.5rem)] sm:h-[calc(100svh-2rem)] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-5 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3">
@@ -1128,7 +1761,7 @@ function IncidentModal({ session, onConfirm, onCancel }: {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-4`}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: '92vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
@@ -1225,9 +1858,15 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [showClosing, setShowClosing] = useState(false);
   const [showCashCount, setShowCashCount] = useState(false);
+  const [showCashOps, setShowCashOps] = useState(false);
+  const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
+  const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
+  const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
+  const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
+  const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
@@ -1284,7 +1923,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   }, [isWorkerUser, managerPdvPickId, sessions, pointsOfSale, dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
   const activeSession = useMemo(() => {
-    const open = sessions.filter((s) => s.status === 'open');
+    const open = sessions.filter((s) => isTpvRegisterSessionOpen(s));
     if (isTabletSession && tabletRestrictedPdvId) {
       return open.find((s) => String(s.pointOfSaleId || '').trim() === tabletRestrictedPdvId) || null;
     }
@@ -1301,9 +1940,70 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     return null;
   }, [sessions, isTabletSession, tabletRestrictedPdvId, isWorkerUser, workerAssignedPdvId, managerPdvPickId]);
 
+  const activeStoreScope = useMemo(() => {
+    const pdvId = String(activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '').trim();
+    const pdv = pointsOfSale.find((p) => p._id === pdvId);
+    const workCenterId = String(
+      pdv?.workCenterId || tabletBinding?.workCenterId || '',
+    ).trim();
+    return { pdvId, workCenterId };
+  }, [activeSession, tabletRestrictedPdvId, managerPdvPickId, pointsOfSale, tabletBinding?.workCenterId]);
+
+  const refreshClockedInWorkers = useCallback(async (options?: { silent?: boolean }) => {
+    if (!businessId || !activeSession) {
+      setClockedInWorkers([]);
+      return;
+    }
+    const ownerUserId = String(currentBusiness?.owner_user_id || '').trim();
+    const { pdvId, workCenterId } = activeStoreScope;
+    if (!pdvId) return;
+    const silent = options?.silent ?? false;
+    if (!silent) setClockedInWorkersLoading(true);
+    try {
+      const workers = await loadClockedInStoreWorkers(
+        businessId,
+        ownerUserId,
+        pdvId,
+        workCenterId,
+      );
+      setClockedInWorkers(workers);
+      setSelectedOrderTakerId((prev) => {
+        if (prev && workers.some((w) => w.id === prev)) return prev;
+        return pickDefaultOrderTaker(workers);
+      });
+    } catch {
+      if (!silent) setClockedInWorkers([]);
+    } finally {
+      if (!silent) setClockedInWorkersLoading(false);
+    }
+  }, [businessId, activeSession, currentBusiness?.owner_user_id, activeStoreScope]);
+
+  useEffect(() => {
+    if (!activeSession) {
+      setClockedInWorkers([]);
+      setSelectedOrderTakerId(null);
+      return;
+    }
+    void refreshClockedInWorkers();
+    const interval = setInterval(() => void refreshClockedInWorkers({ silent: true }), 60000);
+    return () => clearInterval(interval);
+  }, [activeSession, refreshClockedInWorkers]);
+
+  useEffect(() => {
+    if (!isTpvRegisterSessionOpen(activeSession)) {
+      setShowClosing(false);
+      setShowCashCount(false);
+      setShowCashOps(false);
+      setShowIncident(false);
+    }
+  }, [activeSession?._id, activeSession?.status, activeSession?.openedAt]);
+
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+
   const loadData = useCallback(async () => {
     if (!dataUserId || !user) return;
-    const biz = currentBusiness;
+    const biz = currentBusinessRef.current;
     const bidAtStart = String(biz?.business_id || biz?.id || '').trim();
     const seq = ++loadSeqRef.current;
     try {
@@ -1360,7 +2060,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, [dataUserId, user, currentBusiness, accountBusinessCount]);
+  }, [dataUserId, user, businessId, accountBusinessCount]);
 
   useEffect(() => {
     setPointsOfSale([]);
@@ -1369,19 +2069,24 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     setManagerPdvPickId(null);
     skipManagerAutoPdvRef.current = false;
     loadSeqRef.current += 1;
+    setLoading(true);
   }, [businessId]);
 
   useEffect(() => {
-    if (businessLoading || !dataUserId) {
-      setLoading(true);
-      return;
-    }
-    setLoading(true);
+    if (businessLoading || !dataUserId) return;
     void loadData();
   }, [businessLoading, dataUserId, businessId, loadData]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
+    const pdvId = String(data.pointOfSaleId || '').trim();
+    const localOpen = sessions.find(
+      (s) => s.status === 'open' && String(s.pointOfSaleId || '').trim() === pdvId,
+    );
+    if (localOpen) {
+      toast.info(`Continuando con la caja ya abierta en ${localOpen.pointOfSaleName || 'esta tienda'}`);
+      return;
+    }
     const total = calcDenominationTotal(data.counts);
     try {
       const created = await createTpvRegisterSessionRequest(dataUserId, {
@@ -1425,58 +2130,118 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         route: '/saas/tpv',
         metadata: { initialCashAmount: total, pointOfSaleId: data.pointOfSaleId, terminalId: data.terminalId },
       }).catch((error) => { console.error('Error creating tpv open notification:', error); });
-    } catch {
-      toast.error('Error al abrir la caja');
+    } catch (err) {
+      if (err instanceof TpvRegisterSessionConflictError) {
+        setSessions((prev) => {
+          const exists = prev.some((s) => s._id === err.existingSession._id);
+          if (exists) {
+            return prev.map((s) => (s._id === err.existingSession._id ? err.existingSession : s));
+          }
+          return [err.existingSession, ...prev];
+        });
+        toast.info(err.message);
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Error al abrir la caja');
     }
   };
 
-  const handleClose = async (counts: CashDenominationCount, notes: string) => {
-    if (!dataUserId || !activeSession) return;
+  const handleClose = async (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[] = []) => {
+    if (!dataUserId || !isTpvRegisterSessionOpen(activeSession)) {
+      toast.info('Abre la caja antes de cerrarla');
+      setShowClosing(false);
+      return;
+    }
+    const session = activeSession;
     const finalAmount = calcDenominationTotal(counts);
-    const expected = calcExpectedCash(activeSession);
+    const expected = calcExpectedCash(session);
     const diff = finalAmount - expected;
-    const summary = buildSummary(activeSession);
+    const summary = buildSummary(session);
+    const aggregatorClosingTotals: Record<string, number> = {};
+    for (const row of aggregatorRows) {
+      aggregatorClosingTotals[row.platform.channel] = row.totalSales;
+      summary.salesByChannel[row.platform.channel] = row.totalSales;
+    }
+    const closedPayload: Partial<TpvRegisterSession> = {
+      ...session,
+      status: 'closed',
+      closedAt: new Date().toISOString(),
+      closedBy: session.workerName,
+      closingCashCount: counts,
+      finalCashAmount: finalAmount,
+      expectedCash: expected,
+      difference: diff,
+      closingNotes: notes,
+      summary,
+      aggregatorClosingTotals,
+      closingValidationStatus: 'pending',
+    };
     try {
-      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
-        ...activeSession,
-        status: 'closed',
-        closedAt: new Date().toISOString(),
-        closedBy: activeSession.workerName,
-        closingCashCount: counts,
-        finalCashAmount: finalAmount,
-        expectedCash: expected,
-        difference: diff,
-        closingNotes: notes,
-        summary,
-      });
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, closedPayload as TpvRegisterSession);
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       setShowClosing(false);
       setPostCloseSession(updated);
-      toast.success(`Caja cerrada. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`);
+      setPostCloseAggregatorRows(aggregatorRows);
+      toast.success(`Caja cerrada. Pendiente de validación gerente. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`);
+      void createNotification({
+        level: Math.abs(diff) >= 20 ? 'warning' : 'info',
+        category: 'tpv',
+        title: 'Cierre de caja pendiente de validación',
+        message: `${activeSession.workerName} cerró ${activeSession.pointOfSaleName || 'caja'} (${activeSession.terminalName || 'TPV'}). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
+        entityId: updated._id,
+        entityType: 'tpv_register_session',
+        route: '/saas/vertical/delivery/caja',
+        metadata: { difference: diff, pointOfSaleId: activeSession.pointOfSaleId },
+      }).catch(() => null);
     } catch {
       toast.error('Error al cerrar la caja');
     }
   };
 
-  const addTransaction = useCallback(async (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => {
-    if (!dataUserId || !activeSession) return;
-    const fullTx: TpvRegisterTransaction = { ...tx, id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, date: new Date().toISOString() };
-    const updatedTxs = [...activeSession.transactions, fullTx];
+  const applySessionTransactions = useCallback((
+    session: TpvRegisterSession,
+    updatedTxs: TpvRegisterTransaction[],
+  ) => {
     const salesByChannel: Record<string, number> = {};
     for (const t of updatedTxs) {
       if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
     }
-    const linkedOrderIds = [...(activeSession.linkedOrderIds || [])];
-    if (fullTx.linkedDeliveryOrderId && !linkedOrderIds.includes(fullTx.linkedDeliveryOrderId)) {
-      linkedOrderIds.push(fullTx.linkedDeliveryOrderId);
+    const linkedOrderIds = [...(session.linkedOrderIds || [])];
+    const lastTx = updatedTxs[updatedTxs.length - 1];
+    if (lastTx?.linkedDeliveryOrderId && !linkedOrderIds.includes(lastTx.linkedDeliveryOrderId)) {
+      linkedOrderIds.push(lastTx.linkedDeliveryOrderId);
     }
+    return { transactions: updatedTxs, salesByChannel, linkedOrderIds };
+  }, []);
+
+  const addTransaction = useCallback(async (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => {
+    if (!dataUserId || !activeSession) return;
+    const fullTx: TpvRegisterTransaction = { ...tx, id: `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, date: new Date().toISOString() };
+    const updatedTxs = [...activeSession.transactions, fullTx];
+    const patch = applySessionTransactions(activeSession, updatedTxs);
+    const nextSession = { ...activeSession, ...patch };
+
+    if (!isBrowserOnline()) {
+      enqueueTpvOfflineItem('register_tx', { userId: dataUserId, session: nextSession, tx: fullTx });
+      setSessions(prev => prev.map(s => s._id === activeSession._id ? nextSession : s));
+      const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
+      toast.info(`${label} guardado en cola local. Efectivo esperado: ${calcExpectedCash(nextSession).toFixed(2)}€`);
+      setShowCashOps(false);
+      return;
+    }
+
     try {
-      const updated = await updateTpvRegisterSessionRequest(dataUserId, { ...activeSession, transactions: updatedTxs, salesByChannel, linkedOrderIds });
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, nextSession);
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+      if (isTpvCashMovementTx(fullTx.type)) {
+        const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
+        toast.success(`${label} de ${fullTx.amount.toFixed(2)}€ registrada. Efectivo esperado: ${calcExpectedCash(updated).toFixed(2)}€`);
+        setShowCashOps(false);
+      }
     } catch {
       toast.error('Error al registrar operación');
     }
-  }, [dataUserId, activeSession]);
+  }, [dataUserId, activeSession, applySessionTransactions]);
 
   const performCashCount = useCallback(async (countedBy: string, denominations: CashDenominationCount, notes?: string) => {
     if (!dataUserId || !activeSession) return;
@@ -1534,22 +2299,54 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     }
   }, [dataUserId, activeSession]);
 
+  const registerContextValue = useMemo((): TpvRegisterContextType | null => {
+    if (!isTpvRegisterSessionOpen(activeSession)) return null;
+    return {
+      session: activeSession,
+      addTransaction,
+      performCashCount,
+      addIncident,
+      requestClose: () => setShowClosing(true),
+      requestCashCount: () => setShowCashCount(true),
+      requestIncident: () => setShowIncident(true),
+      expectedCash: calcExpectedCash(activeSession),
+      clockedInWorkers,
+      clockedInWorkersLoading,
+      selectedOrderTakerId,
+      setSelectedOrderTakerId,
+      refreshClockedInWorkers,
+    };
+  }, [
+    activeSession,
+    addTransaction,
+    performCashCount,
+    addIncident,
+    clockedInWorkers,
+    clockedInWorkersLoading,
+    selectedOrderTakerId,
+    refreshClockedInWorkers,
+  ]);
+
+  const wrapRegisterContext = (body: ReactNode) => (
+    <TpvRegisterContext.Provider value={registerContextValue}>{body}</TpvRegisterContext.Provider>
+  );
+
   if (loading) {
-    return (
+    return wrapRegisterContext(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="text-center">
           <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full mx-auto mb-3" />
           <p className="text-sm text-gray-500">Cargando caja...</p>
         </div>
-      </div>
+      </div>,
     );
   }
 
   if (!activeSession && postCloseSession) {
     const expected = calcExpectedCash(postCloseSession);
-    return (
+    return wrapRegisterContext(
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
           <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
             <button
               type="button"
@@ -1591,6 +2388,15 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
                 {(postCloseSession.difference || 0) >= 0 ? '+' : ''}{Number(postCloseSession.difference || 0).toFixed(2)}€
               </span>
             </div>
+            <AggregatorCashSummary
+              rows={postCloseAggregatorRows.length > 0
+                ? postCloseAggregatorRows
+                : aggregatorRowsFromClosingTotals(
+                  getClosingAggregatorPlatforms(),
+                  postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
+                )}
+              title="Cajas agregadores"
+            />
           </div>
           <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
             <button
@@ -1618,13 +2424,13 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
             </button>
           </div>
         </div>
-      </div>
+      </div>,
     );
   }
 
-  if (!activeSession) {
+  if (!isTpvRegisterSessionOpen(activeSession)) {
     if (isWorkerUser && !isTabletSession && !loading && !user?.employment?.salesPointId?.trim()) {
-      return (
+      return wrapRegisterContext(
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
             <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -1642,12 +2448,12 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               Volver a Mi trabajo
             </button>
           </div>
-        </div>
+        </div>,
       );
     }
 
     if (isWorkerUser && !isTabletSession && !loading && user?.employment?.salesPointId?.trim() && pointsOfSale.length === 0) {
-      return (
+      return wrapRegisterContext(
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
             <div className="w-14 h-14 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -1672,40 +2478,40 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               Volver a Mi trabajo
             </button>
           </div>
-        </div>
+        </div>,
       );
     }
 
-    const workerOptions = isTabletSession && user
-      ? [{
-          id: String(user.user_id || user.id || '').trim(),
-          name: String(user.fullName || user.email || 'Trabajador').trim(),
-        }].filter((w) => w.id && w.name)
-      : isWorkerUser && user
-      ? [{
-          id: String(user.user_id || user.id || '').trim(),
-          name: String(user.fullName || user.email || 'Trabajador').trim(),
-        }].filter((w) => w.id && w.name)
-      : (() => {
+    const workerOptions = (isTabletSession || (!isWorkerUser && !isTabletSession))
+      ? (() => {
           const members = (currentBusiness?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
             id: String(m.user_id || m.id || '').trim(),
             name: String(m.fullName || m.email || 'Trabajador').trim(),
           })).filter((m) => m.id && m.name);
           const uniq = new Map<string, { id: string; name: string }>();
           for (const m of members) uniq.set(m.id, m);
-          if (user?.id) {
-            uniq.set(String(user.id), {
-              id: String(user.id),
-              name: String(user.fullName || user.email || 'Gerente').trim(),
-            });
+          if (user?.user_id || user?.id) {
+            const uid = String(user.user_id || user.id || '').trim();
+            if (uid) {
+              uniq.set(uid, {
+                id: uid,
+                name: String(user.fullName || user.email || 'Gerente').trim(),
+              });
+            }
           }
           return Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-        })();
+        })()
+      : isWorkerUser && user
+      ? [{
+          id: String(user.user_id || user.id || '').trim(),
+          name: String(user.fullName || user.email || 'Trabajador').trim(),
+        }].filter((w) => w.id && w.name)
+      : [];
 
     const openingRestrictedPdvId = tabletRestrictedPdvId
       || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
 
-    return (
+    return wrapRegisterContext(
       <OpeningScreen
         onOpen={handleOpen}
         loading={loading}
@@ -1726,33 +2532,75 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               }
             : undefined
         }
-      />
+      />,
     );
   }
 
-  return (
-    <TpvRegisterContext.Provider value={{
-      session: activeSession,
-      addTransaction,
-      performCashCount,
-      addIncident,
-      requestClose: () => setShowClosing(true),
-      requestCashCount: () => setShowCashCount(true),
-      requestIncident: () => setShowIncident(true),
-      expectedCash: calcExpectedCash(activeSession),
-    }}>
+  return wrapRegisterContext(
+    <>
       <div className="flex flex-col min-h-screen">
         <RegisterStatusBar
           session={activeSession}
+          onRequestClockIn={() => setShowClockIn(true)}
           onRequestClose={() => setShowClosing(true)}
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
+          onRequestCashOps={() => setShowCashOps(true)}
+          clockedInWorkers={clockedInWorkers}
+          clockedInWorkersLoading={clockedInWorkersLoading}
+          selectedOrderTakerId={selectedOrderTakerId}
+          onSelectOrderTaker={setSelectedOrderTakerId}
         />
-        <div className="flex-1">{children}</div>
+        <RegisterCashOpsStrip session={activeSession} />
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{children}</div>
       </div>
-      {showClosing && <ClosingScreen session={activeSession} onClose={handleClose} onCancel={() => setShowClosing(false)} />}
-      {showCashCount && <CashCountModal session={activeSession} onConfirm={(d, n) => performCashCount(activeSession.workerName, d, n)} onCancel={() => setShowCashCount(false)} />}
-      {showIncident && <IncidentModal session={activeSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />}
-    </TpvRegisterContext.Provider>
+      {showClosing && (
+        <TpvGatePortal>
+          <ClosingScreen
+            session={activeSession}
+            dataUserId={dataUserId}
+            onClose={handleClose}
+            onCancel={() => setShowClosing(false)}
+          />
+        </TpvGatePortal>
+      )}
+      {showCashCount && (
+        <TpvGatePortal>
+          <CashCountModal session={activeSession} onConfirm={(d, n) => performCashCount(activeSession.workerName, d, n)} onCancel={() => setShowCashCount(false)} />
+        </TpvGatePortal>
+      )}
+      {showCashOps && (
+        <TpvGatePortal>
+          <TpvCashOpsModal
+            registeredBy={activeSession.workerName}
+            onClose={() => setShowCashOps(false)}
+            onConfirm={async (tx) => { await addTransaction(tx); }}
+          />
+        </TpvGatePortal>
+      )}
+      {showClockIn && (
+        <TpvGatePortal>
+          <ClockInModal
+            storeLabel={activeSession.pointOfSaleName || tabletBinding?.pdvName || 'Tienda'}
+            businessId={businessId}
+            ownerUserId={String(currentBusiness?.owner_user_id || '')}
+            pdvId={String(activeSession.pointOfSaleId || '')}
+            workCenterId={String(
+              pointsOfSale.find((p) => p._id === activeSession.pointOfSaleId)?.workCenterId || tabletBinding?.workCenterId || '',
+            )}
+            onChanged={() => void refreshClockedInWorkers()}
+            onCancel={() => {
+              setShowClockIn(false);
+              void refreshClockedInWorkers();
+            }}
+          />
+        </TpvGatePortal>
+      )}
+      {showIncident && (
+        <TpvGatePortal>
+          <IncidentModal session={activeSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />
+        </TpvGatePortal>
+      )}
+    </>,
   );
 }

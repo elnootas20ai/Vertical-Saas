@@ -14,6 +14,7 @@ import {
   listCatalogItems,
   createCatalogItem,
   bulkCreateCatalogItems,
+  bulkApplyStaffPrices,
   updateCatalogItem,
   removeCatalogItem,
   listSuppliers,
@@ -44,6 +45,8 @@ import {
   regeneratePointOfSaleTerminalCode,
   getDeliveryConfig,
   updateDeliveryConfig,
+  listStaffConsumptions,
+  createStaffConsumption,
   getOpsCenter,
   listDrivers,
   createDriver,
@@ -129,6 +132,7 @@ deliveryRouter.delete('/orders/:userId/:orderId', removeDeliveryOrder);
 deliveryRouter.get('/catalog/:userId', listCatalogItems);
 deliveryRouter.post('/catalog/:userId', createCatalogItem);
 deliveryRouter.post('/catalog/:userId/bulk', bulkCreateCatalogItems);
+deliveryRouter.post('/catalog/:userId/bulk-staff-prices', bulkApplyStaffPrices);
 deliveryRouter.put('/catalog/:userId/:itemId', updateCatalogItem);
 deliveryRouter.delete('/catalog/:userId/:itemId', removeCatalogItem);
 
@@ -172,6 +176,8 @@ deliveryRouter.post('/drivers/:userId/auto-assign/:orderId', autoAssignDriver);
 
 deliveryRouter.get('/config/:userId', getDeliveryConfig);
 deliveryRouter.put('/config/:userId', updateDeliveryConfig);
+deliveryRouter.get('/staff-consumptions/:userId', listStaffConsumptions);
+deliveryRouter.post('/staff-consumptions/:userId', createStaffConsumption);
 deliveryRouter.get('/ops-center/:userId', getOpsCenter);
 
 deliveryRouter.get('/reparto-config/:userId', getRepartoConfig);

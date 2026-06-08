@@ -13,6 +13,7 @@ import {
   listConstructionProjects, listConstructionWorkers, listConstructionTasks,
   createDailyReport, submitDailyReport,
 } from '../../../lib/constructionApi';
+import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 const GREMIOS = ['carpintería', 'peletería', 'lampistería', 'pradurista', 'yesero', 'pintor', 'herrero', 'electricista', 'fontanero', 'albañil', 'otro'];
 
@@ -111,7 +112,7 @@ export function WorkerConstructionReport() {
       const created = await createDailyReport(userId, data);
       if (andSubmit) await submitDailyReport(userId, created._id);
       setSuccess(true);
-      setTimeout(() => navigate('/saas/worker/tpv'), 1500);
+      setTimeout(() => navigate(AUTH_PATHS.tpvTabletLogin), 1500);
     } catch { /* */ }
     setSaving(false);
   };

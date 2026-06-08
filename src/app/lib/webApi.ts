@@ -259,6 +259,7 @@ export interface DeliveryIntegrations {
   uber: DeliveryIntegrationEntry;
   globo: DeliveryIntegrationEntry;
   justead: DeliveryIntegrationEntry;
+  flipdish: DeliveryIntegrationEntry;
 }
 
 export async function getDeliveryIntegrationsRequest(businessId: string) {

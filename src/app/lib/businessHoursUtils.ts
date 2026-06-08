@@ -3,7 +3,18 @@ import type { WorkCenter } from './workCentersApi';
 
 export const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
 export const WEEKEND_KEYS = ['saturday', 'sunday'] as const;
+export const ALL_SCHEDULE_DAY_KEYS = [...WEEKDAY_KEYS, ...WEEKEND_KEYS] as const;
 export type ScheduleDayKey = keyof WeekSchedule;
+
+export const SCHEDULE_DAY_LABELS_ES: Record<ScheduleDayKey, string> = {
+  monday: 'Lunes',
+  tuesday: 'Martes',
+  wednesday: 'Miércoles',
+  thursday: 'Jueves',
+  friday: 'Viernes',
+  saturday: 'Sábado',
+  sunday: 'Domingo',
+};
 
 export const DEFAULT_BUSINESS_HOURS_CONFIG: BusinessHoursConfig = {
   timezone: 'Europe/Madrid',
@@ -94,23 +105,64 @@ export function isRetailWorkCenter(centerType: WorkCenter['centerType']): boolea
 
 export function countOpenScheduleDays(schedule: WeekSchedule | null | undefined): number {
   if (!schedule) return 0;
-  return (Object.keys(schedule) as ScheduleDayKey[]).filter((day) => schedule[day]?.open).length;
+  return ALL_SCHEDULE_DAY_KEYS.filter((day) => schedule[day]?.open).length;
+}
+
+/** Mensaje para UI si el horario no se puede guardar; `null` si es válido. */
+export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefined): string | null {
+  if (!hours?.schedule) {
+    return 'Activa al menos un día con horario de apertura y cierre.';
+  }
+  if (countOpenScheduleDays(hours.schedule) === 0) {
+    return 'Activa al menos un día (interruptor o letra L–D).';
+  }
+  for (const day of ALL_SCHEDULE_DAY_KEYS) {
+    const d = hours.schedule[day];
+    if (!d?.open) continue;
+    const from = String(d.from ?? '').trim();
+    const to = String(d.to ?? '').trim();
+    if (!from || !to) {
+      return `${SCHEDULE_DAY_LABELS_ES[day]}: indica hora de apertura y de cierre.`;
+    }
+    if (from === to) {
+      return `${SCHEDULE_DAY_LABELS_ES[day]}: apertura y cierre no pueden ser la misma hora.`;
+    }
+  }
+  return null;
 }
 
 export function hasValidBusinessHoursConfig(
   hours: BusinessHoursConfig | null | undefined,
 ): boolean {
-  if (!hours?.schedule) return false;
-  return Object.values(hours.schedule).some(
-    (d) =>
-      d &&
-      d.open &&
-      typeof d.from === 'string' &&
-      typeof d.to === 'string' &&
-      d.from.trim() &&
-      d.to.trim() &&
-      d.from !== d.to,
-  );
+  return getBusinessHoursIssue(hours) === null;
+}
+
+/** Rellena días faltantes y normaliza strings (datos legacy o Couch incompletos). */
+export function normalizeBusinessHoursConfig(
+  hours: BusinessHoursConfig | null | undefined,
+): BusinessHoursConfig {
+  const base = DEFAULT_BUSINESS_HOURS_CONFIG;
+  const schedule = cloneWeekSchedule(base.schedule);
+  if (hours?.schedule && typeof hours.schedule === 'object') {
+    for (const day of ALL_SCHEDULE_DAY_KEYS) {
+      const src = hours.schedule[day];
+      if (!src || typeof src !== 'object') continue;
+      schedule[day] = {
+        open: Boolean(src.open),
+        from: String(src.from ?? schedule[day].from).trim() || schedule[day].from,
+        to: String(src.to ?? schedule[day].to).trim() || schedule[day].to,
+      };
+    }
+  }
+  return {
+    timezone: String(hours?.timezone || base.timezone).trim() || base.timezone,
+    schedule,
+    holidays: Array.isArray(hours?.holidays) ? hours!.holidays : [],
+    lunchBreak:
+      hours?.lunchBreak && typeof hours.lunchBreak === 'object'
+        ? { ...base.lunchBreak, ...hours.lunchBreak }
+        : { ...base.lunchBreak },
+  };
 }
 
 /** Al menos una tienda retail activa con horario válido. */

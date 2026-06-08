@@ -5,9 +5,24 @@ import { getApiBase } from './apiBase';
 
 export type AlertPriority = 'high' | 'medium' | 'low';
 export type AlertStatus = 'new' | 'seen' | 'resolved';
+
+export type AlertHistoryAction = 'created' | 'status_change' | 'assigned' | 'deleted';
+
+export interface AlertHistoryEntry {
+  action: AlertHistoryAction;
+  at: string;
+  by: string | null;
+  status?: AlertStatus;
+  from?: AlertStatus;
+  to?: AlertStatus;
+  meta?: Record<string, unknown>;
+}
+
 export type AlertSource =
   | 'finanzas' | 'stock' | 'equipo' | 'documentacion'
-  | 'verticales' | 'ocr' | 'conciliacion' | 'crm' | 'taller' | 'sistema';
+  | 'verticales' | 'delivery' | 'construccion' | 'limpieza'
+  | 'ocr' | 'conciliacion' | 'crm' | 'taller' | 'carniceria'
+  | 'compraventa' | 'adquisiciones' | 'desguaces' | 'sistema';
 
 export interface AlertRecord {
   id: string;
@@ -30,6 +45,10 @@ export interface AlertRecord {
   assignedTo: { userIds: string[]; roles: string[] };
   resolvedAt: string | null;
   resolvedBy: string | null;
+  seenAt: string | null;
+  seenBy: string | null;
+  deletedBy: string | null;
+  statusHistory: AlertHistoryEntry[];
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -42,6 +61,41 @@ export interface AlertSummary {
   bySource: Partial<Record<AlertSource, number>>;
   unresolved: number;
   lastAlertAt: string | null;
+  historyTotal?: number;
+}
+
+const EMPTY_ALERT_SUMMARY: AlertSummary = {
+  total: 0,
+  byPriority: { high: 0, medium: 0, low: 0 },
+  byStatus: { new: 0, seen: 0, resolved: 0 },
+  bySource: {},
+  unresolved: 0,
+  lastAlertAt: null,
+  historyTotal: 0,
+};
+
+/** Normaliza respuestas legacy o parciales del backend. */
+export function normalizeAlertSummary(raw: Partial<AlertSummary> | null | undefined): AlertSummary {
+  if (!raw || typeof raw !== 'object') return { ...EMPTY_ALERT_SUMMARY };
+  const byPriority = raw.byPriority || {};
+  const byStatus = raw.byStatus || {};
+  return {
+    total: Number(raw.total) || 0,
+    byPriority: {
+      high: Number(byPriority.high) || 0,
+      medium: Number(byPriority.medium) || 0,
+      low: Number(byPriority.low) || 0,
+    },
+    byStatus: {
+      new: Number(byStatus.new) || 0,
+      seen: Number(byStatus.seen) || 0,
+      resolved: Number(byStatus.resolved) || 0,
+    },
+    bySource: raw.bySource && typeof raw.bySource === 'object' ? raw.bySource : {},
+    unresolved: Number(raw.unresolved) || 0,
+    lastAlertAt: raw.lastAlertAt ?? null,
+    historyTotal: Number(raw.historyTotal) || 0,
+  };
 }
 
 export interface AlertsPagination {
@@ -63,6 +117,12 @@ export interface ListAlertsFilters {
   limit?: number;
   from?: string;
   to?: string;
+  includeDeleted?: boolean | string;
+  historyOnly?: boolean | string;
+}
+
+export interface AlertHistoryFilters extends ListAlertsFilters {
+  includeDeleted?: boolean;
 }
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
@@ -118,10 +178,31 @@ export async function fetchAlerts(businessId: string, filters: ListAlertsFilters
   return request<{ alerts: AlertRecord[]; pagination: AlertsPagination }>(path);
 }
 
+export async function fetchAlertHistory(businessId: string, filters: AlertHistoryFilters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, String(value));
+    }
+  });
+
+  const qs = params.toString();
+  const path = `/api/alerts/${encodeURIComponent(businessId)}/history${qs ? `?${qs}` : ''}`;
+
+  return request<{ alerts: AlertRecord[]; pagination: AlertsPagination }>(path);
+}
+
+export async function fetchAlertTimeline(businessId: string, alertId: string) {
+  return request<{ alert: AlertRecord; timeline: AlertHistoryEntry[] }>(
+    `/api/alerts/${encodeURIComponent(businessId)}/${encodeURIComponent(alertId)}/timeline`,
+  );
+}
+
 export async function fetchAlertSummary(businessId: string) {
-  return request<{ summary: AlertSummary }>(
+  const res = await request<{ summary: AlertSummary }>(
     `/api/alerts/${encodeURIComponent(businessId)}/summary`,
   );
+  return { ...res, summary: normalizeAlertSummary(res.summary) };
 }
 
 export async function updateAlertStatus(businessId: string, alertId: string, status: AlertStatus) {
@@ -152,18 +233,33 @@ export async function deleteAlert(businessId: string, alertId: string) {
   );
 }
 
+/** Dispara el motor de alertas (OP, finanzas, delivery, RRHH…) */
+export async function triggerAlertEngineCheck(userId: string) {
+  return request<{ message?: string }>(
+    `/api/alerts/${encodeURIComponent(userId)}/check`,
+    { method: 'POST' },
+  );
+}
+
 // ─── Source display helpers ──────────────────────────────────────────────────
 
 export const SOURCE_LABELS: Record<AlertSource, string> = {
   finanzas: 'Finanzas',
   stock: 'Stock',
-  equipo: 'Equipo',
+  equipo: 'RRHH',
   documentacion: 'Documentación',
   verticales: 'Operaciones',
+  delivery: 'Delivery',
+  construccion: 'Construcción',
+  limpieza: 'Limpieza',
   ocr: 'OCR',
   conciliacion: 'Conciliación',
   crm: 'CRM',
   taller: 'Taller',
+  carniceria: 'Carnicería',
+  compraventa: 'Compraventa',
+  adquisiciones: 'Adquisiciones',
+  desguaces: 'Desguace',
   sistema: 'Sistema',
 };
 
@@ -173,12 +269,83 @@ export const SOURCE_COLORS: Record<AlertSource, string> = {
   equipo: '#6366F1',
   documentacion: '#8B5CF6',
   verticales: '#3B82F6',
+  delivery: '#EF4444',
+  construccion: '#F97316',
+  limpieza: '#06B6D4',
   ocr: '#EC4899',
   conciliacion: '#14B8A6',
   crm: '#F97316',
   taller: '#64748B',
+  carniceria: '#DC2626',
+  compraventa: '#2563EB',
+  adquisiciones: '#7C3AED',
+  desguaces: '#475569',
   sistema: '#6B7280',
 };
+
+/** Agrupación CEO: departamentos visibles en el centro de alertas */
+export interface CeoAlertDepartment {
+  id: string;
+  label: string;
+  icon: string;
+  sources: AlertSource[];
+  gradient: string;
+}
+
+export const CEO_ALERT_DEPARTMENTS: CeoAlertDepartment[] = [
+  {
+    id: 'all',
+    label: 'Todas',
+    icon: 'bell',
+    sources: [],
+    gradient: 'from-indigo-500 to-violet-600',
+  },
+  {
+    id: 'delivery',
+    label: 'Delivery',
+    icon: 'bike',
+    sources: ['delivery'],
+    gradient: 'from-red-500 to-orange-500',
+  },
+  {
+    id: 'finanzas',
+    label: 'Finanzas',
+    icon: 'dollar',
+    sources: ['finanzas', 'conciliacion', 'ocr'],
+    gradient: 'from-emerald-500 to-teal-600',
+  },
+  {
+    id: 'rrhh',
+    label: 'RRHH',
+    icon: 'users',
+    sources: ['equipo', 'documentacion'],
+    gradient: 'from-indigo-500 to-blue-600',
+  },
+  {
+    id: 'operaciones',
+    label: 'Operaciones',
+    icon: 'activity',
+    sources: ['verticales', 'stock', 'taller', 'crm'],
+    gradient: 'from-blue-500 to-cyan-600',
+  },
+];
+
+export function countAlertsForDepartment(
+  summary: AlertSummary | null,
+  deptId: string,
+): number {
+  if (!summary) return 0;
+  if (deptId === 'all') return summary.unresolved;
+  const dept = CEO_ALERT_DEPARTMENTS.find((d) => d.id === deptId);
+  if (!dept || dept.sources.length === 0) return summary.unresolved;
+  return dept.sources.reduce((sum, src) => sum + (summary.bySource[src] || 0), 0);
+}
+
+export function departmentSourceFilter(deptId: string): string | undefined {
+  if (deptId === 'all') return undefined;
+  const dept = CEO_ALERT_DEPARTMENTS.find((d) => d.id === deptId);
+  return dept?.sources.length ? dept.sources.join(',') : undefined;
+}
 
 export const PRIORITY_LABELS: Record<AlertPriority, string> = {
   high: 'Alta',
@@ -191,3 +358,28 @@ export const STATUS_LABELS: Record<AlertStatus, string> = {
   seen: 'Vista',
   resolved: 'Resuelta',
 };
+
+export const HISTORY_ACTION_LABELS: Record<AlertHistoryAction, string> = {
+  created: 'Creada',
+  status_change: 'Cambio de estado',
+  assigned: 'Asignada',
+  deleted: 'Eliminada',
+};
+
+export function formatHistoryEntry(entry: AlertHistoryEntry): string {
+  switch (entry.action) {
+    case 'created':
+      return 'Alerta generada';
+    case 'status_change':
+      if (entry.from && entry.to) {
+        return `${STATUS_LABELS[entry.from]} → ${STATUS_LABELS[entry.to]}`;
+      }
+      return entry.to ? `Marcada como ${STATUS_LABELS[entry.to]}` : 'Estado actualizado';
+    case 'assigned':
+      return 'Asignación actualizada';
+    case 'deleted':
+      return 'Eliminada del centro activo';
+    default:
+      return 'Evento registrado';
+  }
+}

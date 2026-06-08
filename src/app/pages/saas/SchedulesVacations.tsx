@@ -24,18 +24,24 @@ import type { VacationRequest, VacationSettings, LeaveType, VacationStatus } fro
 import { listVacations, createVacationRequest, reviewVacation, deleteVacation, getSettings, saveSettings, getDaysUsed, getDaysAllowed, countBusinessDays, LEAVE_TYPE_LABELS, STATUS_LABELS } from '../../lib/vacationsApi';
 
 import type { CompanyHoliday, HolidayScope } from '../../lib/companyHolidaysApi';
-import { listCompanyHolidays, saveCompanyHoliday, deleteCompanyHoliday, importPresetHolidays, getHolidayForDate, SCOPE_LABELS } from '../../lib/companyHolidaysApi';
+import { listCompanyHolidays, saveCompanyHoliday, deleteCompanyHoliday, importPresetHolidays, SCOPE_LABELS } from '../../lib/companyHolidaysApi';
 
 import type { AvailabilityBlock, BlockReason } from '../../lib/availabilityBlocksApi';
-import { listBlocks, saveBlock, deleteBlock, getMemberBlocksForDate, BLOCK_REASON_LABELS, BLOCK_REASON_COLORS } from '../../lib/availabilityBlocksApi';
+import { listBlocks, saveBlock, deleteBlock, BLOCK_REASON_LABELS, BLOCK_REASON_COLORS } from '../../lib/availabilityBlocksApi';
 
-import { listClockins } from '../../lib/clockinsApi';
-import type { ClockinRecord } from '../../lib/clockinsApi';
+import { fetchClockins } from '../../lib/clockinsApi';
+import type { EnrichedClockinRecord } from '../../lib/clockinsApi';
 
 import type { ScheduleAlert } from '../../lib/scheduleAlertsApi';
 import { generateAlerts, getDismissedAlertIds, dismissAlert, ALERT_SEVERITY_CONFIG } from '../../lib/scheduleAlertsApi';
 
-type Tab = 'calendar' | 'vacations' | 'holidays' | 'blocks' | 'templates' | 'rules' | 'comparison' | 'anomalies';
+import { SchedulesWeekPanel } from '../../components/saas/schedules/SchedulesWeekPanel';
+import { VacationsTeamPanel } from '../../components/saas/schedules/VacationsTeamPanel';
+import { SchedulesControlPanel } from '../../components/saas/schedules/SchedulesControlPanel';
+import { mergeBusinessMembers } from '../../lib/schedulesDisplay';
+
+type Tab = 'calendar' | 'vacations' | 'control' | 'config';
+type ConfigSubTab = 'holidays' | 'blocks' | 'templates' | 'rules';
 const MANAGER_ROLES = new Set(['Admin', 'Gerente']);
 
 export function SchedulesVacations() {
@@ -43,8 +49,12 @@ export function SchedulesVacations() {
   const { user, listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
+  const myBusinessMember = useMemo(
+    () => currentBusiness?.members?.find((m) => m.user_id === user?.user_id),
+    [currentBusiness?.members, user?.user_id],
+  );
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
-  const canManage = MANAGER_ROLES.has(user?.role || '');
+  const canManage = MANAGER_ROLES.has(myBusinessMember?.role || user?.role || '');
   const lang = (i18n.language?.slice(0, 2) || 'es') as string;
   const dayLabels = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.es;
   const leaveLabels = LEAVE_TYPE_LABELS[lang] || LEAVE_TYPE_LABELS.es;
@@ -54,6 +64,7 @@ export function SchedulesVacations() {
   const currentYear = new Date().getFullYear();
 
   const [tab, setTab] = useState<Tab>('calendar');
+  const [configSubTab, setConfigSubTab] = useState<ConfigSubTab>('holidays');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -69,7 +80,7 @@ export function SchedulesVacations() {
   const [vacSettings, setVacSettings] = useState<VacationSettings | null>(null);
   const [holidays, setHolidays] = useState<CompanyHoliday[]>([]);
   const [blocks, setBlocks] = useState<AvailabilityBlock[]>([]);
-  const [clockins, setClockins] = useState<ClockinRecord[]>([]);
+  const [clockins, setClockins] = useState<EnrichedClockinRecord[]>([]);
   const [alerts, setAlerts] = useState<ScheduleAlert[]>([]);
 
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
@@ -127,8 +138,6 @@ export function SchedulesVacations() {
 
   const weekDates = useMemo(() => WEEKDAYS.map((_, i) => { const d = new Date(currentWeekStart + 'T00:00:00'); d.setDate(d.getDate() + i); return d; }), [currentWeekStart]);
   const weekEnd = useMemo(() => weekDates[6]?.toISOString().slice(0, 10) || currentWeekStart, [weekDates, currentWeekStart]);
-  const isToday = (date: Date) => { const n = new Date(); return date.getDate() === n.getDate() && date.getMonth() === n.getMonth() && date.getFullYear() === n.getFullYear(); };
-  const formatDate = (d: Date) => d.toLocaleDateString(lang, { day: 'numeric', month: 'short' });
 
   const loadData = useCallback(async () => {
     if (!businessId) return;
@@ -145,10 +154,15 @@ export function SchedulesVacations() {
         listBlocks(businessId, { from: currentWeekStart, to: weekEnd }),
       ]);
       setSchedules(scheds);
-      setMembers((memberList as any[]).map((u: any) => ({ user_id: u.user_id, fullName: u.fullName, role: u.role, employment: u.employment })));
+      setMembers(
+        mergeBusinessMembers(
+          (currentBusiness?.members || []) as { user_id: string; fullName?: string; email?: string; role?: string; employment?: unknown }[],
+          (memberList as { user_id: string; fullName?: string; role?: string; employment?: unknown }[]),
+        ),
+      );
       setTemplates(tmpls); setRules(rls); setVacations(vacs); setVacSettings(vs); setHolidays(hols); setBlocks(blks);
     } catch (e: any) { setError(e.message); } finally { setLoading(false); }
-  }, [businessId, canManage, currentWeekStart, weekEnd, currentYear]);
+  }, [businessId, canManage, currentWeekStart, weekEnd, currentYear, currentBusiness?.members]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -184,10 +198,25 @@ export function SchedulesVacations() {
 
   const loadClockins = useCallback(async () => {
     if (!businessId) return;
-    try { setClockins(await listClockins(businessId, { date: comparisonDate })); } catch {}
+    try {
+      setClockins(await fetchClockins(businessId, { date: comparisonDate, recordsOnly: true }));
+    } catch { /* non-critical */ }
   }, [businessId, comparisonDate]);
 
-  useEffect(() => { if (tab === 'comparison') loadClockins(); }, [tab, comparisonDate, loadClockins]);
+  useEffect(() => { if (tab === 'control') loadClockins(); }, [tab, comparisonDate, loadClockins]);
+
+  const goToAlertTab = (actionTab: string) => {
+    if (actionTab === 'calendar' || actionTab === 'vacations' || actionTab === 'control') {
+      setTab(actionTab as Tab);
+      return;
+    }
+    if (actionTab === 'holidays' || actionTab === 'blocks' || actionTab === 'templates' || actionTab === 'rules') {
+      setTab('config');
+      setConfigSubTab(actionTab as ConfigSubTab);
+      return;
+    }
+    if (actionTab === 'comparison' || actionTab === 'anomalies') setTab('control');
+  };
 
   const flash = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 2500); };
 
@@ -197,9 +226,10 @@ export function SchedulesVacations() {
     return list;
   }, [members, canManage, user?.user_id, filterWorkCenter]);
 
-  const getScheduleForMember = (id: string) => schedules.find(s => s.member_id === id);
   const totalTeamHours = schedules.reduce((s, sc) => s + sc.weeklyHours, 0);
-  const membersOnVacation = new Set(vacations.filter(v => v.status === 'approved' && v.startDate <= weekEnd && v.endDate >= currentWeekStart).map(v => v.member_id));
+  const membersOnVacation = new Set(
+    vacations.filter((v) => v.status === 'approved' && v.startDate <= weekEnd && v.endDate >= currentWeekStart).map((v) => v.member_id),
+  );
   const activeAlerts = alerts.filter(a => a.severity === 'critical' || a.severity === 'warning');
 
   const openEditor = async (memberId: string) => {
@@ -310,20 +340,17 @@ export function SchedulesVacations() {
     } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
-  const comparisonDay = useMemo(() => { const d = new Date(comparisonDate + 'T00:00:00'); return WEEKDAYS[(d.getDay() + 6) % 7]; }, [comparisonDate]);
-  function getTimeDiffMin(scheduled: string, actualIso: string): number { const [sh, sm] = scheduled.split(':').map(Number); const a = new Date(actualIso); return (a.getHours() * 60 + a.getMinutes()) - (sh * 60 + sm); }
+  const pendingVacations = vacations.filter((v) => v.status === 'pending').length;
 
   const visibleTabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'calendar', label: 'Calendario', icon: <CalendarRange className="w-4 h-4" /> },
-    { id: 'vacations', label: 'Vacaciones', icon: <Umbrella className="w-4 h-4" />, badge: canManage ? vacations.filter(v => v.status === 'pending').length : undefined },
-    { id: 'holidays', label: 'Festivos', icon: <PartyPopper className="w-4 h-4" /> },
+    { id: 'calendar', label: 'Semana', icon: <CalendarRange className="w-4 h-4" /> },
+    { id: 'vacations', label: 'Vacaciones', icon: <Umbrella className="w-4 h-4" />, badge: canManage ? pendingVacations : undefined },
     ...(canManage ? [
-      { id: 'blocks' as Tab, label: 'Bloqueos', icon: <Ban className="w-4 h-4" /> },
-      { id: 'templates' as Tab, label: 'Plantillas', icon: <LayoutTemplate className="w-4 h-4" /> },
-      { id: 'rules' as Tab, label: 'Reglas', icon: <Settings2 className="w-4 h-4" /> },
-      { id: 'comparison' as Tab, label: 'Horario vs Fichaje', icon: <Timer className="w-4 h-4" /> },
-      { id: 'anomalies' as Tab, label: 'Anomalías', icon: <AlertTriangle className="w-4 h-4" /> },
-    ] : []),
+      { id: 'control' as Tab, label: 'Control', icon: <Timer className="w-4 h-4" />, badge: activeAlerts.length || undefined },
+      { id: 'config' as Tab, label: 'Configuración', icon: <Settings2 className="w-4 h-4" /> },
+    ] : [
+      { id: 'config' as Tab, label: 'Festivos', icon: <PartyPopper className="w-4 h-4" /> },
+    ]),
   ];
 
   if (loading) return (
@@ -347,7 +374,7 @@ export function SchedulesVacations() {
                   <p className="text-sm font-semibold">{a.title}</p>
                   <p className="text-xs opacity-80 mt-0.5">{a.description}</p>
                 </div>
-                <button onClick={() => setTab(a.actionTab as Tab)} className="text-xs font-medium underline shrink-0">{a.actionLabel}</button>
+                <button onClick={() => goToAlertTab(a.actionTab)} className="text-xs font-medium underline shrink-0">{a.actionLabel}</button>
                 <button onClick={() => { dismissAlert(a.id); setAlerts(prev => prev.filter(x => x.id !== a.id)); }} className="p-1 opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
               </div>
             ))}
@@ -371,139 +398,95 @@ export function SchedulesVacations() {
           ))}
         </div>
 
-        {hasWorkCenters && tab === 'calendar' && (
-          <select value={filterWorkCenter} onChange={e => setFilterWorkCenter(e.target.value)} className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none">
-            <option value="all">Todos los centros</option>
-            {activeWorkCenters.map(wc => <option key={wc.id} value={wc.id}>{wc.name}</option>)}
-          </select>
-        )}
-
-        {/* CALENDAR TAB */}
+        {/* SEMANA */}
         {tab === 'calendar' && (
           <>
-            {canManage && templates.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                <button onClick={openBulkModal} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-colors shadow-sm"><Copy className="w-4 h-4" />Asignación masiva</button>
-                {rules.filter(r => r.active).length > 0 && <button onClick={handleAutoAssign} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 hover:bg-amber-100 rounded-xl transition-colors"><Zap className="w-4 h-4" />Auto-asignar</button>}
-              </div>
+            {hasWorkCenters && (
+              <select value={filterWorkCenter} onChange={e => setFilterWorkCenter(e.target.value)} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-amber-500">
+                <option value="all">Todos los centros</option>
+                {activeWorkCenters.map(wc => <option key={wc.id} value={wc.id}>{wc.name}</option>)}
+              </select>
             )}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                <button onClick={() => setWeekOffset(w => w - 1)} className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"><ChevronLeft className="w-4 h-4 text-gray-500" /></button>
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Semana del {currentWeekStart}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-200">{formatDate(weekDates[0])} — {formatDate(weekDates[6])}</span>
-                    {weekOffset !== 0 && <button onClick={() => setWeekOffset(0)} className="px-2 py-0.5 text-xs font-medium text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 rounded-md hover:bg-amber-100">Hoy</button>}
-                  </div>
-                </div>
-                <button onClick={() => setWeekOffset(w => w + 1)} className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700"><ChevronRight className="w-4 h-4 text-gray-500" /></button>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[800px]">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-700">
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase w-48">Miembro</th>
-                      {WEEKDAYS.map((day, i) => {
-                        const dateStr = weekDates[i].toISOString().slice(0, 10);
-                        const hol = getHolidayForDate(dateStr, holidays);
-                        return (
-                          <th key={day} className={`px-2 py-3 text-center text-xs font-semibold uppercase ${isToday(weekDates[i]) ? 'text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-900/10' : hol ? 'text-rose-500 dark:text-rose-400 bg-rose-50/50 dark:bg-rose-900/10' : 'text-gray-500 dark:text-gray-400'}`}>
-                            <div>{dayLabels[day]?.slice(0, 3)}</div>
-                            <div className="text-[10px] font-normal mt-0.5">{weekDates[i].getDate()}</div>
-                            {hol && <div className="text-[9px] font-normal text-rose-400 truncate max-w-[80px] mx-auto">{hol.name}</div>}
-                          </th>
-                        );
-                      })}
-                      <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase">H/sem</th>
-                      {canManage && <th className="px-3 py-3 w-12"></th>}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-                    {visibleMembers.map(member => {
-                      const sched = getScheduleForMember(member.user_id);
-                      const tmpl = sched?.template_id ? templates.find(t => t._id === sched.template_id) : null;
-                      return (
-                        <tr key={member.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors group">
-                          <td className="px-4 py-3">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{member.fullName}</p>
-                            {tmpl && <div className="flex items-center gap-1.5 mt-0.5"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: tmpl.color }} /><span className="text-[10px] text-gray-400">{tmpl.name}</span></div>}
-                          </td>
-                          {WEEKDAYS.map((day, i) => {
-                            const dateStr = weekDates[i].toISOString().slice(0, 10);
-                            const shift = sched?.weekly?.[day];
-                            const vac = vacations.find(v => v.member_id === member.user_id && v.status === 'approved' && dateStr >= v.startDate && dateStr <= v.endDate);
-                            const blk = getMemberBlocksForDate(blocks, member.user_id, dateStr)[0];
-                            const hol = getHolidayForDate(dateStr, holidays);
-                            if (vac) return <td key={day} className="px-2 py-3 text-center"><span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">Vacaciones</span></td>;
-                            if (blk) return <td key={day} className="px-2 py-3 text-center"><span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold" style={{ backgroundColor: BLOCK_REASON_COLORS[blk.reason] + '20', color: BLOCK_REASON_COLORS[blk.reason] }}>{blockLabels[blk.reason]}</span></td>;
-                            return (
-                              <td key={day} className={`px-2 py-3 text-center ${isToday(weekDates[i]) ? 'bg-amber-50/30 dark:bg-amber-900/5' : hol ? 'bg-rose-50/20 dark:bg-rose-900/5' : ''}`}>
-                                {shift?.enabled ? <div className="text-xs"><span className="font-medium text-gray-900 dark:text-white">{shift.start}</span><span className="text-gray-400 mx-0.5">-</span><span className="font-medium text-gray-900 dark:text-white">{shift.end}</span></div> : <span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
-                              </td>
-                            );
-                          })}
-                          <td className="px-3 py-3 text-center"><span className="text-sm font-bold text-gray-900 dark:text-white tabular-nums">{sched ? `${sched.weeklyHours}h` : '—'}</span></td>
-                          {canManage && <td className="px-3 py-3 text-center"><button onClick={() => openEditor(member.user_id)} className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors opacity-0 group-hover:opacity-100"><Pencil className="w-4 h-4" /></button></td>}
-                        </tr>
-                      );
-                    })}
-                    {visibleMembers.length === 0 && <tr><td colSpan={10} className="py-16 text-center text-gray-400 text-sm"><Users className="w-10 h-10 mx-auto mb-3" />{canManage ? 'No hay miembros' : 'Sin horario asignado'}</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <SchedulesWeekPanel
+              members={visibleMembers}
+              schedules={schedules}
+              templates={templates}
+              vacations={vacations}
+              holidays={holidays}
+              blocks={blocks}
+              weekDates={weekDates}
+              weekStart={currentWeekStart}
+              weekOffset={weekOffset}
+              dayLabels={dayLabels}
+              lang={lang}
+              canManage={canManage}
+              saving={saving}
+              blockLabels={blockLabels}
+              onPrevWeek={() => setWeekOffset(w => w - 1)}
+              onNextWeek={() => setWeekOffset(w => w + 1)}
+              onToday={() => setWeekOffset(0)}
+              onEditMember={openEditor}
+              onBulkAssign={canManage && templates.length > 0 ? openBulkModal : undefined}
+              onAutoAssign={canManage && rules.filter(r => r.active).length > 0 ? handleAutoAssign : undefined}
+              hasRules={rules.filter(r => r.active).length > 0}
+            />
           </>
         )}
 
-        {/* VACATIONS TAB */}
+        {/* VACACIONES */}
         {tab === 'vacations' && (
-          <>
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              {user && vacSettings && (() => { const used = getDaysUsed(vacations, user.user_id, currentYear); const allowed = getDaysAllowed(vacSettings, user.user_id); const remaining = Math.max(0, allowed - used); return (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
-                  <StatCard icon={<Umbrella className="w-5 h-5" />} label="Asignados" value={String(allowed)} color="blue" />
-                  <StatCard icon={<CalendarDays className="w-5 h-5" />} label="Usados" value={String(used)} color="amber" />
-                  <StatCard icon={<Check className="w-5 h-5" />} label="Restantes" value={String(remaining)} color="green" />
-                  <StatCard icon={<Clock className="w-5 h-5" />} label="Pendientes" value={String(vacations.filter(v => v.member_id === user.user_id && v.status === 'pending').length)} color="red" />
-                </div>
-              ); })()}
-              <button onClick={() => setShowVacForm(true)} className="flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl shadow-lg shadow-amber-600/25"><Plus className="w-4 h-4" />Solicitar</button>
-            </div>
-            {canManage && (() => { const pending = vacations.filter(v => v.status === 'pending'); if (!pending.length) return null; return (
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2"><Clock className="w-4 h-4 text-amber-500" />Pendientes ({pending.length})</h3>
-                {pending.map(req => { const isExp = expandedVacRequest === req._id; return (
-                  <div key={req._id} className="bg-white dark:bg-gray-800 rounded-xl border border-amber-200 dark:border-amber-800/50 overflow-hidden">
-                    <div className="p-4 cursor-pointer hover:bg-amber-50/50 dark:hover:bg-amber-900/10" onClick={() => setExpandedVacRequest(isExp ? null : req._id)}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1"><p className="text-sm font-bold text-gray-900 dark:text-white">{req.member_name}</p><p className="text-sm text-gray-600 dark:text-gray-300">{leaveLabels[req.leaveType]} · {req.startDate} → {req.endDate} · <span className="font-semibold">{req.totalDays}d</span></p></div>
-                        {isExp ? <ChevronLeft className="w-4 h-4 text-gray-400 rotate-90" /> : <ChevronLeft className="w-4 h-4 text-gray-400 -rotate-90" />}
-                      </div>
-                    </div>
-                    {isExp && <div className="px-4 pb-4 border-t border-amber-100 dark:border-amber-800/30 pt-3 space-y-3">
-                      <textarea value={reviewNotes[req._id] || ''} onChange={e => setReviewNotes(p => ({ ...p, [req._id]: e.target.value }))} rows={2} placeholder="Nota (opcional)..." className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm placeholder:text-gray-400 outline-none" />
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={e => { e.stopPropagation(); handleVacReview(req, 'rejected'); }} className="flex items-center gap-1.5 px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm font-semibold rounded-lg border border-red-200 dark:border-red-800"><ThumbsDown className="w-4 h-4" />Rechazar</button>
-                        <button onClick={e => { e.stopPropagation(); handleVacReview(req, 'approved'); }} className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"><ThumbsUp className="w-4 h-4" />Aprobar</button>
-                      </div>
-                    </div>}
-                  </div>
-                ); })}
-              </div>
-            ); })()}
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700"><h3 className="text-sm font-semibold text-gray-900 dark:text-white">{canManage ? `Todas (${currentYear})` : 'Mis solicitudes'}</h3></div>
-              {(() => { const shown = canManage ? vacations : vacations.filter(v => v.member_id === user?.user_id); if (!shown.length) return <div className="py-16 text-center text-gray-400"><Umbrella className="w-10 h-10 mx-auto mb-3" /><p className="text-sm">Sin solicitudes</p></div>; return (
-                <div className="overflow-x-auto"><table className="w-full min-w-[700px]"><thead><tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">{canManage && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Miembro</th>}<th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Tipo</th><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Fechas</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Días</th><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Estado</th><th className="px-4 py-3 w-10"></th></tr></thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">{shown.map(r => <tr key={r._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">{canManage && <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{r.member_name}</td>}<td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{leaveLabels[r.leaveType]}</td><td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300 tabular-nums">{r.startDate} → {r.endDate}</td><td className="px-4 py-3 text-center text-sm font-bold">{r.totalDays}</td><td className="px-4 py-3"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${r.status === 'approved' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : r.status === 'rejected' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'}`}>{statusLabels[r.status]}</span></td><td className="px-4 py-3">{r.status === 'pending' && r.member_id === user?.user_id && <button onClick={() => deleteVacation(r).then(loadData)} className="p-1 text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>}</td></tr>)}</tbody></table></div>
-              ); })()}
-            </div>
-          </>
+          <VacationsTeamPanel
+            members={visibleMembers}
+            vacations={vacations}
+            vacSettings={vacSettings}
+            currentYear={currentYear}
+            canManage={canManage}
+            userId={user?.user_id}
+            leaveLabels={leaveLabels}
+            statusLabels={statusLabels}
+            expandedId={expandedVacRequest}
+            reviewNotes={reviewNotes}
+            onExpand={setExpandedVacRequest}
+            onReviewNote={(id, note) => setReviewNotes(p => ({ ...p, [id]: note }))}
+            onReview={handleVacReview}
+            onDelete={(r) => deleteVacation(r).then(loadData)}
+            onRequest={() => setShowVacForm(true)}
+          />
         )}
 
-        {/* HOLIDAYS TAB */}
-        {tab === 'holidays' && (
+        {/* CONTROL: horario vs fichaje + anomalías */}
+        {tab === 'control' && canManage && (
+          <SchedulesControlPanel
+            members={visibleMembers}
+            schedules={schedules}
+            clockins={clockins}
+            comparisonDate={comparisonDate}
+            lang={lang}
+            alerts={alerts}
+            onDateChange={setComparisonDate}
+            onGoToTab={goToAlertTab}
+          />
+        )}
+
+        {/* CONFIGURACIÓN */}
+        {tab === 'config' && (
+          <>
+            {canManage && (
+            <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-x-auto w-fit">
+              {([
+                { id: 'holidays' as ConfigSubTab, label: 'Festivos', icon: <PartyPopper className="w-3.5 h-3.5" /> },
+                { id: 'blocks' as ConfigSubTab, label: 'Bloqueos', icon: <Ban className="w-3.5 h-3.5" /> },
+                { id: 'templates' as ConfigSubTab, label: 'Plantillas', icon: <LayoutTemplate className="w-3.5 h-3.5" /> },
+                { id: 'rules' as ConfigSubTab, label: 'Reglas', icon: <Settings2 className="w-3.5 h-3.5" /> },
+              ]).map(st => (
+                <button key={st.id} onClick={() => setConfigSubTab(st.id)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${configSubTab === st.id ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+                  {st.icon}{st.label}
+                </button>
+              ))}
+            </div>
+            )}
+
+        {(canManage ? configSubTab === 'holidays' : true) && (
           <>
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <p className="text-sm text-gray-500">Festivos de empresa ({currentYear})</p>
@@ -521,8 +504,7 @@ export function SchedulesVacations() {
           </>
         )}
 
-        {/* BLOCKS TAB */}
-        {tab === 'blocks' && canManage && (
+        {canManage && configSubTab === 'blocks' && (
           <>
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-500">Bloqueos de disponibilidad</p>
@@ -537,8 +519,7 @@ export function SchedulesVacations() {
           </>
         )}
 
-        {/* TEMPLATES TAB */}
-        {tab === 'templates' && canManage && (
+        {canManage && configSubTab === 'templates' && (
           <>
             <div className="flex items-center justify-between"><p className="text-sm text-gray-500">Plantillas reutilizables de horario.</p><button onClick={() => openTemplateModal()} className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-sm"><Plus className="w-4 h-4" />Nueva</button></div>
             {!templates.length ? <EmptyState icon={<LayoutTemplate className="w-12 h-12" />} title="Sin plantillas" description="Crea plantillas para reutilizar horarios" /> : (
@@ -553,8 +534,7 @@ export function SchedulesVacations() {
           </>
         )}
 
-        {/* RULES TAB */}
-        {tab === 'rules' && canManage && (
+        {canManage && configSubTab === 'rules' && (
           <>
             <div className="flex items-center justify-between">
               <p className="text-sm text-gray-500">Reglas de asignación automática.</p>
@@ -576,44 +556,7 @@ export function SchedulesVacations() {
           </>
         )}
 
-        {/* COMPARISON TAB */}
-        {tab === 'comparison' && canManage && (
-          <>
-            <div className="flex items-center gap-4">
-              <input type="date" value={comparisonDate} onChange={e => setComparisonDate(e.target.value)} className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm" />
-              <button onClick={() => setComparisonDate(new Date().toISOString().slice(0, 10))} className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400 rounded-lg hover:bg-amber-100">Hoy</button>
-            </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-x-auto">
-              <table className="w-full min-w-[800px]">
-                <thead><tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50"><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Miembro</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Previsto</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Fichaje</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Dif. entrada</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Dif. salida</th><th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Estado</th></tr></thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">{members.map(m => {
-                  const sched = getScheduleForMember(m.user_id); const shift = sched?.weekly?.[comparisonDay]; const rec = clockins.find(c => c.member_id === m.user_id);
-                  const ci = rec?.entries.find(e => e.type === 'clock_in'); const co = rec?.entries.find(e => e.type === 'clock_out');
-                  const dI = shift?.enabled && ci ? getTimeDiffMin(shift.start, ci.time) : null; const dO = shift?.enabled && co ? getTimeDiffMin(shift.end, co.time) : null;
-                  let st: string = 'no-schedule'; if (shift?.enabled) { if (!rec) st = 'absent'; else if (dI !== null && dI > 5) st = 'late'; else if (dO !== null && dO < -5) st = 'early'; else st = 'ok'; }
-                  const cfg: Record<string, { l: string; c: string }> = { ok: { l: 'Correcto', c: 'text-green-600 bg-green-50 dark:bg-green-900/20 dark:text-green-400' }, late: { l: 'Retraso', c: 'text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400' }, early: { l: 'Salida anticipada', c: 'text-orange-600 bg-orange-50 dark:bg-orange-900/20 dark:text-orange-400' }, absent: { l: 'Ausencia', c: 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400' }, 'no-schedule': { l: 'Sin horario', c: 'text-gray-400 bg-gray-50 dark:bg-gray-700' } };
-                  return <tr key={m.user_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30"><td className="px-4 py-3 text-sm font-medium">{m.fullName}</td><td className="px-4 py-3 text-center text-sm tabular-nums">{shift?.enabled ? `${shift.start}-${shift.end}` : '—'}</td><td className="px-4 py-3 text-center text-sm tabular-nums">{ci ? new Date(ci.time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) + (co ? '-' + new Date(co.time).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' }) : '') : '—'}</td><td className="px-4 py-3 text-center">{dI !== null ? <span className={`text-xs font-medium tabular-nums ${dI > 0 ? 'text-red-500' : 'text-green-500'}`}>{dI > 0 ? '+' : ''}{dI}m</span> : <span className="text-xs text-gray-300">—</span>}</td><td className="px-4 py-3 text-center">{dO !== null ? <span className={`text-xs font-medium tabular-nums ${dO < 0 ? 'text-red-500' : 'text-green-500'}`}>{dO > 0 ? '+' : ''}{dO}m</span> : <span className="text-xs text-gray-300">—</span>}</td><td className="px-4 py-3 text-center"><span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${cfg[st].c}`}>{cfg[st].l}</span></td></tr>;
-                })}</tbody>
-              </table>
-            </div>
           </>
-        )}
-
-        {/* ANOMALIES TAB */}
-        {tab === 'anomalies' && canManage && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700"><h3 className="text-sm font-semibold">Anomalías (semana actual)</h3></div>
-            {!alerts.length ? <div className="py-16 text-center text-gray-400"><CheckCircle2 className="w-10 h-10 mx-auto mb-3" /><p className="text-sm">Sin anomalías</p></div> : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-700/50">{alerts.map(a => (
-                <div key={a.id} className="px-4 py-3 flex items-start gap-3">
-                  {a.severity === 'critical' ? <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" /> : a.severity === 'warning' ? <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" /> : <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />}
-                  <div className="flex-1"><p className="text-sm font-medium">{a.title}</p><p className="text-xs text-gray-500 mt-0.5">{a.description}</p></div>
-                  {a.date && <span className="text-xs text-gray-400 tabular-nums">{a.date}</span>}
-                  <button onClick={() => setTab(a.actionTab as Tab)} className="text-xs font-medium text-amber-600 hover:text-amber-700">{a.actionLabel}</button>
-                </div>
-              ))}</div>
-            )}
-          </div>
         )}
 
         {/* MODAL: EDIT SCHEDULE */}

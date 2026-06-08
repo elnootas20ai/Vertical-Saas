@@ -16,13 +16,24 @@ import {
   type DeliveryOrderItem,
   type DeliveryOrderStatus,
   type DeliveryType,
+  isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { updateClientRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
-import { TpvRegisterGate, useTpvRegister } from '../../components/saas/TpvRegisterGate';
+import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
+import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
+import {
+  buildTpvCatalogSections,
+  categoriesForTpvScope,
+  defaultTpvSectionId,
+  filterTpvCatalogProducts,
+  parseTpvSectionId,
+} from '../../lib/tpvCatalogNavigation';
+import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
+import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import {
   ArrowLeft,
   Search,
@@ -41,11 +52,9 @@ import {
   Wallet,
   ShoppingCart,
   CheckCircle2,
-  Package,
   Home,
   Briefcase,
   Loader2,
-  Sparkles,
 } from 'lucide-react';
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
@@ -103,25 +112,76 @@ function formatPrice(n: number): string {
   return n.toFixed(2).replace('.', ',') + ' €';
 }
 
+const LEGACY_ADDRESS_PREFIX = 'legacy-';
+
+function resolveClientDeliveryAddresses(client: Client): ClientAddress[] {
+  const raw = client.addresses || [];
+  const normalized = raw
+    .map((a, idx) => ({
+      ...a,
+      street:
+        (a.street || '').trim() ||
+        (idx === 0 && a.isPrimary !== false ? (client.address || '').trim() : ''),
+      city:
+        (a.city || '').trim() ||
+        (idx === 0 && a.isPrimary !== false ? (client.city || '').trim() : undefined),
+      postalCode: a.postalCode || (idx === 0 ? client.postalCode : undefined),
+    }))
+    .filter((a) => a.street);
+  if (normalized.length > 0) return normalized;
+  if (client.address?.trim()) {
+    return [
+      {
+        id: `${LEGACY_ADDRESS_PREFIX}${client.id}`,
+        label: 'Casa',
+        street: client.address.trim(),
+        city: client.city,
+        postalCode: client.postalCode,
+        isPrimary: true,
+      },
+    ];
+  }
+  return [];
+}
+
+function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): boolean {
+  if (addr.isPrimary) return true;
+  return !all.some((a) => a.isPrimary) && all[0]?.id === addr.id;
+}
+
 export function TpvRapidoPage() {
   return (
     <TpvRegisterGate>
-      <TpvRapidoPageInner />
+      <TpvRapidoOrderFlow />
     </TpvRegisterGate>
   );
 }
 
-function TpvRapidoPageInner() {
+export type TpvRapidoOrderFlowProps = {
+  /** Tablet TPV: volver al tablero operativo en lugar de delivery-ops */
+  onBack?: () => void;
+  tabletMode?: boolean;
+  /** Cuando el flujo se monta fuera del árbol del gate (p. ej. vista embebida en tablet). */
+  registerOverride?: TpvRegisterContextType;
+};
+
+export function TpvRapidoOrderFlow({
+  onBack,
+  tabletMode = false,
+  registerOverride,
+}: TpvRapidoOrderFlowProps = {}) {
   const { user } = useAuth();
-  const register = useTpvRegister();
+  const registerFromGate = useTpvRegisterIfOpen();
+  const register = registerOverride ?? registerFromGate;
+
   const { addClient, clients } = useApp();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
+  const goBack = onBack ?? (() => navigate('/saas/delivery-ops'));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
-  const [selectedCashierId, setSelectedCashierId] = useState<string>('');
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
@@ -162,13 +222,26 @@ function TpvRapidoPageInner() {
   const [newAddrNotes, setNewAddrNotes] = useState('');
   const [newAddrPrimary, setNewAddrPrimary] = useState(false);
   const [savingAddress, setSavingAddress] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [editAddrStreet, setEditAddrStreet] = useState('');
+  const [editAddrCity, setEditAddrCity] = useState('');
+  const [editAddrPostal, setEditAddrPostal] = useState('');
+  const [editAddrNotes, setEditAddrNotes] = useState('');
   const [addressWarning, setAddressWarning] = useState(false);
+
+  const deliveryAddresses = useMemo(
+    () => (selectedClient ? resolveClientDeliveryAddresses(selectedClient) : []),
+    [selectedClient],
+  );
 
   // Step 3 - Products
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [productSearch, setProductSearch] = useState('');
+  const [selectedSectionId, setSelectedSectionId] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const brandInitRef = useRef(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
 
@@ -187,42 +260,10 @@ function TpvRapidoPageInner() {
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const cashierOptions = useMemo(() => {
-    const members = currentBusiness?.members || [];
-    const merged = new Map<string, { id: string; name: string; role: string }>();
-    members.forEach((m) => {
-      const id = String(m.user_id || '');
-      if (!id) return;
-      merged.set(id, {
-        id,
-        name: m.fullName?.trim() || m.email || 'Trabajador',
-        role: m.role || 'worker',
-      });
-    });
-    if (user?.id) {
-      merged.set(user.id, {
-        id: user.id,
-        name: user.fullName?.trim() || `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Gerente',
-        role: String((user as Record<string, unknown>).role || 'admin'),
-      });
-    }
-    return Array.from(merged.values());
-  }, [currentBusiness?.members, user]);
-
-  useEffect(() => {
-    if (!selectedCashierId && cashierOptions.length > 0) {
-      const manager = cashierOptions.find((c) => ['admin', 'owner', 'manager', 'gerente'].includes(c.role.toLowerCase()));
-      setSelectedCashierId(manager?.id || cashierOptions[0].id);
-    }
-  }, [cashierOptions, selectedCashierId]);
-
-  useEffect(() => {
-    try {
-      const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
-      const name = cashier?.name?.trim() || '';
-      if (name) localStorage.setItem('vertial.tpvRapido.cashierName', name);
-    } catch { /* ignore */ }
-  }, [cashierOptions, selectedCashierId]);
+  const selectedOrderTaker = useMemo(
+    () => register.clockedInWorkers.find((w) => w.id === register.selectedOrderTakerId) || null,
+    [register.clockedInWorkers, register.selectedOrderTakerId],
+  );
 
   // ─── Load catalog ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -241,6 +282,40 @@ function TpvRapidoPageInner() {
       });
     return () => { cancelled = true; };
   }, [userId]);
+
+  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+
+  useEffect(() => {
+    if (!businessId) {
+      setBrands([]);
+      return;
+    }
+    let cancelled = false;
+    listBrandsRequest(businessId)
+      .then((list) => {
+        if (!cancelled) setBrands(list);
+      })
+      .catch(() => {
+        if (!cancelled) setBrands([]);
+      });
+    return () => { cancelled = true; };
+  }, [businessId]);
+
+  const catalogSections = useMemo(
+    () => buildTpvCatalogSections(brands, catalog),
+    [brands, catalog],
+  );
+
+  const selectedScope = useMemo(
+    () => parseTpvSectionId(selectedSectionId),
+    [selectedSectionId],
+  );
+
+  useEffect(() => {
+    if (brandInitRef.current || catalogSections.length === 0) return;
+    brandInitRef.current = true;
+    setSelectedSectionId(defaultTpvSectionId(catalogSections));
+  }, [catalogSections]);
 
   const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
@@ -278,10 +353,9 @@ function TpvRapidoPageInner() {
 
   // ─── Derived ───────────────────────────────────────────────────────────────
   const categories = useMemo(() => {
-    const cats = new Set<string>();
-    catalog.forEach((item) => { if (item.category) cats.add(item.category); });
-    return Array.from(cats).sort();
-  }, [catalog]);
+    if (!selectedScope) return [];
+    return categoriesForTpvScope(selectedScope, brands, catalog);
+  }, [selectedScope, brands, catalog]);
 
   const clientProductScores = useMemo(() => {
     if (!selectedClient?.id) return {};
@@ -317,22 +391,17 @@ function TpvRapidoPageInner() {
     return m;
   }, [catalog]);
 
-  const filteredProducts = useMemo(() => {
-    let items = catalog.filter((i) => i.itemType === 'product' || i.itemType === 'combo');
-    if (selectedCategory) items = items.filter((i) => i.category === selectedCategory);
-    if (productSearch.trim()) {
-      const q = productSearch.toLowerCase();
-      items = items.filter(
-        (i) => i.name.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q),
-      );
-    }
-    return items.sort((a, b) => {
-      const pricedA = Number(a.unitPrice || 0) > 0 ? 1 : 0;
-      const pricedB = Number(b.unitPrice || 0) > 0 ? 1 : 0;
-      if (pricedA !== pricedB) return pricedB - pricedA;
-      return (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0);
-    });
-  }, [catalog, selectedCategory, productSearch, clientProductScores]);
+  const filteredProducts = useMemo(
+    () =>
+      filterTpvCatalogProducts(
+        catalog,
+        selectedScope,
+        selectedCategory,
+        productSearch,
+        clientProductScores,
+      ),
+    [catalog, selectedScope, selectedCategory, productSearch, clientProductScores],
+  );
 
   const hasPricedProducts = useMemo(
     () => catalog.some((item) => Number(item.unitPrice || 0) > 0),
@@ -341,10 +410,16 @@ function TpvRapidoPageInner() {
 
   const habitualProducts = useMemo(
     () =>
-      filteredProducts
-        .filter((p) => (clientProductScores[p._id] || 0) > 0)
+      catalog
+        .filter(
+          (p) =>
+            (p.itemType === 'product' || p.itemType === 'combo') &&
+            p.active !== false &&
+            (clientProductScores[p._id] || 0) > 0,
+        )
+        .sort((a, b) => (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0))
         .slice(0, 6),
-    [filteredProducts, clientProductScores],
+    [catalog, clientProductScores],
   );
 
   const crossSellProducts = useMemo(() => {
@@ -515,7 +590,7 @@ function TpvRapidoPageInner() {
   );
 
   const canSubmit =
-    !!selectedCashierId &&
+    !!register.selectedOrderTakerId &&
     !!selectedClient &&
     !!deliveryType &&
     cart.length > 0 &&
@@ -579,6 +654,9 @@ function TpvRapidoPageInner() {
     setCart([]);
     setProductSearch('');
     setSelectedCategory(null);
+    if (catalogSections.length > 0) {
+      setSelectedSectionId(defaultTpvSectionId(catalogSections));
+    }
     setPaymentMethod(null);
     setCashGiven('');
     setOrderNotes('');
@@ -588,7 +666,7 @@ function TpvRapidoPageInner() {
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
-  }, [clearSelection]);
+  }, [clearSelection, catalogSections]);
 
   const goToPreviousStep = useCallback(() => {
     const order: Step[] = ['client', 'delivery', 'products', 'payment'];
@@ -629,8 +707,10 @@ function TpvRapidoPageInner() {
           })
           .catch(() => {});
       }
-      const primary = client.addresses?.find((a) => a.isPrimary);
+      const addrs = resolveClientDeliveryAddresses(client);
+      const primary = addrs.find((a) => isPrimaryClientAddress(a, addrs));
       if (primary) setSelectedAddressId(primary.id);
+      setEditingAddressId(null);
       completeStep('client');
     },
     [selectClient, completeStep],
@@ -669,7 +749,7 @@ function TpvRapidoPageInner() {
     setCreatingClient(true);
     try {
       const addressId = uuidv4();
-      const selectedCashier = cashierOptions.find((c) => c.id === selectedCashierId);
+      const selectedCashier = selectedOrderTaker;
       const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
       const clientData: Omit<Client, 'id' | 'createdAt'> = {
         type: 'client',
@@ -730,8 +810,7 @@ function TpvRapidoPageInner() {
     newClientPayment,
     handleSelectClient,
     addClient,
-    cashierOptions,
-    selectedCashierId,
+    selectedOrderTaker,
     currentBusiness?.branches,
     user?.fullName,
     user?.firstName,
@@ -782,6 +861,96 @@ function TpvRapidoPageInner() {
     }
   }, [selectedClient, userId, selectClient, newAddrLabel, newAddrStreet, newAddrCity, newAddrPostal, newAddrNotes, newAddrPrimary, isDeliveryBusiness]);
 
+  const handleStartEditPrimaryAddress = useCallback((addr: ClientAddress) => {
+    setShowNewAddress(false);
+    setEditingAddressId(addr.id);
+    setEditAddrStreet(addr.street || '');
+    setEditAddrCity(addr.city || '');
+    setEditAddrPostal(addr.postalCode || '');
+    setEditAddrNotes(addr.notes || '');
+  }, []);
+
+  const handleSaveEditedAddress = useCallback(async () => {
+    if (!selectedClient || !editingAddressId || !editAddrStreet.trim()) return;
+    if (isDeliveryBusiness && !editAddrCity.trim()) {
+      toast.error('Indica la ciudad de la dirección');
+      return;
+    }
+    setSavingAddress(true);
+    try {
+      const isLegacy = editingAddressId.startsWith(LEGACY_ADDRESS_PREFIX);
+      const existing = selectedClient.addresses || [];
+      let nextAddresses: ClientAddress[];
+      let nextSelectedId = editingAddressId;
+
+      if (isLegacy || existing.length === 0) {
+        const newId = uuidv4();
+        nextAddresses = [
+          {
+            id: newId,
+            label: 'Casa',
+            street: editAddrStreet.trim(),
+            city: editAddrCity.trim() || undefined,
+            postalCode: editAddrPostal.trim() || undefined,
+            notes: editAddrNotes.trim() || undefined,
+            isPrimary: true,
+            usageCount: 0,
+            lastUsedAt: null,
+          },
+        ];
+        nextSelectedId = newId;
+      } else {
+        nextAddresses = existing.map((a) =>
+          a.id === editingAddressId
+            ? {
+                ...a,
+                street: editAddrStreet.trim(),
+                city: editAddrCity.trim() || undefined,
+                postalCode: editAddrPostal.trim() || undefined,
+                notes: editAddrNotes.trim() || undefined,
+              }
+            : a,
+        );
+      }
+
+      const editingAddr = nextAddresses.find((a) => a.id === nextSelectedId)
+        || nextAddresses.find((a) => a.id === editingAddressId);
+      const isPrimary = editingAddr ? isPrimaryClientAddress(editingAddr, nextAddresses) : false;
+
+      const updated = await updateClientRequest(userId, {
+        ...selectedClient,
+        addresses: nextAddresses,
+        ...(isPrimary
+          ? {
+              address: editAddrStreet.trim(),
+              city: editAddrCity.trim(),
+              postalCode: editAddrPostal.trim(),
+            }
+          : {}),
+      } as Client);
+      if (updated) {
+        selectClient(updated);
+        setSelectedAddressId(nextSelectedId);
+        setEditingAddressId(null);
+        toast.success('Dirección actualizada');
+      }
+    } catch {
+      toast.error('Error al guardar dirección');
+    } finally {
+      setSavingAddress(false);
+    }
+  }, [
+    selectedClient,
+    userId,
+    selectClient,
+    editingAddressId,
+    editAddrStreet,
+    editAddrCity,
+    editAddrPostal,
+    editAddrNotes,
+    isDeliveryBusiness,
+  ]);
+
   // ─── Submit order ─────────────────────────────────────────────────────────
   const handleSubmitOrder = useCallback(
     async (status: DeliveryOrderStatus) => {
@@ -806,7 +975,9 @@ function TpvRapidoPageInner() {
           brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],
         }));
 
-        const selectedAddr = selectedClient.addresses?.find((a) => a.id === selectedAddressId);
+        const selectedAddr = resolveClientDeliveryAddresses(selectedClient).find(
+          (a) => a.id === selectedAddressId,
+        );
 
         const promoNote = (() => {
           if (promoMode === 'code' && appliedPromo) {
@@ -820,7 +991,11 @@ function TpvRapidoPageInner() {
 
         const pdvId = String(register.session?.pointOfSaleId || '').trim();
         const pdvName = String(register.session?.pointOfSaleName || '').trim();
-        const cashier = cashierOptions.find((c) => c.id === selectedCashierId);
+        const takerId = String(register.selectedOrderTakerId || '').trim();
+        const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
+
+        const submitStatus: DeliveryOrderStatus = tabletMode ? 'listo' : status;
+        const now = new Date().toISOString();
 
         const orderData: Partial<DeliveryOrder> = {
           clientId: selectedClient.id,
@@ -833,17 +1008,16 @@ function TpvRapidoPageInner() {
             .join(', ') || '',
           deliveryType,
           channel: 'tpv',
-          status,
+          status: submitStatus,
+          ...(tabletMode ? { assemblyStartedAt: now, kitchenCompletedAt: now } : {}),
           salesPointId: pdvId,
           salesPointName: pdvName,
-          takenBy: selectedCashierId || user?.user_id || user?.id || '',
-          takenByName: cashier?.name || user?.fullName || 'TPV',
+          takenBy: takerId || user?.user_id || user?.id || '',
+          takenByName: takerName,
           items,
           totalAmount: finalTotal,
           notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
-          observations: selectedCashierId
-            ? `Caja atendida por: ${cashierOptions.find((c) => c.id === selectedCashierId)?.name || selectedCashierId}`
-            : '',
+          observations: takerName ? `Atendido por: ${takerName}` : '',
           paymentMethod,
           paymentStatus: paymentMethod === 'efectivo' ? 'paid' : 'pending',
           paidAmount: paymentMethod === 'efectivo' ? finalTotal : 0,
@@ -864,7 +1038,7 @@ function TpvRapidoPageInner() {
           orderId: created.id,
           orderNumber: created.orderNumber,
           channel: 'tpv',
-          registeredBy: cashier?.name || user?.fullName || 'TPV',
+          registeredBy: takerName,
           linkedDeliveryOrderId: created._id,
         });
 
@@ -876,7 +1050,7 @@ function TpvRapidoPageInner() {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, selectedCashierId, cashierOptions, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id, tabletMode],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -901,6 +1075,9 @@ function TpvRapidoPageInner() {
     setCart([]);
     setProductSearch('');
     setSelectedCategory(null);
+    if (catalogSections.length > 0) {
+      setSelectedSectionId(defaultTpvSectionId(catalogSections));
+    }
     setPaymentMethod(null);
     setCashGiven('');
     setOrderNotes('');
@@ -911,14 +1088,13 @@ function TpvRapidoPageInner() {
     setClientPromos([]);
     setSelectedClientPromoId('');
     setCreatedOrder(null);
-    setSelectedCashierId((prev) => prev || cashierOptions[0]?.id || '');
     setTimeout(() => phoneRef.current?.focus(), 150);
-  }, [clearSelection, clearResults, cashierOptions]);
+  }, [clearSelection, clearResults, catalogSections]);
 
   // ─── Success screen ───────────────────────────────────────────────────────
   if (createdOrder) {
     return (
-      <TpvFullscreenShell onBack={() => navigate('/saas/delivery-ops')}>
+      <TpvFullscreenShell onBack={goBack} embedded>
         <div className="max-w-[820px] mx-auto py-10">
           <div className="flex flex-col items-center text-center gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
@@ -938,10 +1114,10 @@ function TpvRapidoPageInner() {
             </div>
             <div className="flex gap-3 mt-4">
               <button
-                onClick={() => navigate('/saas/delivery')}
+                onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery'))}
                 className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
-                Ver pedido
+                {tabletMode ? 'Volver al tablero' : 'Ver pedido'}
               </button>
               <button
                 onClick={handleReset}
@@ -958,53 +1134,56 @@ function TpvRapidoPageInner() {
 
   const clientSearchReady = phoneInput.trim().length >= 2;
 
+  if (!register) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Abre la caja de la tienda antes de crear un pedido.
+        </p>
+        <button
+          type="button"
+          onClick={goBack}
+          className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
+        >
+          Volver
+        </button>
+      </div>
+    );
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────
+  // Acciones de caja (arqueo, incidencia, cierre…) viven en RegisterStatusBar del gate; aquí solo enlace al panel CEO.
+  const tpvTopActions = register && isTpvRegisterSessionOpen(register.session) && !tabletMode ? (
+    <button
+      type="button"
+      onClick={() => navigate('/saas/vertical/delivery/caja')}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors max-w-[55vw]"
+      title={`Caja: ${register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}${register.session.terminalName} · ${register.session.workerName}`}
+    >
+      <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+      <span className="truncate">
+        Caja: {register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}{register.session.terminalName}
+      </span>
+    </button>
+  ) : null;
+
   return (
     <TpvFullscreenShell
-      onBack={() => navigate('/saas/delivery-ops')}
-      topSlot={(
-        <div className="flex items-center gap-2">
-          <div className="hidden sm:flex items-center gap-1">
-            <button
-              type="button"
-              onClick={register.requestCashCount}
-              className="px-2.5 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs font-bold hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
-              title="Arqueo"
-            >
-              Arqueo
-            </button>
-            <button
-              type="button"
-              onClick={register.requestIncident}
-              className="px-2.5 py-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs font-bold hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
-              title="Incidencia"
-            >
-              Incidencia
-            </button>
-            <button
-              type="button"
-              onClick={register.requestClose}
-              className="px-2.5 py-1.5 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-xs font-bold hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-              title="Cerrar caja"
-            >
-              Cerrar
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => navigate('/saas/vertical/delivery/caja')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors max-w-[55vw]"
-            title={`Caja: ${register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}${register.session.terminalName} · ${register.session.workerName}`}
-          >
-            <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-            <span className="truncate">
-              Caja: {register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}{register.session.terminalName}
-            </span>
-          </button>
-        </div>
-      )}
+      onBack={goBack}
+      embedded
+      topSlot={tpvTopActions}
     >
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-28 px-2 md:px-4`}>
+        <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+          <ClockedInWorkerBubbles
+            workers={register.clockedInWorkers}
+            selectedId={register.selectedOrderTakerId}
+            onSelect={register.setSelectedOrderTakerId}
+            loading={register.clockedInWorkersLoading}
+            label="¿Quién coge el pedido?"
+            emptyMessage="Ficha al equipo antes de crear pedidos (botón Fichar arriba)"
+          />
+        </div>
 
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
         {currentStep === 'client' ? (
@@ -1168,7 +1347,7 @@ function TpvRapidoPageInner() {
               <button
                 onClick={() => {
                   setDeliveryType('domicilio');
-                  const primary = selectedClient?.addresses?.find((a) => a.isPrimary);
+                  const primary = deliveryAddresses.find((a) => isPrimaryClientAddress(a, deliveryAddresses));
                   if (primary) setSelectedAddressId(primary.id);
                 }}
                 className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${
@@ -1190,9 +1369,11 @@ function TpvRapidoPageInner() {
                   </div>
                 )}
 
-                {(selectedClient?.addresses || []).length > 0 && (
+                {deliveryAddresses.length > 0 && (
                   <div className="space-y-2">
-                    {selectedClient!.addresses!.map((addr) => (
+                    {deliveryAddresses.map((addr) => {
+                      const isPrimary = isPrimaryClientAddress(addr, deliveryAddresses);
+                      return (
                       <label
                         key={addr.id}
                         className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
@@ -1211,25 +1392,83 @@ function TpvRapidoPageInner() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-gray-900 dark:text-gray-100 text-sm">{addr.label || 'Dirección'}</span>
-                            {addr.isPrimary && (
+                            {isPrimary && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 font-medium">Principal</span>
                             )}
                           </div>
                           <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{addr.street}</p>
                           {addr.city && <p className="text-xs text-gray-400">{addr.city} {addr.postalCode}</p>}
                         </div>
+                        {isPrimary && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleStartEditPrimaryAddress(addr);
+                            }}
+                            className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            title="Editar dirección principal"
+                            aria-label="Editar dirección principal"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                        )}
                       </label>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                {!showNewAddress && (
+                {!showNewAddress && !editingAddressId && (
                   <button
-                    onClick={() => setShowNewAddress(true)}
+                    onClick={() => {
+                      setShowNewAddress(true);
+                      setEditingAddressId(null);
+                    }}
                     className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
                   >
                     <Plus className="w-4 h-4" /> Añadir nueva dirección
                   </button>
+                )}
+
+                {editingAddressId && (
+                  <div className="p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 space-y-3">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Editar dirección principal</p>
+                    <div>
+                      <label className={LABEL_CLASS}>Calle *</label>
+                      <input value={editAddrStreet} onChange={(e) => setEditAddrStreet(e.target.value)} className={INPUT_CLASS} placeholder="Calle, número, piso..." />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className={LABEL_CLASS}>Ciudad</label>
+                        <input value={editAddrCity} onChange={(e) => setEditAddrCity(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                      <div>
+                        <label className={LABEL_CLASS}>Código postal</label>
+                        <input value={editAddrPostal} onChange={(e) => setEditAddrPostal(e.target.value)} className={INPUT_CLASS} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Notas</label>
+                      <input value={editAddrNotes} onChange={(e) => setEditAddrNotes(e.target.value)} className={INPUT_CLASS} placeholder="Portal, timbre..." />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        onClick={() => setEditingAddressId(null)}
+                        className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleSaveEditedAddress}
+                        disabled={savingAddress || !editAddrStreet.trim()}
+                        className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
+                      >
+                        {savingAddress ? 'Guardando...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 {showNewAddress && (
@@ -1306,327 +1545,150 @@ function TpvRapidoPageInner() {
         {/* ═══════════════ STEP 3: PRODUCTS ═══════════════ */}
         {currentStep === 'products' && isStepReachable('products') ? (
           <StepContainer step={3} title="Productos" visible wide>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                value={productSearch}
-                onChange={(e) => setProductSearch(e.target.value)}
-                placeholder="Buscar producto..."
-                className={`${INPUT_CLASS} pl-10`}
-              />
-            </div>
-
-            {!hasPricedProducts && (
-              <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-                <p className="text-xs text-amber-800 dark:text-amber-300">
-                  No hay precios cargados en catálogo. Importa Excel para operar rápido.
-                </p>
-                <button
-                  onClick={() => navigate('/saas/catalog')}
-                  className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-                >
-                  Importar Excel
-                </button>
-              </div>
-            )}
-
-            {categories.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto pb-1 mt-3 scrollbar-hide">
-                <button
-                  onClick={() => setSelectedCategory(null)}
-                  className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    !selectedCategory
-                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  Todos
-                </button>
-                {categories.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat === selectedCategory ? null : cat)}
-                    className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      selectedCategory === cat
-                        ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
-                        : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {selectedClient && habitualProducts.length > 0 && (
-              <div className="mt-3 mb-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-0.5">
-                  Suele pedir (historial)
-                </p>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-2">Basado en pedidos anteriores de este cliente.</p>
-                <div className="flex flex-wrap gap-2">
-                  {habitualProducts.map((item) => (
-                    <button
-                      key={`habitual-${item._id}`}
-                      onClick={() => addToCart(item)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span className="truncate max-w-[180px]">{item.name}</span>
-                      <span className="text-[11px] opacity-80">x{clientProductScores[item._id] || 0}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {cart.length > 0 && crossSellProducts.length > 0 && (
-              <div className="mt-3 mb-2 rounded-xl border border-violet-200/80 dark:border-violet-800/80 bg-violet-50/90 dark:bg-violet-950/30 px-3 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-300 mb-0.5 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Venta cruzada · suelen combinarlo
-                </p>
-                <p className="text-[10px] text-violet-600/90 dark:text-violet-400/90 mb-2">
-                  {selectedClient?.id
-                    ? 'Según tu histórico y el de otros pedidos recientes.'
-                    : 'Según pedidos recientes del negocio.'}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {crossSellProducts.map((item) => (
-                    <button
-                      key={`cross-${item._id}`}
-                      type="button"
-                      onClick={() => addToCart(item)}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 bg-white dark:bg-gray-900 text-violet-900 dark:text-violet-100 text-xs font-medium hover:bg-violet-100/80 dark:hover:bg-violet-900/40 transition-colors shadow-sm"
-                    >
-                      <Plus className="w-3 h-3 shrink-0" />
-                      <span className="truncate max-w-[160px]">{item.name}</span>
-                      <span className="text-[11px] opacity-75 tabular-nums">{formatPrice(item.unitPrice)}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-3 lg:grid lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-4">
-              <div>
-                {loadingCatalog ? (
-                  <div className="flex items-center justify-center py-12 text-gray-400">
-                    <Loader2 className="w-6 h-6 animate-spin" />
+            <TpvProductPicker
+              sections={catalogSections}
+              selectedSectionId={selectedSectionId}
+              onSelectedSectionChange={setSelectedSectionId}
+              loading={loadingCatalog}
+              productSearch={productSearch}
+              onProductSearchChange={setProductSearch}
+              selectedCategory={selectedCategory}
+              onSelectedCategoryChange={setSelectedCategory}
+              categories={categories}
+              filteredProducts={filteredProducts}
+              habitualProducts={selectedClient ? habitualProducts : []}
+              crossSellProducts={cart.length > 0 ? crossSellProducts : []}
+              getCartQty={getCartQty}
+              addToCart={addToCart}
+              removeFromCart={removeFromCart}
+              formatPrice={formatPrice}
+              hasPricedProducts={hasPricedProducts}
+              onImportCatalog={() => navigate('/saas/catalog')}
+              cartPanel={(
+                <div className={`flex flex-col h-full min-h-[12rem] lg:min-h-0 p-3 ${cartShake ? 'animate-shake' : ''}`}>
+                  <div className="flex items-center justify-between mb-2 shrink-0">
+                    <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                      Pedido
+                    </h4>
+                    {cartCount > 0 && (
+                      <span className="text-[10px] font-bold tabular-nums px-2 py-0.5 rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900">
+                        {cartCount}
+                      </span>
+                    )}
                   </div>
-                ) : filteredProducts.length === 0 ? (
-                  <p className="text-center text-sm text-gray-400 py-8">No hay productos</p>
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {filteredProducts.map((item) => {
-                      const qty = getCartQty(item._id);
-                      const disabled = !item.active || Number(item.unitPrice || 0) <= 0;
-                      return (
-                        <div
-                          key={item._id}
-                          className={`relative rounded-2xl border-2 overflow-hidden transition-all ${
-                            qty > 0
-                              ? 'border-gray-900 dark:border-gray-300'
-                              : 'border-gray-200 dark:border-gray-700'
-                          } ${disabled ? 'opacity-60' : ''}`}
-                        >
-                          {disabled && (
-                            <div className="absolute top-2 right-2 z-10 px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 text-[10px] font-bold uppercase">
-                              {Number(item.unitPrice || 0) <= 0 ? 'Sin precio' : 'Agotado'}
+
+                  {cart.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-6 px-2">
+                      <ShoppingCart className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
+                      <p className="text-xs text-gray-400 dark:text-gray-500">Toca productos para añadir</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
+                        {cart.map((ci) => (
+                          <div key={ci.catalogItem._id} className="flex items-center justify-between gap-1 text-sm">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-gray-500 dark:text-gray-400 tabular-nums text-xs shrink-0">{ci.quantity}×</span>
+                              <span className="text-gray-900 dark:text-gray-100 truncate text-xs font-medium">{ci.catalogItem.name}</span>
                             </div>
-                          )}
-                          <div className="aspect-[4/3] bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                            {item.image ? (
-                              <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <Package className="w-8 h-8 text-gray-300 dark:text-gray-500" />
-                            )}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-xs">
+                                {formatPrice(ci.catalogItem.unitPrice * ci.quantity)}
+                              </span>
+                              <button type="button" onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors p-0.5">
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <button type="button" onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors p-0.5">
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="p-2.5">
-                            <p className="text-[13px] font-semibold text-gray-900 dark:text-gray-100 truncate">{item.name}</p>
-                            <p className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-0.5">
-                              {Number(item.unitPrice || 0) > 0 ? formatPrice(item.unitPrice) : 'Sin precio'}
-                            </p>
-                            <div className="flex items-center justify-between mt-1.5">
-                              {qty > 0 ? (
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => removeFromCart(item._id)}
-                                    className="w-7 h-7 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                                  >
-                                    <Minus className="w-3.5 h-3.5" />
-                                  </button>
-                                  <span className="text-sm font-bold text-gray-900 dark:text-gray-100 w-5 text-center tabular-nums">{qty}</span>
-                                  <button
-                                    onClick={() => addToCart(item)}
-                                    disabled={disabled}
-                                    className="w-7 h-7 rounded-lg bg-gray-900 dark:bg-gray-200 flex items-center justify-center text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
-                                  >
-                                    <Plus className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
+                        ))}
+                      </div>
+
+                      <div className="shrink-0 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                          Promoción
+                        </label>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {(['none', 'code', 'client'] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              disabled={mode === 'client' && clientPromos.length === 0}
+                              onClick={() => setPromoMode(mode)}
+                              className={`px-2 h-7 rounded-full text-[10px] font-bold border transition-colors disabled:opacity-50 ${
+                                promoMode === mode
+                                  ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                                  : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                              }`}
+                            >
+                              {mode === 'none' ? 'Ninguna' : mode === 'code' ? 'Código' : 'Cliente'}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex gap-1.5 mb-2">
+                          {promoMode === 'client' ? (
+                            <select
+                              value={selectedClientPromoId}
+                              onChange={(e) => setSelectedClientPromoId(e.target.value)}
+                              className={`${INPUT_CLASS} h-9 py-1.5 text-xs min-w-0 flex-1`}
+                            >
+                              <option value="">Promo cliente…</option>
+                              {clientPromos.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.nombre}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <input
+                                value={promoCodeInput}
+                                onChange={(e) => setPromoCodeInput(e.target.value)}
+                                className={`${INPUT_CLASS} uppercase h-9 py-1.5 text-xs min-w-0 flex-1`}
+                                placeholder="PROMO"
+                                disabled={promoMode !== 'code'}
+                              />
+                              {appliedPromo ? (
+                                <button type="button" onClick={clearPromoCode} className="px-2 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-semibold shrink-0">
+                                  Quitar
+                                </button>
                               ) : (
-                                <button
-                                  onClick={() => addToCart(item)}
-                                  disabled={disabled}
-                                  className="w-full py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors disabled:opacity-40"
-                                >
-                                  Añadir
+                                <button type="button" onClick={applyPromoCode} disabled={promoMode !== 'code'} className="px-2 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-semibold shrink-0 disabled:opacity-50">
+                                  OK
                                 </button>
                               )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {cart.length > 0 && (
-                <div className={`mt-4 lg:mt-0 lg:sticky lg:top-20 h-fit p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 ${cartShake ? 'animate-shake' : ''}`}>
-                  <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3">Resumen</h4>
-                  <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                    {cart.map((ci) => (
-                      <div key={ci.catalogItem._id} className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-gray-500 dark:text-gray-400 tabular-nums">{ci.quantity}x</span>
-                          <span className="text-gray-900 dark:text-gray-100 truncate">{ci.catalogItem.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-medium text-gray-700 dark:text-gray-300 tabular-nums">{formatPrice(ci.catalogItem.unitPrice * ci.quantity)}</span>
-                          <button onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors">
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors">
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                    <label className="block text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
-                      Promoción
-                    </label>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => setPromoMode('none')}
-                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors ${
-                          promoMode === 'none'
-                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
-                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                        }`}
-                      >
-                        Ninguna
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPromoMode('code')}
-                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors ${
-                          promoMode === 'code'
-                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
-                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                        }`}
-                      >
-                        Código
-                      </button>
-                      <button
-                        type="button"
-                        disabled={clientPromos.length === 0}
-                        onClick={() => setPromoMode('client')}
-                        className={`px-2.5 h-8 rounded-full text-[11px] font-bold border transition-colors disabled:opacity-50 ${
-                          promoMode === 'client'
-                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
-                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                        }`}
-                        title={clientPromos.length === 0 ? 'Este cliente no tiene promociones' : 'Usar promo del cliente'}
-                      >
-                        Cliente
-                      </button>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      {promoMode === 'client' ? (
-                        <select
-                          value={selectedClientPromoId}
-                          onChange={(e) => setSelectedClientPromoId(e.target.value)}
-                          className={`${INPUT_CLASS} h-10 py-2 min-w-0 flex-1`}
-                        >
-                          <option value="">Selecciona promo…</option>
-                          {clientPromos.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.nombre} ({String(p.tipo || '').toUpperCase()})
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <>
-                          <input
-                            value={promoCodeInput}
-                            onChange={(e) => setPromoCodeInput(e.target.value)}
-                            className={`${INPUT_CLASS} uppercase h-10 py-2 min-w-0 flex-1`}
-                            placeholder="Ej. PROMO123"
-                            disabled={promoMode !== 'code'}
-                          />
-                          {appliedPromo ? (
-                            <button
-                              type="button"
-                              onClick={clearPromoCode}
-                              className="px-3 h-10 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold hover:bg-white/70 dark:hover:bg-gray-800 transition-colors shrink-0"
-                              title="Quitar código"
-                            >
-                              Quitar
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={applyPromoCode}
-                              className="px-3 h-10 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50 shrink-0"
-                              disabled={promoMode !== 'code'}
-                            >
-                              Aplicar
-                            </button>
+                            </>
                           )}
-                        </>
-                      )}
-                    </div>
-                    {promoMode === 'code' && appliedPromo && (
-                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2 font-semibold break-words">
-                        Aplicado: {appliedPromo.code}
-                      </p>
-                    )}
-                    {promoMode === 'client' && clientPromoSelected && (
-                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-2 font-semibold break-words">
-                        Aplicado: {clientPromoSelected.nombre}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between mt-3">
-                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Subtotal</span>
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(cartTotal)}</span>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Descuento</span>
-                    <span className={`text-xs font-bold tabular-nums ${discountAmount > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                      -{formatPrice(discountAmount)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                    <span className="font-bold text-gray-900 dark:text-gray-100">Total</span>
-                    <span className="font-bold text-lg text-gray-900 dark:text-gray-100 tabular-nums">{formatPrice(finalTotal)}</span>
-                  </div>
-                  <div className="flex justify-end mt-3">
-                    <button
-                      onClick={() => completeStep('products')}
-                      className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-                    >
-                      Continuar
-                    </button>
-                  </div>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
+                          <span className="font-bold tabular-nums">{formatPrice(cartTotal)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs mt-0.5">
+                          <span className="text-gray-500 dark:text-gray-400">Descuento</span>
+                          <span className={`font-bold tabular-nums ${discountAmount > 0 ? 'text-emerald-600' : ''}`}>
+                            -{formatPrice(discountAmount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                          <span className="font-bold text-sm">Total</span>
+                          <span className="font-bold text-base tabular-nums">{formatPrice(finalTotal)}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => completeStep('products')}
+                          className="w-full mt-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors"
+                        >
+                          Continuar al pago
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
-            </div>
+            />
           </StepContainer>
         ) : null}
 
@@ -1692,32 +1754,41 @@ function TpvRapidoPageInner() {
             </div>
 
             <div className="mt-4">
-              <label className={LABEL_CLASS}>Estado inicial</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setInitialStatus('nuevo')}
-                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
-                    initialStatus === 'nuevo'
-                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
-                  }`}
-                >
-                  Nuevo
-                </button>
-                <button
-                  onClick={() => setInitialStatus('cocina')}
-                  className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
-                    initialStatus === 'cocina'
-                      ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
-                      : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
-                  }`}
-                >
-                  En preparación
-                </button>
-              </div>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                El gerente puede configurar el estado por defecto
-              </p>
+              {!tabletMode && (
+                <>
+                  <label className={LABEL_CLASS}>Estado inicial</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setInitialStatus('nuevo')}
+                      className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                        initialStatus === 'nuevo'
+                          ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
+                      }`}
+                    >
+                      Nuevo
+                    </button>
+                    <button
+                      onClick={() => setInitialStatus('cocina')}
+                      className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                        initialStatus === 'cocina'
+                          ? 'border-gray-900 dark:border-gray-300 bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
+                      }`}
+                    >
+                      En preparación
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                    El gerente puede configurar el estado por defecto
+                  </p>
+                </>
+              )}
+              {tabletMode && (
+                <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                  Tras cobrar, el pedido entra directo en Montaje del tablero.
+                </p>
+              )}
             </div>
           </StepContainer>
         ) : null}
@@ -1754,7 +1825,7 @@ function TpvRapidoPageInner() {
               Atrás
             </button>
             <button
-              onClick={() => handleSubmitOrder(initialStatus)}
+              onClick={() => handleSubmitOrder(tabletMode ? 'listo' : initialStatus)}
               disabled={!canSubmit || submitting}
               className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -1785,26 +1856,45 @@ function TpvFullscreenShell({
   children,
   onBack,
   topSlot,
+  embedded = false,
 }: {
   children: ReactNode;
   onBack: () => void;
   topSlot?: ReactNode;
+  /** Dentro del gate TPV (tablet): no cubrir la barra verde de caja con fixed. */
+  embedded?: boolean;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
-      <div className="sticky top-0 z-20 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-        <div className="max-w-[1320px] mx-auto px-3 py-2.5 flex items-center gap-2">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Volver
-          </button>
-          <div className="flex-1 min-w-0" />
-          {topSlot}
+  const header = (
+    <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+      <div className="max-w-[1320px] mx-auto px-3 py-2.5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Volver
+        </button>
+        <div className="flex-1 min-w-0" />
+        {topSlot}
+      </div>
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="h-full min-h-0 flex flex-col bg-gray-50 dark:bg-gray-950 overflow-hidden">
+        {header}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
+      {header}
       <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
     </div>
   );
@@ -1842,7 +1932,8 @@ function CollapsedStep({
 }
 
 function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () => void }) {
-  const primaryAddr = client.addresses?.find((a) => a.isPrimary) || client.addresses?.[0];
+  const addrs = resolveClientDeliveryAddresses(client);
+  const primaryAddr = addrs.find((a) => isPrimaryClientAddress(a, addrs));
   const payLabels: Record<string, string> = {
     efectivo: 'Efectivo',
     tarjeta: 'Tarjeta',

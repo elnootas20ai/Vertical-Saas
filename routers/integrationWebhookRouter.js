@@ -125,8 +125,32 @@ function mapUberEatsToOrder(payload) {
   };
 }
 
-const ADAPTERS = { globo: mapGlovoToOrder, justead: mapJustEatToOrder, uber: mapUberEatsToOrder };
-const PLATFORM_KEYS = { glovo: 'globo', justeat: 'justead', ubereats: 'uber' };
+function mapFlipdishToOrder(payload) {
+  const body = payload.Body || payload.Order || payload;
+  return {
+    channel: 'flipdish',
+    externalOrderId: String(body.OrderId || body.id || payload.order_id || ''),
+    customerName: String(body.CustomerName || body.customer?.name || payload.customer_name || ''),
+    customerPhone: String(body.CustomerPhone || body.customer?.phone || payload.customer_phone || ''),
+    customerAddress: String(body.DeliveryAddress || body.delivery_address || payload.address || ''),
+    deliveryType: body.IsPickup || body.is_pickup ? 'recogida' : 'domicilio',
+    items: Array.isArray(body.Items || body.items || payload.products)
+      ? (body.Items || body.items || payload.products).map((p, i) => ({
+          id: `ext-${i}`, name: String(p.Name || p.name || p.product_name || ''),
+          quantity: Number(p.Quantity || p.quantity || 1), unitPrice: Number(p.Price || p.price || 0),
+          total: Number(p.Price || p.price || 0) * Number(p.Quantity || p.quantity || 1), notes: '',
+        }))
+      : [],
+    notes: String(body.Notes || payload.notes || ''),
+    observations: '',
+    paymentMethod: 'plataforma',
+    paymentStatus: 'paid',
+    status: 'nuevo',
+  };
+}
+
+const ADAPTERS = { globo: mapGlovoToOrder, justead: mapJustEatToOrder, uber: mapUberEatsToOrder, flipdish: mapFlipdishToOrder };
+const PLATFORM_KEYS = { glovo: 'globo', justeat: 'justead', ubereats: 'uber', flipdish: 'flipdish' };
 
 // ─── Generic Webhook Handler ─────────────────────────────────────────────────
 
@@ -172,5 +196,6 @@ async function handlePlatformWebhook(platform, req, res) {
 webhookRouter.post('/glovo/:businessId', (req, res) => handlePlatformWebhook('glovo', req, res));
 webhookRouter.post('/justeat/:businessId', (req, res) => handlePlatformWebhook('justeat', req, res));
 webhookRouter.post('/ubereats/:businessId', (req, res) => handlePlatformWebhook('ubereats', req, res));
+webhookRouter.post('/flipdish/:businessId', (req, res) => handlePlatformWebhook('flipdish', req, res));
 
 export { webhookRouter };

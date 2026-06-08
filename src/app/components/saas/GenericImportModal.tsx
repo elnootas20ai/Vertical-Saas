@@ -4,6 +4,7 @@ import { X, Upload, Download, FileText, CheckCircle2, AlertCircle, ArrowRight, A
 import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { autoMapImportFields, type ImportHeaderAliases } from '../../lib/importHeaderMapping';
 
 export interface ImportFieldDef {
   key: string;
@@ -30,6 +31,12 @@ interface GenericImportModalProps {
     onDownloadSampleZip?: () => void | Promise<void>;
     onFileSelected: (file: File | null) => void | Promise<void>;
   };
+  /** Plantilla Excel propia (p. ej. catálogo delivery + TPV). Si no se pasa, se genera desde fields. */
+  onDownloadTemplate?: () => void;
+  /** Sinónimos de cabecera para auto-mapeo (p. ej. nombre/name, categoría/category). */
+  headerAliases?: ImportHeaderAliases;
+  /** Si todos los campos obligatorios se auto-mapean, ir directo a vista previa (plantilla oficial). */
+  skipMappingWhenComplete?: boolean;
 }
 
 type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing';
@@ -43,6 +50,9 @@ export function GenericImportModal({
   fields,
   onImport,
   extraFileUpload,
+  onDownloadTemplate,
+  headerAliases,
+  skipMappingWhenComplete,
 }: GenericImportModalProps) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
@@ -64,6 +74,10 @@ export function GenericImportModal({
   };
 
   const downloadTemplate = () => {
+    if (onDownloadTemplate) {
+      onDownloadTemplate();
+      return;
+    }
     const headers = fields.map(f => f.label + (f.required ? ' *' : ''));
     const example = fields.map(f => f.example || '');
     if (example.every((value) => !String(value || '').trim()) && example.length > 0) {
@@ -78,6 +92,32 @@ export function GenericImportModal({
     const downloadName = requestedName.replace(/\.(csv|tsv|txt)$/i, '.xlsx');
     XLSX.writeFile(wb, downloadName);
     toast.success('Plantilla Excel descargada');
+  };
+
+  const applyParsedTable = (headers: string[], rows: string[][]) => {
+    const trimmedHeaders = headers.map((h) => String(h ?? '').trim());
+    const trimmedRows = rows
+      .map((row) => row.map((cell) => String(cell ?? '').trim()))
+      .filter((row) => row.some((cell) => cell.length > 0));
+
+    if (trimmedHeaders.every((h) => !h) || trimmedRows.length === 0) {
+      toast.error('El archivo no tiene datos suficientes');
+      return;
+    }
+
+    const nextMapping = autoMapImportFields(fields, trimmedHeaders, headerAliases);
+    const missingRequired = fields.filter((f) => f.required && !nextMapping[f.key]);
+
+    setRawHeaders(trimmedHeaders);
+    setRawData(trimmedRows);
+    setMapping(nextMapping);
+
+    if (skipMappingWhenComplete && missingRequired.length === 0) {
+      setStep('preview');
+      toast.success('Plantilla detectada — columnas listas para importar');
+    } else {
+      setStep('mapping');
+    }
   };
 
   const processFile = (file: File) => {
@@ -95,10 +135,7 @@ export function GenericImportModal({
             toast.error('El archivo no tiene datos suficientes');
             return;
           }
-          setRawHeaders(result.data[0]);
-          setRawData(result.data.slice(1));
-          autoMap(result.data[0]);
-          setStep('mapping');
+          applyParsedTable(result.data[0], result.data.slice(1));
         },
         error: () => toast.error('Error al leer el CSV'),
       });
@@ -107,16 +144,15 @@ export function GenericImportModal({
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(e.target?.result, { type: 'array' });
-          const ws = wb.Sheets[wb.SheetNames[0]];
+          const sheetName =
+            wb.SheetNames.find((n) => n.toLowerCase() === 'catalogo') || wb.SheetNames[0];
+          const ws = wb.Sheets[sheetName];
           const data: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
           if (data.length < 2) {
             toast.error('El archivo no tiene datos suficientes');
             return;
           }
-          setRawHeaders(data[0].map(String));
-          setRawData(data.slice(1).map(row => row.map(String)));
-          autoMap(data[0].map(String));
-          setStep('mapping');
+          applyParsedTable(data[0].map(String), data.slice(1).map((row) => row.map(String)));
         } catch {
           toast.error('Error al leer el archivo Excel');
         }
@@ -143,19 +179,6 @@ export function GenericImportModal({
     }
   };
 
-  const autoMap = (headers: string[]) => {
-    const m: Record<string, string> = {};
-    for (const field of fields) {
-      const norm = field.label.toLowerCase().replace(/\s*\*\s*/g, '').trim();
-      const keyNorm = field.key.toLowerCase();
-      const match = headers.findIndex(
-        h => h.toLowerCase().replace(/\s*\*\s*/g, '').trim() === norm
-          || h.toLowerCase() === keyNorm
-      );
-      if (match >= 0) m[field.key] = headers[match];
-    }
-    setMapping(m);
-  };
 
   const mappedEntries = useMemo(() => {
     const reverseMap: Record<string, string> = {};
@@ -365,6 +388,11 @@ export function GenericImportModal({
               </div>
               <p className="text-xs text-gray-400 dark:text-gray-500">
                 {rawData.length} filas detectadas · {rawHeaders.length} columnas
+                {rawHeaders.length > 0 && (
+                  <span className="block mt-1 text-gray-500 dark:text-gray-400">
+                    Columnas del archivo: {rawHeaders.join(' · ')}
+                  </span>
+                )}
               </p>
             </div>
           )}

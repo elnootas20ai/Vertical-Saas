@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import * as cacheService from './cache.js';
+import { createInitialAlertHistory, deriveAlertTimeline, alertHistorySortKey } from './alertHistory.js';
 import { computeSetupSteps } from '../models/setupSteps.js';
 import { buildDefaultPersonalData, computeWorkerProfileCompletion, hasMinimumWorkerIdentity, WORKER_DEFAULT_LANDING_PATH } from './workerProfileCompletion.js';
 
@@ -1134,7 +1135,11 @@ function normalizeNotificationLevel(value) {
 
 const VALID_PRIORITIES = ['high', 'medium', 'low'];
 const VALID_ALERT_STATUSES = ['new', 'seen', 'resolved'];
-const VALID_SOURCES = ['finanzas', 'stock', 'equipo', 'documentacion', 'verticales', 'ocr', 'conciliacion', 'crm', 'taller', 'sistema'];
+const VALID_SOURCES = [
+  'finanzas', 'stock', 'equipo', 'documentacion', 'verticales', 'delivery',
+  'construccion', 'limpieza', 'ocr', 'conciliacion', 'crm', 'taller', 'carniceria',
+  'compraventa', 'adquisiciones', 'desguaces', 'sistema',
+];
 
 const LEVEL_PRIORITY_MAP = { alert: 'high', warning: 'medium', info: 'low', success: 'low' };
 const CATEGORY_SOURCE_MAP = {
@@ -1217,6 +1222,9 @@ export function buildNotificationDocument({
     assignedTo: normalizedAssignedTo,
     resolvedAt: resolvedAt || null,
     resolvedBy: resolvedBy || null,
+    seenAt: null,
+    seenBy: null,
+    statusHistory: createInitialAlertHistory({ status: derivedStatus, at: now, by: uid || null }),
     createdAt: now,
     updatedAt: now,
   };
@@ -1271,6 +1279,10 @@ export function sanitizeNotification(notification) {
     assignedTo,
     resolvedAt: notification.resolvedAt || null,
     resolvedBy: notification.resolvedBy || null,
+    seenAt: notification.seenAt || null,
+    seenBy: notification.seenBy || null,
+    deletedBy: notification.deletedBy || null,
+    statusHistory: deriveAlertTimeline(notification),
     createdAt: String(notification.createdAt || new Date().toISOString()),
     updatedAt: String(notification.updatedAt || notification.createdAt || new Date().toISOString()),
     deletedAt: notification.deletedAt || null,
@@ -3302,7 +3314,7 @@ function foldSearchText(s) {
     .toLowerCase();
 }
 
-/** Texto plegado para buscar por nombre (varios campos + contactos; legados nombre/fullName). */
+/** Texto plegado para buscar por nombre (sin email: evita falsos positivos tipo "uri" en securitas@…). */
 function clientNameSearchHaystack(doc) {
   const parts = [];
   const push = (v) => {
@@ -3314,7 +3326,6 @@ function clientNameSearchHaystack(doc) {
   push(doc.nombre);
   push(doc.fullName);
   push(doc.displayName);
-  push(doc.email);
   if (Array.isArray(doc.contacts)) {
     for (const c of doc.contacts) {
       if (c && typeof c === 'object') {
@@ -3326,16 +3337,62 @@ function clientNameSearchHaystack(doc) {
   return foldSearchText(parts.join(' '));
 }
 
+function clientEmailSearchHaystack(doc) {
+  return foldSearchText(String(doc.email || '').trim());
+}
+
 /**
- * Coincidencia por nombre: substring completa (sin acentos) o todas las palabras ≥2 caracteres
- * presentes en cualquier orden (ej. "ivan ortega" vs "Ortega, Iván").
+ * Coincidencia por nombre: prefijo de palabra (nunca substring dentro de la palabra).
+ * Evita "uriel" → "Curiel" / "uri" → "Seguridad".
  */
 function foldedNameQueryMatches(qFold, haystackFold) {
   if (!qFold || qFold.length < 2 || !haystackFold) return false;
-  if (haystackFold.includes(qFold)) return true;
   const tokens = qFold.split(/\s+/).filter((t) => t.length >= 2);
-  if (tokens.length === 0) return haystackFold.includes(qFold);
-  return tokens.every((t) => haystackFold.includes(t));
+  const parts = tokens.length > 0 ? tokens : [qFold];
+  const words = haystackFold.split(/[^a-z0-9]+/).filter(Boolean);
+
+  return parts.every((token) =>
+    words.some((w) => w === token || w.startsWith(token)),
+  );
+}
+
+/** true = búsqueda por teléfono; false = solo nombre (letras). */
+function clientSearchPrefersPhone(raw, qDigits) {
+  const letters = String(raw || '').replace(/[^a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/g, '');
+  if (qDigits.length >= 3 && letters.length === 0) return true;
+  if (letters.length >= 2 && qDigits.length < 3) return false;
+  return qDigits.length > letters.length;
+}
+
+function scoreClientSearchMatch(doc, raw, qFold, qDigits, preferPhone) {
+  let score = 0;
+  const nameHay = clientNameSearchHaystack(doc);
+  const words = nameHay.split(/[^a-z0-9]+/).filter(Boolean);
+
+  if (!preferPhone && qFold.length >= 2) {
+    if (nameHay === qFold) score += 200;
+    else if (words.some((w) => w === qFold)) score += 180;
+    else if (words.some((w) => w.startsWith(qFold))) score += 160;
+    else if (foldedNameQueryMatches(qFold, nameHay)) score += 120;
+  }
+
+  if (preferPhone && qDigits.length >= 3) {
+    for (const h of clientPhoneDigitHaystacks(doc)) {
+      if (h === qDigits) score += 200;
+      else if (h.endsWith(qDigits)) score += 170;
+      else if (h.startsWith(qDigits)) score += 150;
+      else if (qDigits.length >= 6 && h.includes(qDigits)) score += 130;
+    }
+    // Mismo teléfono pero nombre también cuadra (ej. "612 uriel")
+    if (qFold.length >= 2 && foldedNameQueryMatches(qFold, nameHay)) score += 50;
+  }
+
+  if (raw.includes('@')) {
+    const emailHay = clientEmailSearchHaystack(doc);
+    if (emailHay.includes(qFold)) score += 100;
+  }
+
+  return score;
 }
 
 function clientPhoneDigitHaystacks(doc) {
@@ -3350,7 +3407,7 @@ function clientPhoneDigitHaystacks(doc) {
   return list.filter(Boolean);
 }
 
-/** Búsqueda por teléfono (≥3 dígitos coincidentes) y/o por nombre del cliente (substring, sin acentos). */
+/** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
 export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) {
   const db = getClientsDbName();
   await ensureDatabase(req, db);
@@ -3359,18 +3416,21 @@ export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) 
   if (raw.length < 2) return [];
   const qFold = foldSearchText(raw);
   const qDigits = raw.replace(/\D/g, '');
+  const preferPhone = clientSearchPrefersPhone(raw, qDigits);
+
   return docs
-    .filter((d) => {
-      if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return false;
-      const phoneHaystacks = clientPhoneDigitHaystacks(d);
-      const phoneHit =
-        qDigits.length >= 3 && phoneHaystacks.some((h) => h.includes(qDigits));
-      const nameHit =
-        qFold.length >= 2 && foldedNameQueryMatches(qFold, clientNameSearchHaystack(d));
-      return phoneHit || nameHit;
+    .map((d) => {
+      if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return null;
+      const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
+      return score > 0 ? { doc: d, score } : null;
     })
-    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
-    .slice(0, Number(limit) || 20);
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return String(b.doc.updatedAt || '').localeCompare(String(a.doc.updatedAt || ''));
+    })
+    .slice(0, Number(limit) || 20)
+    .map((row) => row.doc);
 }
 
 // ─── CLIENT NOTES ────────────────────────────────────────────────────────────
@@ -5058,6 +5118,9 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     paymentStatus: normalizePaymentStatus(data.paymentStatus || existing?.paymentStatus),
     paidAmount: Number(data.paidAmount ?? existing?.paidAmount ?? 0),
     paidAt: String(data.paidAt || existing?.paidAt || ''),
+    paymentCollected: Boolean(data.paymentCollected ?? existing?.paymentCollected),
+    paymentCollectedAt: String(data.paymentCollectedAt || existing?.paymentCollectedAt || ''),
+    paymentCollectedBy: String(data.paymentCollectedBy || existing?.paymentCollectedBy || ''),
 
     assignedDriver: String(data.assignedDriver || ''),
     estimatedDelivery: String(data.estimatedDelivery || ''),
@@ -5186,6 +5249,12 @@ const DEFAULT_DELIVERY_CONFIG = {
     { id: 'lunch', label: 'Comida', start: '12:00', end: '16:00' },
     { id: 'dinner', label: 'Cena', start: '19:00', end: '23:30' },
   ],
+  staffConsumption: {
+    enabled: true,
+    pricingMode: 'staff_price_field',
+    defaultDiscountPercent: 0,
+    eligibleCategories: [],
+  },
 };
 
 export function buildDeliveryConfigDocument(userId, data = {}, existing = null) {
@@ -5208,8 +5277,38 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
     cashCloseReminderTime: String(base.cashCloseReminderTime || '23:00'),
     activeChannels: Array.isArray(base.activeChannels) ? base.activeChannels : ['direct'],
     activeTimeSlots: Array.isArray(base.activeTimeSlots) ? base.activeTimeSlots : [],
+    staffConsumption: sanitizeStaffConsumptionConfig(base.staffConsumption ?? existing?.staffConsumption),
     createdAt: existing?.createdAt || now, updatedAt: now,
   };
+}
+
+export function sanitizeStaffConsumptionConfig(raw) {
+  const base = { ...DEFAULT_DELIVERY_CONFIG.staffConsumption, ...(raw && typeof raw === 'object' ? raw : {}) };
+  const validModes = ['staff_price_field', 'percent_discount', 'same_as_public'];
+  const pricingMode = validModes.includes(String(base.pricingMode || ''))
+    ? String(base.pricingMode)
+    : 'staff_price_field';
+  return {
+    enabled: base.enabled !== false,
+    pricingMode,
+    defaultDiscountPercent: Math.max(0, Math.min(100, Number(base.defaultDiscountPercent || 0))),
+    eligibleCategories: Array.isArray(base.eligibleCategories)
+      ? base.eligibleCategories.map((c) => String(c || '').trim()).filter(Boolean)
+      : [],
+  };
+}
+
+export function resolveStaffUnitPrice(catalogItem, staffConsumptionConfig) {
+  const publicPrice = Number(catalogItem?.unitPrice || 0);
+  const cfg = sanitizeStaffConsumptionConfig(staffConsumptionConfig);
+  if (cfg.pricingMode === 'same_as_public') return Math.round(publicPrice * 100) / 100;
+  if (cfg.pricingMode === 'percent_discount') {
+    const pct = Number(cfg.defaultDiscountPercent || 0);
+    return Math.round(publicPrice * (1 - pct / 100) * 100) / 100;
+  }
+  const staffPrice = Number(catalogItem?.staffPrice);
+  if (Number.isFinite(staffPrice) && staffPrice > 0) return Math.round(staffPrice * 100) / 100;
+  return Math.round(publicPrice * 100) / 100;
 }
 
 export function sanitizeDeliveryConfig(doc) {
@@ -5230,6 +5329,7 @@ export function sanitizeDeliveryConfig(doc) {
     cashCloseReminderTime: doc.cashCloseReminderTime || '23:00',
     activeChannels: Array.isArray(doc.activeChannels) ? doc.activeChannels : ['direct'],
     activeTimeSlots: Array.isArray(doc.activeTimeSlots) ? doc.activeTimeSlots : [],
+    staffConsumption: sanitizeStaffConsumptionConfig(doc.staffConsumption),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
   };
@@ -5721,6 +5821,17 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     difference: Number(data.difference ?? existing?.difference ?? 0),
     closingNotes: String(data.closingNotes ?? existing?.closingNotes ?? ''),
 
+    closingValidatedBy: String(data.closingValidatedBy ?? existing?.closingValidatedBy ?? ''),
+    closingValidatedAt: String(data.closingValidatedAt ?? existing?.closingValidatedAt ?? ''),
+    closingValidationStatus: ['pending', 'validated', 'rejected'].includes(String(data.closingValidationStatus || existing?.closingValidationStatus || ''))
+      ? String(data.closingValidationStatus || existing?.closingValidationStatus)
+      : (status === 'closed' ? 'pending' : ''),
+    closingValidationNotes: String(data.closingValidationNotes ?? existing?.closingValidationNotes ?? ''),
+
+    incidents: Array.isArray(data.incidents) ? data.incidents : (existing?.incidents || []),
+    salesByChannel: data.salesByChannel || existing?.salesByChannel || {},
+    linkedOrderIds: Array.isArray(data.linkedOrderIds) ? data.linkedOrderIds : (existing?.linkedOrderIds || []),
+
     summary: data.summary || existing?.summary || {},
 
     createdAt: existing?.createdAt || now,
@@ -5766,6 +5877,15 @@ export function sanitizeTpvRegisterSession(doc) {
     difference: Number(doc.difference || 0),
     closingNotes: doc.closingNotes || '',
 
+    closingValidatedBy: doc.closingValidatedBy || '',
+    closingValidatedAt: doc.closingValidatedAt || '',
+    closingValidationStatus: doc.closingValidationStatus || '',
+    closingValidationNotes: doc.closingValidationNotes || '',
+
+    incidents: Array.isArray(doc.incidents) ? doc.incidents : [],
+    salesByChannel: doc.salesByChannel || {},
+    linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
+
     summary: doc.summary || {},
 
     createdAt: doc.createdAt || new Date().toISOString(),
@@ -5781,6 +5901,70 @@ export async function listTpvRegisterSessionsByUser(req, userId) {
   return docs
     .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+/** Efectivo esperado en caja según transacciones registradas. */
+export function calcTpvRegisterExpectedCash(session) {
+  if (!session) return 0;
+  const txs = Array.isArray(session.transactions) ? session.transactions : [];
+  const cashSales = txs
+    .filter((t) => t?.type === 'sale' && t.paymentMethod === 'efectivo')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+  const cashReturns = txs
+    .filter((t) => t?.type === 'return' && t.paymentMethod === 'efectivo')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+  const cashIn = txs
+    .filter((t) => t?.type === 'cash_in')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+  const cashOut = txs
+    .filter((t) => t?.type === 'cash_out' || t?.type === 'expense')
+    .reduce((s, t) => s + Number(t.amount || 0), 0);
+  return Number(session.initialCashAmount || 0) + cashSales - cashReturns + cashIn - cashOut;
+}
+
+/** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */
+export function sumTpvRegisterSaleAmountForOrder(transactions, orderId) {
+  const oid = String(orderId || '').trim();
+  if (!oid) return 0;
+  return (Array.isArray(transactions) ? transactions : [])
+    .filter((t) => t && t.type === 'sale' && String(t.orderId || '').trim() === oid)
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
+/** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */
+export function findOpenTpvRegisterSessionForPointOfSale(sessions, pointOfSaleId) {
+  const pdvId = String(pointOfSaleId || '').trim();
+  if (!pdvId) return null;
+  const openForPdv = (Array.isArray(sessions) ? sessions : [])
+    .filter(
+      (s) =>
+        s &&
+        s.status === 'open' &&
+        !s.deletedAt &&
+        String(s.pointOfSaleId || '').trim() === pdvId,
+    )
+    .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
+  return openForPdv[0] || null;
+}
+
+/** Cierra una sesión TPV sin conteo manual (mantenimiento / fin de jornada). */
+export function autoCloseTpvRegisterSessionDocument(userId, session, reason, closedBy = 'Sistema') {
+  const expected = calcTpvRegisterExpectedCash(session);
+  const now = new Date().toISOString();
+  return buildTpvRegisterSessionDocument(
+    userId,
+    {
+      ...session,
+      status: 'closed',
+      closedAt: now,
+      closedBy: String(closedBy || 'Sistema'),
+      closingNotes: String(reason || 'Cierre automático'),
+      expectedCash: expected,
+      finalCashAmount: expected,
+      difference: 0,
+    },
+    session,
+  );
 }
 
 // ─── CLEANING ─────────────────────────────────────────────────────────────────
@@ -8293,6 +8477,9 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     description: String(data.description || ''),
     category: String(data.category || 'general'),
     unitPrice: Number(data.unitPrice || 0),
+    staffPrice: data.staffPrice !== undefined && data.staffPrice !== null && data.staffPrice !== ''
+      ? Number(data.staffPrice)
+      : (existing?.staffPrice ?? null),
     costPrice: Number(data.costPrice || 0),
     taxRate: data.taxRate !== undefined ? Number(data.taxRate) : (existing?.taxRate ?? 21),
     stockQuantity: Number(data.stockQuantity ?? existing?.stockQuantity ?? 0),
@@ -8355,6 +8542,9 @@ export function sanitizeCatalogItem(doc) {
     description: doc.description || '',
     category: doc.category || 'general',
     unitPrice: Number(doc.unitPrice || 0),
+    staffPrice: doc.staffPrice !== undefined && doc.staffPrice !== null && doc.staffPrice !== ''
+      ? Number(doc.staffPrice)
+      : null,
     costPrice: Number(doc.costPrice || 0),
     taxRate: doc.taxRate !== undefined ? Number(doc.taxRate) : 21,
     stockQuantity: Number(doc.stockQuantity || 0),
@@ -8388,6 +8578,97 @@ export function sanitizeCatalogItem(doc) {
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
   };
+}
+
+// ─── STAFF CONSUMPTIONS ───────────────────────────────────────────────────────
+
+const STAFF_CONSUMPTION_PAYMENT_MODES = ['cash_now', 'payroll_deduction'];
+
+function inferStaffConsumptionType(category = '') {
+  const c = String(category || '').trim().toLowerCase();
+  if (/(bebida|drink|refresco|cerveza|café|cafe|zumo)/.test(c)) return 'drink';
+  if (/(comida|menu|menú|cena|plato|tapas|tapa)/.test(c)) return 'meal';
+  return 'other';
+}
+
+export function buildStaffConsumptionDocument(userId, data = {}) {
+  const now = new Date().toISOString();
+  const id = data.id || data._id || `staffcons-${uuidv4()}`;
+  const quantity = Math.max(1, Number(data.quantity || 1));
+  const unitPrice = Math.round(Number(data.unitPrice || 0) * 100) / 100;
+  const publicUnitPrice = Math.round(Number(data.publicUnitPrice ?? data.unitPrice ?? 0) * 100) / 100;
+  const paymentMode = STAFF_CONSUMPTION_PAYMENT_MODES.includes(String(data.paymentMode || ''))
+    ? String(data.paymentMode)
+    : 'payroll_deduction';
+
+  return {
+    _id: id,
+    _rev: data._rev,
+    type: 'staff_consumption',
+    id,
+    user_id: userId,
+    workerId: String(data.workerId || ''),
+    workerName: String(data.workerName || ''),
+    catalogItemId: String(data.catalogItemId || ''),
+    itemName: String(data.itemName || ''),
+    category: String(data.category || ''),
+    consumptionType: inferStaffConsumptionType(data.category),
+    quantity,
+    unitPrice,
+    publicUnitPrice,
+    total: Math.round(unitPrice * quantity * 100) / 100,
+    paymentMode,
+    salesPointId: String(data.salesPointId || ''),
+    salesPointName: String(data.salesPointName || ''),
+    registerSessionId: String(data.registerSessionId || ''),
+    recordedBy: String(data.recordedBy || ''),
+    recordedByName: String(data.recordedByName || ''),
+    notes: String(data.notes || ''),
+    createdAt: data.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+export function sanitizeStaffConsumption(doc) {
+  if (!doc || doc.type !== 'staff_consumption') return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'staff_consumption',
+    id: doc._id,
+    user_id: doc.user_id,
+    workerId: doc.workerId || '',
+    workerName: doc.workerName || '',
+    catalogItemId: doc.catalogItemId || '',
+    itemName: doc.itemName || '',
+    category: doc.category || '',
+    consumptionType: doc.consumptionType || inferStaffConsumptionType(doc.category),
+    quantity: Number(doc.quantity || 1),
+    unitPrice: Number(doc.unitPrice || 0),
+    publicUnitPrice: Number(doc.publicUnitPrice ?? doc.unitPrice ?? 0),
+    total: Number(doc.total || 0),
+    paymentMode: STAFF_CONSUMPTION_PAYMENT_MODES.includes(String(doc.paymentMode || ''))
+      ? String(doc.paymentMode)
+      : 'payroll_deduction',
+    salesPointId: doc.salesPointId || '',
+    salesPointName: doc.salesPointName || '',
+    registerSessionId: doc.registerSessionId || '',
+    recordedBy: doc.recordedBy || '',
+    recordedByName: doc.recordedByName || '',
+    notes: doc.notes || '',
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
+export async function listStaffConsumptionsByUser(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs
+    .filter((doc) => doc?.type === 'staff_consumption' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
 export async function listCatalogItemsByUser(req, userId, { module: filterModule } = {}) {
@@ -9098,6 +9379,7 @@ export function buildWebConfigDocument(businessId, data = {}, existing = null) {
       uber:    { enabled: false, token: '' },
       globo:   { enabled: false, token: '' },
       justead: { enabled: false, token: '' },
+      flipdish: { enabled: false, token: '' },
     },
 
     createdAt: existing?.createdAt || now,
@@ -9160,6 +9442,7 @@ export function sanitizeDeliveryIntegrations(doc) {
     uber:    sanitizeIntegrationEntry(integrations.uber),
     globo:   sanitizeIntegrationEntry(integrations.globo),
     justead: sanitizeIntegrationEntry(integrations.justead),
+    flipdish: sanitizeIntegrationEntry(integrations.flipdish),
   };
 }
 
@@ -10677,23 +10960,186 @@ export async function listButcherPurchaseEntriesByUser(req, userId) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ALERTS
+// ALERT CENTER (NOTIFICATIONS_DB — business-scoped)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-export async function listAlertsByBusiness(req, userId, businessId) {
-  const db = 'alerts';
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((d) => d?.type === 'alert' && !d?.deletedAt && d?.business_id === businessId)
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+function normalizeAlertScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
 }
 
-export async function getAlertsSummary(req, userId, businessId) {
-  const alerts = await listAlertsByBusiness(req, userId, businessId);
-  const unread = alerts.filter((a) => !a.readAt).length;
-  const critical = alerts.filter((a) => a.severity === 'critical' && !a.readAt).length;
-  return { total: alerts.length, unread, critical };
+function notificationMatchesScope(doc, scopeId, { includeDeleted = false } = {}) {
+  if (!doc || doc.type !== 'notification') return false;
+  if (doc.deletedAt && !includeDeleted) return false;
+  const scope = normalizeAlertScopeId(scopeId);
+  if (!scope) return false;
+  const docBiz = normalizeAlertScopeId(doc.businessId);
+  if (docBiz && docBiz === scope) return true;
+  if (String(doc.businessId || '') === scope) return true;
+  if (String(doc.user_id || '') === scope) return true;
+  return false;
+}
+
+function normalizeNotificationStatus(doc) {
+  if (doc.status && VALID_ALERT_STATUSES.includes(doc.status)) return doc.status;
+  return doc.read ? 'seen' : 'new';
+}
+
+function filterAlertsForScope(docs, scopeId, filters = {}) {
+  const includeDeleted = filters.includeDeleted === true || filters.includeDeleted === 'true';
+  let items = docs.filter((d) => notificationMatchesScope(d, scopeId, { includeDeleted }));
+
+  if (filters.historyOnly === true || filters.historyOnly === 'true') {
+    items = items.filter((d) => d.deletedAt || normalizeNotificationStatus(d) === 'resolved');
+    if (!includeDeleted) {
+      items = items.filter((d) => !d.deletedAt);
+    }
+  }
+
+  if (filters.status) {
+    const statuses = String(filters.status).split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length > 0) {
+      items = items.filter((d) => statuses.includes(normalizeNotificationStatus(d)));
+    }
+  }
+
+  if (filters.priority) {
+    const priorities = String(filters.priority).split(',').map((s) => s.trim()).filter(Boolean);
+    if (priorities.length > 0) {
+      items = items.filter((d) => {
+        const p = d.priority && VALID_PRIORITIES.includes(d.priority)
+          ? d.priority
+          : (LEVEL_PRIORITY_MAP[normalizeNotificationLevel(d.level)] || 'medium');
+        return priorities.includes(p);
+      });
+    }
+  }
+
+  if (filters.source) {
+    const sources = String(filters.source).split(',').map((s) => s.trim()).filter(Boolean);
+    if (sources.length > 0) {
+      items = items.filter((d) => {
+        const src = d.source && VALID_SOURCES.includes(d.source)
+          ? d.source
+          : (CATEGORY_SOURCE_MAP[String(d.category || '')] || 'sistema');
+        return sources.includes(src);
+      });
+    }
+  }
+
+  if (filters.assignedTo) {
+    const assignee = String(filters.assignedTo).trim();
+    items = items.filter((d) => {
+      const ids = Array.isArray(d.assignedTo?.userIds) ? d.assignedTo.userIds : [];
+      return ids.includes(assignee) || d.user_id === assignee;
+    });
+  }
+
+  if (filters.search) {
+    const q = String(filters.search).trim().toLowerCase();
+    if (q) {
+      items = items.filter((d) => {
+        const hay = [
+          d.title, d.message, d.category, d.source, d.entityType, d.entityId,
+        ].map((v) => String(v || '').toLowerCase()).join(' ');
+        return hay.includes(q);
+      });
+    }
+  }
+
+  if (filters.from) {
+    const fromTs = new Date(filters.from).getTime();
+    if (!Number.isNaN(fromTs)) {
+      items = items.filter((d) => {
+        const ref = filters.historyOnly ? alertHistorySortKey(d) : (d.createdAt || '');
+        return new Date(ref || 0).getTime() >= fromTs;
+      });
+    }
+  }
+
+  if (filters.to) {
+    const toTs = new Date(filters.to).getTime();
+    if (!Number.isNaN(toTs)) {
+      items = items.filter((d) => {
+        const ref = filters.historyOnly ? alertHistorySortKey(d) : (d.createdAt || '');
+        return new Date(ref || 0).getTime() <= toTs;
+      });
+    }
+  }
+
+  const sortField = String(filters.sort || 'createdAt');
+  const order = filters.order === 'asc' ? 1 : -1;
+  if (sortField === 'resolvedAt' || (filters.historyOnly && sortField === 'createdAt')) {
+    items.sort((a, b) => order * String(alertHistorySortKey(a)).localeCompare(String(alertHistorySortKey(b))));
+  } else {
+    items.sort((a, b) => order * String(a[sortField] || '').localeCompare(String(b[sortField] || '')));
+  }
+
+  return items;
+}
+
+export async function listAlertsByBusiness(req, scopeId, filters = {}) {
+  await ensureDatabase(req, NOTIFICATIONS_DB);
+  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  const items = filterAlertsForScope(docs, scopeId, filters);
+
+  const page = Math.max(1, Number(filters.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(filters.limit) || 25));
+  const total = items.length;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const start = (page - 1) * limit;
+
+  return {
+    items: items.slice(start, start + limit),
+    total,
+    page,
+    limit,
+    pages,
+  };
+}
+
+export async function getAlertsSummary(req, scopeId) {
+  await ensureDatabase(req, NOTIFICATIONS_DB);
+  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  const items = filterAlertsForScope(docs, scopeId, {});
+
+  const byPriority = { high: 0, medium: 0, low: 0 };
+  const byStatus = { new: 0, seen: 0, resolved: 0 };
+  const bySource = {};
+  let unresolved = 0;
+  let lastAlertAt = null;
+
+  for (const doc of items) {
+    const status = normalizeNotificationStatus(doc);
+    byStatus[status] = (byStatus[status] || 0) + 1;
+    if (status !== 'resolved') unresolved += 1;
+
+    const priority = doc.priority && VALID_PRIORITIES.includes(doc.priority)
+      ? doc.priority
+      : (LEVEL_PRIORITY_MAP[normalizeNotificationLevel(doc.level)] || 'medium');
+    byPriority[priority] = (byPriority[priority] || 0) + 1;
+
+    const source = doc.source && VALID_SOURCES.includes(doc.source)
+      ? doc.source
+      : (CATEGORY_SOURCE_MAP[String(doc.category || '')] || 'sistema');
+    if (status !== 'resolved') {
+      bySource[source] = (bySource[source] || 0) + 1;
+    }
+
+    const createdAt = String(doc.createdAt || '');
+    if (createdAt && (!lastAlertAt || createdAt > lastAlertAt)) {
+      lastAlertAt = createdAt;
+    }
+  }
+
+  return {
+    total: items.length,
+    byPriority,
+    byStatus,
+    bySource,
+    unresolved,
+    lastAlertAt,
+    historyTotal: items.filter((d) => d.deletedAt || normalizeNotificationStatus(d) === 'resolved').length,
+  };
 }
 
 // ── Vehicle Acquisition (Compras y Retiradas) ─────────────────────────────────

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Clock,
   Play,
@@ -91,6 +91,8 @@ import {
   ALERT_TYPE_CONFIG,
 } from '../../lib/clockinAlertsApi';
 import { listVacations, type VacationRequest } from '../../lib/vacationsApi';
+import { ClockinsManagerTeamView } from '../../components/saas/clockins/ClockinsManagerTeamView';
+import { resolveClockinMemberName } from '../../lib/clockinsDisplay';
 
 // ── Pestañas (3 nivel superior) + sub-pestañas dentro de Análisis ───────────
 type Tab = 'team' | 'analysis' | 'alerts';
@@ -104,6 +106,8 @@ export function Clockins() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlMemberId = searchParams.get('memberId') || '';
   const businessId = currentBusiness?.business_id || '';
 
   const myMember = useMemo(
@@ -134,6 +138,7 @@ export function Clockins() {
   const [filterRole, setFilterRole] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
   const [myClockExpanded, setMyClockExpanded] = useState(false);
+  const [myClockBarVisible, setMyClockBarVisible] = useState(false);
   const [manualClockOpen, setManualClockOpen] = useState(false);
 
   // Vacaciones aprobadas, usadas para cruzar contra absentismo y marcar
@@ -315,6 +320,27 @@ export function Clockins() {
   /* ── Effects ── */
 
   useEffect(() => {
+    if (!urlMemberId || !currentBusiness?.members?.length) return;
+    const member = currentBusiness.members.find((m) => m.user_id === urlMemberId);
+    if (member) {
+      setSearchText(String(member.fullName || member.email || '').trim());
+    }
+  }, [urlMemberId, currentBusiness?.members]);
+
+  const loadDailySummary = useCallback(async () => {
+    if (!businessId || !isAdmin) return;
+    setDailySummaryLoading(true);
+    try {
+      const s = await fetchDailySummary(businessId, selectedDate);
+      setDailySummary(s);
+    } catch (err) {
+      console.error('Error cargando resumen diario:', err);
+    } finally {
+      setDailySummaryLoading(false);
+    }
+  }, [businessId, isAdmin, selectedDate]);
+
+  useEffect(() => {
     (async () => {
       setLoading(true);
       await loadMyRecord();
@@ -328,19 +354,6 @@ export function Clockins() {
       setLoading(false);
     })();
   }, [businessId, user?.user_id]);
-
-  const loadDailySummary = useCallback(async () => {
-    if (!businessId || !isAdmin) return;
-    setDailySummaryLoading(true);
-    try {
-      const s = await fetchDailySummary(businessId);
-      setDailySummary(s);
-    } catch (err) {
-      console.error('Error cargando resumen diario:', err);
-    } finally {
-      setDailySummaryLoading(false);
-    }
-  }, [businessId, isAdmin]);
 
   /**
    * Refresca el resumen cuando llega un evento de fichaje al campanario SSE.
@@ -358,8 +371,11 @@ export function Clockins() {
     return () => window.removeEventListener('vertial:notification', handler);
   }, [isAdmin, loadDailySummary]);
 
-  // Fecha cambia en la pestaña Equipo: recarga la tabla del día.
-  useEffect(() => { loadTeamRecords(); }, [selectedDate]);
+  // Fecha cambia en la pestaña Equipo: recarga la tabla del día y el resumen.
+  useEffect(() => {
+    loadTeamRecords();
+    if (isAdmin) loadDailySummary();
+  }, [selectedDate]);
 
   // Organigrama: se carga sólo al activar su vista dentro de Equipo.
   useEffect(() => {
@@ -593,31 +609,58 @@ export function Clockins() {
           </div>
         )}
 
-        {/* ─── Barra "Mi fichaje" SIEMPRE visible ────────────────────────────
-           Permite al CEO fichar entrada/salida/descanso sin perder la vista
-           del equipo. Click en la cabecera la expande para timeline + notas. */}
-        <MyClockBar
-          record={myRecord}
-          liveMinutes={liveMinutes}
-          actionLoading={actionLoading}
-          expanded={myClockExpanded}
-          onToggle={() => setMyClockExpanded((v) => !v)}
-          notesText={notesText}
-          showNotes={showNotes}
-          STATUS={STATUS}
-          lang={lang}
-          fmtTime={fmtTime}
-          isAdmin={isAdmin}
-          onClockIn={handleClockIn}
-          onClockOut={handleClockOut}
-          onBreak={handleBreak}
-          onNotesChange={setNotesText}
-          onToggleNotes={() => setShowNotes(!showNotes)}
-          onSaveNotes={handleSaveNotes}
-        />
+        {/* Mi fichaje: colapsado para gerentes (prioridad = vista del equipo) */}
+        {isAdmin && !myClockBarVisible ? (
+          <button
+            type="button"
+            onClick={() => setMyClockBarVisible(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+          >
+            <Clock className="w-4 h-4 text-gray-400" />
+            Tu fichaje
+            {myRecord && (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${(STATUS[myRecord.status] || STATUS.offline).color}`}>
+                {(STATUS[myRecord.status] || STATUS.offline).label}
+              </span>
+            )}
+            <ChevronDown className="w-4 h-4 ml-auto text-gray-400" />
+          </button>
+        ) : (
+          <div className="relative">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => { setMyClockBarVisible(false); setMyClockExpanded(false); }}
+                className="absolute top-3 right-3 z-10 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Ocultar tu fichaje"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+            <MyClockBar
+              record={myRecord}
+              liveMinutes={liveMinutes}
+              actionLoading={actionLoading}
+              expanded={myClockExpanded}
+              onToggle={() => setMyClockExpanded((v) => !v)}
+              notesText={notesText}
+              showNotes={showNotes}
+              STATUS={STATUS}
+              lang={lang}
+              fmtTime={fmtTime}
+              isAdmin={isAdmin}
+              onClockIn={handleClockIn}
+              onClockOut={handleClockOut}
+              onBreak={handleBreak}
+              onNotesChange={setNotesText}
+              onToggleNotes={() => setShowNotes(!showNotes)}
+              onSaveNotes={handleSaveNotes}
+            />
+          </div>
+        )}
 
-        {/* Resumen del día (hero card) — solo visible para gestores */}
-        {isAdmin && (
+        {/* Resumen del día en tarjeta aparte solo para no-admin */}
+        {!isAdmin && (
           <DailySummaryCard
             summary={dailySummary}
             loading={dailySummaryLoading}
@@ -647,6 +690,26 @@ export function Clockins() {
           </div>
         )}
 
+        {urlMemberId && (
+          <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-sm">
+            <span className="text-blue-800 dark:text-blue-200">Viendo un miembro concreto del equipo.</span>
+            <button
+              type="button"
+              onClick={() => navigate(`/saas/team/${urlMemberId}?tab=clockins`)}
+              className="font-semibold text-blue-700 dark:text-blue-300 hover:underline"
+            >
+              Historial completo
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSearchParams({}); setSearchText(''); }}
+              className="ml-auto text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Ver todo el equipo
+            </button>
+          </div>
+        )}
+
         {/* Tabs (3 niveles superiores) */}
         <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-x-auto">
           {tabs.map((td) => (
@@ -668,7 +731,39 @@ export function Clockins() {
         </div>
 
         {/* ─── Equipo ─── */}
-        {tab === 'team' && (
+        {tab === 'team' && isAdmin ? (
+          <ClockinsManagerTeamView
+            businessId={businessId}
+            records={filteredTeamRecords}
+            selectedDate={selectedDate}
+            todayStr={todayStr}
+            activeMembers={filteredActiveNow}
+            totalHours={todayTotalHours}
+            dailySummary={dailySummary}
+            dailySummaryLoading={dailySummaryLoading}
+            fmtTime={fmtTime}
+            isAdmin={isAdmin}
+            searchText={searchText}
+            onSearchChange={setSearchText}
+            filterRole={filterRole}
+            onFilterRoleChange={setFilterRole}
+            availableRoles={availableRoles}
+            onShiftDate={shiftDate}
+            onDateChange={setSelectedDate}
+            onRecordsUpdate={() => { loadTeamRecords(); loadDailySummary(); loadActiveNow(); }}
+            onOpenManualClockin={() => setManualClockOpen(true)}
+            onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
+            onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
+            businessMembers={(currentBusiness?.members || []).filter((m) => {
+              const email = String(m.email || '').toLowerCase();
+              const name = String(m.fullName || '').trim();
+              if (email.endsWith('@test.local')) return false;
+              if (/^demo(\s|$)/i.test(name)) return false;
+              return true;
+            })}
+            STATUS={STATUS}
+          />
+        ) : tab === 'team' ? (
           <TeamPanel
             records={filteredTeamRecords}
             selectedDate={selectedDate}
@@ -699,8 +794,10 @@ export function Clockins() {
             onOrgRefresh={loadOrgStatus}
             onOpenManualClockin={() => setManualClockOpen(true)}
             onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
+            onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
+            businessMembers={currentBusiness?.members}
           />
-        )}
+        ) : null}
 
         {/* ─── Análisis (sub-pestañas con DateRange compartido) ─── */}
         {tab === 'analysis' && (
@@ -1031,6 +1128,8 @@ interface TeamPanelProps {
   onOrgRefresh: () => void;
   onOpenManualClockin: () => void;
   onEditSchedule: (memberId: string) => void;
+  onViewMemberHistory: (memberId: string) => void;
+  businessMembers?: { user_id: string; fullName?: string; email?: string }[];
 }
 
 function TeamPanel({
@@ -1039,7 +1138,7 @@ function TeamPanel({
   searchText, onSearchChange, filterRole, onFilterRoleChange,
   filterWorkCenter, onFilterWorkCenterChange, activeWorkCenters, hasWorkCenters, availableRoles,
   todayView, onTodayViewChange, orgNodes, orgEdges, orgLoading, onOrgRefresh,
-  onOpenManualClockin, onEditSchedule,
+  onOpenManualClockin, onEditSchedule, onViewMemberHistory, businessMembers = [],
 }: TeamPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editEntryIdx, setEditEntryIdx] = useState<number>(-1);
@@ -1193,7 +1292,7 @@ function TeamPanel({
           {visibleRecords.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <CalendarDays className="w-10 h-10 mb-3" />
-              <p className="text-sm">{records.length === 0 ? 'No hay fichajes para esta fecha' : 'Ningún fichaje coincide con los filtros'}</p>
+              <p className="text-sm">{records.length === 0 ? 'No hay miembros visibles en el equipo' : 'Ningún miembro coincide con los filtros'}</p>
             </div>
           ) : (
             <>
@@ -1203,11 +1302,13 @@ function TeamPanel({
                   <TeamMemberCard
                     key={r._id}
                     record={r}
+                    displayName={resolveClockinMemberName(r, businessMembers)}
                     STATUS={STATUS}
                     fmtTime={fmtTime}
                     isAdmin={isAdmin}
                     onEditEntry={(idx) => startEdit(r, idx)}
                     onEditSchedule={() => onEditSchedule(r.member_id)}
+                    onViewHistory={() => onViewMemberHistory(r.member_id)}
                   />
                 ))}
               </div>
@@ -1230,6 +1331,7 @@ function TeamPanel({
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
                     {visibleRecords.map((r: EnrichedClockinRecord & { scheduled_start?: string; scheduled_end?: string }) => {
+                  const memberLabel = resolveClockinMemberName(r, businessMembers);
                   const ci = r.entries.find((e) => e.type === 'clock_in');
                   const co = r.entries.find((e) => e.type === 'clock_out');
                   const ciIdx = r.entries.findIndex((e) => e.type === 'clock_in');
@@ -1243,7 +1345,7 @@ function TeamPanel({
 
                   return (
                     <tr key={r._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                      <td className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-white">{r.member_name}</td>
+                      <td className="px-3 py-3 text-sm font-medium text-gray-900 dark:text-white">{memberLabel}</td>
                       <td className="px-3 py-3"><Badge role={r.member_role || 'Usuario'} /></td>
                       <td className="px-3 py-3">
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${sc.color}`}>
@@ -1326,16 +1428,19 @@ function TeamPanel({
                       {isAdmin && (
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1">
-                            {ci && ciIdx >= 0 && !isEditingCi && (
+                            {ci && ciIdx >= 0 && !isEditingCi && !r.roster_placeholder && (
                               <button onClick={() => startEdit(r, ciIdx)} title="Ajustar entrada" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-600 transition-colors">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            {co && coIdx >= 0 && !isEditingCo && (
+                            {co && coIdx >= 0 && !isEditingCo && !r.roster_placeholder && (
                               <button onClick={() => startEdit(r, coIdx)} title="Ajustar salida" className="p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-400 hover:text-blue-600 transition-colors">
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            <button onClick={() => onViewMemberHistory(r.member_id)} title="Historial" className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-700 transition-colors">
+                              <Clock className="w-3.5 h-3.5" />
+                            </button>
                             <button onClick={() => onEditSchedule(r.member_id)} title="Editar horario" className="p-1 rounded hover:bg-violet-50 dark:hover:bg-violet-900/20 text-gray-400 hover:text-violet-600 transition-colors">
                               <CalendarDays className="w-3.5 h-3.5" />
                             </button>
@@ -1362,14 +1467,16 @@ function TeamPanel({
 
 interface TeamMemberCardProps {
   record: EnrichedClockinRecord & { scheduled_start?: string; scheduled_end?: string };
+  displayName: string;
   STATUS: Record<string, { label: string; color: string; dot: string }>;
   fmtTime: (iso: string) => string;
   isAdmin: boolean;
   onEditEntry: (entryIdx: number) => void;
   onEditSchedule: () => void;
+  onViewHistory: () => void;
 }
 
-function TeamMemberCard({ record: r, STATUS, fmtTime, isAdmin, onEditEntry, onEditSchedule }: TeamMemberCardProps) {
+function TeamMemberCard({ record: r, displayName, STATUS, fmtTime, isAdmin, onEditEntry, onEditSchedule, onViewHistory }: TeamMemberCardProps) {
   const ci = r.entries.find((e) => e.type === 'clock_in');
   const co = r.entries.find((e) => e.type === 'clock_out');
   const ciIdx = r.entries.findIndex((e) => e.type === 'clock_in');
@@ -1384,7 +1491,7 @@ function TeamMemberCard({ record: r, STATUS, fmtTime, isAdmin, onEditEntry, onEd
     <div className="p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{r.member_name}</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{displayName}</p>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge role={r.member_role || 'Usuario'} />
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${sc.color}`}>
@@ -1432,16 +1539,19 @@ function TeamMemberCard({ record: r, STATUS, fmtTime, isAdmin, onEditEntry, onEd
         </div>
         {isAdmin && (
           <div className="flex items-center gap-1">
-            {ci && ciIdx >= 0 && (
+            {!r.roster_placeholder && ci && ciIdx >= 0 && (
               <button onClick={() => onEditEntry(ciIdx)} className="px-2 py-1 rounded text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20" title="Ajustar entrada">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             )}
-            {co && coIdx >= 0 && (
+            {!r.roster_placeholder && co && coIdx >= 0 && (
               <button onClick={() => onEditEntry(coIdx)} className="px-2 py-1 rounded text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20" title="Ajustar salida">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             )}
+            <button onClick={onViewHistory} className="px-2 py-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Historial">
+              <Clock className="w-3.5 h-3.5" />
+            </button>
             <button onClick={onEditSchedule} className="px-2 py-1 rounded text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20" title="Editar horario">
               <CalendarDays className="w-3.5 h-3.5" />
             </button>

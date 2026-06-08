@@ -1,14 +1,29 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
-import { useBusiness } from '../../context/BusinessContext';
+import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
+import { AlertCenterSettingsSlide, VertialSecondaryButton } from '../../components/saas/AlertCenterSettingsSlide';
+import {
+  AlertProShell,
+  AlertProKpiStrip,
+  AlertProDeptTabs,
+  AlertProEmpty,
+  AlertProIconButton,
+  AlertProViewTabs,
+  AlertHistoryTimeline,
+  PRIORITY_ACCENT,
+} from '../../components/saas/alertCenterProUi';
 import {
   fetchAlerts,
+  fetchAlertHistory,
   fetchAlertSummary,
   updateAlertStatus,
   bulkUpdateAlertStatus,
   deleteAlert as deleteAlertRequest,
+  triggerAlertEngineCheck,
+  normalizeAlertSummary,
+  departmentSourceFilter,
   SOURCE_LABELS,
   SOURCE_COLORS,
   PRIORITY_LABELS,
@@ -21,15 +36,14 @@ import {
   type ListAlertsFilters,
 } from '../../lib/alertCenterApi';
 import {
-  Bell, AlertTriangle, AlertCircle, Info,
-  CheckCircle, Eye, Filter, Search, RefreshCw,
-  ChevronLeft, ChevronRight, Trash2, Check,
+  Bell, CheckCircle, Eye, Filter, Search, RefreshCw,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Trash2, Check,
   Clock, X, Shield, TrendingUp,
   DollarSign, Package, Users, FileText, Wrench,
-  ScanLine, Building2, Monitor,
+  ScanLine, Building2, Monitor, Bike, Activity, Settings2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -38,11 +52,22 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   equipo: Users,
   documentacion: FileText,
   verticales: TrendingUp,
+  delivery: Bike,
+  construccion: Building2,
+  limpieza: Activity,
   ocr: ScanLine,
   conciliacion: Building2,
   crm: Shield,
   taller: Wrench,
   sistema: Monitor,
+};
+
+const DEPT_TAB_ICONS: Record<string, React.ElementType> = {
+  all: Bell,
+  delivery: Bike,
+  finanzas: DollarSign,
+  rrhh: Users,
+  operaciones: Activity,
 };
 
 const PRIORITY_COLORS: Record<AlertPriority, { bg: string; text: string; dot: string }> = {
@@ -59,37 +84,57 @@ const STATUS_STYLES: Record<AlertStatus, { bg: string; text: string }> = {
 
 export default function AlertCenterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?._id?.replace('business:', '') || currentBusiness?.id || user?.userId || '';
+  const businessId = useAlertCenterBusinessId();
+  const settingsBusinessId = useAlertSettingsBusinessId();
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 25, pages: 0 });
 
   const [filters, setFilters] = useState<ListAlertsFilters>({ status: 'new,seen', order: 'desc', page: 1, limit: 25 });
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
+  const [activeDepartment, setActiveDepartment] = useState('all');
+  const [showSettings, setShowSettings] = useState(false);
+  const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
+  const [includeDeleted, setIncludeDeleted] = useState(false);
+  const [historyFrom, setHistoryFrom] = useState('');
+  const [historyTo, setHistoryTo] = useState('');
+  const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [alertsRes, summaryRes] = await Promise.all([
-        fetchAlerts(businessId, { ...filters, search: searchTerm || undefined }),
-        fetchAlertSummary(businessId),
-      ]);
-      setAlerts(alertsRes.alerts);
-      setPagination(alertsRes.pagination);
-      setSummary(summaryRes.summary);
+      const summaryRes = await fetchAlertSummary(businessId);
+      setSummary(normalizeAlertSummary(summaryRes.summary));
+
+      if (viewMode === 'history') {
+        const alertsRes = await fetchAlertHistory(businessId, {
+          ...filters,
+          search: searchTerm || undefined,
+          includeDeleted,
+          from: historyFrom || undefined,
+          to: historyTo || undefined,
+        });
+        setAlerts(alertsRes.alerts);
+        setPagination(alertsRes.pagination);
+      } else {
+        const alertsRes = await fetchAlerts(businessId, { ...filters, search: searchTerm || undefined });
+        setAlerts(alertsRes.alerts);
+        setPagination(alertsRes.pagination);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error cargando alertas');
     } finally {
       setLoading(false);
     }
-  }, [businessId, filters, searchTerm]);
+  }, [businessId, filters, searchTerm, viewMode, includeDeleted, historyFrom, historyTo]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -155,182 +200,281 @@ export default function AlertCenterPage() {
     setFilterValue(key, next.length > 0 ? next.join(',') : undefined);
   };
 
+  const selectDepartment = (deptId: string) => {
+    setActiveDepartment(deptId);
+    const sourceFilter = departmentSourceFilter(deptId);
+    setFilters((prev) => ({
+      ...prev,
+      source: sourceFilter,
+      page: 1,
+    }));
+  };
+
+  const switchViewMode = (mode: 'active' | 'history') => {
+    setViewMode(mode);
+    setExpandedAlertId(null);
+    setSelectedIds(new Set());
+    setShowFilters(false);
+    if (mode === 'history') {
+      setFilters({ order: 'desc', page: 1, limit: 25 });
+    } else {
+      setFilters({ status: 'new,seen', order: 'desc', page: 1, limit: 25 });
+    }
+  };
+
+  const syncAlerts = useCallback(async () => {
+    if (!businessId) return;
+    setSyncing(true);
+    try {
+      if (user?.userId) {
+        await triggerAlertEngineCheck(user.userId).catch(() => null);
+      }
+      await loadData();
+      toast.success('Alertas actualizadas');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error sincronizando alertas');
+    } finally {
+      setSyncing(false);
+    }
+  }, [businessId, user?.userId, loadData]);
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'history') {
+      switchViewMode('history');
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!businessId || !user?.userId) return;
+    void triggerAlertEngineCheck(user.userId).catch(() => null);
+  }, [businessId, user?.userId]);
+
+
   return (
     <Layout>
-      <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-
-        {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <Bell className="h-6 w-6 text-indigo-600" />
-              Centro de Alertas
-            </h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Todas las alertas del sistema en un solo lugar
-            </p>
-          </div>
-          <button
-            onClick={() => loadData()}
-            disabled={loading}
-            className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Actualizar
-          </button>
-        </div>
-
-        {/* Summary cards */}
-        {summary && (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <SummaryCard label="Total" value={summary.total} icon={Bell} color="text-gray-700 dark:text-gray-300" bg="bg-gray-50 dark:bg-gray-800/60" />
-            <SummaryCard label="Alta prioridad" value={summary.byPriority.high} icon={AlertCircle} color="text-red-700 dark:text-red-400" bg="bg-red-50 dark:bg-red-950/30" />
-            <SummaryCard label="Sin resolver" value={summary.unresolved} icon={AlertTriangle} color="text-amber-700 dark:text-amber-400" bg="bg-amber-50 dark:bg-amber-950/30" />
-            <SummaryCard label="Resueltas" value={summary.byStatus.resolved} icon={CheckCircle} color="text-emerald-700 dark:text-emerald-400" bg="bg-emerald-50 dark:bg-emerald-950/30" />
-          </div>
-        )}
-
-        {/* Filters bar */}
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar alertas..."
-                className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+      <div className="mx-auto max-w-7xl p-4 sm:p-6">
+        <div className="overflow-hidden rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+          <AlertProShell
+            title="Centro de Alertas"
+            subtitle={
+              viewMode === 'history'
+                ? 'Registro de alertas resueltas y cerradas — trazabilidad completa'
+                : 'Delivery · Finanzas · RRHH · Operaciones — visión ejecutiva de tu negocio'
+            }
+            badge={
+              (summary?.unresolved ?? 0) > 0 ? (
+                <span className="rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-bold text-red-300 ring-1 ring-red-500/30">
+                  {summary!.unresolved > 99 ? '99+' : summary!.unresolved} activas
+                </span>
+              ) : undefined
+            }
+            actions={(
+              <>
+                <AlertProIconButton title="Personalizar alertas" onClick={() => setShowSettings(true)}>
+                  <Settings2 className="h-4 w-4" />
+                </AlertProIconButton>
+                <AlertProIconButton title="Actualizar" onClick={() => void syncAlerts()} disabled={loading || syncing}>
+                  <RefreshCw className={`h-4 w-4 ${loading || syncing ? 'animate-spin' : ''}`} />
+                </AlertProIconButton>
+              </>
+            )}
+            kpis={summary ? (
+              <AlertProKpiStrip
+                unresolved={summary.unresolved ?? 0}
+                high={summary.byPriority?.high ?? 0}
+                medium={summary.byPriority?.medium ?? 0}
+                newCount={summary.byStatus?.new ?? 0}
               />
-            </div>
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                showFilters
-                  ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
-                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-              }`}
-            >
-              <Filter className="h-4 w-4" />
-              Filtros
-            </button>
-          </div>
+            ) : undefined}
+          />
 
-          {showFilters && (
-            <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-              {/* Status chips */}
-              <div>
-                <span className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Estado</span>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {(['new', 'seen', 'resolved'] as AlertStatus[]).map((s) => (
-                    <Chip key={s} active={activeStatusFilters.includes(s)} onClick={() => toggleChipFilter('status', s)} label={STATUS_LABELS[s]} />
-                  ))}
+          <AlertProViewTabs
+            activeId={viewMode}
+            onChange={switchViewMode}
+            activeCount={summary?.unresolved ?? 0}
+            historyCount={summary?.historyTotal ?? summary?.byStatus?.resolved ?? 0}
+          />
+
+          <AlertProDeptTabs
+            summary={summary}
+            activeId={activeDepartment}
+            onChange={selectDepartment}
+            icons={DEPT_TAB_ICONS}
+          />
+
+          <div className="space-y-4 p-4 sm:p-6">
+            {/* Filters bar */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-[200px] flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Buscar alertas..."
+                    className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                  />
                 </div>
+                <VertialSecondaryButton active={showFilters} onClick={() => setShowFilters(!showFilters)}>
+                  <Filter className="h-4 w-4" />
+                  Filtros
+                </VertialSecondaryButton>
+                {viewMode === 'history' && (
+                  <label className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+                    <input
+                      type="checkbox"
+                      checked={includeDeleted}
+                      onChange={(e) => {
+                        setIncludeDeleted(e.target.checked);
+                        setFilters((p) => ({ ...p, page: 1 }));
+                      }}
+                      className="rounded border-zinc-300"
+                    />
+                    Incluir eliminadas
+                  </label>
+                )}
               </div>
-              {/* Priority chips */}
-              <div>
-                <span className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Prioridad</span>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {(['high', 'medium', 'low'] as AlertPriority[]).map((p) => (
-                    <Chip key={p} active={activePriorityFilters.includes(p)} onClick={() => toggleChipFilter('priority', p)} label={PRIORITY_LABELS[p]} />
-                  ))}
+
+              {viewMode === 'history' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="date"
+                    value={historyFrom}
+                    onChange={(e) => { setHistoryFrom(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
+                    className="rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                  <span className="text-xs text-zinc-400">hasta</span>
+                  <input
+                    type="date"
+                    value={historyTo}
+                    onChange={(e) => { setHistoryTo(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
+                    className="rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                  />
                 </div>
-              </div>
-              {/* Source chips */}
-              <div>
-                <span className="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Fuente</span>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {(Object.keys(SOURCE_LABELS) as AlertSource[]).map((src) => (
-                    <Chip key={src} active={activeSourceFilters.includes(src)} onClick={() => toggleChipFilter('source', src)} label={SOURCE_LABELS[src]} />
-                  ))}
+              )}
+
+              {showFilters && viewMode === 'active' && (
+                <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Estado</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {(['new', 'seen', 'resolved'] as AlertStatus[]).map((s) => (
+                        <Chip key={s} active={activeStatusFilters.includes(s)} onClick={() => toggleChipFilter('status', s)} label={STATUS_LABELS[s]} />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Prioridad</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {(['high', 'medium', 'low'] as AlertPriority[]).map((p) => (
+                        <Chip key={p} active={activePriorityFilters.includes(p)} onClick={() => toggleChipFilter('priority', p)} label={PRIORITY_LABELS[p]} />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Fuente</span>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {(Object.keys(SOURCE_LABELS) as AlertSource[]).map((src) => (
+                        <Chip key={src} active={activeSourceFilters.includes(src)} onClick={() => toggleChipFilter('source', src)} label={SOURCE_LABELS[src]} />
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
-          )}
+
+            {/* Bulk actions */}
+            {viewMode === 'active' && selectedIds.size > 0 && (
+              <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-900/80">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  {selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}
+                </span>
+                <button onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                  <Eye className="h-3.5 w-3.5" /> Marcar vistas
+                </button>
+                <button onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
+                  <Check className="h-3.5 w-3.5" /> Resolver
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-zinc-400 hover:text-zinc-600">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Alert list */}
+            <div className="space-y-2">
+              {loading && alerts.length === 0 ? (
+                <div className="flex items-center justify-center py-20">
+                  <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
+                </div>
+              ) : alerts.length === 0 ? (
+                <AlertProEmpty label={viewMode === 'history' ? 'No hay alertas en el historial con estos filtros' : undefined} />
+              ) : (
+                <>
+                  {viewMode === 'active' && (
+                  <div className="flex items-center gap-2 px-1 text-xs text-zinc-500">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size === alerts.length && alerts.length > 0}
+                      onChange={toggleSelectAll}
+                      className="h-3.5 w-3.5 rounded border-zinc-300"
+                    />
+                    <span>Seleccionar todo</span>
+                  </div>
+                  )}
+
+                  {alerts.map((alert) => (
+                    <AlertPageRow
+                      key={alert.id}
+                      alert={alert}
+                      historyMode={viewMode === 'history'}
+                      expanded={expandedAlertId === alert.id}
+                      onToggleExpand={() => setExpandedAlertId((id) => (id === alert.id ? null : alert.id))}
+                      selected={selectedIds.has(alert.id)}
+                      onToggleSelect={() => toggleSelect(alert.id)}
+                      onStatusChange={handleStatusChange}
+                      onDelete={handleDelete}
+                      onNavigate={(route) => navigate(route)}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* Pagination */}
+            {pagination.pages > 1 && (
+              <div className="flex items-center justify-between border-t border-zinc-200 pt-4 dark:border-zinc-800">
+                <span className="text-sm text-zinc-500">
+                  {pagination.total} alerta{pagination.total !== 1 ? 's' : ''} · Página {pagination.page} de {pagination.pages}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    disabled={pagination.page <= 1}
+                    onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) - 1 }))}
+                    className="rounded-lg border border-zinc-200 p-2 text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button
+                    disabled={pagination.page >= pagination.pages}
+                    onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
+                    className="rounded-lg border border-zinc-200 p-2 text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Bulk actions */}
-        {selectedIds.size > 0 && (
-          <div className="flex items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 dark:border-indigo-800 dark:bg-indigo-950/30">
-            <span className="text-sm font-medium text-indigo-700 dark:text-indigo-300">
-              {selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}
-            </span>
-            <button onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-md bg-white px-3 py-1 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300">
-              <Eye className="h-3.5 w-3.5" /> Marcar vistas
-            </button>
-            <button onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white shadow-sm hover:bg-emerald-700">
-              <Check className="h-3.5 w-3.5" /> Resolver
-            </button>
-            <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Alert list */}
-        <div className="space-y-2">
-          {loading && alerts.length === 0 ? (
-            <div className="flex items-center justify-center py-20">
-              <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
-            </div>
-          ) : alerts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-gray-300 py-16 dark:border-gray-700">
-              <CheckCircle className="h-12 w-12 text-emerald-400" />
-              <p className="mt-3 text-lg font-medium text-gray-700 dark:text-gray-300">Todo en orden</p>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">No hay alertas que requieran atención</p>
-            </div>
-          ) : (
-            <>
-              {/* Select all */}
-              <div className="flex items-center gap-2 px-1 text-xs text-gray-500 dark:text-gray-400">
-                <input
-                  type="checkbox"
-                  checked={selectedIds.size === alerts.length && alerts.length > 0}
-                  onChange={toggleSelectAll}
-                  className="h-3.5 w-3.5 rounded border-gray-300"
-                />
-                <span>Seleccionar todo</span>
-              </div>
-
-              {alerts.map((alert) => (
-                <AlertRow
-                  key={alert.id}
-                  alert={alert}
-                  selected={selectedIds.has(alert.id)}
-                  onToggleSelect={() => toggleSelect(alert.id)}
-                  onStatusChange={handleStatusChange}
-                  onDelete={handleDelete}
-                  onNavigate={(route) => navigate(route)}
-                />
-              ))}
-            </>
-          )}
-        </div>
-
-        {/* Pagination */}
-        {pagination.pages > 1 && (
-          <div className="flex items-center justify-between border-t border-gray-200 pt-4 dark:border-gray-700">
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              {pagination.total} alerta{pagination.total !== 1 ? 's' : ''} · Página {pagination.page} de {pagination.pages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                disabled={pagination.page <= 1}
-                onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) - 1 }))}
-                className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              <button
-                disabled={pagination.page >= pagination.pages}
-                onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
-                className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-700 dark:text-gray-400"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        <AlertCenterSettingsSlide
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+          businessId={settingsBusinessId}
+          onSaved={() => void loadData()}
+        />
       </div>
     </Layout>
   );
@@ -338,28 +482,14 @@ export default function AlertCenterPage() {
 
 // ─── Subcomponents ───────────────────────────────────────────────────────────
 
-function SummaryCard({ label, value, icon: Icon, color, bg }: { label: string; value: number; icon: React.ElementType; color: string; bg: string }) {
-  return (
-    <div className={`flex items-center gap-3 rounded-xl border border-gray-200/60 p-4 ${bg} dark:border-gray-700/40`}>
-      <div className={`rounded-lg p-2 ${bg}`}>
-        <Icon className={`h-5 w-5 ${color}`} />
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-      </div>
-    </div>
-  );
-}
-
 function Chip({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
       onClick={onClick}
       className={`rounded-full px-3 py-1 text-xs font-medium transition ${
         active
-          ? 'bg-indigo-600 text-white'
-          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'
+          ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
+          : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
       }`}
     >
       {label}
@@ -367,8 +497,11 @@ function Chip({ active, onClick, label }: { active: boolean; onClick: () => void
   );
 }
 
-function AlertRow({
+function AlertPageRow({
   alert,
+  historyMode = false,
+  expanded = false,
+  onToggleExpand,
   selected,
   onToggleSelect,
   onStatusChange,
@@ -376,6 +509,9 @@ function AlertRow({
   onNavigate,
 }: {
   alert: AlertRecord;
+  historyMode?: boolean;
+  expanded?: boolean;
+  onToggleExpand?: () => void;
   selected: boolean;
   onToggleSelect: () => void;
   onStatusChange: (id: string, status: AlertStatus) => void;
@@ -385,7 +521,18 @@ function AlertRow({
   const pColors = PRIORITY_COLORS[alert.priority] || PRIORITY_COLORS.medium;
   const sStyles = STATUS_STYLES[alert.status] || STATUS_STYLES.new;
   const SourceIcon = SOURCE_ICONS[alert.source] || Bell;
-  const sourceColor = SOURCE_COLORS[alert.source as AlertSource] || '#6B7280';
+  const sourceColor = SOURCE_COLORS[alert.source as AlertSource] || '#71717a';
+  const accent = PRIORITY_ACCENT[alert.priority] || PRIORITY_ACCENT.medium;
+  const isDeleted = Boolean(alert.deletedAt);
+
+  const closedAt = alert.resolvedAt || alert.deletedAt || alert.updatedAt;
+  const closedLabel = (() => {
+    try {
+      return format(new Date(closedAt), 'dd MMM yyyy · HH:mm', { locale: es });
+    } catch {
+      return closedAt;
+    }
+  })();
 
   const timeAgo = (() => {
     try {
@@ -397,99 +544,121 @@ function AlertRow({
 
   return (
     <div
-      className={`group flex items-start gap-3 rounded-xl border p-4 transition-all ${
-        alert.status === 'new'
-          ? 'border-l-4 border-l-indigo-500 border-t-gray-200 border-r-gray-200 border-b-gray-200 bg-white dark:border-t-gray-700 dark:border-r-gray-700 dark:border-b-gray-700 dark:border-l-indigo-500 dark:bg-gray-800/80'
-          : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/40'
-      } ${alert.status === 'resolved' ? 'opacity-60' : ''}`}
+      className={`rounded-xl border border-zinc-200/90 bg-white transition-all dark:border-zinc-800 dark:bg-zinc-900/80 border-l-[3px] ${accent} ${
+        historyMode ? '' : 'hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700'
+      } ${alert.status === 'new' && !historyMode ? 'ring-1 ring-amber-500/20' : ''} ${
+        isDeleted ? 'opacity-70' : ''
+      }`}
     >
-      {/* Checkbox */}
-      <input
-        type="checkbox"
-        checked={selected}
-        onChange={onToggleSelect}
-        className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600"
-      />
+      <div className="group flex items-start gap-3 p-4 pl-3.5">
+        {!historyMode && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            className="mt-1 h-4 w-4 rounded border-zinc-300"
+          />
+        )}
 
-      {/* Source icon */}
-      <div className="flex-shrink-0 rounded-lg p-2" style={{ backgroundColor: `${sourceColor}15` }}>
-        <SourceIcon className="h-4 w-4" style={{ color: sourceColor }} />
-      </div>
+        <div className="flex-shrink-0 rounded-lg p-2" style={{ backgroundColor: `${sourceColor}14` }}>
+          <SourceIcon className="h-4 w-4" style={{ color: sourceColor }} />
+        </div>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                {alert.title}
-              </h3>
-              {/* Priority badge */}
-              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pColors.bg} ${pColors.text}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${pColors.dot} ${alert.status === 'new' ? 'animate-pulse' : ''}`} />
-                {PRIORITY_LABELS[alert.priority]}
-              </span>
-              {/* Status badge */}
-              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${sStyles.bg} ${sStyles.text}`}>
-                {alert.status === 'new' && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                {alert.status === 'resolved' && <Check className="h-2.5 w-2.5" />}
-                {STATUS_LABELS[alert.status]}
-              </span>
-              {/* Source label */}
-              <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
-                {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
-              </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {alert.title}
+                </h3>
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pColors.bg} ${pColors.text}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${pColors.dot}`} />
+                  {PRIORITY_LABELS[alert.priority]}
+                </span>
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${sStyles.bg} ${sStyles.text}`}>
+                  {alert.status === 'resolved' && <Check className="h-2.5 w-2.5" />}
+                  {isDeleted ? 'Eliminada' : STATUS_LABELS[alert.status]}
+                </span>
+                <span className="text-[10px] font-medium text-zinc-400">
+                  {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
+                </span>
+              </div>
+              <p className="mt-0.5 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
+                {alert.message}
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Creada {timeAgo}
+                </span>
+                {historyMode && closedAt && (
+                  <span>
+                    {isDeleted ? 'Eliminada' : 'Resuelta'} · {closedLabel}
+                    {(alert.resolvedBy || alert.deletedBy) && ` · ${alert.resolvedBy || alert.deletedBy}`}
+                  </span>
+                )}
+              </div>
             </div>
-            <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-              {alert.message}
-            </p>
-            <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {timeAgo}
-              </span>
-            </div>
-          </div>
 
-          {/* Actions */}
-          <div className="flex flex-shrink-0 items-center gap-1 opacity-0 transition group-hover:opacity-100">
-            {alert.route && (
-              <button
-                onClick={() => onNavigate(alert.route!)}
-                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-300"
-                title="Ir al detalle"
-              >
-                <Eye className="h-4 w-4" />
-              </button>
-            )}
-            {alert.status === 'new' && (
-              <button
-                onClick={() => onStatusChange(alert.id, 'seen')}
-                className="rounded-md p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
-                title="Marcar como vista"
-              >
-                <Eye className="h-4 w-4" />
-              </button>
-            )}
-            {alert.status !== 'resolved' && (
-              <button
-                onClick={() => onStatusChange(alert.id, 'resolved')}
-                className="rounded-md p-1.5 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
-                title="Resolver"
-              >
-                <CheckCircle className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              onClick={() => onDelete(alert.id)}
-              className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-              title="Eliminar"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <div className="flex flex-shrink-0 items-center gap-1">
+              {historyMode ? (
+                <button
+                  type="button"
+                  onClick={onToggleExpand}
+                  className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+                  title="Ver historial"
+                >
+                  {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+              ) : (
+                <div className="opacity-0 transition group-hover:opacity-100 flex items-center gap-1">
+                  {alert.route && (
+                    <button
+                      onClick={() => onNavigate(alert.route!)}
+                      className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      title="Ir al detalle"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  )}
+                  {alert.status === 'new' && (
+                    <button
+                      onClick={() => onStatusChange(alert.id, 'seen')}
+                      className="rounded-md p-1.5 text-zinc-400 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
+                      title="Marcar como vista"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  )}
+                  {alert.status !== 'resolved' && (
+                    <button
+                      onClick={() => onStatusChange(alert.id, 'resolved')}
+                      className="rounded-md p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+                      title="Resolver"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onDelete(alert.id)}
+                    className="rounded-md p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                    title="Eliminar"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      {historyMode && expanded && (
+        <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Línea temporal</p>
+          <AlertHistoryTimeline entries={alert.statusHistory || []} compact />
+        </div>
+      )}
     </div>
   );
 }

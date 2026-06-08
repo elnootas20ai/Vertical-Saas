@@ -105,7 +105,7 @@ export function CatalogDeleteGuardModal({
           ) : (
             <>
               Vas a eliminar <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> artículo
-              {payload.count !== 1 ? 's' : ''} del filtro actual.
+              {payload.count !== 1 ? 's' : ''} seleccionado{payload.count !== 1 ? 's' : ''}.
             </>
           )}
         </p>

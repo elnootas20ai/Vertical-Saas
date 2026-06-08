@@ -2,7 +2,7 @@
  * Alert Center Controller — Centro unificado de alertas globales.
  *
  * Provee endpoints para listado paginado con filtros, resumen/contadores,
- * cambio de estado (seen/resolved), acciones masivas y asignación.
+ * cambio de estado (seen/resolved), acciones masivas, asignación e historial.
  */
 
 import {
@@ -14,7 +14,30 @@ import {
   getAlertsSummary,
   sanitizeNotification,
 } from '../services/couchdb.js';
+import {
+  mutateAlertStatus,
+  mutateAlertAssignment,
+  mutateAlertDeletion,
+} from '../services/alertHistory.js';
 import { ALERT_STATUSES, ALERT_PRIORITIES, ALERT_SOURCES } from '../services/alertConstants.js';
+
+function buildListFilters(query, defaults = {}) {
+  return {
+    status: query.status ?? defaults.status ?? null,
+    priority: query.priority ?? defaults.priority ?? null,
+    source: query.source ?? defaults.source ?? null,
+    assignedTo: query.assignedTo ?? defaults.assignedTo ?? null,
+    search: query.search ?? defaults.search ?? null,
+    sort: query.sort ?? defaults.sort ?? 'createdAt',
+    order: query.order ?? defaults.order ?? 'desc',
+    page: query.page,
+    limit: query.limit,
+    from: query.from ?? defaults.from ?? null,
+    to: query.to ?? defaults.to ?? null,
+    includeDeleted: query.includeDeleted ?? defaults.includeDeleted ?? null,
+    historyOnly: query.historyOnly ?? defaults.historyOnly ?? null,
+  };
+}
 
 // ─── GET /api/alerts/:businessId/center ──────────────────────────────────────
 
@@ -23,21 +46,7 @@ export async function listAlerts(req, res) {
     const { businessId } = req.params;
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
 
-    const filters = {
-      status: req.query.status || null,
-      priority: req.query.priority || null,
-      source: req.query.source || null,
-      assignedTo: req.query.assignedTo || null,
-      search: req.query.search || null,
-      sort: req.query.sort || 'createdAt',
-      order: req.query.order || 'desc',
-      page: req.query.page,
-      limit: req.query.limit,
-      from: req.query.from || null,
-      to: req.query.to || null,
-    };
-
-    const result = await listAlertsByBusiness(req, businessId, filters);
+    const result = await listAlertsByBusiness(req, businessId, buildListFilters(req.query));
 
     return res.json({
       ok: true,
@@ -53,6 +62,67 @@ export async function listAlerts(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error listando alertas',
+    });
+  }
+}
+
+// ─── GET /api/alerts/:businessId/history ─────────────────────────────────────
+
+export async function listAlertHistory(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
+
+    const result = await listAlertsByBusiness(req, businessId, buildListFilters(req.query, {
+      historyOnly: true,
+      sort: 'resolvedAt',
+      order: 'desc',
+    }));
+
+    return res.json({
+      ok: true,
+      alerts: result.items.map(sanitizeNotification),
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        pages: result.pages,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error listando historial de alertas',
+    });
+  }
+}
+
+// ─── GET /api/alerts/:businessId/:alertId/timeline ───────────────────────────
+
+export async function getAlertTimeline(req, res) {
+  try {
+    const { businessId, alertId } = req.params;
+    if (!businessId || !alertId) {
+      return res.status(400).json({ ok: false, error: 'Faltan businessId o alertId' });
+    }
+
+    await ensureDatabase(req, NOTIFICATIONS_DB);
+    const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
+
+    if (!doc || doc.type !== 'notification') {
+      return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
+    }
+
+    const alert = sanitizeNotification(doc);
+    return res.json({
+      ok: true,
+      alert,
+      timeline: alert.statusHistory || [],
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error obteniendo historial de alerta',
     });
   }
 }
@@ -101,17 +171,7 @@ export async function updateAlertStatus(req, res) {
 
     const now = new Date().toISOString();
     const userId = req.authUser?.userId || null;
-    const updated = {
-      ...doc,
-      status,
-      read: status !== 'new',
-      updatedAt: now,
-    };
-
-    if (status === 'resolved') {
-      updated.resolvedAt = now;
-      updated.resolvedBy = userId;
-    }
+    const updated = mutateAlertStatus(doc, { status, userId, now });
 
     const result = await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
 
@@ -163,18 +223,7 @@ export async function bulkUpdateAlertStatus(req, res) {
           continue;
         }
 
-        const updated = {
-          ...doc,
-          status,
-          read: status !== 'new',
-          updatedAt: now,
-        };
-
-        if (status === 'resolved') {
-          updated.resolvedAt = now;
-          updated.resolvedBy = userId;
-        }
-
+        const updated = mutateAlertStatus(doc, { status, userId, now });
         await putDocument(req, NOTIFICATIONS_DB, id, updated);
         results.updated++;
       } catch {
@@ -209,16 +258,9 @@ export async function assignAlert(req, res) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
 
-    const assignedTo = {
-      userIds: Array.isArray(userIds) ? userIds.map(String).slice(0, 50) : (doc.assignedTo?.userIds || []),
-      roles: Array.isArray(roles) ? roles.map(String).slice(0, 20) : (doc.assignedTo?.roles || []),
-    };
-
-    const updated = {
-      ...doc,
-      assignedTo,
-      updatedAt: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
+    const userId = req.authUser?.userId || null;
+    const updated = mutateAlertAssignment(doc, { userIds, roles, userId, now });
 
     const result = await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
 
@@ -250,13 +292,13 @@ export async function deleteAlert(req, res) {
     if (!doc || doc.type !== 'notification') {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
+    if (doc.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
+    }
 
-    const updated = {
-      ...doc,
-      deletedAt: new Date().toISOString(),
-      deletedBy: req.authUser?.userId || null,
-      updatedAt: new Date().toISOString(),
-    };
+    const now = new Date().toISOString();
+    const userId = req.authUser?.userId || null;
+    const updated = mutateAlertDeletion(doc, { userId, now });
 
     await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
 

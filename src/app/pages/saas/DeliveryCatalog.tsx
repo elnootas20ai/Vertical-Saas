@@ -12,12 +12,24 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { listBrandsRequest, createBrandRequest, type Brand } from '../../lib/brandsApi';
 import {
-  normalizeImportCategory,
   formatUnmatchedCommercialBrandWarning,
+  mapImportEntryToCatalogItem,
+  normalizeImportCategory,
+  readImportLineText,
   resolveBrandIdsFromImportText,
   resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
+  activateCommercialLinesAfterCatalogImport,
+  syncTpvOrganizersAfterCatalogImport,
 } from '../../lib/deliveryCatalogImport';
+import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
+import {
+  DELIVERY_CATALOG_IMPORT_FIELDS,
+  DELIVERY_CATALOG_HEADER_ALIASES,
+  downloadDeliveryCatalogImportTemplate,
+  formatDeliveryCatalogImportValidationToast,
+  validateDeliveryCatalogImportEntries,
+} from '../../lib/deliveryCatalogExcelTemplate';
 import {
   catalogCategorySuggestions,
   defaultCategoryForSingleBrand,
@@ -64,6 +76,9 @@ import {
   Users,
   Archive,
   Tag,
+  Upload,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -71,6 +86,8 @@ import { GenericImportModal, type ImportFieldDef } from '../../components/saas/G
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
+import { StaffConsumptionSettingsTab } from '../../components/saas/StaffConsumptionSettingsTab';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -163,6 +180,7 @@ function CreateCatalogItemModal({
     showNewBrand: false,
     unit: 'ud',
     unitPrice: '',
+    staffPrice: '',
     costPrice: '',
     stockQuantity: '',
     minStock: '',
@@ -185,6 +203,7 @@ function CreateCatalogItemModal({
         showNewBrand: false,
         unit: editItem.unit || 'ud',
         unitPrice: String(editItem.unitPrice || ''),
+        staffPrice: editItem.staffPrice != null && editItem.staffPrice > 0 ? String(editItem.staffPrice) : '',
         costPrice: String(editItem.costPrice || ''),
         stockQuantity: String(editItem.stockQuantity || ''),
         minStock: String(editItem.minStock || ''),
@@ -201,7 +220,7 @@ function CreateCatalogItemModal({
         selectedBrandIds: defaultId ? [defaultId] : [],
         newBrandName: '',
         showNewBrand: false,
-        unitPrice: '', costPrice: '', stockQuantity: '', minStock: '',
+        unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
         image: '', allergens: [], notes: '', webVisible: true, available: true,
       });
     }
@@ -281,6 +300,7 @@ function CreateCatalogItemModal({
         brandIds,
         itemType: form.itemType,
         unitPrice: Number(form.unitPrice) || 0,
+        staffPrice: form.staffPrice.trim() ? Number(form.staffPrice) : null,
         costPrice: Number(form.costPrice) || 0,
         stockQuantity: form.itemType === 'service' ? 0 : Number(form.stockQuantity) || 0,
         minStock: form.itemType === 'service' ? 0 : Number(form.minStock) || 0,
@@ -579,6 +599,10 @@ function CreateCatalogItemModal({
                     <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} />
                   </div>
                   <div>
+                    <label className={labelClass}>Precio empleado (€)</label>
+                    <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
+                  </div>
+                  <div>
                     <label className={labelClass}>Precio coste (€)</label>
                     <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} />
                   </div>
@@ -679,6 +703,10 @@ function CreateCatalogItemModal({
                 <div>
                   <label className={labelClass}>Precio venta (€)</label>
                   <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.unitPrice} onChange={(e) => setForm((f) => ({ ...f, unitPrice: e.target.value }))} autoFocus />
+                </div>
+                <div>
+                  <label className={labelClass}>Precio empleado (€)</label>
+                  <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
                 </div>
                 <div>
                   <label className={labelClass}>Precio coste (€)</label>
@@ -1398,15 +1426,28 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
   );
 }
 
+// ─── Loading state ─────────────────────────────────────────────────────────────
+
+function CatalogPageLoadingState({ message = 'Cargando catálogo…' }: { message?: string }) {
+  return (
+    <div className="py-20 flex flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400">
+      <Loader2 className="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" aria-hidden />
+      <p className="text-sm">{message}</p>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function CatalogPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const pdvGate = useDeliveryStorePdvGate();
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [brandsLoading, setBrandsLoading] = useState(true);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
@@ -1431,6 +1472,9 @@ export function CatalogPage() {
   useEffect(() => {
     catalogDeleteOpRef.current = catalogDeleteGuard;
   }, [catalogDeleteGuard]);
+  const [catalogSelectMode, setCatalogSelectMode] = useState(false);
+  const [selectedCatalogIds, setSelectedCatalogIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteConfirmStep, setBulkDeleteConfirmStep] = useState(false);
 
   // Stock state
   const [stockAdjustItem, setStockAdjustItem] = useState<CatalogItem | null>(null);
@@ -1458,18 +1502,28 @@ export function CatalogPage() {
     { key: 'allergens', label: 'Alérgenos' },
   ];
 
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'sku', label: 'SKU', example: 'SKU-001' },
-    { key: 'itemType', label: 'Tipo', example: 'product' },
-    { key: 'category', label: 'Categoría', example: 'principales' },
-    { key: 'marca', label: 'Línea comercial (opcional)', example: 'modomio' },
-    { key: 'price', label: 'Precio', example: '' },
-    { key: 'costPrice', label: 'Coste', example: '' },
-    { key: 'description', label: 'Descripción', example: '' },
-    { key: 'allergens', label: 'Alérgenos', example: '' },
-    { key: 'image', label: 'Imagen (URL opcional)', example: '' },
-  ];
+  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = DELIVERY_CATALOG_IMPORT_FIELDS;
+
+  const commercialLines = useMemo(
+    () => sortBrandsForDisplay(commercialLineBrands(brands)),
+    [brands],
+  );
+
+  const templateOrganizerLines = useMemo(
+    () => organizerBrandsForCatalogTemplate(brands),
+    [brands],
+  );
+
+  const handleDownloadCatalogTemplate = useCallback(() => {
+    if (templateOrganizerLines.length === 0) {
+      toast.error('Configura al menos una línea comercial en Ajustes → Marca antes de descargar la plantilla');
+      return;
+    }
+    downloadDeliveryCatalogImportTemplate(templateOrganizerLines);
+    toast.success(
+      `Plantilla descargada · líneas TPV: ${templateOrganizerLines.map((b) => b.name).join(', ')} · revisa valores_validos`,
+    );
+  }, [templateOrganizerLines]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!user?.id) return;
@@ -1480,10 +1534,10 @@ export function CatalogPage() {
       const name = String(entry.name || '').trim();
       if (!name) continue;
       const category = normalizeImportCategory(String(entry.category || ''));
-      const marcaText = String(entry.marca || entry.brand || '').trim();
+      const lineText = readImportLineText(entry as Record<string, string>);
       let brandIds: string[] = [];
-      if (marcaText && businessId) {
-        const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
+      if (lineText && businessId) {
+        const resolved = await resolveBrandIdsFromImportText(businessId, lineText, brandCache);
         brandCache = resolved.cache;
         brandIds = resolved.brandIds;
         unmatchedCommercialBrands.push(...resolved.unmatchedNames);
@@ -1515,9 +1569,14 @@ export function CatalogPage() {
     }
     const result = await bulkCreateCatalogItemsRequest(user.id, items as Partial<CatalogItem>[]);
     if (result.created > 0) {
+      if (businessId) {
+        const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
+        const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
+        if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
+      }
       await loadCatalog();
       notifyDeliveryCatalogChanged();
-      toast.success(`${result.created} producto(s) importado(s) con IA`);
+      toast.success(`${result.created} producto(s) importado(s) con IA · TPV actualizado`);
     }
     if (result.errors > 0) {
       const firstError = result.errorDetails?.[0];
@@ -1531,6 +1590,21 @@ export function CatalogPage() {
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
     if (!user?.id) return 0;
+
+    const validation = validateDeliveryCatalogImportEntries(entries, brands);
+    if (!validation.ok) {
+      const detail = formatDeliveryCatalogImportValidationToast(validation);
+      toast.error('Revisa la plantilla antes de importar', {
+        description: detail || 'Hay filas con errores',
+        duration: 12000,
+      });
+      return 0;
+    }
+    const warnings = validation.issues.filter((i) => i.severity === 'warning');
+    if (warnings.length > 0) {
+      toast.warning(`${warnings.length} aviso(s) en el Excel (se importará igual)`, { duration: 8000 });
+    }
+
     const zipProvided = Object.keys(imageZipMap).length > 0;
     const unmatchedImageRefs: string[] = [];
     let brandCache = [...brands];
@@ -1539,19 +1613,16 @@ export function CatalogPage() {
 
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
-      const name = String(entry.name || '').trim();
-      if (!name) continue;
-      const sku = String(entry.sku || '').trim();
-      const category = normalizeImportCategory(entry.category);
-      const marcaText = String(entry.marca || entry.brand || '').trim();
-      let brandIds: string[] = [];
-      if (marcaText && businessId) {
-        const resolved = await resolveBrandIdsFromImportText(businessId, marcaText, brandCache);
-        brandCache = resolved.cache;
-        brandIds = resolved.brandIds;
-        unmatchedCommercialBrands.push(...resolved.unmatchedNames);
-      }
+      const mapped = await mapImportEntryToCatalogItem(entry, {
+        businessId: businessId || '',
+        brandCache,
+      });
+      if (!mapped) continue;
+      brandCache = mapped.brandCache;
+      unmatchedCommercialBrands.push(...mapped.unmatchedLineNames);
 
+      const name = mapped.item.name || '';
+      const sku = String(entry.sku || '').trim();
       const imageFromZip =
         imageZipMap[normalizeMediaKey(sku)] ||
         imageZipMap[normalizeMediaKey(name)] ||
@@ -1559,30 +1630,7 @@ export function CatalogPage() {
       const image = String(entry.image || '').trim() || imageFromZip;
       if (zipProvided && !image) unmatchedImageRefs.push(sku || name || `fila ${index + 2}`);
 
-      items.push({
-        name,
-        category,
-        brandIds: resolveCatalogImportBrandIds(brandIds, category, brandCache),
-        itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
-          ? (String(entry.itemType).trim() as CatalogItem['itemType'])
-          : 'product',
-        description: String(entry.description || '').trim(),
-        unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
-        costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
-        stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
-        minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
-        allergens: String(entry.allergens || '')
-          .split(',')
-          .map((a) => a.trim())
-          .filter(Boolean),
-        image,
-        sku: sku || undefined,
-        unit: String(entry.unit || 'ud'),
-        active: true,
-        available: true,
-        webVisible: true,
-        module: 'catalog',
-      });
+      items.push({ ...mapped.item, image, sku: sku || mapped.item.sku });
     }
 
     const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
@@ -1621,12 +1669,18 @@ export function CatalogPage() {
       toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
     }
     if (result.created > 0) {
+      if (businessId) {
+        const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
+        const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
+        if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
+      }
       await loadCatalog();
       notifyDeliveryCatalogChanged();
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
       toast.success(
         `${result.created} producto(s) importado(s)` +
-          (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : ''),
+          (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
+          ' · TPV actualizado',
       );
     }
     if (result.errors > 0) toast.error(`${result.errors} producto(s) no se pudieron importar`);
@@ -1699,12 +1753,16 @@ export function CatalogPage() {
   const loadBrands = useCallback(async () => {
     if (!businessId) {
       setBrands([]);
+      setBrandsLoading(false);
       return;
     }
+    setBrandsLoading(true);
     try {
       setBrands(await listBrandsRequest(businessId));
     } catch {
       setBrands([]);
+    } finally {
+      setBrandsLoading(false);
     }
   }, [businessId]);
 
@@ -1777,9 +1835,35 @@ export function CatalogPage() {
     setCatalogDeleteGuard({ mode: 'single', item });
   };
 
-  const handleDeleteFilteredCatalog = () => {
-    if (!user?.id || filteredCatalog.length === 0 || bulkDeletingCatalog) return;
-    setCatalogDeleteGuard({ mode: 'bulk', items: [...filteredCatalog] });
+  const exitCatalogSelectMode = useCallback(() => {
+    setCatalogSelectMode(false);
+    setBulkDeleteConfirmStep(false);
+    setSelectedCatalogIds(new Set());
+  }, []);
+
+  const toggleCatalogItemSelected = useCallback((itemId: string) => {
+    setBulkDeleteConfirmStep(false);
+    setSelectedCatalogIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }, []);
+
+  const handleBulkDeleteSelected = () => {
+    if (!user?.id || bulkDeletingCatalog) return;
+    const items = filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
+    if (items.length === 0) {
+      toast.error('Selecciona al menos un artículo');
+      return;
+    }
+    if (!bulkDeleteConfirmStep) {
+      setBulkDeleteConfirmStep(true);
+      return;
+    }
+    setCatalogDeleteGuard({ mode: 'bulk', items });
+    setBulkDeleteConfirmStep(false);
   };
 
   const executeCatalogDeleteAfterGuard = useCallback(async () => {
@@ -1824,8 +1908,9 @@ export function CatalogPage() {
       if (failed > 0) toast.error(`${failed} artículo(s) no se pudieron eliminar`);
     } finally {
       setBulkDeletingCatalog(false);
+      exitCatalogSelectMode();
     }
-  }, [user?.id, loadCatalog]);
+  }, [user?.id, loadCatalog, exitCatalogSelectMode]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
     if (!user?.id) return;
@@ -1983,6 +2068,33 @@ export function CatalogPage() {
     });
   }, [catalogItems, searchCatalog, filterCategory, filterBrand, filterType, brands]);
 
+  const selectedCatalogCount = useMemo(
+    () => filteredCatalog.filter((item) => selectedCatalogIds.has(item._id)).length,
+    [filteredCatalog, selectedCatalogIds],
+  );
+
+  const allFilteredCatalogSelected = useMemo(
+    () => filteredCatalog.length > 0 && filteredCatalog.every((item) => selectedCatalogIds.has(item._id)),
+    [filteredCatalog, selectedCatalogIds],
+  );
+
+  const toggleSelectAllFilteredCatalog = useCallback(() => {
+    setBulkDeleteConfirmStep(false);
+    setSelectedCatalogIds((prev) => {
+      const next = new Set(prev);
+      if (allFilteredCatalogSelected) {
+        filteredCatalog.forEach((item) => next.delete(item._id));
+      } else {
+        filteredCatalog.forEach((item) => next.add(item._id));
+      }
+      return next;
+    });
+  }, [allFilteredCatalogSelected, filteredCatalog]);
+
+  useEffect(() => {
+    setBulkDeleteConfirmStep(false);
+  }, [searchCatalog, filterCategory, filterBrand, filterType]);
+
   const catalogKpis = useMemo(() => ({
     totalItems: catalogItems.length,
     products: catalogItems.filter(i => (i.itemType || 'product') === 'product').length,
@@ -2102,15 +2214,82 @@ export function CatalogPage() {
             />
           </ActivationFieldWrap>
           <button
-            onClick={handleDeleteFilteredCatalog}
-            disabled={bulkDeletingCatalog || filteredCatalog.length === 0}
-            className="px-4 py-2.5 border border-red-300 text-red-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            type="button"
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2.5 border-2 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-blue-50 dark:hover:bg-blue-950/40"
           >
-            <Trash2 className="w-5 h-5" />
-            {bulkDeletingCatalog ? 'Eliminando...' : `Eliminar filtro (${filteredCatalog.length})`}
+            <Upload className="w-5 h-5" />
+            Importar
           </button>
+          {catalogSelectMode ? (
+            <>
+              <button
+                type="button"
+                onClick={exitCatalogSelectMode}
+                disabled={bulkDeletingCatalog}
+                className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDeleteSelected}
+                disabled={bulkDeletingCatalog || selectedCatalogCount === 0}
+                className={`px-4 py-2.5 rounded-xl flex items-center gap-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                  bulkDeleteConfirmStep
+                    ? 'bg-red-700 hover:bg-red-800 text-white border border-red-800'
+                    : 'border border-red-300 text-red-700 hover:bg-red-50'
+                }`}
+              >
+                <Trash2 className="w-5 h-5" />
+                {bulkDeletingCatalog
+                  ? 'Eliminando...'
+                  : bulkDeleteConfirmStep
+                    ? `Estoy seguro (${selectedCatalogCount})`
+                    : `Eliminar (${selectedCatalogCount})`}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setCatalogSelectMode(true);
+                setBulkDeleteConfirmStep(false);
+                setSelectedCatalogIds(new Set());
+              }}
+              disabled={bulkDeletingCatalog || filteredCatalog.length === 0}
+              className="px-4 py-2.5 border border-red-300 text-red-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Trash2 className="w-5 h-5" />
+              Eliminar
+            </button>
+          )}
         </div>
       </div>
+
+      {catalogSelectMode && filteredCatalog.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allFilteredCatalogSelected}
+              onChange={toggleSelectAllFilteredCatalog}
+              className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+            />
+            {allFilteredCatalogSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
+          </label>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            {selectedCatalogCount === 0
+              ? 'Marca los artículos que quieras eliminar'
+              : `${selectedCatalogCount} seleccionado${selectedCatalogCount !== 1 ? 's' : ''}`}
+          </span>
+          {bulkDeleteConfirmStep && selectedCatalogCount > 0 && (
+            <span className="text-xs font-medium text-red-700 dark:text-red-300">
+              Pulsa «Estoy seguro» para confirmar el borrado
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       {loading ? (
@@ -2135,6 +2314,11 @@ export function CatalogPage() {
           <table className="w-full min-w-[900px]">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                {catalogSelectMode && (
+                  <th className="px-4 py-3 w-10">
+                    <span className="sr-only">Seleccionar</span>
+                  </th>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Marca</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
@@ -2158,7 +2342,25 @@ export function CatalogPage() {
                     : 'bg-blue-100 text-blue-700 border-blue-200';
                 const typeLabel = itemType === 'service' ? 'Servicio' : itemType === 'combo' ? 'Combo' : 'Producto';
                 return (
-                  <tr key={item._id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <tr
+                    key={item._id}
+                    className={`transition-colors ${
+                      catalogSelectMode && selectedCatalogIds.has(item._id)
+                        ? 'bg-red-50/70 dark:bg-red-950/20'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    {catalogSelectMode && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedCatalogIds.has(item._id)}
+                          onChange={() => toggleCatalogItemSelected(item._id)}
+                          className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                          aria-label={`Seleccionar ${item.name}`}
+                        />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {item.image ? (
@@ -2676,6 +2878,7 @@ export function CatalogPage() {
   const tabsConfig = [
     { id: 'catalog', label: 'Catálogo', count: catalogItems.length || undefined },
     { id: 'stock', label: 'Artículos', count: catalogKpis.lowStock || undefined },
+    { id: 'staff-consumption', label: 'Consumos equipo' },
     { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
   ];
@@ -2689,10 +2892,12 @@ export function CatalogPage() {
     return primary ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount: 1 }) : false;
   }, [isDelivery, brands]);
 
+  const initialLoadPending = loading || brandsLoading;
+
   if (isDelivery && pdvGate.loading) {
     return (
       <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <div className="py-16 text-center text-sm text-gray-500 dark:text-gray-400">Comprobando tienda y PDV…</div>
+        <CatalogPageLoadingState message="Comprobando tienda y PDV…" />
       </Layout>
     );
   }
@@ -2705,7 +2910,15 @@ export function CatalogPage() {
     );
   }
 
-  if (isDelivery && !loading && !brandReady) {
+  if (initialLoadPending) {
+    return (
+      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+        <CatalogPageLoadingState />
+      </Layout>
+    );
+  }
+
+  if (isDelivery && !brandReady) {
     return (
       <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
         <DeliveryActivationGatePanel kind="brand" />
@@ -2719,6 +2932,13 @@ export function CatalogPage() {
         <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
         {activeTab === 'catalog' && renderCatalogTab()}
         {activeTab === 'stock' && renderStockTab()}
+        {activeTab === 'staff-consumption' && dataUserId && (
+          <StaffConsumptionSettingsTab
+            userId={dataUserId}
+            catalogItems={catalogItems}
+            onCatalogUpdated={loadCatalog}
+          />
+        )}
         {activeTab === 'suppliers' && renderSuppliersTab()}
         {activeTab === 'invoices' && renderInvoicesTab()}
       </div>
@@ -2773,7 +2993,10 @@ export function CatalogPage() {
               ? { mode: 'bulk', count: catalogDeleteGuard.items.length }
               : null
         }
-        onClose={() => setCatalogDeleteGuard(null)}
+        onClose={() => {
+          setCatalogDeleteGuard(null);
+          setBulkDeleteConfirmStep(false);
+        }}
         onVerified={() => {
           void executeCatalogDeleteAfterGuard();
         }}
@@ -2783,8 +3006,12 @@ export function CatalogPage() {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         moduleLabel="Catálogo"
+        templateFileName="plantilla_catalogo_delivery_tpv.xlsx"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
+        onDownloadTemplate={handleDownloadCatalogTemplate}
+        headerAliases={DELIVERY_CATALOG_HEADER_ALIASES}
+        skipMappingWhenComplete
         extraFileUpload={{
           label: 'ZIP de imágenes (opcional)',
           helpText: 'Sube un ZIP con fotos nombradas por SKU o nombre del producto (si falta match se bloquea la importación).',

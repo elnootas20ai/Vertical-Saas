@@ -109,6 +109,7 @@ import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
+import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
@@ -118,6 +119,7 @@ import { WebStorefront } from './pages/public/WebStorefront';
 import { QuotePublicResponse } from './pages/public/QuotePublicResponse';
 import { WebConfig } from './pages/saas/WebConfig';
 import { WebOrders } from './pages/saas/WebOrders';
+import { DeliveryIntegrations } from './pages/saas/DeliveryIntegrations';
 import { CleaningHub } from './pages/saas/CleaningHub';
 import { CleaningWorkers } from './pages/saas/CleaningWorkers';
 import { CleaningServices } from './pages/saas/CleaningServices';
@@ -481,6 +483,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <SaasIndexRedirect /> },
           { path: 'dashboard', element: <RequireBusinessOwner><Dashboard /></RequireBusinessOwner> },
+          { path: 'alerts', element: <RequireBusinessOwner><AlertCenterPage /></RequireBusinessOwner> },
           { path: 'onboarding', Component: SetupOnboarding },
           { path: 'delivery/primer-pdv', element: <Navigate to="/saas/dashboard" replace /> },
           { path: 'user-dashboard', Component: UserDashboard },
@@ -558,8 +561,9 @@ export const router = createBrowserRouter([
           { path: 'delivery-kitchen', element: <RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission> },
           { path: 'delivery-montaje', element: <RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission> },
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
-          { path: 'vertical/delivery/tpv', element: <RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal> },
-          { path: 'vertical/delivery/caja', element: <RequirePdvTerminal><CajaPage /></RequirePdvTerminal> },
+          { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><DeliveryIntegrations /></RequireBusinessOwner> },
           { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },
@@ -793,7 +797,7 @@ export const router = createBrowserRouter([
           { path: 'worker/setup-profile', Component: WorkerIdentitySetup },
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
-          { path: 'worker/tpv', Component: WorkerTpv },
+          { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpv /></RequireTpvTabletEntry> },
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/calendar', Component: WorkerCalendar },
           { path: 'worker/clock', Component: WorkerClock },

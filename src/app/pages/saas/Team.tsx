@@ -55,6 +55,7 @@ import {
 import { Layout } from '../../components/saas/Layout';
 import { PayrollTab } from '../../components/saas/PayrollTab';
 import { StaffExpensesTab } from '../../components/saas/StaffExpensesTab';
+import { StaffConsumptionsTab } from '../../components/saas/StaffConsumptionsTab';
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
 import { toast } from 'sonner';
 import { InviteUserModal, type InviteUserPayload } from '../../components/saas/InviteUserModal';
@@ -102,7 +103,7 @@ import {
 } from '../../lib/roleCatalog';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
 
-type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'payroll';
+type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
 
 const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
@@ -3311,6 +3312,7 @@ export function Team() {
             { id: 'roles' as const, label: 'Funciones', count: roles.length },
             { id: 'activity' as const, label: t('team.tabs.activity'), count: null },
             { id: 'staff-expenses' as const, label: t('team.tabs.staffExpenses'), count: null },
+            { id: 'staff-consumptions' as const, label: t('team.tabs.staffConsumptions'), count: null },
             { id: 'payroll' as const, label: t('team.tabs.payroll'), count: null },
           ].map((tab, index) => {
             const isActive = activeTab === tab.id;
@@ -3578,7 +3580,7 @@ export function Team() {
                             <td className="px-5 py-4 text-xs text-gray-400 dark:text-gray-500">{formatRelativeTime(member.lastLoginAt)}</td>
                             <td className="px-5 py-4">
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/saas/clockins?memberId=${member.user_id}`); }} title="Fichajes" className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 transition-colors">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/saas/team/${member.user_id}?tab=clockins`); }} title="Fichajes" className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 transition-colors">
                                   <Clock className="w-3.5 h-3.5" />
                                 </button>
                                 <button type="button" onClick={(e) => { e.stopPropagation(); navigate(`/saas/schedules?memberId=${member.user_id}`); }} title="Horarios" className="rounded-lg p-1.5 text-gray-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 hover:text-emerald-600 transition-colors">
@@ -3701,6 +3703,13 @@ export function Team() {
             members={orderedMembers}
             currentUser={user}
             isAdmin={user.role === 'Admin' || user.role === 'Superadmin'}
+          />
+        )}
+
+        {activeTab === 'staff-consumptions' && user && (
+          <StaffConsumptionsTab
+            members={orderedMembers}
+            currentUser={user}
           />
         )}
 

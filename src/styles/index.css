@@ -45,3 +45,74 @@
   0%, 100% { box-shadow: 0 0 0 2px rgb(245 158 11), 0 0 0 4px rgba(245, 158, 11, 0.15); }
   50% { box-shadow: 0 0 0 2px rgb(245 158 11), 0 0 0 8px rgba(245, 158, 11, 0.35); }
 }
+
+/* Horarios PDV — inputs type=time legibles (Chrome/Edge, formato 12h) */
+.udar-time-field-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.udar-time-input {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 2.75rem;
+  min-width: 10.75rem;
+  padding: 0 0.75rem;
+  border-radius: 0.625rem;
+  border: 2px solid #e5e7eb;
+  background-color: #fff;
+  color: #111827;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.udar-time-input:focus {
+  border-color: #111827;
+  box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.12);
+}
+
+.udar-time-input:disabled {
+  opacity: 0.45;
+}
+
+.udar-time-input::-webkit-datetime-edit {
+  padding: 0;
+  margin: 0;
+  line-height: 1.25rem;
+}
+
+.udar-time-input::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+  align-items: center;
+}
+
+.udar-time-input::-webkit-datetime-edit-hour-field,
+.udar-time-input::-webkit-datetime-edit-minute-field,
+.udar-time-input::-webkit-datetime-edit-ampm-field {
+  padding: 0 0.12em;
+}
+
+.udar-time-input::-webkit-calendar-picker-indicator {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-inline-start: 0.35rem;
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.dark .udar-time-input {
+  border-color: #4b5563;
+  background-color: #111827;
+  color: #f9fafb;
+}
+
+.dark .udar-time-input:focus {
+  border-color: #e5e7eb;
+}

@@ -18,6 +18,8 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
+  Clock,
+  FileText,
   Wallet,
 } from 'lucide-react';
 import { fmtEuro } from '../../lib/portfolioMetrics';
@@ -31,6 +33,7 @@ import {
   type PortfolioBusiness,
   type PortfolioTotals,
 } from '../../hooks/usePortfolioOverview';
+import { TeamRrhhCompactRow } from './TeamRrhhDashboardWidget';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -80,6 +83,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       ordersMonth: filteredRows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
       activeOrders: filteredRows.reduce((s, r) => s + r.metrics.activeOrders, 0),
       openCashRegisters: filteredRows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
+      clockedInNow: filteredRows.reduce((s, r) => s + r.team.clockedInNow, 0),
+      pendingVacations: filteredRows.reduce((s, r) => s + r.team.pendingVacationRequests, 0),
+      payslipsThisMonth: filteredRows.reduce((s, r) => s + r.team.payslipsThisMonth, 0),
     };
   }, [filteredRows]);
 
@@ -110,6 +116,16 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const openStores = (businessId: string) => {
     switchBusiness(businessId);
     navigate('/saas/settings/tienda');
+  };
+
+  const openTeam = (businessId: string) => {
+    switchBusiness(businessId);
+    navigate('/saas/team');
+  };
+
+  const openPayroll = (businessId: string) => {
+    switchBusiness(businessId);
+    navigate('/saas/payroll');
   };
 
   return (
@@ -172,14 +188,14 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           </div>
         </section>
 
-        {/* KPIs operativos delivery */}
+        {/* KPIs operativos delivery + RRHH */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${fmtEuro(filteredTotals.revenueToday)}`} />
           <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
           <StatCard label="En curso" value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Pedidos activos" />
-          <StatCard label="Cajas abiertas" value={String(filteredTotals.openCashRegisters)} icon={<Banknote className="w-4 h-4" />} tone="violet" sub="TPV ahora" />
-          <StatCard label="Empresas" value={filteredTotals.businesses} icon={<Building2 className="w-4 h-4" />} tone="slate" sub={`${filteredTotals.brands} marcas · ${filteredTotals.stores} tiendas`} />
-          <StatCard label="Equipo" value={filteredTotals.members} icon={<Users className="w-4 h-4" />} tone="rose" sub="Miembros totales" />
+          <StatCard label="Fichados ahora" value={String(filteredTotals.clockedInNow)} icon={<Clock className="w-4 h-4" />} tone="violet" sub="Equipo en turno" />
+          <StatCard label="Vac. pendientes" value={String(filteredTotals.pendingVacations)} icon={<Users className="w-4 h-4" />} tone="rose" sub="Por revisar" />
+          <StatCard label="Nóminas mes" value={String(filteredTotals.payslipsThisMonth)} icon={<FileText className="w-4 h-4" />} tone="slate" sub="Subidas este mes" />
         </div>
 
         {/* Filters */}
@@ -240,6 +256,12 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                   switchBusiness(row.businessId);
                   navigate('/saas/delivery-ops');
                 }}
+                onOpenCaja={() => {
+                  switchBusiness(row.businessId);
+                  navigate('/saas/vertical/delivery/caja');
+                }}
+                onOpenTeam={() => openTeam(row.businessId)}
+                onOpenPayroll={() => openPayroll(row.businessId)}
               />
             ))}
           </div>
@@ -346,6 +368,9 @@ function BusinessCard({
   onOpenStores,
   onOpenSettings,
   onOpenOps,
+  onOpenCaja,
+  onOpenTeam,
+  onOpenPayroll,
 }: {
   row: PortfolioBusiness;
   expanded: boolean;
@@ -355,6 +380,9 @@ function BusinessCard({
   onOpenStores: () => void;
   onOpenSettings: () => void;
   onOpenOps: () => void;
+  onOpenCaja: () => void;
+  onOpenTeam: () => void;
+  onOpenPayroll: () => void;
 }) {
   const b = row.business;
   const m = row.metrics;
@@ -439,6 +467,38 @@ function BusinessCard({
             ) : (
               <p className="text-xs text-gray-500 italic">Métricas de pedidos disponibles para negocios tipo delivery con tiendas configuradas.</p>
             )}
+
+            {row.isDelivery && (m.openCashRegisters > 0 || m.cashInRegisters > 0) ? (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onOpenCaja(); }}
+                className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-left hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+              >
+                <Banknote className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                <span className="text-xs font-semibold text-amber-900 dark:text-amber-100">
+                  Panel de caja — {m.openCashRegisters} abierta{m.openCashRegisters !== 1 ? 's' : ''} · {fmtEuro(m.cashInRegisters)} en efectivo
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-amber-700 ml-auto shrink-0" />
+              </button>
+            ) : null}
+
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-violet-500" />
+                  Equipo y RRHH
+                </h4>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={onOpenTeam} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+                    Equipo
+                  </button>
+                  <button type="button" onClick={onOpenPayroll} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+                    Nóminas
+                  </button>
+                </div>
+              </div>
+              <TeamRrhhCompactRow snapshot={row.team} />
+            </section>
 
             <div className="grid gap-5 lg:grid-cols-2">
               <section>

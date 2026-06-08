@@ -7,6 +7,7 @@ import {
   buildCatalogItemDocument,
   sanitizeCatalogItem,
   listCatalogItemsByUser,
+  resolveStaffUnitPrice,
   buildSupplierDocument,
   sanitizeSupplier,
   listSuppliersByUser,
@@ -22,6 +23,9 @@ import {
   buildTpvRegisterSessionDocument,
   sanitizeTpvRegisterSession,
   listTpvRegisterSessionsByUser,
+  findOpenTpvRegisterSessionForPointOfSale,
+  sumTpvRegisterSaleAmountForOrder,
+  autoCloseTpvRegisterSessionDocument,
   buildPointOfSaleDocument,
   sanitizePointOfSale,
   listPointsOfSaleByUser,
@@ -35,6 +39,10 @@ import {
   listScaleDevicesByUser,
   buildDeliveryConfigDocument,
   sanitizeDeliveryConfig,
+  sanitizeStaffConsumptionConfig,
+  buildStaffConsumptionDocument,
+  sanitizeStaffConsumption,
+  listStaffConsumptionsByUser,
   buildDriverDocument,
   sanitizeDriver,
   listDriversByUser,
@@ -71,6 +79,7 @@ import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js'
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
+import { notifyManagersOrderCancelled } from '../services/deliveryOrderNotifications.js';
 import logger from '../services/logger.js';
 
 /** Reglas mínimas para operar TPV / delivery con un PDV identificable. */
@@ -114,13 +123,17 @@ function pickPrimaryPdvId(pdvs) {
   return sorted[0]._id || null;
 }
 
-function orderMatchesPdvScope(order, pdvId, primaryPdvId) {
+function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName) {
   const filterId = String(pdvId || '').trim();
   if (!filterId) return true;
   const oid = String(order.salesPointId || '').trim();
   if (!oid) {
     const primary = String(primaryPdvId || '').trim();
-    return primary ? filterId === primary : false;
+    if (primary && filterId === primary) return true;
+    const orderStore = String(order.salesPointName || '').trim().toLowerCase();
+    const pdvLabel = String(pdvName || '').trim().toLowerCase();
+    if (orderStore && pdvLabel && orderStore === pdvLabel) return true;
+    return false;
   }
   return oid === filterId;
 }
@@ -425,6 +438,7 @@ export async function updateDeliveryOrder(req, res) {
 
     await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, existing.status);
+    await maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, account.fullName, req.callerAccount || account);
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastToUser(userId, 'delivery_order_updated', sanitized);
@@ -489,28 +503,41 @@ export async function cancelDeliveryOrder(req, res) {
     }
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const actorUserId = String(req.callerUserId || userId).trim();
+    const actorAccount = req.callerAccount || account;
+    const actorName = String(actorAccount?.fullName || account.fullName || 'Sistema').trim();
     const now = new Date().toISOString();
+    const trimmedReason = String(cancelReason).trim();
     const db = getDeliveryDbName();
     const doc = buildDeliveryOrderDocument(userId, {
       ...existing,
       status: 'cancelled',
-      cancelReason: String(cancelReason).trim(),
+      cancelReason: trimmedReason,
       cancelledAt: now,
-      cancelledBy: account.fullName || userId,
+      cancelledBy: actorName,
       stageHistory: [
         ...(existing.stageHistory || []),
-        { status: 'cancelled', date: now, user: account.fullName || 'Sistema', notes: String(cancelReason).trim() },
+        { status: 'cancelled', date: now, user: actorName, notes: trimmedReason },
       ],
     }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
-      actorUserId: userId, actorName: account.fullName, targetUserId: userId,
-      type: 'delivery_order', action: `Canceló pedido ${doc.orderNumber}: ${cancelReason}`,
-      entityId: doc._id, entityLabel: doc.orderNumber, metadata: { cancelReason },
+      actorUserId: actorUserId, actorName, targetUserId: userId,
+      type: 'delivery_order', action: `Eliminó pedido ${doc.orderNumber}: ${trimmedReason}`,
+      entityId: doc._id, entityLabel: doc.orderNumber, metadata: { cancelReason: trimmedReason, cancelledBy: actorName },
     });
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastToUser(userId, 'delivery_order_cancelled', { order: sanitized, reason: cancelReason });
+    broadcastToUser(userId, 'delivery_order_cancelled', { order: sanitized, reason: trimmedReason });
     triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: 'cancelled', previousStatus: existing.status }).catch(() => null);
+    notifyManagersOrderCancelled(req, {
+      order: sanitized,
+      cancelReason: trimmedReason,
+      actorUserId,
+      actorName,
+      businessUserId: userId,
+    }).catch((err) => {
+      logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error notificando gerentes por cancelación');
+    });
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
@@ -560,6 +587,122 @@ export async function reopenDeliveryOrder(req, res) {
 
 // ─── REGISTER PAYMENT ────────────────────────────────────────────────────────
 
+async function resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount) {
+  const pdvs = await listPointsOfSaleByUser(req, userId);
+  let pdvId = String(orderDoc.salesPointId || '').trim();
+  if (pdvId) {
+    return resolvePdvIdFromRef(pdvs, pdvId) || pdvId;
+  }
+
+  const scoped = await resolveOrderSalesPoint(req, userId, orderDoc, callerAccount);
+  if (scoped.salesPointId) return scoped.salesPointId;
+
+  const orderStore = String(orderDoc.salesPointName || '').trim().toLowerCase();
+  if (orderStore) {
+    const byName = (pdvs || []).find((p) => String(p?.name || '').trim().toLowerCase() === orderStore);
+    if (byName?._id) return byName._id;
+  }
+
+  const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+  const openSessions = (allSessions || []).filter((s) => s && s.status === 'open' && !s.deletedAt);
+  if (openSessions.length === 1) {
+    const fromSession = String(openSessions[0].pointOfSaleId || '').trim();
+    if (fromSession) return fromSession;
+  }
+
+  return pickPrimaryPdvId(pdvs);
+}
+
+/**
+ * Registra venta en la sesión TPV abierta del PDV del pedido.
+ * @param {'increment'|'targetTotal'} mode - increment: suma amount tal cual; targetTotal: hasta amount menos lo ya registrado.
+ */
+async function autoRegisterTpvSaleForOrder(req, userId, orderDoc, {
+  amount,
+  paymentMethod,
+  registeredBy,
+  description,
+  mode = 'increment',
+  callerAccount,
+}) {
+  const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
+  if (!orderPdvId) return null;
+
+  const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+  const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
+  if (!openSession) return null;
+
+  let toRegister = Number(amount || 0);
+  if (mode === 'targetTotal') {
+    const alreadyRegistered = sumTpvRegisterSaleAmountForOrder(openSession.transactions, orderDoc._id);
+    toRegister = toRegister - alreadyRegistered;
+  }
+  if (!Number.isFinite(toRegister) || toRegister <= 0.001) return null;
+
+  const now = new Date().toISOString();
+  const db = getDeliveryDbName();
+  const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const registerTx = {
+    id: txId,
+    type: 'sale',
+    paymentMethod: paymentMethod || 'efectivo',
+    amount: Math.round(toRegister * 100) / 100,
+    description: description || `Pedido ${orderDoc.orderNumber || ''} — ${orderDoc.customerName || ''}`.trim(),
+    orderId: orderDoc._id,
+    orderNumber: orderDoc.orderNumber || '',
+    channel: orderDoc.channel || '',
+    date: now,
+    registeredBy: registeredBy || 'Sistema',
+  };
+  const updatedTxs = [...(openSession.transactions || []), registerTx];
+  const salesByChannel = {};
+  for (const t of updatedTxs) {
+    if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
+  }
+  const linkedOrderIds = [...(openSession.linkedOrderIds || [])];
+  if (!linkedOrderIds.includes(orderDoc._id)) linkedOrderIds.push(orderDoc._id);
+  const sessionDoc = buildTpvRegisterSessionDocument(userId, {
+    ...openSession,
+    transactions: updatedTxs,
+    salesByChannel,
+    linkedOrderIds,
+  }, openSession);
+  const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
+  const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
+  broadcastToUser(userId, 'tpv_session_updated', sanitized);
+  return sanitized;
+}
+
+async function maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, registeredBy, callerAccount) {
+  const isDelivered = String(doc.status || '').toLowerCase() === DELIVERED_ORDER_STATUS;
+  if (!isDelivered) return;
+
+  const targetPaid = Number(doc.paidAmount || 0);
+  const hasPayment = Boolean(doc.paymentMethod || doc.paymentCollected || targetPaid > 0);
+  if (!hasPayment) return;
+
+  const becameDelivered = String(existing.status || '').toLowerCase() !== DELIVERED_ORDER_STATUS;
+  const paidIncreased = targetPaid > Number(existing.paidAmount || 0);
+  const collectedNow = Boolean(doc.paymentCollected && !existing.paymentCollected);
+  if (!becameDelivered && !paidIncreased && !collectedNow) return;
+
+  const amount = targetPaid > 0 ? targetPaid : Number(doc.totalAmount || 0);
+  if (amount <= 0) return;
+
+  try {
+    await autoRegisterTpvSaleForOrder(req, userId, doc, {
+      amount,
+      paymentMethod: doc.paymentMethod || 'efectivo',
+      registeredBy: registeredBy || doc.paymentCollectedBy || 'Sistema',
+      description: `Pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
+      mode: 'targetTotal',
+      callerAccount,
+    });
+  } catch (regErr) {
+    console.error('[CAJA] Error auto-registering delivery payment in TPV session:', regErr?.message);
+  }
+}
+
 export async function registerPayment(req, res) {
   try {
     const { userId, orderId } = req.params;
@@ -595,40 +738,15 @@ export async function registerPayment(req, res) {
       metadata: { paymentMethod, paidAmount: newPaid, paymentStatus },
     });
 
-    // CAJA-03/10: auto-register transaction on open TPV register session
+    // CAJA-03/10: auto-register transaction on open TPV register session (misma tienda)
     try {
-      const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-      const openSession = allSessions.find(s => s.status === 'open');
-      if (openSession) {
-        const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const registerTx = {
-          id: txId,
-          type: 'sale',
-          paymentMethod: paymentMethod || 'efectivo',
-          amount: Number(paidAmount),
-          description: `Pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
-          orderId: doc._id,
-          orderNumber: doc.orderNumber || '',
-          channel: doc.channel || '',
-          date: now,
-          registeredBy: account.fullName || 'Sistema',
-        };
-        const updatedTxs = [...(openSession.transactions || []), registerTx];
-        const salesByChannel = {};
-        for (const t of updatedTxs) {
-          if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
-        }
-        const linkedOrderIds = [...(openSession.linkedOrderIds || [])];
-        if (!linkedOrderIds.includes(doc._id)) linkedOrderIds.push(doc._id);
-        const sessionDoc = buildTpvRegisterSessionDocument(userId, {
-          ...openSession,
-          transactions: updatedTxs,
-          salesByChannel,
-          linkedOrderIds,
-        }, openSession);
-        await putDocument(req, db, sessionDoc._id, sessionDoc);
-        broadcastToUser(userId, 'tpv_session_updated', sanitizeTpvRegisterSession({ ...sessionDoc, _rev: openSession._rev }));
-      }
+      await autoRegisterTpvSaleForOrder(req, userId, doc, {
+        amount: Number(paidAmount),
+        paymentMethod: paymentMethod || 'efectivo',
+        registeredBy: account.fullName || 'Sistema',
+        mode: 'increment',
+        callerAccount: req.callerAccount || account,
+      });
     } catch (regErr) {
       console.error('[CAJA] Error auto-registering in TPV session:', regErr?.message);
     }
@@ -670,7 +788,9 @@ export async function filterDeliveryOrders(req, res) {
       const pdvs = await listPointsOfSaleByUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
-      orders = orders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId));
+      const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
+      const pdvName = String(pdvDoc?.name || '').trim();
+      orders = orders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName));
     }
     if (status) orders = orders.filter((o) => o.status === status);
     if (deliveryType) orders = orders.filter((o) => o.deliveryType === deliveryType);
@@ -868,6 +988,86 @@ export async function bulkCreateCatalogItems(req, res) {
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error en importación masiva' });
+  }
+}
+
+export async function bulkApplyStaffPrices(req, res) {
+  try {
+    const { userId } = req.params;
+    const { discountPercent, categories } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const pct = Math.max(0, Math.min(100, Number(discountPercent)));
+    if (!Number.isFinite(pct)) return badRequest(res, 'discountPercent inválido');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const staffCfg = { pricingMode: 'percent_discount', defaultDiscountPercent: pct };
+    const categoryFilter = Array.isArray(categories)
+      ? categories.map((c) => String(c || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const existingItems = await listCatalogItemsByUser(req, userId, { module: 'catalog' });
+
+    const toUpdate = existingItems.filter((item) => {
+      if (!item || item.active === false) return false;
+      if (categoryFilter.length === 0) return true;
+      const cat = String(item.category || '').trim().toLowerCase();
+      return categoryFilter.includes(cat);
+    });
+
+    if (toUpdate.length === 0) {
+      return badRequest(res, 'No hay productos en catálogo para actualizar');
+    }
+
+    const docs = toUpdate.map((existing) => {
+      const staffPrice = resolveStaffUnitPrice(existing, staffCfg);
+      return buildCatalogItemDocument(userId, { ...existing, staffPrice }, existing);
+    });
+
+    const results = await bulkPutDocuments(req, db, docs);
+    const updated = [];
+    const errors = [];
+    results.forEach((result, idx) => {
+      if (result.ok) {
+        updated.push(sanitizeCatalogItem({ ...docs[idx], _rev: result.rev }));
+      } else {
+        errors.push({ index: idx, name: docs[idx]?.name, error: result.error || result.reason });
+      }
+    });
+
+    const deliveryDb = getDeliveryDbName();
+    await ensureDatabase(req, deliveryDb);
+    const configId = `dlvconf-${userId}`;
+    let configExisting;
+    try { configExisting = await getDocument(req, deliveryDb, configId); } catch { configExisting = null; }
+    if (!configExisting || configExisting.type !== 'delivery_config') configExisting = null;
+    const configDoc = buildDeliveryConfigDocument(userId, {
+      staffConsumption: {
+        enabled: true,
+        pricingMode: 'staff_price_field',
+        defaultDiscountPercent: pct,
+        eligibleCategories: Array.isArray(categories)
+          ? categories.map((c) => String(c || '').trim()).filter(Boolean)
+          : (configExisting?.staffConsumption?.eligibleCategories || []),
+      },
+    }, configExisting);
+    const configSaved = await putDocument(req, deliveryDb, configDoc._id, configDoc);
+
+    return res.json({
+      ok: true,
+      updated: updated.length,
+      errors: errors.length,
+      discountPercent: pct,
+      config: sanitizeDeliveryConfig({ ...configDoc, _rev: configSaved.rev }),
+      items: updated,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al aplicar precios empleado' });
   }
 }
 
@@ -1321,7 +1521,10 @@ export async function updateDriverCashSession(req, res) {
     if (wasClosed) {
       try {
         const allTpvSessions = await listTpvRegisterSessionsByUser(req, userId);
-        const openTpvSession = allTpvSessions.find(s => s.status === 'open');
+        const driverPdvId = String(doc.salesPointId || existing.salesPointId || '').trim();
+        const openTpvSession = driverPdvId
+          ? findOpenTpvRegisterSessionForPointOfSale(allTpvSessions, driverPdvId)
+          : allTpvSessions.find((s) => s.status === 'open');
         if (openTpvSession) {
           const driverCashCollected = (doc.transactions || [])
             .filter(t => t.paymentMethod === 'efectivo' && (t.type === 'cobro' || t.type === 'collection'))
@@ -1414,10 +1617,49 @@ export async function createTpvRegisterSession(req, res) {
     const { session } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
     if (!session || typeof session !== 'object') return badRequest(res, 'Falta el objeto session');
+    const pdvId = String(session.pointOfSaleId || '').trim();
+    if (!pdvId) return badRequest(res, 'Falta el punto de venta (tienda) de la caja');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
+
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const today = new Date().toISOString().slice(0, 10);
+    const openForPdv = (allSessions || []).filter(
+      (s) => s.status === 'open' && !s.deletedAt && String(s.pointOfSaleId || '').trim() === pdvId,
+    );
+
+    for (const stale of openForPdv) {
+      const openDay = String(stale.openedAt || '').slice(0, 10);
+      if (openDay && openDay < today) {
+        const closedDoc = autoCloseTpvRegisterSessionDocument(
+          userId,
+          stale,
+          `Cierre automático: jornada ${openDay} (nueva apertura ${today})`,
+          account.fullName || 'Sistema',
+        );
+        await putDocument(req, db, closedDoc._id, closedDoc);
+        triggerReactiveAlert(userId, 'cash_session_changed', {
+          sessionId: closedDoc._id,
+          sessionType: 'tpv',
+          action: 'closed',
+        }).catch(() => null);
+      }
+    }
+
+    const refreshed = await listTpvRegisterSessionsByUser(req, userId);
+    const alreadyOpen = findOpenTpvRegisterSessionForPointOfSale(refreshed, pdvId);
+    if (alreadyOpen) {
+      const pdvLabel = alreadyOpen.pointOfSaleName || 'esta tienda';
+      return res.status(409).json({
+        ok: false,
+        error: `Ya hay una caja abierta en ${pdvLabel} desde ${new Date(alreadyOpen.openedAt).toLocaleString('es-ES')}. Ciérrala antes de abrir otra.`,
+        existingSessionId: alreadyOpen._id,
+        existingSession: sanitizeTpvRegisterSession(alreadyOpen),
+      });
+    }
+
     const doc = buildTpvRegisterSessionDocument(userId, session);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
@@ -1619,6 +1861,9 @@ export async function createPointOfSale(req, res) {
       codeStr = suggestNextPdvCode(rawName, codes);
     }
     if (isPdvCodeAlreadyUsed(codeStr, codes)) {
+      codeStr = suggestNextPdvCode(rawName, codes);
+    }
+    if (isPdvCodeAlreadyUsed(codeStr, codes)) {
       return badRequest(res, `Ya existe un punto de venta con el código «${codeStr}». Elige otro código.`);
     }
     const finalName = body.preserveDisplayName
@@ -1814,11 +2059,229 @@ export async function updateDeliveryConfig(req, res) {
   }
 }
 
+// ─── STAFF CONSUMPTIONS ───────────────────────────────────────────────────────
+
+async function loadDeliveryStaffConsumptionConfig(req, userId) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  const configId = `dlvconf-${userId}`;
+  let doc;
+  try { doc = await getDocument(req, db, configId); } catch { doc = null; }
+  if (!doc || doc.type !== 'delivery_config') {
+    doc = buildDeliveryConfigDocument(userId, {});
+  }
+  return sanitizeStaffConsumptionConfig(doc.staffConsumption);
+}
+
+async function registerStaffConsumptionInTpvSession(req, userId, {
+  pdvId,
+  consumptionDoc,
+  paymentMethod,
+  registeredBy,
+}) {
+  if (!pdvId) return null;
+  const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+  const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, pdvId);
+  if (!openSession) return null;
+
+  const now = new Date().toISOString();
+  const db = getDeliveryDbName();
+  const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const registerTx = {
+    id: txId,
+    type: 'staff_consumption',
+    paymentMethod: paymentMethod || 'efectivo',
+    amount: Math.round(Number(consumptionDoc.total || 0) * 100) / 100,
+    description: `Consumo equipo · ${consumptionDoc.workerName || ''} · ${consumptionDoc.itemName || ''}`.trim(),
+    staffConsumptionId: consumptionDoc._id,
+    workerId: consumptionDoc.workerId || '',
+    workerName: consumptionDoc.workerName || '',
+    date: now,
+    registeredBy: registeredBy || consumptionDoc.recordedByName || 'Sistema',
+  };
+  const updatedTxs = [...(openSession.transactions || []), registerTx];
+  const sessionDoc = buildTpvRegisterSessionDocument(userId, {
+    ...openSession,
+    transactions: updatedTxs,
+  }, openSession);
+  const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
+  const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
+  broadcastToUser(userId, 'tpv_session_updated', sanitized);
+  return sanitized;
+}
+
+export async function listStaffConsumptions(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const { workerId, month, salesPointId } = req.query || {};
+    let items = await listStaffConsumptionsByUser(req, userId);
+
+    if (workerId) {
+      const wid = String(workerId).trim();
+      items = items.filter((doc) => String(doc.workerId || '') === wid);
+    }
+    if (salesPointId) {
+      const pdv = String(salesPointId).trim();
+      items = items.filter((doc) => String(doc.salesPointId || '') === pdv);
+    }
+    if (month) {
+      const prefix = String(month).trim().slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(prefix)) {
+        items = items.filter((doc) => String(doc.createdAt || '').slice(0, 7) === prefix);
+      }
+    }
+
+    const sanitized = items.map(sanitizeStaffConsumption).filter(Boolean);
+    const summary = {
+      count: sanitized.length,
+      total: Math.round(sanitized.reduce((sum, row) => sum + Number(row.total || 0), 0) * 100) / 100,
+      cashNowTotal: Math.round(
+        sanitized.filter((row) => row.paymentMode === 'cash_now').reduce((sum, row) => sum + Number(row.total || 0), 0) * 100,
+      ) / 100,
+      payrollTotal: Math.round(
+        sanitized.filter((row) => row.paymentMode === 'payroll_deduction').reduce((sum, row) => sum + Number(row.total || 0), 0) * 100,
+      ) / 100,
+    };
+
+    return res.json({ ok: true, items: sanitized, summary });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al listar consumos del equipo' });
+  }
+}
+
+export async function createStaffConsumption(req, res) {
+  try {
+    const { userId } = req.params;
+    const body = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const workerId = String(body.workerId || '').trim();
+    const workerName = String(body.workerName || '').trim();
+    const catalogItemId = String(body.catalogItemId || '').trim();
+    const quantity = Math.max(1, Number(body.quantity || 1));
+    const paymentMode = String(body.paymentMode || '').trim();
+    const salesPointId = String(body.salesPointId || '').trim();
+    const salesPointName = String(body.salesPointName || '').trim();
+    const registerSessionId = String(body.registerSessionId || '').trim();
+    const paymentMethod = String(body.paymentMethod || 'efectivo').trim();
+
+    if (!workerId) return badRequest(res, 'Falta workerId');
+    if (!workerName) return badRequest(res, 'Falta workerName');
+    if (!catalogItemId) return badRequest(res, 'Falta catalogItemId');
+    if (!['cash_now', 'payroll_deduction'].includes(paymentMode)) {
+      return badRequest(res, 'paymentMode inválido (cash_now | payroll_deduction)');
+    }
+
+    const staffCfg = await loadDeliveryStaffConsumptionConfig(req, userId);
+    if (!staffCfg.enabled) {
+      return badRequest(res, 'Los consumos de equipo están desactivados en la configuración');
+    }
+
+    const catalogDb = getCatalogDbName();
+    await ensureDatabase(req, catalogDb);
+    let catalogItem;
+    try {
+      catalogItem = await getDocument(req, catalogDb, catalogItemId);
+    } catch {
+      catalogItem = null;
+    }
+    if (!catalogItem || catalogItem.type !== 'catalog_item' || catalogItem.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Producto no encontrado en catálogo' });
+    }
+    if (catalogItem.active === false || catalogItem.available === false) {
+      return badRequest(res, 'El producto no está disponible');
+    }
+
+    const eligible = staffCfg.eligibleCategories || [];
+    const category = String(catalogItem.category || '').trim();
+    if (eligible.length > 0 && !eligible.some((c) => String(c).trim().toLowerCase() === category.toLowerCase())) {
+      return badRequest(res, 'Este producto no está habilitado para consumo de equipo');
+    }
+
+    const unitPrice = resolveStaffUnitPrice(catalogItem, staffCfg);
+    const publicUnitPrice = Number(catalogItem.unitPrice || 0);
+    const recordedBy = String(req.callerUserId || account.user_id || '');
+    const recordedByName = String(account.fullName || account.firstName || 'Trabajador');
+
+    const doc = buildStaffConsumptionDocument(userId, {
+      workerId,
+      workerName,
+      catalogItemId,
+      itemName: catalogItem.name || '',
+      category,
+      quantity,
+      unitPrice,
+      publicUnitPrice,
+      paymentMode,
+      salesPointId,
+      salesPointName,
+      registerSessionId,
+      recordedBy,
+      recordedByName,
+      notes: String(body.notes || ''),
+    });
+
+    const db = getDeliveryDbName();
+    await ensureDatabase(req, db);
+    const saved = await putDocument(req, db, doc._id, doc);
+    const consumption = sanitizeStaffConsumption({ ...doc, _rev: saved.rev });
+
+    if (paymentMode === 'cash_now') {
+      try {
+        await registerStaffConsumptionInTpvSession(req, userId, {
+          pdvId: salesPointId,
+          consumptionDoc: consumption,
+          paymentMethod,
+          registeredBy: recordedByName,
+        });
+      } catch (regErr) {
+        console.error('[STAFF_CONSUMPTION] Error registrando en caja:', regErr?.message);
+      }
+    }
+
+    return res.status(201).json({ ok: true, consumption });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al registrar consumo del equipo' });
+  }
+}
+
 // ─── OPS CENTER ──────────────────────────────────────────────────────────────
 
 function isSameDay(dateStr, targetDate) {
   if (!dateStr) return false;
   return dateStr.slice(0, 10) === targetDate;
+}
+
+const OPS_CASH_MOVEMENT_TYPES = new Set(['cash_in', 'cash_out', 'return']);
+
+function collectOpsCashMovements(tpvSessions, targetDate, salesPointId) {
+  const pdv = salesPointId ? String(salesPointId).trim() : '';
+  const items = [];
+  for (const sess of tpvSessions || []) {
+    if (pdv && String(sess.pointOfSaleId || '') !== pdv) continue;
+    for (const tx of sess.transactions || []) {
+      if (!OPS_CASH_MOVEMENT_TYPES.has(tx.type)) continue;
+      if (!isSameDay(tx.date, targetDate)) continue;
+      items.push({
+        id: String(tx.id || `${sess._id}-${tx.date}-${tx.type}`),
+        type: tx.type,
+        amount: Number(tx.amount || 0),
+        description: String(tx.description || '').trim(),
+        date: tx.date,
+        terminalName: String(sess.terminalName || ''),
+        pointOfSaleName: String(sess.pointOfSaleName || ''),
+        workerName: String(tx.registeredBy || sess.workerName || ''),
+      });
+    }
+  }
+  return items.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8);
 }
 
 function minutesSince(dateStr) {
@@ -1838,6 +2301,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) 
   const now = new Date().toISOString();
   const threshold = config.delayThresholdMinutes || 30;
   const kitchenMax = config.kitchenSaturationThreshold || 10;
+  const discrepancyThreshold = Number(config.cashRegister?.discrepancyThreshold || 20);
 
   const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
   for (const o of orders) {
@@ -1863,7 +2327,19 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) 
     });
   }
 
+  const todayStr = new Date().toISOString().slice(0, 10);
   const openTpv = tpvSessions.filter(s => s.status === 'open');
+  const hasActiveOrders = orders.some((o) => activeStatuses.includes(o.status));
+
+  if (hasActiveOrders && openTpv.length === 0) {
+    alerts.push({
+      id: 'register_not_open_today', type: 'register_not_open', severity: 'warning',
+      title: 'Caja sin abrir',
+      message: 'Hay pedidos activos pero ninguna caja TPV está abierta hoy.',
+      route: '/saas/vertical/delivery/caja', createdAt: now,
+    });
+  }
+
   for (const s of openTpv) {
     const hours = minutesSince(s.openedAt) / 60;
     if (hours > 14) {
@@ -1871,7 +2347,36 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) 
         id: `cash_pending_${s._id}`, type: 'cash_pending_close', severity: 'warning',
         title: 'Caja pendiente de cierre',
         message: `${s.terminalName || 'Terminal'} — ${s.pointOfSaleName || 'PDV'} abierta ${Math.round(hours)}h`,
-        sessionId: s._id, route: '/saas/delivery', createdAt: now,
+        sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+      });
+    }
+  }
+
+  const pendingValidation = tpvSessions.filter(
+    (s) => s.status === 'closed' && s.closingValidationStatus === 'pending',
+  );
+  if (pendingValidation.length > 0) {
+    alerts.push({
+      id: 'cash_pending_validation', type: 'cash_pending_validation',
+      severity: pendingValidation.length > 2 ? 'critical' : 'warning',
+      title: `${pendingValidation.length} cierre${pendingValidation.length > 1 ? 's' : ''} pendiente${pendingValidation.length > 1 ? 's' : ''} de validación`,
+      message: pendingValidation.slice(0, 2).map((s) => s.pointOfSaleName || s.terminalName || 'Caja').join(', '),
+      route: '/saas/vertical/delivery/caja', createdAt: now,
+    });
+  }
+
+  const closedToday = tpvSessions.filter(
+    (s) => s.status === 'closed' && String(s.closedAt || '').startsWith(todayStr),
+  );
+  for (const s of closedToday) {
+    const diff = Math.abs(Number(s.difference || 0));
+    if (diff >= discrepancyThreshold) {
+      alerts.push({
+        id: `register_discrep_${s._id}`, type: 'register_discrepancy',
+        severity: diff >= discrepancyThreshold * 3 ? 'critical' : 'warning',
+        title: 'Descuadre de caja',
+        message: `${s.pointOfSaleName || s.terminalName || 'Caja'}: ${Number(s.difference) >= 0 ? '+' : ''}${Number(s.difference).toFixed(2)}€`,
+        sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
       });
     }
   }
@@ -1943,7 +2448,9 @@ export async function getOpsCenter(req, res) {
       const pdvs = await listPointsOfSaleByUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
-      dayOrders = dayOrders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId));
+      const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
+      const pdvName = String(pdvDoc?.name || '').trim();
+      dayOrders = dayOrders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName));
     }
     if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
     if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
@@ -2082,6 +2589,7 @@ export async function getOpsCenter(req, res) {
           return tpvSessions.filter(s => s.status === 'closed' && s.closedAt?.startsWith(todayStr)).reduce((sum, s) => sum + (s.difference || 0), 0);
         })(),
         openIncidentCount: tpvSessions.reduce((sum, s) => sum + (s.incidents || []).filter(i => !i.resolvedAt).length, 0),
+        recentCashMovements: collectOpsCashMovements(tpvSessions, targetDate, salesPointId),
       },
       kitchenStatus: {
         ordersInKitchen: inKitchen.length,

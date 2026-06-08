@@ -1,10 +1,9 @@
-import { useRef, useMemo, useCallback, useEffect, useState } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
   MapPin,
   Users,
-  LayoutDashboard,
 } from 'lucide-react';
 import type { Business, BusinessType } from '../../lib/businessApi';
 
@@ -62,33 +61,16 @@ interface BusinessCarouselProps {
   businesses: Business[];
   currentBusinessId: string | undefined;
   onSwitchBusiness: (businessId: string) => void;
-  onSelectGeneral?: () => void;
-  isGeneralActive?: boolean;
 }
 
 export function BusinessCarousel({
   businesses,
   currentBusinessId,
   onSwitchBusiness,
-  onSelectGeneral,
-  isGeneralActive = false,
 }: BusinessCarouselProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const typeGroups = useMemo(() => {
-    const groups: Record<string, number> = {};
-    for (const b of businesses) {
-      groups[b.businessType] = (groups[b.businessType] || 0) + 1;
-    }
-    return groups;
-  }, [businesses]);
-
-  const totalEmployees = useMemo(
-    () => businesses.reduce((acc, b) => acc + (b.members?.length || 0), 0),
-    [businesses],
-  );
 
   const checkScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -128,7 +110,7 @@ export function BusinessCarousel({
     el.scrollBy({ left: direction === 'left' ? -260 : 260, behavior: 'smooth' });
   }, []);
 
-  if (businesses.length <= 1) return null;
+  if (businesses.length === 0) return null;
 
   return (
     <div className="relative group/carousel -mx-1">
@@ -145,52 +127,8 @@ export function BusinessCarousel({
         className="flex gap-2.5 overflow-x-auto snap-x snap-mandatory pb-1 px-1 scroll-smooth"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
       >
-        {/* ── General Dashboard Card ── */}
-        <button
-          type="button"
-          onClick={onSelectGeneral}
-          className={`snap-start flex-shrink-0 w-[230px] p-3.5 rounded-xl border-2 transition-all duration-200 text-left hover:shadow-md hover:-translate-y-0.5 ${
-            isGeneralActive
-              ? 'border-amber-400 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/20 shadow-sm shadow-amber-200/50 dark:shadow-amber-900/20 ring-1 ring-amber-200 dark:ring-amber-800'
-              : 'border-dashed border-gray-300 dark:border-gray-600 bg-gradient-to-br from-white to-gray-50 dark:from-gray-800 dark:to-gray-850 hover:border-gray-400 dark:hover:border-gray-500'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 mb-2.5">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-sm flex-shrink-0">
-              <LayoutDashboard className="w-4 h-4 text-white" />
-            </div>
-            <div className="min-w-0">
-              <p className={`text-xs font-bold leading-tight transition-colors ${isGeneralActive ? 'text-amber-700 dark:text-amber-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                Dashboard General
-              </p>
-              <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                {businesses.length} empresas · {totalEmployees} trabajadores
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(typeGroups).slice(0, 3).map(([type, count]) => (
-              <span
-                key={type}
-                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-semibold rounded-md ${
-                  BUSINESS_TYPE_COLORS[type] || 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
-                }`}
-              >
-                {BUSINESS_TYPE_LABELS[type as BusinessType] || type}
-                {count > 1 && <span className="opacity-70">×{count}</span>}
-              </span>
-            ))}
-            {Object.keys(typeGroups).length > 3 && (
-              <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-semibold rounded-md bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                +{Object.keys(typeGroups).length - 3}
-              </span>
-            )}
-          </div>
-        </button>
-
-        {/* ── Business Cards ── */}
         {businesses.map((business) => {
-          const isActive = !isGeneralActive && currentBusinessId === business.business_id;
+          const isActive = currentBusinessId === business.business_id;
           const initials = business.name.slice(0, 2).toUpperCase();
           const typeLabel =
             BUSINESS_TYPE_LABELS[business.businessType] || business.businessType;

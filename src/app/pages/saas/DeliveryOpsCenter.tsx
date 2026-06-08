@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
@@ -22,6 +22,7 @@ import { getAuthHeaders } from '../../lib/authApi';
 import { Delivery } from './Delivery';
 import {
   getOpsCenterRequest,
+  localDateInputValue,
   pointOfSaleDisplayLabel,
   updateDeliveryOrderRequest,
   type OpsCenterData,
@@ -37,7 +38,7 @@ import { DELIVERY_LEGACY_SCREENS_HIDDEN } from '../../lib/deliverySetup';
 import {
   Activity, ChefHat, Package, Truck, CheckCircle2, Clock, AlertTriangle,
   ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
-  Timer, Users, Bell, ChevronDown, ChevronUp,
+  Timer, Users, Bell,
   Filter, X, Armchair, Boxes, BookOpen, Hash,
   Store,
   Plus,
@@ -166,6 +167,9 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
     filters.timeSlot,
   ].filter(Boolean).length;
   const sel = 'px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
+  const today = localDateInputValue();
+  const selectedDate = filters.date || today;
+  const isToday = selectedDate === today;
 
   const inner = (
     <div className="flex flex-wrap gap-2 items-center">
@@ -226,10 +230,35 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
           {config.activeTimeSlots.map(s => <option key={s.id} value={s.id}>{s.label} ({s.start}–{s.end})</option>)}
         </select>
       )}
-      <input type="date" className={sel} value={filters.date || new Date().toISOString().slice(0, 10)}
-        onChange={e => onChange({ ...filters, date: e.target.value || undefined })} />
+      <div className="flex items-center gap-1.5">
+        <input
+          type="date"
+          className={sel}
+          value={selectedDate}
+          max={today}
+          onChange={(e) => onChange({ ...filters, date: e.target.value || today })}
+        />
+        <button
+          type="button"
+          onClick={() => onChange({ ...filters, date: today })}
+          className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-colors shrink-0 ${
+            isToday
+              ? 'border-teal-600 bg-teal-600 text-white'
+              : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+          }`}
+          title={`Ver operativa de hoy (${new Date(`${today}T12:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })})`}
+        >
+          Hoy
+        </button>
+      </div>
       {ac > 0 && (
-        <button onClick={() => onChange({})} className="px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1">
+        <button
+          onClick={() => onChange({
+            date: today,
+            ...(filters.salesPointId ? { salesPointId: filters.salesPointId } : {}),
+          })}
+          className="px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1"
+        >
           <X className="w-3.5 h-3.5" /> Limpiar
         </button>
       )}
@@ -288,124 +317,214 @@ function Pipeline({ byStatus, active, onFilter }: {
 
 /* ── Alerts ───────────────────────────────────────────────────────────────── */
 
+function opsAlertSignature(alerts: OpsAlert[]): string {
+  return alerts.map((a) => a.id).sort().join('|');
+}
+
+function readOpsBannerDismissed(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeOpsBannerDismissed(key: string, signature: string) {
+  try {
+    sessionStorage.setItem(key, signature);
+  } catch {
+    /* ignore */
+  }
+}
+
 function Alerts({ alerts }: { alerts: OpsAlert[] }) {
-  const [exp, setExp] = useState(() => {
-    try {
-      return sessionStorage.getItem('deliveryOps.alertsPanelExpanded') !== 'false';
-    } catch {
-      return true;
-    }
-  });
+  const signature = useMemo(() => opsAlertSignature(alerts), [alerts]);
+  const [bannerDismissedSig, setBannerDismissedSig] = useState<string | null>(
+    () => readOpsBannerDismissed('deliveryOps.alertsBannerDismissed'),
+  );
+  const [exp, setExp] = useState(false);
   const [hide, setHide] = useState<Set<string>>(new Set());
-  const [snoozed, setSnoozed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('deliveryOps.alertsSnoozed') === '1';
-    } catch {
-      return false;
-    }
-  });
   const nav = useNavigate();
-  const vis = alerts.filter(a => !hide.has(a.id));
-  if (!vis.length) return null;
-  const crit = vis.some(a => a.severity === 'critical');
-  const bg = crit ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800' : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
-  const ICONS: Record<string, typeof AlertTriangle> = { delayed_order: Timer, kitchen_saturated: ChefHat, cash_pending_close: Wallet, critical_stock: Boxes, open_incident: AlertCircle };
-  const snooze = () => {
-    setSnoozed(true);
-    try {
-      localStorage.setItem('deliveryOps.alertsSnoozed', '1');
-    } catch { /* ignore */ }
-  };
-  const unsnooze = () => {
-    setSnoozed(false);
-    try {
-      localStorage.setItem('deliveryOps.alertsSnoozed', '0');
-    } catch { /* ignore */ }
+
+  const vis = alerts.filter((a) => !hide.has(a.id));
+  const bannerHidden = bannerDismissedSig === signature;
+  if (!vis.length || bannerHidden) return null;
+
+  const crit = vis.some((a) => a.severity === 'critical');
+  const bg = crit
+    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
+  const ICONS: Record<string, typeof AlertTriangle> = {
+    delayed_order: Timer,
+    kitchen_saturated: ChefHat,
+    cash_pending_close: Wallet,
+    cash_pending_validation: Banknote,
+    register_discrepancy: Banknote,
+    register_not_open: Banknote,
+    critical_stock: Boxes,
+    open_incident: AlertCircle,
   };
 
-  if (snoozed) {
-    const tone = crit
-      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/35'
-      : 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/35';
-    const iconBg = crit
-      ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
-      : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-500';
-    const titleCls = crit ? 'text-red-900 dark:text-red-100' : 'text-amber-950 dark:text-amber-100';
-    const subCls = crit ? 'text-red-800/85 dark:text-red-200/90' : 'text-amber-900/75 dark:text-amber-200/85';
-    return (
-      <button
-        type="button"
-        onClick={unsnooze}
-        className={`w-full rounded-xl border-2 ${tone} px-3 py-3 flex items-center gap-3 text-left shadow-sm hover:shadow-md transition-shadow`}
-        title="Mostrar y gestionar alertas"
-      >
-        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${iconBg}`}>
-          <Bell className="w-[22px] h-[22px]" aria-hidden />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className={`text-[15px] font-bold leading-tight ${titleCls}`}>
-            {vis.length} alerta{vis.length !== 1 ? 's' : ''} pendiente{vis.length !== 1 ? 's' : ''}
-          </p>
-          <p className={`text-xs font-medium mt-0.5 ${subCls}`}>Revisa incidencias y avisos del día</p>
-        </div>
-        <span
-          className={`shrink-0 inline-flex items-center rounded-lg px-3 py-2 text-sm font-bold border shadow-sm ${
+  const dismissBanner = (e: MouseEvent) => {
+    e.stopPropagation();
+    setBannerDismissedSig(signature);
+    writeOpsBannerDismissed('deliveryOps.alertsBannerDismissed', signature);
+  };
+
+  return (
+    <div className={`rounded-xl border-2 ${bg} overflow-hidden shadow-sm`}>
+      <div className="w-full px-3 py-2.5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExp((v) => !v)}
+          className="flex-1 min-w-0 flex items-center gap-2 text-left"
+        >
+          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${crit ? 'bg-red-100 dark:bg-red-900/40' : 'bg-amber-100 dark:bg-amber-900/40'}`}>
+            <Bell className={`w-4 h-4 ${crit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+          </div>
+          <div className="min-w-0">
+            <p className={`text-sm font-bold leading-tight ${crit ? 'text-red-900 dark:text-red-100' : 'text-amber-950 dark:text-amber-100'}`}>
+              {vis.length} alerta{vis.length !== 1 ? 's' : ''} pendiente{vis.length !== 1 ? 's' : ''}
+            </p>
+            <p className={`text-xs mt-0.5 ${crit ? 'text-red-800/85 dark:text-red-200/90' : 'text-amber-900/75 dark:text-amber-200/85'}`}>
+              {exp ? 'Toca para ocultar detalle' : 'Revisa incidencias y avisos del día'}
+            </p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setExp((v) => !v)}
+          className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-bold border ${
             crit
               ? 'bg-white dark:bg-gray-900 text-red-700 dark:text-red-300 border-red-200 dark:border-red-700'
               : 'bg-white dark:bg-gray-900 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
           }`}
         >
-          Ver alertas
-        </span>
-      </button>
-    );
-  }
-
-  return (
-    <div className={`rounded-lg border ${bg} overflow-hidden`}>
-      <button type="button" onClick={() => {
-          const next = !exp;
-          setExp(next);
-          try {
-            sessionStorage.setItem('deliveryOps.alertsPanelExpanded', String(next));
-          } catch { /* ignore */ }
-        }} className="w-full px-3 py-2.5 flex items-center justify-between"
-      >
-        <div className="flex items-center gap-2">
-          <Bell className={`w-3.5 h-3.5 ${crit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
-          <span className={`text-xs font-bold ${crit ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>{vis.length} alerta{vis.length !== 1 ? 's' : ''}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); snooze(); }}
-            className="px-2 py-1 rounded-lg text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-900/20 border border-gray-200/60 dark:border-gray-700/60"
-            title="Ocultar por ahora"
-          >
-            Ver luego
-          </button>
-          {exp ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
-        </div>
-      </button>
+          {exp ? 'Ocultar' : 'Ver alertas'}
+        </button>
+        <button
+          type="button"
+          onClick={dismissBanner}
+          className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-900/30 shrink-0"
+          title="Quitar aviso"
+          aria-label="Quitar aviso de alertas"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
       {exp && (
-        <div className="px-3 pb-2 space-y-1.5">
-          {vis.map(a => { const I = ICONS[a.type] || AlertTriangle; return (
-            <div key={a.id} className="flex items-start gap-2 bg-white dark:bg-gray-800 rounded-md p-2 border border-gray-100 dark:border-gray-700">
-              <I className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-500' : 'text-amber-500'}`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{a.title}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{a.message}</p>
+        <div className="px-3 pb-3 space-y-1.5 border-t border-black/5 dark:border-white/5 pt-2">
+          {vis.map((a) => {
+            const I = ICONS[a.type] || AlertTriangle;
+            return (
+              <div key={a.id} className="flex items-start gap-2 bg-white dark:bg-gray-800 rounded-lg p-2.5 border border-gray-100 dark:border-gray-700">
+                <I className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-500' : 'text-amber-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{a.title}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{a.message}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => nav(a.route, { state: { returnToOps: true } })}
+                    className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+                  >
+                    Ver
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHide((p) => new Set(p).add(a.id))}
+                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg"
+                    title="Quitar esta alerta"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => nav(a.route, { state: { returnToOps: true } })} className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg">Ver</button>
-                <button onClick={() => setHide(p => new Set(p).add(a.id))} className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"><X className="w-3.5 h-3.5" /></button>
-              </div>
-            </div>
-          ); })}
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+/* ── Caja status banner ───────────────────────────────────────────────────── */
+
+function cashBannerSignature(cashStatus: NonNullable<OpsCenterData['cashStatus']>): string {
+  const pendingClose = cashStatus.pendingClose || 0;
+  const pendingValidation = cashStatus.pendingValidation || 0;
+  const discrepancy = Math.abs(cashStatus.todayDiscrepancy || 0);
+  const openCount = cashStatus.openTpvSessions?.length || 0;
+  return `${openCount}|${pendingClose}|${pendingValidation}|${Math.round(discrepancy)}`;
+}
+
+function CashStatusBanner({
+  cashStatus,
+  onNavigate,
+}: {
+  cashStatus: OpsCenterData['cashStatus'] | undefined;
+  onNavigate: (path: string) => void;
+}) {
+  const signature = cashStatus ? cashBannerSignature(cashStatus) : '';
+  const [dismissedSig, setDismissedSig] = useState<string | null>(
+    () => readOpsBannerDismissed('deliveryOps.cashBannerDismissed'),
+  );
+
+  if (!cashStatus) return null;
+  const pendingClose = cashStatus.pendingClose || 0;
+  const pendingValidation = cashStatus.pendingValidation || 0;
+  const discrepancy = Math.abs(cashStatus.todayDiscrepancy || 0);
+  const openCount = cashStatus.openTpvSessions?.length || 0;
+  const hasIssue = pendingClose > 0 || pendingValidation > 0 || discrepancy >= 20;
+  if (!hasIssue && openCount === 0) return null;
+  if (dismissedSig === signature) return null;
+
+  const dismiss = (e: MouseEvent) => {
+    e.stopPropagation();
+    setDismissedSig(signature);
+    writeOpsBannerDismissed('deliveryOps.cashBannerDismissed', signature);
+  };
+
+  return (
+    <div className="relative rounded-xl border-2 border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shadow-sm">
+      <button
+        type="button"
+        onClick={() => onNavigate('/saas/vertical/delivery/caja')}
+        className="w-full text-left px-4 py-3 pr-12 hover:bg-amber-100/80 dark:hover:bg-amber-900/20 transition-colors rounded-xl"
+      >
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
+            <Banknote className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-amber-900 dark:text-amber-100">Panel de caja</p>
+            <p className="text-xs text-amber-800/90 dark:text-amber-200/90 mt-0.5">
+              {openCount > 0 ? `${openCount} caja${openCount !== 1 ? 's' : ''} abierta${openCount !== 1 ? 's' : ''}` : 'Sin caja abierta'}
+              {pendingValidation > 0 ? ` · ${pendingValidation} cierre${pendingValidation !== 1 ? 's' : ''} por validar` : ''}
+              {pendingClose > 0 ? ` · ${pendingClose} sin cerrar (+14h)` : ''}
+              {discrepancy >= 20 ? ` · descuadre hoy ${discrepancy.toFixed(2)}€` : ''}
+            </p>
+          </div>
+          <span className="text-xs font-bold text-amber-800 dark:text-amber-300 shrink-0 mt-1">Abrir →</span>
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={dismiss}
+        className="absolute top-2.5 right-2.5 p-2 rounded-lg text-amber-700/70 dark:text-amber-300/70 hover:text-amber-900 dark:hover:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+        title="Quitar aviso"
+        aria-label="Quitar aviso de caja"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function cajaAlertBadge(cashStatus: OpsCenterData['cashStatus'] | undefined): number {
+  if (!cashStatus) return 0;
+  return (cashStatus.pendingClose || 0) + (cashStatus.pendingValidation || 0);
 }
 
 /* ── Quick Access ─────────────────────────────────────────────────────────── */
@@ -417,16 +536,15 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueC
   pedidosQueueCount: number;
   activationFocus?: string | null;
 }) {
-  type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean };
+  type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean; highlight?: boolean };
   const items: QItem[] = [
-    // Solo vertical Delivery (coherente con Sidebar)
     { l: 'TPV rápido', i: Zap, r: '/saas/vertical/delivery/tpv', b: null, v: true },
+    { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true, highlight: cashPend > 0 },
     { l: 'Pedidos', i: Truck, r: '/saas/delivery', b: pedidosQueueCount > 0 ? pedidosQueueCount : null, v: !DELIVERY_LEGACY_SCREENS_HIDDEN },
     { l: 'Cocina', i: ChefHat, r: '/saas/delivery-kitchen', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
     { l: 'Montaje', i: ClipboardCheck, r: '/saas/delivery-montaje', b: kpis?.byStatus.listo ?? null, v: cfg?.hasAssemblyStation !== false },
     { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
     { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: !DELIVERY_LEGACY_SCREENS_HIDDEN && cfg?.hasPhysicalTables === true },
-    { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true },
     { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
     { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },
@@ -443,7 +561,9 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueC
           data-activation-field={activationKey}
           onClick={() => onNavigate(x.r)}
           className={`flex flex-col items-center justify-center gap-2 px-3 py-3.5 rounded-xl border-2 bg-white dark:bg-gray-800 hover:border-amber-400/80 dark:hover:border-amber-600/50 hover:bg-amber-50/40 dark:hover:bg-amber-950/20 hover:shadow-md active:scale-[0.98] transition-all min-w-[88px] sm:min-w-[102px] shrink-0 relative overflow-visible shadow-sm ${
-            highlighted
+            highlighted || (x.highlight && x.b)
+              ? 'activation-field-highlight border-amber-500 dark:border-amber-500 ring-2 ring-amber-300/50'
+              : highlighted
               ? 'activation-field-highlight border-amber-500 dark:border-amber-500'
               : 'border-gray-200 dark:border-gray-600'
           }`}
@@ -615,9 +735,13 @@ function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
 
 /* ── Cash Widget ─────────────────────────────────────────────────────────── */
 
-function CashW({ cs }: { cs: OpsCenterData['cashStatus'] | null }) {
+function CashW({ cs, onNavigate, opsDate }: { cs: OpsCenterData['cashStatus'] | null; onNavigate: (path: string) => void; opsDate?: string }) {
   if (!cs) return null;
   const tot = cs.openTpvSessions.length + cs.openDriverSessions.length;
+  const movements = cs.recentCashMovements || [];
+  const movLabels: Record<string, string> = { cash_in: 'Entrada', cash_out: 'Salida', return: 'Devolución' };
+  const isToday = opsDate === localDateInputValue();
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
@@ -626,19 +750,58 @@ function CashW({ cs }: { cs: OpsCenterData['cashStatus'] | null }) {
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Caja</h3>
           <span className="px-2 py-0.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 rounded-full text-xs font-bold">{tot}</span>
         </div>
-        {cs.pendingClose > 0 && <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-xs font-bold animate-pulse">{cs.pendingClose} cierre pend.</span>}
+        <div className="flex items-center gap-2">
+          {cs.pendingClose > 0 && <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-xs font-bold animate-pulse">{cs.pendingClose} cierre pend.</span>}
+          <button
+            type="button"
+            onClick={() => onNavigate('/saas/vertical/delivery/caja')}
+            className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+          >
+            Ver caja →
+          </button>
+        </div>
       </div>
       <div className="p-3">
-        <div className="text-center mb-2">
+        <div className="text-center mb-3">
           <p className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{eur(cs.totalCashInRegisters)} €</p>
-          <p className="text-xs text-gray-500 mt-0.5">Efectivo en cajas</p>
+          <p className="text-xs text-gray-500 mt-0.5">Efectivo en cajas abiertas</p>
         </div>
-        {cs.openTpvSessions.slice(0, 3).map(s => (
+        {cs.openTpvSessions.slice(0, 2).map(s => (
           <div key={s._id} className="flex items-center justify-between text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg px-3 py-2 mb-1.5">
-            <span className="font-semibold text-gray-700 dark:text-gray-300">{s.terminalName || 'Terminal'} — {s.pointOfSaleName || 'PDV'}</span>
-            <span className="text-gray-500">{s.workerName || '—'} · {ago(s.openedAt)}</span>
+            <span className="font-semibold text-gray-700 dark:text-gray-300 truncate">{s.terminalName || 'Terminal'} — {s.pointOfSaleName || 'PDV'}</span>
+            <span className="text-gray-500 shrink-0 ml-2">{s.workerName || '—'} · {ago(s.openedAt)}</span>
           </div>
         ))}
+        <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+          <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+            Movimientos de caja{isToday ? ' hoy' : ''}
+          </p>
+          {movements.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-2">Sin entradas, salidas ni devoluciones manuales</p>
+          ) : (
+            <div className="space-y-1.5 max-h-[168px] overflow-y-auto">
+              {movements.map((m) => (
+                <div key={m.id} className="flex items-start justify-between gap-2 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg px-2.5 py-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-gray-400 tabular-nums">
+                        {new Date(m.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${m.type === 'cash_in' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'}`}>
+                        {movLabels[m.type] || m.type}
+                      </span>
+                      <span className="text-gray-500 truncate">{m.terminalName || m.pointOfSaleName || 'TPV'}</span>
+                    </div>
+                    <p className="text-gray-600 dark:text-gray-400 truncate mt-0.5">{m.description || m.workerName || '—'}</p>
+                  </div>
+                  <span className={`font-bold shrink-0 tabular-nums ${m.type === 'cash_in' ? 'text-green-600' : 'text-red-600'}`}>
+                    {m.type === 'cash_in' ? '+' : '−'}{m.amount.toFixed(2)}€
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -870,7 +1033,15 @@ export function DeliveryOpsCenter() {
     }, 500);
     clearActivationFocus();
   }, [activationFocus, clearActivationFocus]);
-  const [filters, setFilters] = useState<OpsCenterFilters>({});
+  const [filters, setFilters] = useState<OpsCenterFilters>(() => ({ date: localDateInputValue() }));
+  const syncedTodayRef = useRef(false);
+
+  useEffect(() => {
+    if (syncedTodayRef.current) return;
+    syncedTodayRef.current = true;
+    const today = localDateInputValue();
+    setFilters((f) => (f.date === today ? f : { ...f, date: today }));
+  }, []);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sseOk, setSseOk] = useState(false);
   const [lastUp, setLastUp] = useState<Date | null>(null);
@@ -1022,25 +1193,14 @@ export function DeliveryOpsCenter() {
     return DELIVERY_LEGACY_SCREENS_HIDDEN ? tabs.filter((t) => t.id !== 'pedidos') : tabs;
   }, [pedidosQueueCount]);
 
-  // Fecha LOCAL del navegador (YYYY-MM-DD). Evita depender de la zona horaria
-  // del servidor y garantiza que el panel muestre el día real del usuario.
-  const todayLocal = useCallback(() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }, []);
-
   const load = useCallback(async () => {
     if (!authUserId) return;
     try {
-      // Si el usuario no ha forzado una fecha, mandamos siempre el "hoy" local.
-      const effectiveFilters = filters.date ? filters : { ...filters, date: todayLocal() };
+      const effectiveFilters = { ...filters, date: filters.date || localDateInputValue() };
       const r = await getOpsCenterRequest(authUserId, effectiveFilters);
       setData(r); setLastUp(new Date());
     } catch (e) { console.error('ops-center error', e); } finally { setLoading(false); }
-  }, [authUserId, filters, todayLocal]);
+  }, [authUserId, filters]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1049,17 +1209,23 @@ export function DeliveryOpsCenter() {
     return () => { if (poll.current) clearInterval(poll.current); };
   }, [load]);
 
-  // Refresco automático al cambiar de día. Vigila cada minuto y, si el día local
-  // cambia respecto al último cargado, dispara un `load()` inmediato para que
-  // el panel pase solo al día siguiente sin necesidad de recargar la página.
+  // Al cambiar de día local, volver a hoy si el panel seguía en el día anterior.
   useEffect(() => {
     const tick = setInterval(() => {
-      if (data?.date && data.date !== todayLocal()) {
+      const today = localDateInputValue();
+      setFilters((f) => {
+        if (f.date === today) return f;
+        if (data?.date && f.date === data.date) {
+          return { ...f, date: today };
+        }
+        return f;
+      });
+      if (data?.date && data.date !== today) {
         load();
       }
     }, 60_000);
     return () => clearInterval(tick);
-  }, [data?.date, load, todayLocal]);
+  }, [data?.date, load]);
 
   const handlers = useMemo(() => ({
     'delivery:order_created': () => load(),
@@ -1188,7 +1354,7 @@ export function DeliveryOpsCenter() {
               <QuickAccess
                 cfg={cfg}
                 kpis={data?.kpis || null}
-                cashPend={data?.cashStatus?.pendingClose || 0}
+                cashPend={cajaAlertBadge(data?.cashStatus)}
                 incidents={data?.kpis?.byStatus?.incident || 0}
                 onNavigate={quickNav}
                 pedidosQueueCount={pedidosQueueCount}
@@ -1228,12 +1394,14 @@ export function DeliveryOpsCenter() {
 
             {data?.alerts && data.alerts.length > 0 && <Alerts alerts={data.alerts} />}
 
+            <CashStatusBanner cashStatus={data?.cashStatus} onNavigate={quickNav} />
+
             {data?.kpis && <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />}
 
             <QuickAccess
               cfg={cfg}
               kpis={data?.kpis || null}
-              cashPend={data?.cashStatus?.pendingClose || 0}
+              cashPend={cajaAlertBadge(data?.cashStatus)}
               incidents={data?.kpis?.byStatus?.incident || 0}
               onNavigate={quickNav}
               pedidosQueueCount={pedidosQueueCount}
@@ -1268,7 +1436,7 @@ export function DeliveryOpsCenter() {
                     brandLabels={data?.brandLabels}
                   />
                 )}
-                <CashW cs={data?.cashStatus || null} />
+                <CashW cs={data?.cashStatus || null} onNavigate={quickNav} opsDate={data?.date || filters.date} />
                 <IncidentsW orders={active} onNavigate={navFromOps} />
                 {!DELIVERY_LEGACY_SCREENS_HIDDEN && cfg?.hasPhysicalTables && cfg.tableCount > 0 && (
                   <TablesW cfg={cfg} orders={active} />

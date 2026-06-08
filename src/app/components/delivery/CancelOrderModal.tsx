@@ -16,16 +16,19 @@ interface Props {
   onConfirm: (reason: string) => void;
   onClose: () => void;
   loading?: boolean;
+  /** Textos para eliminar en lugar de cancelar (misma acción en backend). */
+  mode?: 'cancel' | 'delete';
 }
 
-export function CancelOrderModal({ order, onConfirm, onClose, loading }: Props) {
+export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'cancel' }: Props) {
   const [reason, setReason] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('');
   const finalReason = selectedPreset === 'otro' ? reason : (selectedPreset || reason);
   const isValid = finalReason.trim().length >= 10;
+  const isDelete = mode === 'delete';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md animate-in zoom-in-95">
         <div className="p-6">
@@ -34,7 +37,9 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading }: Props) 
               <AlertTriangle className="w-5 h-5 text-red-600" />
             </div>
             <div>
-              <h3 className="font-bold text-gray-900 dark:text-gray-100">Cancelar pedido</h3>
+              <h3 className="font-bold text-gray-900 dark:text-gray-100">
+                {isDelete ? 'Eliminar pedido' : 'Cancelar pedido'}
+              </h3>
               <p className="text-sm text-gray-500">#{order.orderNumber} — {order.customerName}</p>
             </div>
             <button onClick={onClose} className="ml-auto p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl">
@@ -46,7 +51,9 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading }: Props) 
             <div className="flex justify-between"><span className="text-gray-500">{order.items.length} productos</span><span className="font-bold text-gray-900 dark:text-gray-100">{order.totalAmount.toFixed(2)}€</span></div>
           </div>
 
-          <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Motivo de cancelación *</label>
+          <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">
+            {isDelete ? 'Motivo de eliminación *' : 'Motivo de cancelación *'}
+          </label>
           <div className="flex flex-wrap gap-2 mb-3">
             {PRESET_REASONS.map((preset) => (
               <button key={preset} onClick={() => { setSelectedPreset(preset); setReason(''); }}
@@ -78,7 +85,9 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading }: Props) 
           </button>
           <button onClick={() => isValid && onConfirm(finalReason.trim())} disabled={!isValid || loading}
             className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            {loading ? 'Cancelando...' : 'Cancelar pedido'}
+            {loading
+              ? (isDelete ? 'Eliminando...' : 'Cancelando...')
+              : (isDelete ? 'Eliminar pedido' : 'Cancelar pedido')}
           </button>
         </div>
       </div>

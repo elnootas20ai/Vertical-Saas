@@ -7,6 +7,8 @@ import {
 } from '../controllers/alertController.js';
 import {
   listAlerts,
+  listAlertHistory,
+  getAlertTimeline,
   getAlertSummary,
   updateAlertStatus,
   bulkUpdateAlertStatus,
@@ -18,7 +20,9 @@ const alertRouter = Router();
 
 // ── Centro de alertas globales (por businessId) ──
 alertRouter.get('/:businessId/center', listAlerts);
+alertRouter.get('/:businessId/history', listAlertHistory);
 alertRouter.get('/:businessId/summary', getAlertSummary);
+alertRouter.get('/:businessId/:alertId/timeline', getAlertTimeline);
 alertRouter.put('/:businessId/bulk-status', bulkUpdateAlertStatus);
 alertRouter.put('/:businessId/:alertId/status', updateAlertStatus);
 alertRouter.put('/:businessId/:alertId/assign', assignAlert);

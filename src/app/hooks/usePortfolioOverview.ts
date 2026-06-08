@@ -28,6 +28,11 @@ import {
 } from '../lib/portfolioMetrics';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import type { WorkCenter } from '../lib/workCentersApi';
+import {
+  fetchTeamDashboardSnapshot,
+  type TeamDashboardSnapshot,
+  EMPTY_TEAM_DASHBOARD_SNAPSHOT,
+} from '../lib/teamDashboardApi';
 
 export type PortfolioStore = {
   id: string;
@@ -62,6 +67,7 @@ export type PortfolioBusiness = {
   pdvIds: string[];
   metrics: PortfolioMetrics;
   isDelivery: boolean;
+  team: TeamDashboardSnapshot;
 };
 
 export type PortfolioTotals = {
@@ -75,6 +81,9 @@ export type PortfolioTotals = {
   ordersMonth: number;
   activeOrders: number;
   openCashRegisters: number;
+  clockedInNow: number;
+  pendingVacations: number;
+  payslipsThisMonth: number;
 };
 
 const EMPTY_FINANCE: PortfolioFinanceTotals = {
@@ -258,35 +267,45 @@ export function usePortfolioOverview(
         }),
       );
 
-      const loaded: PortfolioBusiness[] = structures.map((s) => {
-        const brandsBase = buildBrandRows(s.brandsRaw, s.stores);
-        let metrics = emptyPortfolioMetrics();
+      const loaded: PortfolioBusiness[] = await Promise.all(
+        structures.map(async (s) => {
+          const brandsBase = buildBrandRows(s.brandsRaw, s.stores);
+          let metrics = emptyPortfolioMetrics();
 
-        if (s.isDelivery && s.dataUserId && s.pdvIds.length > 0) {
-          const orders = ordersByUser.get(s.dataUserId) || [];
-          const sessions = sessionsByUser.get(s.dataUserId) || [];
-          const createdMap = pdvCreatedAtMap(s.pointsOfSale);
-          const primaryPdv = pickPrimaryPdvIdFromList(s.pdvIds, createdMap);
-          metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey);
-          metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
-        }
+          if (s.isDelivery && s.dataUserId && s.pdvIds.length > 0) {
+            const orders = ordersByUser.get(s.dataUserId) || [];
+            const sessions = sessionsByUser.get(s.dataUserId) || [];
+            const createdMap = pdvCreatedAtMap(s.pointsOfSale);
+            const primaryPdv = pickPrimaryPdvIdFromList(s.pdvIds, createdMap);
+            metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey);
+            metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
+          }
 
-        const brands = enrichBrandsWithRevenue(brandsBase, metrics);
+          const brands = enrichBrandsWithRevenue(brandsBase, metrics);
+          const members = (s.business.members || []).map((m) => ({
+            user_id: m.user_id,
+            fullName: m.fullName,
+          }));
+          const team = await fetchTeamDashboardSnapshot(s.business.business_id, members).catch(
+            () => ({ ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: members.length }),
+          );
 
-        return {
-          businessId: s.business.business_id,
-          business: s.business,
-          brands,
-          stores: s.stores,
-          memberCount: s.business.members?.length ?? 0,
-          brandCount: brands.length,
-          storeCount: s.stores.length,
-          pdvCount: s.pdvIds.length,
-          pdvIds: s.pdvIds,
-          metrics,
-          isDelivery: s.isDelivery,
-        };
-      });
+          return {
+            businessId: s.business.business_id,
+            business: s.business,
+            brands,
+            stores: s.stores,
+            memberCount: s.business.members?.length ?? 0,
+            brandCount: brands.length,
+            storeCount: s.stores.length,
+            pdvCount: s.pdvIds.length,
+            pdvIds: s.pdvIds,
+            metrics,
+            isDelivery: s.isDelivery,
+            team,
+          };
+        }),
+      );
 
       setFinance(financeTotals);
       setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
@@ -324,6 +343,9 @@ export function usePortfolioOverview(
     ordersMonth: rows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
     activeOrders: rows.reduce((s, r) => s + r.metrics.activeOrders, 0),
     openCashRegisters: rows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
+    clockedInNow: rows.reduce((s, r) => s + r.team.clockedInNow, 0),
+    pendingVacations: rows.reduce((s, r) => s + r.team.pendingVacationRequests, 0),
+    payslipsThisMonth: rows.reduce((s, r) => s + r.team.payslipsThisMonth, 0),
   };
 
   return { rows, totals, finance, loading, error, reload };

@@ -29,9 +29,20 @@ function getSchedulesDbName() {
 
 const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 
+function getAuthUserId(req) {
+  return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+}
+
 function getMember(business, userId) {
   if (!business?.members) return null;
   return business.members.find((m) => m.user_id === userId) || null;
+}
+
+function allBusinessMemberIds(business) {
+  const ids = new Set((business.members || []).map((m) => m.user_id).filter(Boolean));
+  const ownerId = String(business.owner_user_id || '').trim();
+  if (ownerId) ids.add(ownerId);
+  return Array.from(ids);
 }
 
 function getSubordinateIds(business, orgchart, userId) {
@@ -64,12 +75,21 @@ function getSubordinateIds(business, orgchart, userId) {
 }
 
 async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
-  const member = getMember(business, requesterId);
-  if (!member) return [];
+  if (!requesterId) return [];
 
-  if (ADMIN_ROLES.has(member.role)) {
-    return business.members.map((m) => m.user_id);
+  const member = getMember(business, requesterId);
+  const ownerId = String(business.owner_user_id || '').trim();
+  const authRole = String(req.authUser?.role || '').trim();
+  const isManager =
+    (member && ADMIN_ROLES.has(member.role))
+    || ownerId === requesterId
+    || (authRole === 'Admin' && ownerId === requesterId);
+
+  if (isManager) {
+    return allBusinessMemberIds(business);
   }
+
+  if (!member) return [];
 
   const subordinateIds = getSubordinateIds(business, orgchart, requesterId);
   if (subordinateIds && subordinateIds.length > 0) {
@@ -97,7 +117,141 @@ function buildMemberMap(business) {
   for (const m of business.members || []) {
     map[m.user_id] = { fullName: m.fullName, role: m.role, email: m.email, branch_id: m.branch_id };
   }
+  const ownerId = String(business.owner_user_id || '').trim();
+  if (ownerId && !map[ownerId]) {
+    map[ownerId] = {
+      fullName: business.name ? `${business.name} (titular)` : 'Titular',
+      role: 'Admin',
+      email: business.email || '',
+      branch_id: '',
+    };
+  }
   return map;
+}
+
+function displayNameFromAccount(account) {
+  if (!account) return '';
+  return String(
+    account.fullName
+    || [account.firstName, account.lastName].filter(Boolean).join(' ')
+    || account.email
+    || '',
+  ).trim();
+}
+
+/** Nombre legible para UI; nunca devolver el UUID crudo. */
+function resolveMemberLabel(memberMap, memberId, storedName = '') {
+  const info = memberMap[memberId] || {};
+  const stored = String(storedName || '').trim();
+  const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored);
+  if (stored && !looksLikeUuid) return stored;
+  return info.fullName || info.email || 'Sin nombre';
+}
+
+async function enrichMemberMap(req, business) {
+  const map = buildMemberMap(business);
+  const ids = allBusinessMemberIds(business);
+  await Promise.all(
+    ids.map(async (userId) => {
+      if (map[userId]?.fullName?.trim()) return;
+      try {
+        const account = await findAccountByUserId(req, userId);
+        const name = displayNameFromAccount(account);
+        if (!map[userId]) {
+          map[userId] = { fullName: '', role: 'Usuario', email: '', branch_id: '' };
+        }
+        if (name) map[userId].fullName = name;
+        if (account?.email && !map[userId].email) map[userId].email = String(account.email).trim();
+        if (account?.role && map[userId].role === 'Usuario') map[userId].role = account.role;
+      } catch {
+        /* cuenta no encontrada */
+      }
+    }),
+  );
+  for (const userId of ids) {
+    if (!map[userId]) map[userId] = { fullName: '', role: 'Usuario', email: '', branch_id: '' };
+    if (!map[userId].fullName?.trim()) {
+      map[userId].fullName = map[userId].email || 'Sin nombre';
+    }
+  }
+  return map;
+}
+
+function isDemoTeamMember(memberMap, memberId, memberRow = null) {
+  const info = memberMap[memberId] || {};
+  const email = String(memberRow?.email || info.email || '').trim().toLowerCase();
+  const name = String(memberRow?.fullName || info.fullName || '').trim();
+  if (email.endsWith('@test.local')) return true;
+  if (/^demo(\s|$)/i.test(name)) return true;
+  return false;
+}
+
+/** Miembros reales del business (no cuentas demo / test). */
+function listRealTeamMemberIds(business, visibleIds, memberMap) {
+  const ids = new Set();
+  for (const m of business.members || []) {
+    const uid = String(m?.user_id || '').trim();
+    if (!uid || !visibleIds.includes(uid)) continue;
+    if (m.status === 'inactive' || m.deletedAt) continue;
+    if (isDemoTeamMember(memberMap, uid, m)) continue;
+    ids.add(uid);
+  }
+  const ownerId = String(business.owner_user_id || '').trim();
+  if (ownerId && visibleIds.includes(ownerId) && !isDemoTeamMember(memberMap, ownerId)) {
+    ids.add(ownerId);
+  }
+  return Array.from(ids);
+}
+
+function dedupeClockinsByMemberDate(records) {
+  const byKey = new Map();
+  const rank = (r) => {
+    if (r.status === 'active' || r.status === 'break') return 3;
+    if (r.status === 'completed') return 2;
+    return 1;
+  };
+  for (const r of records) {
+    const key = `${r.member_id}:${r.date}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, r);
+      continue;
+    }
+    const rRank = rank(r);
+    const pRank = rank(prev);
+    if (rRank > pRank || (rRank === pRank && String(r.updatedAt || '') > String(prev.updatedAt || ''))) {
+      byKey.set(key, r);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function resolveMemberShiftForDate(scheduleDocs, memberId, dateStr) {
+  const targetMs = new Date(`${dateStr}T00:00:00`).getTime();
+  const weekday = WEEKDAYS_MAP[new Date(`${dateStr}T00:00:00`).getDay()];
+  let best = null;
+  let bestWs = -Infinity;
+  for (const doc of scheduleDocs) {
+    if (doc.type !== 'schedule' || doc.member_id !== memberId) continue;
+    const ws = new Date(`${doc.week_start}T00:00:00`).getTime();
+    if (Number.isNaN(ws) || ws > targetMs) continue;
+    if (ws >= bestWs) {
+      bestWs = ws;
+      best = doc;
+    }
+  }
+  const shift = best?.weekly?.[weekday];
+  if (!shift?.enabled) return null;
+  return { start: shift.start, end: shift.end };
+}
+
+function attachScheduleToRecord(record, shift) {
+  if (!shift) return record;
+  return {
+    ...record,
+    scheduled_start: record.scheduled_start || shift.start,
+    scheduled_end: record.scheduled_end || shift.end,
+  };
 }
 
 // ─── List clockins (role-aware) ───────────────────────────────────────────────
@@ -107,7 +261,7 @@ export async function listClockins(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -116,23 +270,77 @@ export async function listClockins(req, res) {
     const orgchart = await loadOrgChart(req, businessId);
     const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
 
+    const dateFilter = req.query.date ? String(req.query.date).slice(0, 10) : null;
+    const memberIdFilter = req.query.memberId ? String(req.query.memberId) : null;
+
     let records = await listClockinsByBusiness(req, businessId);
 
-    if (req.query.date) {
-      records = records.filter((r) => r.date === req.query.date);
+    if (dateFilter) {
+      records = records.filter((r) => r.date === dateFilter);
     }
-    if (req.query.memberId) {
-      records = records.filter((r) => r.member_id === req.query.memberId);
+    if (memberIdFilter) {
+      records = records.filter((r) => r.member_id === memberIdFilter);
     }
 
     records = records.filter((r) => visibleIds.includes(r.member_id));
+    records = dedupeClockinsByMemberDate(records);
 
-    const memberMap = buildMemberMap(business);
-    const enriched = records.map((r) => ({
+    const memberMap = await enrichMemberMap(req, business);
+    const enrichRecord = (r) => ({
       ...r,
-      member_role: memberMap[r.member_id]?.role || 'Usuario',
-      member_email: memberMap[r.member_id]?.email || '',
-    }));
+      member_role: memberMap[r.member_id]?.role || r.member_role || 'Usuario',
+      member_email: memberMap[r.member_id]?.email || r.member_email || '',
+      member_name: resolveMemberLabel(memberMap, r.member_id, r.member_name),
+    });
+
+    const recordsOnly = String(req.query.recordsOnly || '') === '1';
+
+    // Vista del día: una fila por miembro REAL del equipo (fichado o sin fichar).
+    if (dateFilter && !memberIdFilter && !recordsOnly) {
+      const scheduleDocs = await loadScheduleDocs(req, businessId);
+      const teamIds = listRealTeamMemberIds(business, visibleIds, memberMap);
+      const recordByMember = new Map(records.map((r) => [r.member_id, r]));
+      const enriched = teamIds.map((mid) => {
+        const shift = resolveMemberShiftForDate(scheduleDocs, mid, dateFilter);
+        const existing = recordByMember.get(mid);
+        if (existing) {
+          return attachScheduleToRecord(enrichRecord(existing), shift);
+        }
+        const info = memberMap[mid] || {};
+        return {
+          _id: `teamday:${dateFilter}:${mid}`,
+          type: 'clockin',
+          business_id: businessId,
+          member_id: mid,
+          member_name: resolveMemberLabel(memberMap, mid),
+          date: dateFilter,
+          entries: [],
+          totalMinutes: 0,
+          breakMinutes: 0,
+          status: 'offline',
+          notes: '',
+          scheduled_start: shift?.start,
+          scheduled_end: shift?.end,
+          member_role: info.role || 'Usuario',
+          member_email: info.email || '',
+          roster_placeholder: true,
+        };
+      });
+
+      enriched.sort((a, b) => {
+        const roleRank = (role) => (role === 'Admin' || role === 'Gerente' ? 0 : 1);
+        const byRole = roleRank(a.member_role) - roleRank(b.member_role);
+        if (byRole !== 0) return byRole;
+        return (a.member_name || '').localeCompare(b.member_name || '', 'es');
+      });
+
+      return res.json({ ok: true, clockins: enriched });
+    }
+
+    const enriched = records.map(enrichRecord);
+    enriched.sort(
+      (a, b) => b.date.localeCompare(a.date) || (a.member_name || '').localeCompare(b.member_name || '', 'es'),
+    );
 
     return res.json({ ok: true, clockins: enriched });
   } catch (error) {
@@ -147,7 +355,7 @@ export async function listActiveNow(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
@@ -165,10 +373,10 @@ export async function listActiveNow(req, res) {
           visibleIds.includes(r.member_id),
       );
 
-    const memberMap = buildMemberMap(business);
+    const memberMap = await enrichMemberMap(req, business);
     const enriched = active.map((r) => ({
       member_id: r.member_id,
-      member_name: r.member_name,
+      member_name: resolveMemberLabel(memberMap, r.member_id, r.member_name),
       member_role: memberMap[r.member_id]?.role || 'Usuario',
       status: r.status,
       clock_in: r.entries?.find((e) => e.type === 'clock_in')?.time || null,
@@ -188,7 +396,7 @@ export async function getStats(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
@@ -308,7 +516,7 @@ export async function getPerformance(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
@@ -389,7 +597,7 @@ export async function adjustClockinEntry(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -478,7 +686,7 @@ export async function getOrgClockStatus(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
@@ -545,7 +753,7 @@ export async function getAbsenteeism(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -652,7 +860,7 @@ export async function getOvertime(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -757,7 +965,7 @@ export async function getPayrollSummary(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -891,7 +1099,7 @@ export async function exportClockins(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -945,7 +1153,7 @@ export async function crossCheck(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -1082,7 +1290,7 @@ export async function getDailySummary(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -1143,7 +1351,7 @@ export async function getDailySummary(req, res) {
         lateCount += 1;
         offenders.push({
           memberId: rec.member_id,
-          memberName: rec.member_name || '',
+          memberName: resolveMemberLabel(memberMap, rec.member_id, rec.member_name),
           lateMinutes: diffMin,
         });
       } else {
@@ -1156,7 +1364,7 @@ export async function getDailySummary(req, res) {
 
     const clockedIds = new Set(dayClockins.map((r) => r.member_id));
     const noShow = scheduledIds.filter((id) => !clockedIds.has(id));
-    const memberMap = buildMemberMap(business);
+    const memberMap = await enrichMemberMap(req, business);
 
     return res.json({
       ok: true,
@@ -1166,7 +1374,7 @@ export async function getDailySummary(req, res) {
       noShow: noShow.length,
       noShowMembers: noShow.map((id) => ({
         memberId: id,
-        memberName: memberMap[id]?.fullName || '',
+        memberName: resolveMemberLabel(memberMap, id),
         role: memberMap[id]?.role || '',
       })),
       onTime,
@@ -1343,7 +1551,7 @@ export async function notifyClockinEvent(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const {
@@ -1469,7 +1677,7 @@ export async function notifyClockinEvent(req, res) {
       }
     }
 
-    const route = `/saas/equipo/fichajes?memberId=${encodeURIComponent(memberId)}`;
+    const route = `/saas/clockins?memberId=${encodeURIComponent(memberId)}`;
     const metadata = {
       businessId,
       memberId,

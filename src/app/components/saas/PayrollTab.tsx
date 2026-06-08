@@ -5,21 +5,27 @@ import {
   Download,
   FileText,
   Filter,
+  Files,
   Plus,
   Search,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { AuthUser } from '../../lib/authApi';
 import {
   createPayrollDocumentRequest,
   deletePayrollDocumentRequest,
+  finalizePayrollDocumentUpload,
+  payrollUploadSuccessMessage,
   listPayrollDocumentsRequest,
   PAYROLL_DOC_TYPE_LABELS,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
+import { payrollBulkSummaryMessage } from '../../lib/payrollBulkUpload';
+import { PayrollBulkUploadModal } from './PayrollBulkUploadModal';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -116,6 +122,7 @@ function UploadModal({ members, currentUser, onClose, onUploaded }: UploadModalP
         uploadedByName: currentUser.fullName,
       });
       onUploaded(doc);
+      void finalizePayrollDocumentUpload(doc);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo subir el documento.');
@@ -128,7 +135,10 @@ function UploadModal({ members, currentUser, onClose, onUploaded }: UploadModalP
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-6 py-4">
-          <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Subir documento</h2>
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Subir documento</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Visible al instante en Documentos del trabajador</p>
+          </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
             <X className="w-4 h-4 text-gray-500 dark:text-gray-400" />
           </button>
@@ -332,7 +342,7 @@ interface PayrollTabProps {
 export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
   const [documents, setDocuments] = useState<PayrollDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showUpload, setShowUpload] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [docToDelete, setDocToDelete] = useState<PayrollDocument | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [filterWorker, setFilterWorker] = useState<string>('all');
@@ -359,8 +369,12 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
 
   function handleUploaded(doc: PayrollDocument) {
     setDocuments((prev) => [doc, ...prev]);
-    setMessage(`Documento "${doc.name}" subido correctamente.`);
-    setTimeout(() => setMessage(null), 4000);
+    if (isAdmin) {
+      setFilterWorker(doc.worker_id);
+    }
+    setMessage(payrollUploadSuccessMessage(doc));
+    toast.success(payrollUploadSuccessMessage(doc));
+    setTimeout(() => setMessage(null), 6000);
   }
 
   async function handleDelete() {
@@ -430,11 +444,11 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
         {isAdmin && (
           <button
             type="button"
-            onClick={() => setShowUpload(true)}
+            onClick={() => setShowBulkUpload(true)}
             className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 px-4 py-2 text-sm font-semibold text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            Subir documento
+            <Files className="w-4 h-4" />
+            Subir ZIP nóminas
           </button>
         )}
       </div>
@@ -648,12 +662,18 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
         )}
       </div>
 
-      {showUpload && (
-        <UploadModal
+      {showBulkUpload && (
+        <PayrollBulkUploadModal
           members={members}
           currentUser={currentUser}
-          onClose={() => setShowUpload(false)}
-          onUploaded={handleUploaded}
+          onClose={() => setShowBulkUpload(false)}
+          onComplete={(docs) => {
+            if (docs.length === 0) return;
+            setDocuments((prev) => [...docs, ...prev]);
+            setMessage(payrollBulkSummaryMessage({ success: docs, failed: [] }));
+            toast.success(payrollBulkSummaryMessage({ success: docs, failed: [] }));
+            setTimeout(() => setMessage(null), 6000);
+          }}
         />
       )}
 

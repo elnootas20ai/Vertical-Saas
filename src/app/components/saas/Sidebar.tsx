@@ -122,6 +122,7 @@ import {
   BookmarkCheck,
   CirclePlus,
   FileCheck,
+  Plug,
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
@@ -143,7 +144,10 @@ import {
 } from '../../lib/deliverySetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
+import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
+import { isMenuItemVisibleForVertical } from '../../lib/verticalModuleVisibility';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
 const CALENDAR_V2_VISUAL = true;
@@ -195,12 +199,13 @@ const HOME_GROUP: SidebarGroup = {
   id: 'home',
   label: 'Home',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['dashboard', 'calendar', 'chat', 'calls'],
+  itemIds: ['dashboard', 'alertas', 'calendar', 'chat', 'calls'],
 };
 
 const menuItemDefs = [
   // ── Home ─────────────────────────────────────────────────────────────────────
   { id: 'dashboard', navKey: 'dashboard', icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/dashboard' },
+  { id: 'alertas', navKey: 'alertas', icon: <Bell className="w-5 h-5" />, path: '/saas/alerts' },
   { id: 'calendar',  navKey: 'calendar',  icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/calendar' },
   { id: 'chat',      navKey: 'chat',      icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/chat' },
   { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
@@ -270,6 +275,7 @@ const menuItemDefs = [
   { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/delivery-ops?panel=clients' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
   { id: 'web-config',       navKey: 'webConfig',       icon: <Globe className="w-5 h-5" />,    path: '/saas/web-config' },
+  { id: 'delivery-integrations', navKey: 'deliveryIntegrations', icon: <Plug className="w-5 h-5" />, path: '/saas/vertical/delivery/integraciones' },
 
   // ── Vertical: Limpieza ───────────────────────────────────────────────────────
   { id: 'cleaning-hub',         navKey: 'cleaningHub',         icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/cleaning-hub' },
@@ -412,7 +418,8 @@ const workerMenuItemDefs = [
   { id: 'worker-security',      navKey: 'workerSecurity',     icon: <Shield className="w-5 h-5" />,        path: '/saas/worker/security' },
 ] as const;
 
-const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv']);
+/** Ítems del menú trabajador que no van en sidebar (acceso operativo vía landing / código tienda). */
+const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'tpv-rapido', 'caja']);
 
 const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
@@ -433,7 +440,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'caja', 'web-orders', 'web-config'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'caja', 'web-orders', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -553,6 +560,10 @@ function SidebarInner({
   })();
 
   const isWorker = isWorkerAccount(user);
+  const alertCenterBusinessId = useAlertCenterBusinessId();
+  const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
+    !isWorker ? alertCenterBusinessId : undefined,
+  );
   /** Trabajador con empresa asignada (invitación aceptada / miembro en el negocio). */
   const workerHasLinkedCompany = Boolean(
     isWorker && currentBusiness?.business_id && currentBusiness.businessType,
@@ -830,17 +841,17 @@ function SidebarInner({
   // Items que SOLO pueden ver los dueños del negocio (owner/admin/manager).
   // Sirve tanto para el filtro de sidebar como para no colar nada admin en modo worker.
   const BUSINESS_OWNER_ONLY_IDS = new Set<string>([
-    'dashboard', 'reports', 'team', 'team-schedules', 'commissions', 'payroll',
+    'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'commissions', 'payroll',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation',
     'supplier-billing', 'client-billing', 'costing', 'billing',
     'suppliers', 'orders', 'purchase-orders', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
     // 'delivery' apunta a /saas/delivery que requiere RequireBusinessOwner: si lo viese
-    // un worker y clicase, se chocaría con el guard. Mejor ocultarlo (ya tiene worker-tpv
-    // y los items operativos sala/caja/tpv-rapido para su día a día).
+    // un worker y clicase, se chocaría con el guard. El TPV rápido (tpv-rapido) solo lo
+    // usa el gerente en sidebar; trabajadores entran por landing / código de tienda.
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
-    'delivery', 'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders',
+    'delivery', 'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
     'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
     'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents',
     'gym-classes', 'gym-memberships', 'gym-routines', 'gym-access',
@@ -865,11 +876,17 @@ function SidebarInner({
   ]);
 
   const visibleMenuItems = visibleMenuItemsBase.filter((item) => {
+    if (!isMenuItemVisibleForVertical(item.id, vertical)) {
+      return false;
+    }
     if (!user) {
       return true;
     }
     // Worker: nunca ver items admin-only por mucho que se cuelen en el menú base.
     if (isWorker && BUSINESS_OWNER_ONLY_IDS.has(item.id)) {
+      return false;
+    }
+    if (isWorker && WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)) {
       return false;
     }
     // Items siempre accesibles para el owner (entran sin permiso explícito).
@@ -908,6 +925,7 @@ function SidebarInner({
   const isItemActive = (item: SidebarItem) =>
     `${location.pathname}${location.search}` === item.path ||
     location.pathname === item.path ||
+    (item.id === 'alertas' && location.pathname.startsWith('/saas/alerts')) ||
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
     (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
     (item.id === 'salesPoints-settings' &&
@@ -931,6 +949,7 @@ function SidebarInner({
     (item.id === 'caja' && location.pathname.startsWith('/saas/vertical/delivery/caja')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||
+    (item.id === 'delivery-integrations' && location.pathname.startsWith('/saas/vertical/delivery/integraciones')) ||
     (item.id === 'cleaning-hub' && location.pathname.startsWith('/saas/cleaning-hub')) ||
     (item.id === 'cleaning-clients' && location.pathname.startsWith('/saas/vertical/limpieza/clientes')) ||
     (item.id === 'cleaning-workers' && location.pathname.startsWith('/saas/cleaning-workers')) ||
@@ -1081,7 +1100,12 @@ function SidebarInner({
           ...group,
           items: group.itemIds
             .map((id) => visibleById.get(id))
-            .filter((item): item is SidebarItem => Boolean(item) && !WORKER_HIDDEN_ITEM_IDS.has(item.id)),
+            .filter(
+              (item): item is SidebarItem =>
+                Boolean(item) &&
+                !WORKER_HIDDEN_ITEM_IDS.has(item.id) &&
+                !WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id),
+            ),
         }))
         .filter((group) => group.items.length > 0)
     : [];
@@ -1405,6 +1429,14 @@ function SidebarInner({
                                 </span>
                               ) : null}
                             </span>
+                          )}
+                          {(isMobile || !collapsed) && item.id === 'alertas' && alertCenterUnresolved > 0 && (
+                            <span className="px-1.5 py-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full leading-none flex-shrink-0 min-w-[1.25rem] text-center">
+                              {alertCenterUnresolved > 99 ? '99+' : alertCenterUnresolved}
+                            </span>
+                          )}
+                          {!isMobile && collapsed && item.id === 'alertas' && alertCenterUnresolved > 0 && (
+                            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-900" />
                           )}
                           {(isMobile || !collapsed) && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0 animate-pulse">

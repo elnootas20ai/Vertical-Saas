@@ -39,7 +39,7 @@ export type DeliveryOrderStatus = 'nuevo' | 'cocina' | 'listo' | 'en_reparto' | 
 
 export type DeliveryType = 'domicilio' | 'recogida' | 'sala';
 export type PaymentStatus = 'pending' | 'paid' | 'partial' | 'refunded';
-export type DeliveryChannel = 'direct' | 'phone' | 'web' | 'app' | 'tpv' | 'glovo' | 'justeat' | 'ubereats';
+export type DeliveryChannel = 'direct' | 'phone' | 'web' | 'app' | 'tpv' | 'glovo' | 'justeat' | 'ubereats' | 'flipdish';
 
 export interface DeliveryOrderItem {
   id: string;
@@ -168,6 +168,8 @@ export interface CatalogItem {
   description: string;
   category: string;
   unitPrice: number;
+  /** Precio empleado; si no se define, aplica la regla global de consumos. */
+  staffPrice?: number | null;
   costPrice: number;
   taxRate: number;
   stockQuantity: number;
@@ -376,11 +378,15 @@ export async function registerPaymentRequest(userId: string, orderId: string, pa
   return result.order;
 }
 
-export async function cancelDeliveryOrderRequest(userId: string, orderId: string): Promise<DeliveryOrder> {
+export async function cancelDeliveryOrderRequest(
+  userId: string,
+  orderId: string,
+  cancelReason: string,
+): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: DeliveryOrder }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/cancel`,
-    { method: 'PUT' },
+    { method: 'PUT', body: JSON.stringify({ cancelReason: cancelReason.trim() }) },
   );
   if (!result.order) throw new Error('Respuesta inválida del servidor');
   return result.order;
@@ -431,6 +437,28 @@ export async function bulkCreateCatalogItemsRequest(userId: string, items: Parti
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk`,
     { method: 'POST', body: JSON.stringify({ items }) },
   );
+}
+
+export async function bulkApplyStaffPricesRequest(
+  userId: string,
+  data: { discountPercent: number; categories?: string[] },
+): Promise<{ updated: number; discountPercent: number; config: DeliveryConfig }> {
+  const id = normalizeUserId(userId);
+  const result = await request<{
+    ok: boolean;
+    updated: number;
+    discountPercent: number;
+    config: DeliveryConfig;
+    error?: string;
+  }>(
+    `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-staff-prices`,
+    { method: 'POST', body: JSON.stringify(data) },
+  );
+  return {
+    updated: result.updated || 0,
+    discountPercent: result.discountPercent || data.discountPercent,
+    config: result.config,
+  };
 }
 
 export async function updateCatalogItemRequest(userId: string, item: CatalogItem): Promise<CatalogItem> {
@@ -1080,15 +1108,8 @@ export async function ensureDeliveryPdvForWorkCenter(
     }
   }
 
-  const existingCodes = pdvData.map((p) => String(p.code || '').trim()).filter(Boolean);
-  const existingNames = pdvData.map((p) => String(p.name || '').trim()).filter(Boolean);
   const nameBase = String(options?.pdvName || wc.name || '').trim() || wc.name;
-  const pdvCode =
-    sanitizePdvCodeInput(String(options?.pdvCode || '')) ||
-    suggestNextPdvCode(nameBase, existingCodes);
-  const pdvName =
-    sanitizeStoreDisplayName(String(options?.pdvName || '')) ||
-    suggestNextPdvDisplayName(nameBase, existingNames, existingCodes, pdvCode);
+  const pdvName = sanitizeStoreDisplayName(String(options?.pdvName || '')) || nameBase;
   const termId =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
@@ -1097,7 +1118,7 @@ export async function ensureDeliveryPdvForWorkCenter(
   try {
     return await createPointOfSaleRequest(id, {
       name: pdvName,
-      code: pdvCode,
+      ...(explicitCode ? { code: explicitCode } : {}),
       ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
       address: addr,
       active: pdvActive,
@@ -1156,15 +1177,20 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
   }
 
   for (const wc of wcs) {
-    const ensured = await ensureDeliveryPdvForWorkCenter(id, wc, {
-      existingPdvs: pdvData,
-      business: options?.business ?? null,
-    });
-    if (!ensured) continue;
-    const idx = pdvData.findIndex((p) => p._id === ensured._id);
-    if (idx >= 0) pdvData[idx] = ensured;
-    else pdvData.push(ensured);
-    pdvData = dedupePointsOfSale(pdvData);
+    try {
+      const ensured = await ensureDeliveryPdvForWorkCenter(id, wc, {
+        existingPdvs: pdvData,
+        business: options?.business ?? null,
+      });
+      if (!ensured) continue;
+      const idx = pdvData.findIndex((p) => p._id === ensured._id);
+      if (idx >= 0) pdvData[idx] = ensured;
+      else pdvData.push(ensured);
+      pdvData = dedupePointsOfSale(pdvData);
+    } catch {
+      // Un local con error de enlace no debe vaciar el listado de tiendas.
+      continue;
+    }
   }
   return filterPointsOfSaleForWorkCenters(pdvData, wcs);
 }
@@ -1384,7 +1410,7 @@ export interface CashDenominationCount {
   coins_010?: number; coins_005?: number; coins_002?: number; coins_001?: number;
 }
 
-export type TpvTransactionType = 'sale' | 'return' | 'cash_in' | 'cash_out' | 'expense' | 'tip' | 'correction';
+export type TpvTransactionType = 'sale' | 'return' | 'cash_in' | 'cash_out' | 'expense' | 'tip' | 'correction' | 'staff_consumption';
 export type TpvPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'online' | 'otro';
 
 export interface TpvRegisterTransaction {
@@ -1401,6 +1427,9 @@ export interface TpvRegisterTransaction {
   linkedDeliveryOrderId?: string;
   refundReason?: string;
   correctionRef?: string;
+  staffConsumptionId?: string;
+  workerId?: string;
+  workerName?: string;
 }
 
 export interface TpvCashCount {
@@ -1486,6 +1515,9 @@ export interface TpvRegisterSession {
   closingValidationStatus?: 'pending' | 'validated' | 'rejected';
   closingValidationNotes?: string;
 
+  /** Totales agregador declarados al cierre (Glovo, Uber Eats, etc.). */
+  aggregatorClosingTotals?: Record<string, number>;
+
   incidents: TpvIncident[];
 
   salesByChannel?: Record<string, number>;
@@ -1496,6 +1528,11 @@ export interface TpvRegisterSession {
 
   createdAt: string;
   updatedAt: string;
+}
+
+/** Sesión de caja operativa (status open). */
+export function isTpvRegisterSessionOpen(session: TpvRegisterSession | null | undefined): session is TpvRegisterSession {
+  return Boolean(session && String(session.status || '').toLowerCase() === 'open');
 }
 
 export async function listTpvRegisterSessionsRequest(
@@ -1514,12 +1551,39 @@ export async function listTpvRegisterSessionsRequest(
 
 export async function createTpvRegisterSessionRequest(userId: string, data: Partial<TpvRegisterSession>): Promise<TpvRegisterSession> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; session: TpvRegisterSession }>(
-    `/api/delivery/tpv-sessions/${encodeURIComponent(id)}`,
-    { method: 'POST', body: JSON.stringify({ session: data }) },
-  );
-  if (!result.session) throw new Error('Respuesta inválida del servidor');
-  return result.session;
+  const response = await authFetch(`${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
+    body: JSON.stringify({ session: data }),
+  });
+  const payload = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    session?: TpvRegisterSession;
+    error?: string;
+    existingSession?: TpvRegisterSession;
+  };
+  if (response.status === 409 && payload.existingSession) {
+    throw new TpvRegisterSessionConflictError(
+      payload.error || 'Ya hay una caja abierta en esta tienda',
+      payload.existingSession,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Error inesperado en delivery API');
+  }
+  if (!payload.session) throw new Error('Respuesta inválida del servidor');
+  return payload.session;
+}
+
+/** La tienda ya tiene una sesión de caja abierta (409 del servidor). */
+export class TpvRegisterSessionConflictError extends Error {
+  existingSession: TpvRegisterSession;
+
+  constructor(message: string, existingSession: TpvRegisterSession) {
+    super(message);
+    this.name = 'TpvRegisterSessionConflictError';
+    this.existingSession = existingSession;
+  }
 }
 
 export async function updateTpvRegisterSessionRequest(userId: string, session: TpvRegisterSession): Promise<TpvRegisterSession> {
@@ -1539,6 +1603,52 @@ export interface DeliveryTimeSlot {
   label: string;
   start: string;
   end: string;
+}
+
+export type StaffConsumptionPricingMode = 'staff_price_field' | 'percent_discount' | 'same_as_public';
+
+export interface StaffConsumptionConfig {
+  enabled: boolean;
+  pricingMode: StaffConsumptionPricingMode;
+  defaultDiscountPercent: number;
+  eligibleCategories: string[];
+}
+
+export type StaffConsumptionPaymentMode = 'cash_now' | 'payroll_deduction';
+export type StaffConsumptionType = 'drink' | 'meal' | 'other';
+
+export interface StaffConsumption {
+  _id: string;
+  _rev?: string;
+  type: 'staff_consumption';
+  id: string;
+  user_id: string;
+  workerId: string;
+  workerName: string;
+  catalogItemId: string;
+  itemName: string;
+  category: string;
+  consumptionType: StaffConsumptionType;
+  quantity: number;
+  unitPrice: number;
+  publicUnitPrice: number;
+  total: number;
+  paymentMode: StaffConsumptionPaymentMode;
+  salesPointId: string;
+  salesPointName: string;
+  registerSessionId: string;
+  recordedBy: string;
+  recordedByName: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StaffConsumptionSummary {
+  count: number;
+  total: number;
+  cashNowTotal: number;
+  payrollTotal: number;
 }
 
 export interface DeliveryConfig {
@@ -1565,6 +1675,7 @@ export interface DeliveryConfig {
   activeChannels: string[];
   activeTimeSlots: DeliveryTimeSlot[];
 
+  staffConsumption?: StaffConsumptionConfig;
   cashRegisterAlerts?: {
     registerNotOpenedEnabled?: boolean;
     registerNotOpenedCheckHour?: number;
@@ -1596,11 +1707,59 @@ export async function updateDeliveryConfigRequest(userId: string, config: Partia
   return result.config;
 }
 
+export async function listStaffConsumptionsRequest(
+  userId: string,
+  filters?: { workerId?: string; month?: string; salesPointId?: string },
+): Promise<{ items: StaffConsumption[]; summary: StaffConsumptionSummary }> {
+  const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (filters?.workerId) params.set('workerId', filters.workerId);
+  if (filters?.month) params.set('month', filters.month);
+  if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
+  const qs = params.toString();
+  const payload = await request<{ ok: boolean; items: StaffConsumption[]; summary: StaffConsumptionSummary }>(
+    `/api/delivery/staff-consumptions/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`,
+  );
+  return { items: payload.items || [], summary: payload.summary || { count: 0, total: 0, cashNowTotal: 0, payrollTotal: 0 } };
+}
+
+export async function createStaffConsumptionRequest(
+  userId: string,
+  data: {
+    workerId: string;
+    workerName: string;
+    catalogItemId: string;
+    quantity?: number;
+    paymentMode: StaffConsumptionPaymentMode;
+    paymentMethod?: TpvPaymentMethod;
+    salesPointId?: string;
+    salesPointName?: string;
+    registerSessionId?: string;
+    notes?: string;
+  },
+): Promise<StaffConsumption> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; consumption: StaffConsumption }>(
+    `/api/delivery/staff-consumptions/${encodeURIComponent(id)}`,
+    { method: 'POST', body: JSON.stringify(data) },
+  );
+  if (!result.consumption) throw new Error('Respuesta inválida del servidor');
+  return result.consumption;
+}
+
 // ─── Ops Center ───────────────────────────────────────────────────────────────
 
 export interface OpsAlert {
   id: string;
-  type: 'delayed_order' | 'kitchen_saturated' | 'cash_pending_close' | 'critical_stock' | 'open_incident';
+  type:
+    | 'delayed_order'
+    | 'kitchen_saturated'
+    | 'cash_pending_close'
+    | 'cash_pending_validation'
+    | 'register_discrepancy'
+    | 'register_not_open'
+    | 'critical_stock'
+    | 'open_incident';
   severity: 'warning' | 'critical';
   title: string;
   message: string;
@@ -1609,6 +1768,17 @@ export interface OpsAlert {
   itemId?: string;
   route: string;
   createdAt: string;
+}
+
+export interface OpsCashMovement {
+  id: string;
+  type: 'cash_in' | 'cash_out' | 'return';
+  amount: number;
+  description: string;
+  date: string;
+  terminalName: string;
+  pointOfSaleName: string;
+  workerName: string;
 }
 
 export interface OpsCenterKpis {
@@ -1635,6 +1805,10 @@ export interface OpsCenterData {
     openDriverSessions: DriverCashSession[];
     totalCashInRegisters: number;
     pendingClose: number;
+    pendingValidation?: number;
+    todayDiscrepancy?: number;
+    openIncidentCount?: number;
+    recentCashMovements?: OpsCashMovement[];
   };
   kitchenStatus: {
     ordersInKitchen: number;
@@ -1667,13 +1841,21 @@ export interface OpsCenterFilters {
   date?: string;
 }
 
+/** YYYY-MM-DD en la zona horaria local del navegador (inputs type="date"). */
+export function localDateInputValue(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export async function getOpsCenterRequest(userId: string, filters?: OpsCenterFilters): Promise<OpsCenterData> {
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
   if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
   if (filters?.channel) params.set('channel', filters.channel);
   if (filters?.timeSlot) params.set('timeSlot', filters.timeSlot);
-  if (filters?.date) params.set('date', filters.date);
+  params.set('date', filters?.date || localDateInputValue());
   const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean } & OpsCenterData>(
     `/api/delivery/ops-center/${encodeURIComponent(id)}${qs}`,

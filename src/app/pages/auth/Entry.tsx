@@ -4,15 +4,107 @@ import {
   Building2,
   User,
   ArrowRight,
-  Users,
   BriefcaseBusiness,
   UserCheck,
   Handshake,
   Monitor,
+  type LucideIcon,
 } from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
+
+type AccentKey = 'neutral' | 'blue' | 'violet';
+
+const ACCENT_STYLES: Record<
+  AccentKey,
+  {
+    iconWrap: string;
+    icon: string;
+    primary: string;
+    secondary: string;
+  }
+> = {
+  neutral: {
+    iconWrap: 'bg-gray-100 dark:bg-gray-700',
+    icon: 'text-gray-700 dark:text-gray-200',
+    primary: 'bg-[#0f1419] hover:bg-[#1a2029] text-white',
+    secondary:
+      'border-gray-200 dark:border-gray-600 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700/50',
+  },
+  blue: {
+    iconWrap: 'bg-blue-50 dark:bg-blue-900/30',
+    icon: 'text-blue-600 dark:text-blue-400',
+    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    secondary:
+      'border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
+  },
+  violet: {
+    iconWrap: 'bg-violet-50 dark:bg-violet-900/30',
+    icon: 'text-violet-600 dark:text-violet-400',
+    primary: 'bg-violet-600 hover:bg-violet-700 text-white',
+    secondary:
+      'border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30',
+  },
+};
+
+const BTN_PRIMARY =
+  'w-full min-h-[3rem] px-5 py-3.5 rounded-xl font-semibold text-sm transition-colors';
+const BTN_SECONDARY =
+  'w-full min-h-[3rem] px-5 py-3 rounded-xl border-2 font-medium text-sm transition-colors flex items-center justify-center gap-2';
+
+function EntryRoleCard({
+  accent,
+  icon: Icon,
+  title,
+  description,
+  primaryLabel,
+  onPrimary,
+  secondaryLabel,
+  onSecondary,
+  secondaryIcon: SecondaryIcon,
+}: {
+  accent: AccentKey;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  primaryLabel: string;
+  onPrimary: () => void;
+  secondaryLabel: string;
+  onSecondary: () => void;
+  secondaryIcon?: LucideIcon;
+}) {
+  const styles = ACCENT_STYLES[accent];
+
+  return (
+    <div className="flex flex-col h-full p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm">
+      <div
+        className={`w-14 h-14 rounded-xl flex items-center justify-center mb-4 shrink-0 ${styles.iconWrap}`}
+      >
+        <Icon className={`w-7 h-7 ${styles.icon}`} />
+      </div>
+
+      <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">{title}</h2>
+      <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400 mb-6 flex-1 min-h-[4.5rem]">
+        {description}
+      </p>
+
+      <div className="mt-auto space-y-3 shrink-0">
+        <button type="button" onClick={onPrimary} className={`${BTN_PRIMARY} ${styles.primary}`}>
+          {primaryLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onSecondary}
+          className={`${BTN_SECONDARY} ${styles.secondary}`}
+        >
+          {SecondaryIcon && <SecondaryIcon className="w-4 h-4 shrink-0" />}
+          {secondaryLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function Entry() {
   const navigate = useNavigate();
@@ -40,11 +132,11 @@ export function Entry() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 items-stretch">
             <button
               type="button"
               onClick={() => setSelectedType('company')}
-              className={`group relative p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
+              className={`group relative flex flex-col h-full p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
                 selectedType === 'company'
                   ? 'border-[#0f1419] ring-2 ring-gray-200 dark:ring-gray-700'
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
@@ -66,7 +158,7 @@ export function Entry() {
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Registro con datos fiscales y onboarding de negocio.
               </p>
-              <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
+              <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400 mt-auto">
                 {roleHighlights.manager.map((item) => (
                   <li key={item} className="flex items-center gap-2">
                     <BriefcaseBusiness className="w-3.5 h-3.5 shrink-0" />
@@ -79,7 +171,7 @@ export function Entry() {
             <button
               type="button"
               onClick={() => setSelectedType('user')}
-              className={`group relative p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
+              className={`group relative flex flex-col h-full p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
                 selectedType === 'user'
                   ? 'border-blue-600 ring-2 ring-blue-100 dark:ring-blue-900/50'
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
@@ -93,7 +185,7 @@ export function Entry() {
                 </div>
               )}
               <div className={`w-14 h-14 rounded-xl flex items-center justify-center mb-4 transition-colors ${
-                selectedType === 'user' ? 'bg-blue-600' : 'bg-blue-100 dark:bg-blue-900/40 group-hover:bg-blue-200 dark:group-hover:bg-blue-900/60'
+                selectedType === 'user' ? 'bg-blue-600' : 'bg-blue-50 dark:bg-blue-900/30 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/50'
               }`}>
                 <User className={`w-7 h-7 transition-colors ${selectedType === 'user' ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
               </div>
@@ -101,7 +193,7 @@ export function Entry() {
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                 Alta personal; te unes por invitación de tu empresa.
               </p>
-              <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400">
+              <ul className="space-y-1.5 text-sm text-gray-500 dark:text-gray-400 mt-auto">
                 {roleHighlights.employee.map((item) => (
                   <li key={item} className="flex items-center gap-2">
                     <UserCheck className="w-3.5 h-3.5 shrink-0" />
@@ -142,7 +234,7 @@ export function Entry() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-      <div className="w-full max-w-6xl">
+      <div className="w-full max-w-5xl">
         <div className="text-center mb-10">
           <div className="flex items-center justify-center mb-6">
             <VertialLogo size="xl" />
@@ -155,94 +247,40 @@ export function Entry() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {/* Empresa */}
-          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl">
-            <div className="w-14 h-14 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center mb-4">
-              <Building2 className="w-7 h-7 text-gray-700 dark:text-gray-200" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Empresa / Gerente
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
-              Propietarios, administradores y responsables de gestión. Dashboard, CRM, facturación y equipo.
-            </p>
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.companyLogin)}
-                className="w-full px-5 py-3.5 bg-[#0f1419] text-white rounded-xl font-semibold hover:bg-[#1a2029] transition-colors"
-              >
-                Iniciar sesión — Empresa
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' as const } })}
-                className="w-full px-5 py-3 border-2 border-gray-200 dark:border-gray-600 text-gray-800 dark:text-gray-100 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-              >
-                Crear cuenta de empresa
-              </button>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
+          <EntryRoleCard
+            accent="neutral"
+            icon={Building2}
+            title="Empresa / Gerente"
+            description="Propietarios, administradores y responsables de gestión. Dashboard, CRM, facturación y equipo."
+            primaryLabel="Iniciar sesión — Empresa"
+            onPrimary={() => navigate(AUTH_PATHS.companyLogin)}
+            secondaryLabel="Crear cuenta de empresa"
+            onSecondary={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' as const } })}
+          />
 
-          {/* Trabajador */}
-          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-blue-200 dark:border-blue-800/60 rounded-2xl">
-            <div className="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mb-4">
-              <Users className="w-7 h-7 text-blue-600 dark:text-blue-400" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Trabajador / Empleado
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
-              Personal operativo: TPV, fichajes, tareas y módulos asignados por tu empresa.
-            </p>
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.workerLogin)}
-                className="w-full px-5 py-3.5 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
-              >
-                Iniciar sesión — Trabajador
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
-                className="w-full px-5 py-3 border-2 border-indigo-200 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 rounded-xl font-medium hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors flex items-center justify-center gap-2"
-              >
-                <Monitor className="w-4 h-4" />
-                TPV en tablet
-              </button>
-            </div>
-          </div>
+          <EntryRoleCard
+            accent="blue"
+            icon={User}
+            title="Trabajador / Empleado"
+            description="Operativa en tienda: fichajes, tareas y módulos asignados. También puedes activar la tablet con el código del local."
+            primaryLabel="Iniciar sesión — Trabajador"
+            onPrimary={() => navigate(AUTH_PATHS.workerLogin)}
+            secondaryLabel="Tablet TPV — código de tienda"
+            onSecondary={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+            secondaryIcon={Monitor}
+          />
 
-          {/* Afiliado */}
-          <div className="flex flex-col p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-violet-200 dark:border-violet-800/60 rounded-2xl md:col-span-2 lg:col-span-1">
-            <div className="w-14 h-14 bg-violet-50 dark:bg-violet-900/30 rounded-xl flex items-center justify-center mb-4">
-              <Handshake className="w-7 h-7 text-violet-600 dark:text-violet-400" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Afiliado / Partner
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
-              Programa de partners: clientes referidos, comisiones y seguimiento de tu red comercial.
-            </p>
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
-                className="w-full px-5 py-3.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-indigo-700 transition-colors"
-              >
-                Iniciar sesión — Afiliado
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/affiliados')}
-                className="w-full px-5 py-3 border-2 border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 rounded-xl font-medium hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors"
-              >
-                Solicitar ser afiliado
-              </button>
-            </div>
-          </div>
+          <EntryRoleCard
+            accent="violet"
+            icon={Handshake}
+            title="Afiliado / Partner"
+            description="Programa de partners: clientes referidos, comisiones y seguimiento de tu red comercial."
+            primaryLabel="Iniciar sesión — Afiliado"
+            onPrimary={() => navigate(AUTH_PATHS.affiliatePortal)}
+            secondaryLabel="Solicitar ser afiliado"
+            onSecondary={() => navigate('/affiliados')}
+          />
         </div>
 
         <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">

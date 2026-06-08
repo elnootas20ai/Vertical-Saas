@@ -1,26 +1,45 @@
-import { listBrandsRequest, type Brand } from './brandsApi';
-import { isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
+import { listBrandsRequest, updateBrandRequest, type Brand } from './brandsApi';
+import type { CatalogItem } from './deliveryApi';
+import {
+  buildBrandCategoryMapFromItems,
+  commercialLineBrands,
+  formatUnmatchedCommercialBrandWarning,
+  isCommercialLineBrand,
+  mergeBrandCatalogCategories,
+  normalizeImportCategory,
+  readImportLineText,
+  resolveCatalogImportBrandIds,
+  resolveCommercialLineIdsFromText,
+  shouldClearBrandForCategory,
+} from './deliveryCatalogImportLogic';
 
-function foldKey(s: string): string {
-  return String(s || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '');
-}
+export type { ImportBrandLike } from './deliveryCatalogImportLogic';
+export {
+  allCommercialLineBrands,
+  buildBrandCategoryMapFromItems,
+  commercialLineBrands,
+  defaultBrandIdForCatalogImport,
+  formatUnmatchedCommercialBrandWarning,
+  inferCommercialLineBrandId,
+  inferCommercialLineBrandIdFromProductName,
+  isCommercialLineBrand,
+  mergeBrandCatalogCategories,
+  normalizeImportCategory,
+  readImportLineText,
+  resolveCatalogImportBrandIds,
+  shouldClearBrandForCategory,
+} from './deliveryCatalogImportLogic';
 
 export type ResolveBrandIdsFromImportResult = {
   brandIds: string[];
   cache: Brand[];
-  /** Siempre vacío: el import de catálogo no crea líneas comerciales en Ajustes → Marca. */
   createdNames: string[];
-  /** Nombres del Excel que no coinciden con ninguna marca ya creada en la empresa. */
   unmatchedNames: string[];
 };
 
 /**
- * Resuelve texto de import (nombre de línea comercial o id) a brandIds del negocio.
- * Solo enlaza marcas existentes; nunca crea marcas nuevas (eso es Ajustes → Marca).
+ * Resuelve texto de import a brandIds de **líneas comerciales** del negocio.
+ * No enlaza marcas de producto (Coca-Cola, Galbani…) aunque existan en la BD.
  */
 export async function resolveBrandIdsFromImportText(
   businessId: string,
@@ -34,8 +53,10 @@ export async function resolveBrandIdsFromImportText(
     return { brandIds: [], cache, createdNames: [], unmatchedNames: [] };
   }
 
-  /** Blindaje: import catálogo no debe crear marcas comerciales (p. ej. Coca-Cola del Excel). */
-  const createMissing = options?.createMissing === true;
+  if (options?.createMissing === true) {
+    // Reservado para flujos explícitos fuera del import Excel (no usado por defecto).
+  }
+
   let brands = [...cache];
   if (brands.length === 0) {
     try {
@@ -45,82 +66,126 @@ export async function resolveBrandIdsFromImportText(
     }
   }
 
-  const parts = raw.split(/[,;|]/).map((p) => p.trim()).filter(Boolean);
-  const brandIds: string[] = [];
-  const unmatchedNames: string[] = [];
-
-  for (const part of parts) {
-    const key = foldKey(part);
-    const hit =
-      brands.find((b) => b._id === part || b.id === part) ||
-      brands.find((b) => foldKey(b.name) === key);
-    if (!hit && createMissing) {
-      // Reservado para flujos explícitos fuera del import Excel (no usado por defecto).
-      unmatchedNames.push(part);
-      continue;
-    }
-    if (!hit) {
-      unmatchedNames.push(part);
-      continue;
-    }
-    if (hit._id && !brandIds.includes(hit._id)) brandIds.push(hit._id);
-  }
-
+  const { brandIds, unmatchedNames } = resolveCommercialLineIdsFromText(raw, brands);
   return { brandIds, cache: brands, createdNames: [], unmatchedNames };
 }
 
-export function normalizeImportCategory(value: string): string {
-  return String(value || '').trim();
-}
-
-/** Bebidas/complementos: sin marca en import salvo que el Excel traiga marca explícita. */
-export function shouldClearBrandForCategory(category: string): boolean {
-  const c = foldKey(category);
-  return (
-    c === 'bebidas' ||
-    c === 'bebida' ||
-    c === 'complementos' ||
-    c === 'complemento' ||
-    c === 'extras' ||
-    c === 'postres' ||
-    c === 'postre' ||
-    c === 'salsas' ||
-    c === 'otros'
-  );
-}
-
-/** Misma marca por defecto que el wizard manual de alta de producto. */
-export function defaultBrandIdForCatalogImport(brands: Brand[]): string {
-  const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
-  const pick =
-    sorted.find((b) => isDefaultCommercialBrand(b)) ??
-    sorted[0];
-  return pick?._id ?? '';
-}
-
 /**
- * Asigna brandIds en import Excel/IA igual que al crear desde el modal:
- * marca explícita (solo si existe en la empresa), vacío en categorías sin línea, o marca principal.
+ * Tras importar productos, actualiza catalogCategories de cada línea comercial
+ * para que el TPV muestre las pestañas inferiores (Pizzas, Bebidas…) en orden lógico.
  */
-export function resolveCatalogImportBrandIds(
-  explicitBrandIds: string[],
-  category: string,
-  brands: Brand[],
-): string[] {
-  if (explicitBrandIds.length > 0) return explicitBrandIds;
-  if (shouldClearBrandForCategory(category)) return [];
-  const defaultId = defaultBrandIdForCatalogImport(brands);
-  return defaultId ? [defaultId] : [];
+export async function syncTpvOrganizersAfterCatalogImport(
+  businessId: string,
+  items: Array<Pick<CatalogItem, 'brandIds' | 'category'>>,
+): Promise<{ updatedBrands: number }> {
+  const bid = String(businessId || '').trim();
+  if (!bid || items.length === 0) return { updatedBrands: 0 };
+
+  const brands = await listBrandsRequest(bid).catch(() => [] as Brand[]);
+  const categoryMap = buildBrandCategoryMapFromItems(items);
+  let updatedBrands = 0;
+
+  for (const brand of brands) {
+    if (!isCommercialLineBrand(brand)) continue;
+    const importedCats = categoryMap.get(brand._id);
+    if (!importedCats?.length) continue;
+
+    const merged = mergeBrandCatalogCategories(brand.catalogCategories, importedCats);
+    const prev = brand.catalogCategories || [];
+    const unchanged =
+      merged.length === prev.length && merged.every((cat, idx) => cat === prev[idx]);
+    if (unchanged) continue;
+
+    await updateBrandRequest(bid, { ...brand, catalogCategories: merged });
+    updatedBrands += 1;
+  }
+
+  return { updatedBrands };
 }
 
-/** Aviso único tras import si el Excel trae marcas de producto (Coca-Cola…) en vez de líneas comerciales. */
-export function formatUnmatchedCommercialBrandWarning(unmatchedNames: string[]): string | null {
-  const unique = [...new Set(unmatchedNames.map((n) => String(n || '').trim()).filter(Boolean))];
-  if (unique.length === 0) return null;
-  const sample = unique.slice(0, 8).join(', ');
-  const extra = unique.length > 8 ? ` (+${unique.length - 8} más)` : '';
-  return (
-    `Columna «marca»: ${sample}${extra} no coincide con tus líneas en Ajustes → Marca. ` +
-    'Esos productos se asignan a tu marca principal. No se crean marcas nuevas desde el Excel.'
+/** Activa líneas comerciales que recibieron productos en el import (p. ej. blackburger inactiva). */
+export async function activateCommercialLinesAfterCatalogImport(
+  businessId: string,
+  items: Array<Pick<CatalogItem, 'brandIds'>>,
+): Promise<{ activated: number }> {
+  const bid = String(businessId || '').trim();
+  if (!bid || items.length === 0) return { activated: 0 };
+
+  const usedBrandIds = new Set(
+    items.flatMap((item) => (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean)),
   );
+  if (usedBrandIds.size === 0) return { activated: 0 };
+
+  const brands = await listBrandsRequest(bid).catch(() => [] as Brand[]);
+  let activated = 0;
+
+  for (const brand of brands) {
+    if (!usedBrandIds.has(brand._id)) continue;
+    if (brand.active !== false) continue;
+    if (!isCommercialLineBrand(brand)) continue;
+    await updateBrandRequest(bid, { ...brand, active: true });
+    activated += 1;
+  }
+
+  return { activated };
+}
+
+export type MapImportEntryOptions = {
+  businessId: string;
+  brandCache: Brand[];
+};
+
+export type MapImportEntryResult = {
+  item: Partial<CatalogItem>;
+  brandCache: Brand[];
+  unmatchedLineNames: string[];
+};
+
+/** Convierte una fila del Excel en un ítem de catálogo listo para bulk create. */
+export async function mapImportEntryToCatalogItem(
+  entry: Record<string, string>,
+  options: MapImportEntryOptions,
+): Promise<MapImportEntryResult | null> {
+  const name = String(entry.name || '').trim();
+  if (!name) return null;
+
+  const category = normalizeImportCategory(entry.category || '');
+  const lineText = readImportLineText(entry);
+  let brandCache = options.brandCache;
+  let explicitBrandIds: string[] = [];
+  const unmatchedLineNames: string[] = [];
+
+  if (lineText && options.businessId) {
+    const resolved = await resolveBrandIdsFromImportText(options.businessId, lineText, brandCache);
+    brandCache = resolved.cache;
+    explicitBrandIds = resolved.brandIds;
+    unmatchedLineNames.push(...resolved.unmatchedNames);
+  }
+
+  const item: Partial<CatalogItem> = {
+    name,
+    category,
+    brandIds: resolveCatalogImportBrandIds(explicitBrandIds, category, brandCache, name),
+    itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
+      ? (String(entry.itemType).trim() as CatalogItem['itemType'])
+      : 'product',
+    description: String(entry.description || '').trim(),
+    unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
+    costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
+    stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
+    minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
+    allergens: String(entry.allergens || '')
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean),
+    image: String(entry.image || '').trim() || undefined,
+    sku: String(entry.sku || '').trim() || undefined,
+    unit: String(entry.unit || 'ud'),
+    active: true,
+    available: true,
+    webVisible: true,
+    module: 'catalog',
+  };
+
+  return { item, brandCache, unmatchedLineNames };
 }

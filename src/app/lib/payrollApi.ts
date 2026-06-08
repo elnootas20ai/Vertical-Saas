@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 import { ensureCouchDb } from './ensureCouchDb';
+import { createNotificationRequest } from './notificationApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -125,6 +126,52 @@ export const DOC_CATEGORY_LABELS: Record<string, string> = {
   insurance: 'Seguros',
   other: 'Otros',
 };
+
+export function formatPayrollPeriodLabel(period?: string): string {
+  if (!period) return '';
+  const [year, month] = period.split('-');
+  if (!year || !month) return period;
+  const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const idx = parseInt(month, 10) - 1;
+  if (idx < 0 || idx > 11) return period;
+  return `${monthNames[idx]} ${year}`;
+}
+
+/** Tras subir un documento, avisa al trabajador (app + push). No bloquea si falla. */
+export async function notifyWorkerPayrollDocumentUploaded(doc: PayrollDocument): Promise<void> {
+  if (!doc.worker_id) return;
+  const typeLabel = PAYROLL_DOC_TYPE_LABELS[doc.documentType] || 'Documento';
+  const periodSuffix = doc.period ? ` · ${formatPayrollPeriodLabel(doc.period)}` : '';
+  const isPayslip = doc.documentType === 'nomina';
+  await createNotificationRequest(doc.worker_id, {
+    level: 'info',
+    category: 'team',
+    title: isPayslip ? 'Nueva nómina disponible' : `Nuevo documento: ${typeLabel}`,
+    message: `${doc.name}${periodSuffix} ya está en Documentos.`,
+    entityId: doc.id || doc._id,
+    entityType: 'payroll',
+    route: '/saas/worker/documents',
+    metadata: {
+      documentType: doc.documentType,
+      period: doc.period,
+      workerId: doc.worker_id,
+    },
+  });
+}
+
+export async function finalizePayrollDocumentUpload(doc: PayrollDocument): Promise<void> {
+  try {
+    await notifyWorkerPayrollDocumentUploaded(doc);
+  } catch {
+    // La subida ya fue correcta; la notificación es complementaria.
+  }
+}
+
+export function payrollUploadSuccessMessage(doc: PayrollDocument): string {
+  const worker = doc.worker_name?.trim() || 'el trabajador';
+  const periodSuffix = doc.period ? ` (${formatPayrollPeriodLabel(doc.period)})` : '';
+  return `"${doc.name}"${periodSuffix} publicado. ${worker} lo verá en Documentos al instante.`;
+}
 
 export function getDocumentExpiryStatus(doc: PayrollDocument): DocumentExpiryStatus {
   if (!doc.expiryDate) return 'valid';

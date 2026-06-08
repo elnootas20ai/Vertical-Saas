@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Package, Clock, CheckCircle, Truck, Store, XCircle, Loader2,
   RefreshCw, ChevronDown, Phone, Mail, MapPin, FileText,
@@ -38,6 +38,7 @@ const STATUS_FLOW: WebOrderStatus[] = ['pending', 'confirmed', 'preparing', 'rea
 type FilterStatus = WebOrderStatus | 'all' | 'active';
 
 export function WebOrders() {
+  const navigate = useNavigate();
   const { currentBusiness } = useBusiness();
   const [orders, setOrders] = useState<WebOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +51,7 @@ export function WebOrders() {
     uber:    { enabled: false, token: '' },
     globo:   { enabled: false, token: '' },
     justead: { enabled: false, token: '' },
+    flipdish: { enabled: false, token: '' },
   });
   const [intLoading, setIntLoading] = useState(false);
   const [intSaving, setIntSaving] = useState(false);
@@ -200,7 +202,7 @@ export function WebOrders() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { setIntegrationsOpen(true); loadIntegrations(); }}
+              onClick={() => navigate('/saas/vertical/delivery/integraciones')}
               className="flex items-center gap-1.5 px-3 py-2 text-sm border border-purple-200 dark:border-purple-700 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 transition-colors"
             >
               <Plug className="w-4 h-4" /> Integraciones

@@ -84,6 +84,11 @@ export function getEffectiveCommercialBrandLimit(
   return INCLUDED_COMMERCIAL_BRANDS[tier] + extra;
 }
 
+export type ResolveTenantEntitlementsOptions = {
+  /** Cuenta super-admin (dev): sin tope de marcas comerciales. */
+  devUnlimitedBrands?: boolean;
+};
+
 export function resolveTenantEntitlements(
   subscription: Pick<
     BillingSubscription,
@@ -95,29 +100,39 @@ export function resolveTenantEntitlements(
     | 'extraCommercialBrandSlots'
   > | null | undefined,
   counts: TenantEntitlementCounts,
+  options?: ResolveTenantEntitlementsOptions,
 ): TenantEntitlementAccess {
   const planTier = resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
   const hasProAccess = subscriptionHasProAccess(subscription);
   const businessLimit = INCLUDED_BUSINESSES[planTier];
   const pdvLimit = getEffectivePointOfSaleLimit(subscription);
-  const brandLimit = getEffectiveCommercialBrandLimit(subscription);
+  const brandLimit = options?.devUnlimitedBrands
+    ? 999
+    : getEffectiveCommercialBrandLimit(subscription);
 
   const canCreateBusiness = counts.businesses < businessLimit;
   const canCreatePointOfSale = counts.pointOfSales < pdvLimit;
-  const canCreateCommercialBrand = counts.commercialBrands < brandLimit;
+  const canCreateCommercialBrand =
+    options?.devUnlimitedBrands || counts.commercialBrands < brandLimit;
 
   return {
     planTier,
     planLabel: PLAN_TIER_LABELS[planTier],
-    hasProAccess,
+    hasProAccess: hasProAccess || Boolean(options?.devUnlimitedBrands),
     businesses: businessLimit,
     pointOfSales: pdvLimit,
     commercialBrands: brandLimit,
     canCreateBusiness,
     canCreatePointOfSale,
     canCreateCommercialBrand,
-    needsProUpgrade: !hasProAccess && (counts.pointOfSales >= pdvLimit || counts.commercialBrands >= brandLimit),
+    needsProUpgrade:
+      !options?.devUnlimitedBrands &&
+      !hasProAccess &&
+      (counts.pointOfSales >= pdvLimit || counts.commercialBrands >= getEffectiveCommercialBrandLimit(subscription)),
     needsPointOfSaleAddon: hasProAccess && counts.pointOfSales >= pdvLimit,
-    needsCommercialBrandAddon: hasProAccess && counts.commercialBrands >= brandLimit,
+    needsCommercialBrandAddon:
+      !options?.devUnlimitedBrands &&
+      hasProAccess &&
+      counts.commercialBrands >= getEffectiveCommercialBrandLimit(subscription),
   };
 }
