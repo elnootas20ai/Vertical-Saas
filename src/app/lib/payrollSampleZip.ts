@@ -32,7 +32,7 @@ function buildSamplePayslipPdf(workerName: string, period: string): ArrayBuffer 
   doc.setFontSize(12);
   doc.text(`Trabajador: ${workerName}`, 20, 50);
   doc.text(`Periodo: ${month}/${year}`, 20, 62);
-  doc.text('Documento generado por UDar para pruebas internas.', 20, 80);
+  doc.text('Documento generado por Vertial para pruebas internas.', 20, 80);
   return doc.output('arraybuffer');
 }
 
@@ -59,7 +59,7 @@ export async function downloadPayrollSampleZip(
   zip.file(
     'LEEME.txt',
     [
-      'ZIP de prueba — nominas UDar',
+      'ZIP de prueba — nominas Vertial',
       '',
       `Mes: ${effectivePeriod}`,
       `PDFs incluidos: ${active.length}`,

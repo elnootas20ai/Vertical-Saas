@@ -1,18 +1,14 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
+import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
-import { AlertCenterSettingsSlide, VertialSecondaryButton } from '../../components/saas/AlertCenterSettingsSlide';
+import { AlertCenterAjustesView } from '../../components/saas/AlertCenterAjustesView';
 import {
-  AlertProShell,
-  AlertProKpiStrip,
-  AlertProDeptTabs,
-  AlertProEmpty,
-  AlertProIconButton,
-  AlertProViewTabs,
   AlertHistoryTimeline,
   PRIORITY_ACCENT,
+  type AlertCenterPageTab,
 } from '../../components/saas/alertCenterProUi';
 import {
   fetchAlerts,
@@ -24,6 +20,7 @@ import {
   triggerAlertEngineCheck,
   normalizeAlertSummary,
   departmentSourceFilter,
+  CEO_ALERT_DEPARTMENTS,
   SOURCE_LABELS,
   SOURCE_COLORS,
   PRIORITY_LABELS,
@@ -38,9 +35,10 @@ import {
 import {
   Bell, CheckCircle, Eye, Filter, Search, RefreshCw,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Trash2, Check,
-  Clock, X, Shield, TrendingUp,
+  Clock, X, Shield, TrendingUp, AlertTriangle,
   DollarSign, Package, Users, FileText, Wrench,
-  ScanLine, Building2, Monitor, Bike, Activity, Settings2,
+  ScanLine, Building2, Monitor, Bike, Activity,
+  Layers, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -62,14 +60,6 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   sistema: Monitor,
 };
 
-const DEPT_TAB_ICONS: Record<string, React.ElementType> = {
-  all: Bell,
-  delivery: Bike,
-  finanzas: DollarSign,
-  rrhh: Users,
-  operaciones: Activity,
-};
-
 const PRIORITY_COLORS: Record<AlertPriority, { bg: string; text: string; dot: string }> = {
   high: { bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-700 dark:text-red-400', dot: 'bg-red-500' },
   medium: { bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', dot: 'bg-amber-500' },
@@ -82,12 +72,20 @@ const STATUS_STYLES: Record<AlertStatus, { bg: string; text: string }> = {
   resolved: { bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-400' },
 };
 
+function tabFromSearch(tab: string | null): AlertCenterPageTab {
+  if (tab === 'historial' || tab === 'history') return 'history';
+  if (tab === 'ajustes' || tab === 'settings') return 'settings';
+  return 'inbox';
+}
+
 export default function AlertCenterPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const businessId = useAlertCenterBusinessId();
   const settingsBusinessId = useAlertSettingsBusinessId();
+
+  const [pageTab, setPageTab] = useState<AlertCenterPageTab>(() => tabFromSearch(searchParams.get('tab')));
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [summary, setSummary] = useState<AlertSummary | null>(null);
@@ -100,12 +98,13 @@ export default function AlertCenterPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [activeDepartment, setActiveDepartment] = useState('all');
-  const [showSettings, setShowSettings] = useState(false);
-  const [viewMode, setViewMode] = useState<'active' | 'history'>('active');
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [historyFrom, setHistoryFrom] = useState('');
   const [historyTo, setHistoryTo] = useState('');
   const [expandedAlertId, setExpandedAlertId] = useState<string | null>(null);
+
+  const isHistory = pageTab === 'history';
+  const isSettings = pageTab === 'settings';
 
   const loadData = useCallback(async () => {
     if (!businessId) return;
@@ -114,7 +113,9 @@ export default function AlertCenterPage() {
       const summaryRes = await fetchAlertSummary(businessId);
       setSummary(normalizeAlertSummary(summaryRes.summary));
 
-      if (viewMode === 'history') {
+      if (isSettings) return;
+
+      if (isHistory) {
         const alertsRes = await fetchAlertHistory(businessId, {
           ...filters,
           search: searchTerm || undefined,
@@ -134,9 +135,9 @@ export default function AlertCenterPage() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, filters, searchTerm, viewMode, includeDeleted, historyFrom, historyTo]);
+  }, [businessId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
   const handleStatusChange = useCallback(async (alertId: string, status: AlertStatus) => {
     try {
@@ -210,17 +211,24 @@ export default function AlertCenterPage() {
     }));
   };
 
-  const switchViewMode = (mode: 'active' | 'history') => {
-    setViewMode(mode);
+  const switchPageTab = useCallback((tab: AlertCenterPageTab) => {
+    setPageTab(tab);
     setExpandedAlertId(null);
     setSelectedIds(new Set());
     setShowFilters(false);
-    if (mode === 'history') {
+
+    if (tab === 'history') {
       setFilters({ order: 'desc', page: 1, limit: 25 });
-    } else {
+    } else if (tab === 'inbox') {
       setFilters({ status: 'new,seen', order: 'desc', page: 1, limit: 25 });
     }
-  };
+
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'inbox') next.delete('tab');
+    else if (tab === 'history') next.set('tab', 'historial');
+    else next.set('tab', 'ajustes');
+    navigate({ pathname: '/saas/alerts', search: next.toString() ? `?${next.toString()}` : '' }, { replace: true });
+  }, [navigate, searchParams]);
 
   const syncAlerts = useCallback(async () => {
     if (!businessId) return;
@@ -239,89 +247,140 @@ export default function AlertCenterPage() {
   }, [businessId, user?.userId, loadData]);
 
   useEffect(() => {
-    if (searchParams.get('tab') === 'history') {
-      switchViewMode('history');
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    setPageTab(tabFromSearch(searchParams.get('tab')));
+  }, [searchParams]);
 
   useEffect(() => {
     if (!businessId || !user?.userId) return;
     void triggerAlertEngineCheck(user.userId).catch(() => null);
   }, [businessId, user?.userId]);
 
+  const layoutSubtitle = isSettings
+    ? 'Configura qué situaciones quieres que Vertial vigile por ti'
+    : isHistory
+      ? 'Alertas resueltas y cerradas'
+      : 'Todo lo que requiere tu atención ahora mismo';
+
+  const deptLabel = CEO_ALERT_DEPARTMENTS.find((d) => d.id === activeDepartment)?.label || 'Todas';
 
   return (
-    <Layout>
-      <div className="mx-auto max-w-7xl p-4 sm:p-6">
-        <div className="overflow-hidden rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
-          <AlertProShell
-            title="Centro de Alertas"
-            subtitle={
-              viewMode === 'history'
-                ? 'Registro de alertas resueltas y cerradas — trazabilidad completa'
-                : 'Delivery · Finanzas · RRHH · Operaciones — visión ejecutiva de tu negocio'
-            }
-            badge={
-              (summary?.unresolved ?? 0) > 0 ? (
-                <span className="rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-bold text-red-300 ring-1 ring-red-500/30">
-                  {summary!.unresolved > 99 ? '99+' : summary!.unresolved} activas
-                </span>
-              ) : undefined
-            }
-            actions={(
-              <>
-                <AlertProIconButton title="Personalizar alertas" onClick={() => setShowSettings(true)}>
-                  <Settings2 className="h-4 w-4" />
-                </AlertProIconButton>
-                <AlertProIconButton title="Actualizar" onClick={() => void syncAlerts()} disabled={loading || syncing}>
-                  <RefreshCw className={`h-4 w-4 ${loading || syncing ? 'animate-spin' : ''}`} />
-                </AlertProIconButton>
-              </>
-            )}
-            kpis={summary ? (
-              <AlertProKpiStrip
-                unresolved={summary.unresolved ?? 0}
-                high={summary.byPriority?.high ?? 0}
-                medium={summary.byPriority?.medium ?? 0}
-                newCount={summary.byStatus?.new ?? 0}
-              />
-            ) : undefined}
+    <Layout title="Centro de alertas" subtitle={layoutSubtitle}>
+      <div className="flex flex-col gap-5">
+        {/* Navegación principal — una sola fila */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Tabs
+            tabs={[
+              { id: 'inbox', label: 'Bandeja', count: summary?.unresolved || undefined },
+              { id: 'history', label: 'Historial', count: summary?.historyTotal || undefined },
+              { id: 'settings', label: 'Ajustes' },
+            ]}
+            activeTab={pageTab}
+            onChange={(id) => switchPageTab(id as AlertCenterPageTab)}
           />
+          {!isSettings && (
+            <button
+              type="button"
+              onClick={() => void syncAlerts()}
+              disabled={loading || syncing}
+              className="inline-flex items-center justify-center gap-2 self-start rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading || syncing ? 'animate-spin' : ''}`} />
+              Actualizar
+            </button>
+          )}
+        </div>
 
-          <AlertProViewTabs
-            activeId={viewMode}
-            onChange={switchViewMode}
-            activeCount={summary?.unresolved ?? 0}
-            historyCount={summary?.historyTotal ?? summary?.byStatus?.resolved ?? 0}
+        {/* KPIs — solo bandeja e historial */}
+        {!isSettings && summary && (
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              { label: 'Pendientes', value: summary.unresolved ?? 0, icon: Bell, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
+              { label: 'Críticas', value: summary.byPriority?.high ?? 0, icon: AlertTriangle, bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800' },
+              { label: 'Medias', value: summary.byPriority?.medium ?? 0, icon: Activity, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
+              { label: 'Nuevas', value: summary.byStatus?.new ?? 0, icon: Sparkles, bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-800' },
+            ].map((stat) => (
+              <div key={stat.label} className={`rounded-2xl border p-4 ${stat.bg} ${stat.border}`}>
+                <div className="mb-2 flex items-center gap-2">
+                  <stat.icon className={`h-4 w-4 ${stat.text}`} />
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{stat.label}</p>
+                </div>
+                <p className={`text-2xl font-black ${stat.text}`}>{stat.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Ajustes */}
+        {isSettings ? (
+          <AlertCenterAjustesView
+            businessId={settingsBusinessId}
+            onSaved={() => void loadData()}
           />
+        ) : (
+          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+            {/* Barra de herramientas */}
+            <div className="space-y-3 border-b border-gray-100 p-4 dark:border-gray-700">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                {!isHistory && (
+                  <div className="flex items-center gap-2 lg:w-56 shrink-0">
+                    <label htmlFor="alert-dept" className="sr-only">Área</label>
+                    <select
+                      id="alert-dept"
+                      value={activeDepartment}
+                      onChange={(e) => selectDepartment(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                    >
+                      {CEO_ALERT_DEPARTMENTS.map((dept) => (
+                        <option key={dept.id} value={dept.id}>{dept.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
-          <AlertProDeptTabs
-            summary={summary}
-            activeId={activeDepartment}
-            onChange={selectDepartment}
-            icons={DEPT_TAB_ICONS}
-          />
-
-          <div className="space-y-4 p-4 sm:p-6">
-            {/* Filters bar */}
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative min-w-[200px] flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Buscar alertas..."
-                    className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                    placeholder={isHistory ? 'Buscar en el historial…' : 'Buscar alertas…'}
+                    className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                   />
                 </div>
-                <VertialSecondaryButton active={showFilters} onClick={() => setShowFilters(!showFilters)}>
-                  <Filter className="h-4 w-4" />
-                  Filtros
-                </VertialSecondaryButton>
-                {viewMode === 'history' && (
-                  <label className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+
+                {!isHistory && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                      showFilters
+                        ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                    }`}
+                  >
+                    <Filter className="h-4 w-4" />
+                    Filtros
+                  </button>
+                )}
+              </div>
+
+              {isHistory && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-gray-500">Desde</span>
+                  <input
+                    type="date"
+                    value={historyFrom}
+                    onChange={(e) => { setHistoryFrom(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                  <span className="text-xs font-medium text-gray-500">hasta</span>
+                  <input
+                    type="date"
+                    value={historyTo}
+                    onChange={(e) => { setHistoryTo(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  />
+                  <label className="ml-2 inline-flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
                     <input
                       type="checkbox"
                       checked={includeDeleted}
@@ -329,35 +388,17 @@ export default function AlertCenterPage() {
                         setIncludeDeleted(e.target.checked);
                         setFilters((p) => ({ ...p, page: 1 }));
                       }}
-                      className="rounded border-zinc-300"
+                      className="rounded border-gray-300"
                     />
                     Incluir eliminadas
                   </label>
-                )}
-              </div>
-
-              {viewMode === 'history' && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="date"
-                    value={historyFrom}
-                    onChange={(e) => { setHistoryFrom(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
-                    className="rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                  />
-                  <span className="text-xs text-zinc-400">hasta</span>
-                  <input
-                    type="date"
-                    value={historyTo}
-                    onChange={(e) => { setHistoryTo(e.target.value); setFilters((p) => ({ ...p, page: 1 })); }}
-                    className="rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                  />
                 </div>
               )}
 
-              {showFilters && viewMode === 'active' && (
-                <div className="space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+              {showFilters && !isHistory && (
+                <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/50">
                   <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Estado</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Estado</span>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {(['new', 'seen', 'resolved'] as AlertStatus[]).map((s) => (
                         <Chip key={s} active={activeStatusFilters.includes(s)} onClick={() => toggleChipFilter('status', s)} label={STATUS_LABELS[s]} />
@@ -365,18 +406,10 @@ export default function AlertCenterPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Prioridad</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Prioridad</span>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {(['high', 'medium', 'low'] as AlertPriority[]).map((p) => (
                         <Chip key={p} active={activePriorityFilters.includes(p)} onClick={() => toggleChipFilter('priority', p)} label={PRIORITY_LABELS[p]} />
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Fuente</span>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {(Object.keys(SOURCE_LABELS) as AlertSource[]).map((src) => (
-                        <Chip key={src} active={activeSourceFilters.includes(src)} onClick={() => toggleChipFilter('source', src)} label={SOURCE_LABELS[src]} />
                       ))}
                     </div>
                   </div>
@@ -384,51 +417,76 @@ export default function AlertCenterPage() {
               )}
             </div>
 
-            {/* Bulk actions */}
-            {viewMode === 'active' && selectedIds.size > 0 && (
-              <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-900/80">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  {selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}
-                </span>
-                <button onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-                  <Eye className="h-3.5 w-3.5" /> Marcar vistas
-                </button>
-                <button onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
-                  <Check className="h-3.5 w-3.5" /> Resolver
-                </button>
-                <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-zinc-400 hover:text-zinc-600">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            )}
+            {/* Lista */}
+            <div className="space-y-3 p-4">
+              {!isHistory && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Mostrando alertas de <span className="font-semibold text-gray-700 dark:text-gray-300">{deptLabel}</span>
+                  {pagination.total > 0 && ` · ${pagination.total} en total`}
+                </p>
+              )}
 
-            {/* Alert list */}
-            <div className="space-y-2">
+              {!isHistory && selectedIds.size > 0 && (
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-900/80">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}
+                  </span>
+                  <button type="button" onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    <Eye className="h-3.5 w-3.5" /> Marcar vistas
+                  </button>
+                  <button type="button" onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
+                    <Check className="h-3.5 w-3.5" /> Resolver
+                  </button>
+                  <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto text-gray-400 hover:text-gray-600">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
               {loading && alerts.length === 0 ? (
                 <div className="flex items-center justify-center py-20">
-                  <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
+                  <RefreshCw className="h-6 w-6 animate-spin text-gray-400" />
                 </div>
               ) : alerts.length === 0 ? (
-                <AlertProEmpty label={viewMode === 'history' ? 'No hay alertas en el historial con estos filtros' : undefined} />
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:ring-emerald-800">
+                    <CheckCircle className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <p className="text-base font-semibold text-gray-900 dark:text-gray-100">Todo bajo control</p>
+                  <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+                    {isHistory
+                      ? 'No hay alertas en el historial con estos filtros'
+                      : `No hay alertas pendientes en ${deptLabel.toLowerCase()}`}
+                  </p>
+                  {!isHistory && (
+                    <button
+                      type="button"
+                      onClick={() => switchPageTab('settings')}
+                      className="mt-4 text-sm font-semibold text-gray-900 underline underline-offset-2 hover:no-underline dark:text-gray-100"
+                    >
+                      Configurar qué avisos recibir →
+                    </button>
+                  )}
+                </div>
               ) : (
                 <>
-                  {viewMode === 'active' && (
-                  <div className="flex items-center gap-2 px-1 text-xs text-zinc-500">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.size === alerts.length && alerts.length > 0}
-                      onChange={toggleSelectAll}
-                      className="h-3.5 w-3.5 rounded border-zinc-300"
-                    />
-                    <span>Seleccionar todo</span>
-                  </div>
+                  {!isHistory && (
+                    <div className="flex items-center gap-2 px-1 text-xs text-gray-500">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.size === alerts.length && alerts.length > 0}
+                        onChange={toggleSelectAll}
+                        className="h-3.5 w-3.5 rounded border-gray-300"
+                      />
+                      <span>Seleccionar todo</span>
+                    </div>
                   )}
 
                   {alerts.map((alert) => (
                     <AlertPageRow
                       key={alert.id}
                       alert={alert}
-                      historyMode={viewMode === 'history'}
+                      historyMode={isHistory}
                       expanded={expandedAlertId === alert.id}
                       onToggleExpand={() => setExpandedAlertId((id) => (id === alert.id ? null : alert.id))}
                       selected={selectedIds.has(alert.id)}
@@ -440,56 +498,49 @@ export default function AlertCenterPage() {
                   ))}
                 </>
               )}
-            </div>
 
-            {/* Pagination */}
-            {pagination.pages > 1 && (
-              <div className="flex items-center justify-between border-t border-zinc-200 pt-4 dark:border-zinc-800">
-                <span className="text-sm text-zinc-500">
-                  {pagination.total} alerta{pagination.total !== 1 ? 's' : ''} · Página {pagination.page} de {pagination.pages}
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    disabled={pagination.page <= 1}
-                    onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) - 1 }))}
-                    className="rounded-lg border border-zinc-200 p-2 text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <button
-                    disabled={pagination.page >= pagination.pages}
-                    onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
-                    className="rounded-lg border border-zinc-200 p-2 text-zinc-600 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
+              {pagination.pages > 1 && (
+                <div className="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-gray-700">
+                  <span className="text-sm text-gray-500">
+                    {pagination.total} alerta{pagination.total !== 1 ? 's' : ''} · Página {pagination.page} de {pagination.pages}
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={pagination.page <= 1}
+                      onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) - 1 }))}
+                      className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-400"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pagination.page >= pagination.pages}
+                      onClick={() => setFilters((p) => ({ ...p, page: (p.page || 1) + 1 }))}
+                      className="rounded-lg border border-gray-200 p-2 text-gray-600 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-400"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-
-        <AlertCenterSettingsSlide
-          isOpen={showSettings}
-          onClose={() => setShowSettings(false)}
-          businessId={settingsBusinessId}
-          onSaved={() => void loadData()}
-        />
+        )}
       </div>
     </Layout>
   );
 }
 
-// ─── Subcomponents ───────────────────────────────────────────────────────────
-
 function Chip({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`rounded-full px-3 py-1 text-xs font-medium transition ${
         active
-          ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'
-          : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+          ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
       }`}
     >
       {label}
@@ -544,8 +595,8 @@ function AlertPageRow({
 
   return (
     <div
-      className={`rounded-xl border border-zinc-200/90 bg-white transition-all dark:border-zinc-800 dark:bg-zinc-900/80 border-l-[3px] ${accent} ${
-        historyMode ? '' : 'hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700'
+      className={`rounded-xl border border-gray-200 bg-white transition-all dark:border-gray-700 dark:bg-gray-900/60 border-l-[3px] ${accent} ${
+        historyMode ? '' : 'hover:border-gray-300 hover:shadow-sm dark:hover:border-gray-600'
       } ${alert.status === 'new' && !historyMode ? 'ring-1 ring-amber-500/20' : ''} ${
         isDeleted ? 'opacity-70' : ''
       }`}
@@ -556,7 +607,7 @@ function AlertPageRow({
             type="checkbox"
             checked={selected}
             onChange={onToggleSelect}
-            className="mt-1 h-4 w-4 rounded border-zinc-300"
+            className="mt-1 h-4 w-4 rounded border-gray-300"
           />
         )}
 
@@ -568,7 +619,7 @@ function AlertPageRow({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                <h3 className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
                   {alert.title}
                 </h3>
                 <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pColors.bg} ${pColors.text}`}>
@@ -579,14 +630,14 @@ function AlertPageRow({
                   {alert.status === 'resolved' && <Check className="h-2.5 w-2.5" />}
                   {isDeleted ? 'Eliminada' : STATUS_LABELS[alert.status]}
                 </span>
-                <span className="text-[10px] font-medium text-zinc-400">
+                <span className="text-[10px] font-medium text-gray-400">
                   {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
                 </span>
               </div>
-              <p className="mt-0.5 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
+              <p className="mt-0.5 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
                 {alert.message}
               </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-gray-400">
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
                   Creada {timeAgo}
@@ -605,17 +656,18 @@ function AlertPageRow({
                 <button
                   type="button"
                   onClick={onToggleExpand}
-                  className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+                  className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800"
                   title="Ver historial"
                 >
                   {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                 </button>
               ) : (
-                <div className="opacity-0 transition group-hover:opacity-100 flex items-center gap-1">
+                <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
                   {alert.route && (
                     <button
+                      type="button"
                       onClick={() => onNavigate(alert.route!)}
-                      className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                      className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800"
                       title="Ir al detalle"
                     >
                       <Eye className="h-4 w-4" />
@@ -623,8 +675,9 @@ function AlertPageRow({
                   )}
                   {alert.status === 'new' && (
                     <button
+                      type="button"
                       onClick={() => onStatusChange(alert.id, 'seen')}
-                      className="rounded-md p-1.5 text-zinc-400 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
+                      className="rounded-md p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-950/40"
                       title="Marcar como vista"
                     >
                       <Eye className="h-4 w-4" />
@@ -632,16 +685,18 @@ function AlertPageRow({
                   )}
                   {alert.status !== 'resolved' && (
                     <button
+                      type="button"
                       onClick={() => onStatusChange(alert.id, 'resolved')}
-                      className="rounded-md p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
+                      className="rounded-md p-1.5 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950/40"
                       title="Resolver"
                     >
                       <CheckCircle className="h-4 w-4" />
                     </button>
                   )}
                   <button
+                    type="button"
                     onClick={() => onDelete(alert.id)}
-                    className="rounded-md p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                    className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
                     title="Eliminar"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -654,8 +709,8 @@ function AlertPageRow({
       </div>
 
       {historyMode && expanded && (
-        <div className="border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-zinc-500">Línea temporal</p>
+        <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-700">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">Línea temporal</p>
           <AlertHistoryTimeline entries={alert.statusHistory || []} compact />
         </div>
       )}

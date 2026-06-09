@@ -29,7 +29,13 @@ import type {
   AlertChannel,
   AlertUrgency,
 } from '../../../lib/settingsApi';
-import { getAlertsConfig, saveAlertsConfig } from '../../../lib/settingsApi';
+import {
+  getAlertsConfig,
+  saveAlertsConfig,
+  DEFAULT_CASH_REGISTER_OPERATIONAL,
+  ruleDepartment,
+} from '../../../lib/settingsApi';
+import { CEO_ALERT_DEPARTMENTS } from '../../../lib/alertCenterApi';
 
 interface Props {
   businessId: string;
@@ -65,6 +71,20 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
   seguridad:  { label: 'Seguridad',   color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
   documentos: { label: 'Documentos',  color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300' },
   sistema:    { label: 'Sistema',     color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' },
+  delivery:   { label: 'Delivery / Caja', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' },
+  equipo:     { label: 'Equipo',      color: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300' },
+  conciliacion: { label: 'Conciliación', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300' },
+  ocr:        { label: 'OCR',         color: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300' },
+  documentacion: { label: 'Documentación', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300' },
+  compras:    { label: 'Compras',     color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
+  limpieza:   { label: 'Limpieza',    color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300' },
+  construccion: { label: 'Construcción', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' },
+  carniceria: { label: 'Carnicería',  color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
+  desguaces:  { label: 'Desguace',    color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300' },
+  compraventa: { label: 'Compraventa', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' },
+  adquisiciones: { label: 'Adquisiciones', color: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300' },
+  vehicle_entry: { label: 'Vehículos', color: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300' },
+  verticales: { label: 'Operaciones', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' },
 };
 
 const AVAILABLE_ROLES = ['Admin', 'Comercial', 'Taller', 'Recepción', 'Finanzas'];
@@ -77,6 +97,7 @@ export function AlertsTab({ businessId }: Props) {
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterDepartment, setFilterDepartment] = useState<string>('all');
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<'global' | 'rules' | null>('rules');
 
@@ -84,7 +105,15 @@ export function AlertsTab({ businessId }: Props) {
     if (!businessId) return;
     setLoading(true);
     getAlertsConfig(businessId)
-      .then((data) => setConfig(data))
+      .then((data) => setConfig({
+        ...data,
+        operational: {
+          cashRegister: {
+            ...DEFAULT_CASH_REGISTER_OPERATIONAL,
+            ...(data.operational?.cashRegister || {}),
+          },
+        },
+      }))
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [businessId]);
@@ -204,6 +233,7 @@ export function AlertsTab({ businessId }: Props) {
 
   const categories = [...new Set(config.rules.map((r) => r.category))];
   const filteredRules = config.rules.filter((r) => {
+    if (filterDepartment !== 'all' && ruleDepartment(r) !== filterDepartment) return false;
     if (filterCategory !== 'all' && r.category !== filterCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -426,6 +456,16 @@ export function AlertsTab({ businessId }: Props) {
                   className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none"
                 />
               </div>
+              <select
+                value={filterDepartment}
+                onChange={(e) => setFilterDepartment(e.target.value)}
+                className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none"
+              >
+                <option value="all">Todas las ramas</option>
+                {CEO_ALERT_DEPARTMENTS.filter((d) => d.id !== 'all').map((dept) => (
+                  <option key={dept.id} value={dept.id}>{dept.label}</option>
+                ))}
+              </select>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}

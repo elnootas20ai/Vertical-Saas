@@ -189,10 +189,48 @@ export async function importTenantData(
 
 export type AlertChannel = 'push' | 'email' | 'sms' | 'inApp';
 export type AlertUrgency = 'low' | 'medium' | 'high' | 'critical';
+export type AlertRuleDepartment =
+  | 'delivery' | 'finanzas' | 'rrhh' | 'operaciones'
+  | 'limpieza' | 'construccion' | 'verticales' | 'sistema';
+
+const CATEGORY_TO_DEPARTMENT: Record<string, AlertRuleDepartment> = {
+  stock: 'operaciones',
+  ventas: 'operaciones',
+  crm: 'operaciones',
+  citas: 'operaciones',
+  taller: 'operaciones',
+  vehicle_entry: 'operaciones',
+  finanzas: 'finanzas',
+  conciliacion: 'finanzas',
+  ocr: 'finanzas',
+  compras: 'finanzas',
+  equipo: 'rrhh',
+  documentos: 'rrhh',
+  documentacion: 'rrhh',
+  seguridad: 'sistema',
+  sistema: 'sistema',
+  delivery: 'delivery',
+  limpieza: 'limpieza',
+  construccion: 'construccion',
+  carniceria: 'verticales',
+  desguaces: 'verticales',
+  compraventa: 'verticales',
+  adquisiciones: 'verticales',
+  verticales: 'operaciones',
+};
+
+export function ruleDepartment(rule: Pick<AlertRule, 'department' | 'category'>): AlertRuleDepartment {
+  if (rule.department) return rule.department;
+  return CATEGORY_TO_DEPARTMENT[rule.category] || 'operaciones';
+}
+
+export type AlertPlanTier = 'basic' | 'normal' | 'pro';
 
 export interface AlertRule {
   id: string;
   category: string;
+  department?: AlertRuleDepartment;
+  planTier?: AlertPlanTier;
   label: string;
   description: string;
   enabled: boolean;
@@ -212,9 +250,41 @@ export interface AlertsGlobalConfig {
   defaultChannels: AlertChannel[];
 }
 
+/** Umbrales operativos de caja (cuándo dispara cada alerta). */
+export interface CashRegisterOperationalConfig {
+  registerNotOpenedEnabled: boolean;
+  registerNotOpenedCheckHour: number;
+  registerNotClosedEnabled: boolean;
+  cashCloseDeadline: string;
+  cashWarningMinutes: number;
+  cashMaxOpenHours: number;
+  discrepancyEnabled: boolean;
+  discrepancyThreshold: number;
+  highReturnEnabled: boolean;
+  highReturnThreshold: number;
+}
+
+export interface AlertsOperationalConfig {
+  cashRegister: CashRegisterOperationalConfig;
+}
+
+export const DEFAULT_CASH_REGISTER_OPERATIONAL: CashRegisterOperationalConfig = {
+  registerNotOpenedEnabled: true,
+  registerNotOpenedCheckHour: 10,
+  registerNotClosedEnabled: true,
+  cashCloseDeadline: '23:30',
+  cashWarningMinutes: 30,
+  cashMaxOpenHours: 12,
+  discrepancyEnabled: true,
+  discrepancyThreshold: 20,
+  highReturnEnabled: true,
+  highReturnThreshold: 50,
+};
+
 export interface AlertsConfig {
   global: AlertsGlobalConfig;
   rules: AlertRule[];
+  operational?: AlertsOperationalConfig;
 }
 
 export async function getAlertsConfig(businessId: string): Promise<AlertsConfig> {

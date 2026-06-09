@@ -14,6 +14,11 @@ import {
   getDeliveryDbName,
 } from './couchdb.js';
 import { emitGlobalAlert } from './alertEmitter.js';
+import {
+  getBusinessAlertsOperational,
+  minutesPastCloseDeadline,
+  resolveCashRegisterAlertConfig,
+} from './cashRegisterAlertConfig.js';
 import { broadcastToBusiness } from './sseService.js';
 import logger from './logger.js';
 
@@ -64,6 +69,7 @@ const ALERT_CLASSIFICATION = {
   delivery_no_active_riders:       { defaultPriority: 'high',   escalable: false },
   delivery_unassigned_order:       { defaultPriority: 'medium', escalable: true  },
   delivery_cash_pending_close:     { defaultPriority: 'medium', escalable: true  },
+  delivery_register_not_opened:    { defaultPriority: 'medium', escalable: false },
   delivery_channel_silent:         { defaultPriority: 'medium', escalable: false },
   delivery_low_margin:             { defaultPriority: 'medium', escalable: true  },
   delivery_failed_delivery:        { defaultPriority: 'high',   escalable: false },
@@ -94,6 +100,7 @@ export function getDeliveryAlertConfig(account) {
     cashPendingCloseEnabled: cfg.cashPendingCloseEnabled !== false,
     cashCloseDeadline: cfg.cashCloseDeadline || '23:30',
     cashWarningMinutes: Number(cfg.cashWarningMinutes || 30),
+    cashMaxOpenHours: Number(cfg.cashMaxOpenHours || 12),
     channelDownEnabled: cfg.channelDownEnabled !== false,
     channelSilenceMinutes: Number(cfg.channelSilenceMinutes || 60),
     monitoredChannels: cfg.monitoredChannels || ['web', 'app', 'glovo', 'uber_eats', 'just_eat'],
@@ -238,23 +245,93 @@ function checkRiderSaturation(orders, driverSessions, config) {
   return alerts;
 }
 
-function checkCashPendingClose(tpvSessions, driverSessions, orders, config) {
-  if (!config.cashPendingCloseEnabled) return [];
-  const alerts = [], now = new Date();
-  const [dH, dM] = config.cashCloseDeadline.split(':').map(Number);
-  const dl = new Date(now); dl.setHours(dH || 23, dM || 30, 0, 0);
+function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg) {
+  if (!cashCfg?.cashPendingCloseEnabled) return [];
+  const alerts = [];
+  const now = new Date();
+  const deadline = cashCfg.cashCloseDeadline || '23:30';
+  const warnMin = Number(cashCfg.cashWarningMinutes || 30);
+  const maxHours = Number(cashCfg.cashMaxOpenHours || 12);
+  const cajaRoute = '/saas/vertical/delivery/caja';
+
   for (const s of tpvSessions) {
     if (s.status !== 'open') continue;
-    const op = new Date(s.openedAt || s.createdAt), hrs = (now - op) / 3_600_000;
-    if (hrs > 12) { alerts.push({ alertType: 'delivery_cash_pending_close', dedupKey: `tpv-old-${s._id}`, priority: 'high', title: 'Caja olvidada', message: `Caja ${s.pointOfSaleName || ''} abierta ${Math.floor(hrs)}h.`, data: { sessionType: 'tpv', sessionId: s._id, pointOfSale: s.pointOfSaleName, hoursOpen: Math.round(hrs * 10) / 10 }, route: '/saas/delivery?tab=driverCash', targetRoles: ['manager', 'owner', 'cashier'] }); continue; }
-    if (now > dl) { const mp = (now - dl) / 60_000; let p = 'low'; if (mp > config.cashWarningMinutes * 2) p = 'high'; else if (mp > config.cashWarningMinutes) p = 'medium';
-      alerts.push({ alertType: 'delivery_cash_pending_close', dedupKey: `tpv-lt-${s._id}`, priority: p, title: 'Caja pendiente cierre', message: `Caja ${s.pointOfSaleName || ''} abierta desde ${op.toTimeString().slice(0, 5)}.`, data: { sessionType: 'tpv', sessionId: s._id, pointOfSale: s.pointOfSaleName, hoursOpen: Math.round(hrs * 10) / 10, deadline: config.cashCloseDeadline, minutesPastDeadline: Math.floor(mp) }, route: '/saas/delivery?tab=driverCash', targetRoles: ['manager', 'owner', 'cashier'] }); }
+    const op = new Date(s.openedAt || s.createdAt);
+    const hrs = (now.getTime() - op.getTime()) / 3_600_000;
+    const label = s.pointOfSaleName || s.terminalName || 'Caja';
+
+    if (hrs >= maxHours) {
+      alerts.push({
+        alertType: 'delivery_cash_pending_close', dedupKey: `tpv-old-${s._id}`, priority: 'high',
+        title: 'Caja olvidada',
+        message: `${label} lleva ${Math.floor(hrs)}h abierta (máx. ${maxHours}h).`,
+        data: { sessionType: 'tpv', sessionId: s._id, pointOfSale: s.pointOfSaleName, hoursOpen: Math.round(hrs * 10) / 10, maxHours },
+        route: cajaRoute, targetRoles: ['manager', 'owner', 'cashier'],
+      });
+      continue;
+    }
+
+    const mp = minutesPastCloseDeadline(now, deadline);
+    if (mp > 0) {
+      let p = 'low';
+      if (mp > warnMin * 2) p = 'high';
+      else if (mp > warnMin) p = 'medium';
+      alerts.push({
+        alertType: 'delivery_cash_pending_close', dedupKey: `tpv-lt-${s._id}`, priority: p,
+        title: 'Caja pendiente de cierre',
+        message: `${label} sigue abierta desde ${op.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} (límite ${deadline}).`,
+        data: {
+          sessionType: 'tpv', sessionId: s._id, pointOfSale: s.pointOfSaleName,
+          hoursOpen: Math.round(hrs * 10) / 10, deadline, minutesPastDeadline: Math.floor(mp),
+        },
+        route: cajaRoute, targetRoles: ['manager', 'owner', 'cashier'],
+      });
+    }
   }
+
   for (const s of driverSessions) {
     if (s.status !== 'open') continue;
-    const hrs = (now - new Date(s.openedAt || s.createdAt)) / 3_600_000;
-    if (hrs > 2 && !orders.some((o) => o.status === 'delivery' && o.driverName === s.driverName))
-      alerts.push({ alertType: 'delivery_cash_pending_close', dedupKey: `drv-${s._id}`, priority: 'medium', title: 'Caja repartidor sin actividad', message: `${s.driverName || 'Repartidor'} ${Math.floor(hrs)}h sin pedidos.`, data: { sessionType: 'driver', sessionId: s._id, driverName: s.driverName, hoursOpen: Math.round(hrs * 10) / 10 }, route: '/saas/delivery?tab=driverCash', targetRoles: ['manager', 'owner', 'driver'] });
+    const hrs = (now.getTime() - new Date(s.openedAt || s.createdAt).getTime()) / 3_600_000;
+    if (hrs > 2 && !orders.some((o) => o.status === 'delivery' && o.driverName === s.driverName)) {
+      alerts.push({
+        alertType: 'delivery_cash_pending_close', dedupKey: `drv-${s._id}`, priority: 'medium',
+        title: 'Caja repartidor sin actividad',
+        message: `${s.driverName || 'Repartidor'} lleva ${Math.floor(hrs)}h sin pedidos activos.`,
+        data: { sessionType: 'driver', sessionId: s._id, driverName: s.driverName, hoursOpen: Math.round(hrs * 10) / 10 },
+        route: '/saas/delivery?tab=driverCash', targetRoles: ['manager', 'owner', 'driver'],
+      });
+    }
+  }
+  return alerts;
+}
+
+function checkRegisterNotOpened(tpvSessions, pointsOfSale, cashCfg) {
+  if (!cashCfg?.registerNotOpenedEnabled) return [];
+  const now = new Date();
+  if (now.getHours() < Number(cashCfg.registerNotOpenedCheckHour || 10)) return [];
+  const todayStr = now.toISOString().slice(0, 10);
+  const todaySessions = tpvSessions.filter((s) => String(s.openedAt || '').startsWith(todayStr));
+  const alerts = [];
+
+  for (const pdv of pointsOfSale) {
+    const activeTerminals = (pdv.terminals || []).filter((t) => t.active);
+    for (const terminal of activeTerminals) {
+      const hasSession = todaySessions.some(
+        (s) => s.terminalId === terminal.id || s.terminalName === terminal.name,
+      );
+      if (!hasSession) {
+        alerts.push({
+          alertType: 'delivery_register_not_opened',
+          dedupKey: `reg-notopen-${pdv._id}-${terminal.id}-${todayStr}`,
+          priority: 'medium',
+          title: 'Caja sin abrir',
+          message: `La caja "${terminal.name}" de ${pdv.name} no se ha abierto hoy.`,
+          data: { pdvName: pdv.name, terminalName: terminal.name, pdvId: pdv._id, terminalId: terminal.id },
+          route: '/saas/vertical/delivery/caja',
+          targetRoles: ['manager', 'owner', 'cashier'],
+        });
+      }
+    }
   }
   return alerts;
 }
@@ -336,11 +413,19 @@ async function runForUser(userId) {
   ]);
   const active = allOrders.filter((o) => !['delivered', 'cancelled'].includes(o.status));
   const today = allOrders.filter((o) => isToday(o.createdAt));
-  const bId = account.businessId || '', dc = account.deliveryConfig || null;
+  const bId = account.businessId || '';
+  const dc = account.deliveryConfig || null;
+  const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+  const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+  const pointsOfSale = cashCfg.registerNotOpenedEnabled
+    ? await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId))
+    : [];
   const pending = [
     ...checkDelayedOrders(active, config), ...checkKitchenSaturation(active, config),
     ...checkDeliveryStock(catItems, active, config), ...checkRiderSaturation(active, drvS, config),
-    ...checkCashPendingClose(tpvS, drvS, active, config), ...checkChannelHealth(today, config, dc),
+    ...checkCashPendingClose(tpvS, drvS, active, cashCfg),
+    ...checkRegisterNotOpened(tpvS, pointsOfSale, cashCfg),
+    ...checkChannelHealth(today, config, dc),
     ...(cycleCount % MARGIN_CHECK_INTERVAL === 0 ? checkLowMargin(today, catItems, config) : []),
     ...checkFailedDeliveries(allOrders, config), ...checkUnpaidOrders(today, config),
     ...checkRepeatIncidentClients(allOrders, config),
@@ -376,10 +461,18 @@ export async function getDeliveryAlertSummary(userId) {
   const active = allOrders.filter((o) => !['delivered', 'cancelled'].includes(o.status));
   const today = allOrders.filter((o) => isToday(o.createdAt));
   const dc = account.deliveryConfig || null;
+  const bId = account.businessId || '';
+  const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+  const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+  const pointsOfSale = cashCfg.registerNotOpenedEnabled
+    ? await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId))
+    : [];
   const pending = [
     ...checkDelayedOrders(active, config), ...checkKitchenSaturation(active, config),
     ...checkDeliveryStock(catItems, active, config), ...checkRiderSaturation(active, drvS, config),
-    ...checkCashPendingClose(tpvS, drvS, active, config), ...checkChannelHealth(today, config, dc),
+    ...checkCashPendingClose(tpvS, drvS, active, cashCfg),
+    ...checkRegisterNotOpened(tpvS, pointsOfSale, cashCfg),
+    ...checkChannelHealth(today, config, dc),
     ...checkLowMargin(today, catItems, config), ...checkFailedDeliveries(allOrders, config),
     ...checkUnpaidOrders(today, config), ...checkRepeatIncidentClients(allOrders, config),
   ];
@@ -406,7 +499,9 @@ export async function triggerReactiveAlert(userId, eventType, payload) {
       const ts = (await fetchDocsOfType(db, 'tpv_register_session')).filter((s) => s.user_id === userId);
       const ds = (await fetchDocsOfType(db, 'driver_cash_session')).filter((s) => s.user_id === userId);
       const act = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId && !['delivered', 'cancelled'].includes(o.status));
-      toE.push(...checkCashPendingClose(ts, ds, act, config));
+      const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+      const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+      toE.push(...checkCashPendingClose(ts, ds, act, cashCfg));
       if (payload?.action === 'closed' || payload?.action === 'pending_review') {
         const sess = ds.find(s => s._id === payload?.sessionId);
         if (sess && Math.abs(sess.difference || 0) >= (config.driverMismatchThreshold || 5)) {

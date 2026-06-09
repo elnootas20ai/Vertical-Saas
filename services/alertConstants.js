@@ -142,6 +142,7 @@ export const CATEGORY_TO_SOURCE = {
   delivery_no_active_riders: 'delivery',
   delivery_unassigned_order: 'delivery',
   delivery_cash_pending_close: 'delivery',
+  delivery_register_not_opened: 'delivery',
   delivery_cash_discrepancy: 'delivery',
   delivery_channel_silent: 'delivery',
   delivery_low_margin: 'delivery',

@@ -11,14 +11,11 @@ import {
   updateTpvRegisterSessionRequest,
   filterDeliveryOrdersRequest,
   listDriverCashSessionsRequest,
-  getDeliveryConfigRequest,
-  updateDeliveryConfigRequest,
   type TpvRegisterSession,
   type TpvRegisterSummary,
   type PointOfSale,
   type DriverCashSession,
   type TpvIncident,
-  type DeliveryConfig,
   type DeliveryOrder,
 } from '../../lib/deliveryApi';
 import {
@@ -26,7 +23,7 @@ import {
   Store, Clock, BarChart3, AlertTriangle, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, Filter, Download, Calendar, Eye,
   ShieldCheck, ShieldX, MessageSquare, TrendingUp, TrendingDown, Hash,
-  Truck, MapPin, Settings, Save, Bell,
+  Truck, MapPin,
   ArrowLeft, Plug,
 } from 'lucide-react';
 import {
@@ -389,146 +386,9 @@ function ValidationModal({ session, shiftOrders, onValidate, onReject, onCancel 
   );
 }
 
-// ─── Config Tab ──────────────────────────────────────────────────────────────
-
-function CashRegisterConfigTab({ config, onSave, saving }: {
-  config?: DeliveryConfig['cashRegisterAlerts'];
-  onSave: (cfg: DeliveryConfig['cashRegisterAlerts']) => void;
-  saving: boolean;
-}) {
-  const [local, setLocal] = useState<NonNullable<DeliveryConfig['cashRegisterAlerts']>>({
-    registerNotOpenedEnabled: true,
-    registerNotOpenedCheckHour: 10,
-    registerNotClosedEnabled: true,
-    registerNotClosedCheckHour: 23,
-    discrepancyEnabled: true,
-    discrepancyThreshold: 20,
-    highReturnEnabled: true,
-    highReturnThreshold: 50,
-    unpaidDeliveryEnabled: true,
-    autoCreateFinanceOnClose: true,
-    ...config,
-  });
-
-  const update = (key: string, val: boolean | number) => setLocal(prev => ({ ...prev, [key]: val }));
-
-  const inputCls = 'w-20 px-2.5 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-center text-sm font-semibold bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
-
-  const toggleCls = (enabled: boolean) =>
-    `relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`;
-
-  const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
-    <button type="button" className={toggleCls(checked)} onClick={() => onChange(!checked)}>
-      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
-    </button>
-  );
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="p-5 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Bell className="w-4 h-4 text-blue-500" /> Alertas de caja</h3>
-          <p className="text-xs text-gray-500 mt-1">Configura cuándo se generan alertas automáticas</p>
-        </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Caja sin abrir</div>
-              <div className="text-xs text-gray-500 mt-0.5">Alerta si un terminal no abre su caja antes de una hora determinada</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                <span>Hora:</span>
-                <input type="number" min={6} max={14} className={inputCls} value={local.registerNotOpenedCheckHour} onChange={e => update('registerNotOpenedCheckHour', Number(e.target.value))} />
-                <span>h</span>
-              </div>
-              <Toggle checked={!!local.registerNotOpenedEnabled} onChange={v => update('registerNotOpenedEnabled', v)} />
-            </div>
-          </div>
-
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Caja sin cerrar</div>
-              <div className="text-xs text-gray-500 mt-0.5">Alerta si una caja lleva más de 14h abierta</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                <span>Verificar a las:</span>
-                <input type="number" min={18} max={23} className={inputCls} value={local.registerNotClosedCheckHour} onChange={e => update('registerNotClosedCheckHour', Number(e.target.value))} />
-                <span>h</span>
-              </div>
-              <Toggle checked={!!local.registerNotClosedEnabled} onChange={v => update('registerNotClosedEnabled', v)} />
-            </div>
-          </div>
-
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Descuadre de caja</div>
-              <div className="text-xs text-gray-500 mt-0.5">Alerta cuando la diferencia de cierre supera un umbral</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                <span>Umbral:</span>
-                <input type="number" min={1} step={5} className={inputCls} value={local.discrepancyThreshold} onChange={e => update('discrepancyThreshold', Number(e.target.value))} />
-                <span>€</span>
-              </div>
-              <Toggle checked={!!local.discrepancyEnabled} onChange={v => update('discrepancyEnabled', v)} />
-            </div>
-          </div>
-
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Devolución elevada</div>
-              <div className="text-xs text-gray-500 mt-0.5">Alerta cuando las devoluciones del día superan un importe</div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                <span>Umbral:</span>
-                <input type="number" min={10} step={10} className={inputCls} value={local.highReturnThreshold} onChange={e => update('highReturnThreshold', Number(e.target.value))} />
-                <span>€</span>
-              </div>
-              <Toggle checked={!!local.highReturnEnabled} onChange={v => update('highReturnEnabled', v)} />
-            </div>
-          </div>
-
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Pedido entregado sin cobrar</div>
-              <div className="text-xs text-gray-500 mt-0.5">Alerta cuando un pedido de delivery se entrega sin registrar cobro</div>
-            </div>
-            <Toggle checked={!!local.unpaidDeliveryEnabled} onChange={v => update('unpaidDeliveryEnabled', v)} />
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="p-5 border-b border-gray-100 dark:border-gray-700">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Settings className="w-4 h-4 text-gray-500" /> Automatización</h3>
-        </div>
-        <div className="divide-y divide-gray-100 dark:divide-gray-700">
-          <div className="p-5 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Generar asiento financiero al cerrar</div>
-              <div className="text-xs text-gray-500 mt-0.5">Crea automáticamente un movimiento de cobro en Finanzas al cerrar cada caja</div>
-            </div>
-            <Toggle checked={!!local.autoCreateFinanceOnClose} onChange={v => update('autoCreateFinanceOnClose', v)} />
-          </div>
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <button onClick={() => onSave(local)} disabled={saving}
-          className="px-6 py-2.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-xl font-semibold text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2 disabled:opacity-50">
-          <Save className="w-4 h-4" /> {saving ? 'Guardando...' : 'Guardar configuración'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
-type TabId = 'estado' | 'historial' | 'incidencias' | 'configuracion';
+type TabId = 'estado' | 'historial' | 'incidencias';
 
 export function CajaPage() {
   const { user } = useAuth();
@@ -548,8 +408,6 @@ export function CajaPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
   const [validatingSession, setValidatingSession] = useState<TpvRegisterSession | null>(null);
   const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
-  const [deliveryConfig, setDeliveryConfig] = useState<DeliveryConfig | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [ordersFrom, setOrdersFrom] = useState(() => {
@@ -568,14 +426,12 @@ export function CajaPage() {
     if (!dataUserId) return;
     const pdvForApi = filterPdv?.trim() || activeStoreScope.activeSalesPointId?.trim() || undefined;
     try {
-      const [sessData, driverData, cfgData] = await Promise.all([
+      const [sessData, driverData] = await Promise.all([
         listTpvRegisterSessionsRequest(dataUserId, pdvForApi ? { salesPointId: pdvForApi } : undefined),
         listDriverCashSessionsRequest(dataUserId),
-        getDeliveryConfigRequest(dataUserId).catch(() => null),
       ]);
       setSessions(sessData);
       setDriverSessions(driverData);
-      if (cfgData) setDeliveryConfig(cfgData);
     } catch {
       toast.error('Error al cargar datos de caja');
     } finally {
@@ -770,25 +626,10 @@ export function CajaPage() {
     }
   };
 
-  const handleSaveConfig = async (updates: DeliveryConfig['cashRegisterAlerts']) => {
-    if (!dataUserId || !deliveryConfig) return;
-    setSavingConfig(true);
-    try {
-      const updated = await updateDeliveryConfigRequest(dataUserId, { ...deliveryConfig, cashRegisterAlerts: updates });
-      setDeliveryConfig(updated);
-      toast.success('Configuración de caja guardada');
-    } catch {
-      toast.error('Error al guardar configuración');
-    } finally {
-      setSavingConfig(false);
-    }
-  };
-
   const tabs: { id: TabId; label: string; count?: number }[] = [
     { id: 'estado', label: 'Estado actual', count: openSessions.length },
     { id: 'historial', label: 'Historial' },
     { id: 'incidencias', label: 'Incidencias', count: allIncidents.filter(i => !i.resolvedAt).length || undefined },
-    { id: 'configuracion', label: 'Configuración' },
   ];
 
   if (loading) {
@@ -827,6 +668,19 @@ export function CajaPage() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Control de efectivo y cobros de cada TPV</p>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
+          <p className="text-xs text-blue-800 dark:text-blue-200">
+            Las alertas de caja (cierre, descuadre, horarios) se configuran en el centro de notificaciones.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate('/saas/alerts?tab=ajustes')}
+            className="text-xs font-semibold text-blue-700 dark:text-blue-300 hover:underline shrink-0"
+          >
+            Configurar alertas de caja →
+          </button>
         </div>
 
         {/* Pending validations banner */}
@@ -1060,7 +914,6 @@ export function CajaPage() {
           </div>
         )}
 
-        {tab === 'configuracion' && <CashRegisterConfigTab config={deliveryConfig?.cashRegisterAlerts} onSave={handleSaveConfig} saving={savingConfig} />}
       </div>
 
       {viewingClosingSession && (

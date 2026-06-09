@@ -6,20 +6,20 @@
 echo "📦 Creando paquete de documentación completa..."
 
 # Crear directorio temporal
-mkdir -p /tmp/udar-edge-docs
+mkdir -p /tmp/vertial-edge-docs
 
 # Copiar documentos
-cp /LISTADO_FUNCIONALIDADES_COMPLETO.html /tmp/udar-edge-docs/
-cp /ESPECIFICACION_BACKEND_COMPLETA.html /tmp/udar-edge-docs/
-cp /GUIA_COMPLETA_MODULO_EQUIPO.md /tmp/udar-edge-docs/
+cp /LISTADO_FUNCIONALIDADES_COMPLETO.html /tmp/vertial-edge-docs/
+cp /ESPECIFICACION_BACKEND_COMPLETA.html /tmp/vertial-edge-docs/
+cp /GUIA_COMPLETA_MODULO_EQUIPO.md /tmp/vertial-edge-docs/
 
 # Crear README
-cat > /tmp/udar-edge-docs/README.txt << 'EOF'
-📚 DOCUMENTACIÓN COMPLETA - MÓDULO EQUIPO UDAR EDGE
-====================================================
+cat > /tmp/vertial-edge-docs/README.txt << 'EOF'
+📚 DOCUMENTACIÓN COMPLETA - MÓDULO EQUIPO VERTIAL
+================================================
 
 Este paquete contiene TODA la documentación necesaria para desarrollar
-el módulo Equipo y RRHH de UDAR EDGE.
+el módulo Equipo y RRHH de Vertial.
 
 ARCHIVOS INCLUIDOS:
 -------------------
@@ -63,10 +63,10 @@ Fecha: 4 Febrero 2026
 Estado: ✅ COMPLETO Y LISTO PARA DESARROLLO
 EOF
 
-echo "✅ Paquete creado en: /tmp/udar-edge-docs/"
+echo "✅ Paquete creado en: /tmp/vertial-edge-docs/"
 echo ""
 echo "Archivos incluidos:"
-ls -lh /tmp/udar-edge-docs/
+ls -lh /tmp/vertial-edge-docs/
 echo ""
 echo "Para crear ZIP (si tienes zip instalado):"
-echo "cd /tmp && zip -r udar-edge-docs.zip udar-edge-docs/"
+echo "cd /tmp && zip -r vertial-edge-docs.zip vertial-edge-docs/"

@@ -2,16 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   X, Bell, CheckCircle, AlertCircle, Info, Clock,
   ArrowRight, RefreshCw, Bike, DollarSign, Users, Activity,
-  Eye, Settings2,
+  Eye, Settings2, Building2, Layers, Sparkles, Shield,
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useModalClose } from '../../hooks/useModalClose';
-import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
+import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
-import { AlertCenterSettingsSlide } from '../saas/AlertCenterSettingsSlide';
 import {
   AlertProShell,
   AlertProKpiStrip,
@@ -41,6 +40,10 @@ const DEPT_ICONS: Record<string, typeof Bell> = {
   finanzas: DollarSign,
   rrhh: Users,
   operaciones: Activity,
+  limpieza: Sparkles,
+  construccion: Building2,
+  verticales: Layers,
+  sistema: Shield,
 };
 
 function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
@@ -133,20 +136,13 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const businessId = useAlertCenterBusinessId();
-  const settingsBusinessId = useAlertSettingsBusinessId();
   const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, { pollMs: isOpen ? 30_000 : 60_000 });
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [activeDept, setActiveDept] = useState('all');
-  const [showSettings, setShowSettings] = useState(false);
-
   useModalClose(isOpen, onClose);
-
-  useEffect(() => {
-    if (!isOpen) setShowSettings(false);
-  }, [isOpen]);
 
   const loadAlerts = useCallback(async (deptId = activeDept) => {
     if (!businessId) return;
@@ -217,6 +213,11 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
     onClose();
   };
 
+  const goAjustes = () => {
+    navigate('/saas/alerts?tab=ajustes');
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   const highCount = summary?.byPriority?.high ?? 0;
@@ -242,7 +243,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
           ) : undefined}
           actions={(
             <>
-              <AlertProIconButton title="Personalizar" onClick={() => setShowSettings(true)}>
+              <AlertProIconButton title="Ajustes de alertas" onClick={goAjustes}>
                 <Settings2 className="w-4 h-4" />
               </AlertProIconButton>
               <AlertProIconButton title="Actualizar" onClick={() => void syncAndReload()} disabled={syncing}>
@@ -298,28 +299,29 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
           )}
           <button
             type="button"
+            onClick={goAjustes}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 py-3 text-sm font-semibold text-white shadow-md shadow-violet-500/20 transition hover:from-violet-500 hover:to-indigo-500"
+          >
+            <Settings2 className="w-4 h-4" />
+            Ajustes de alertas
+          </button>
+          <button
+            type="button"
             onClick={goFullCenter}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-zinc-900 py-3 text-sm font-semibold text-white transition hover:bg-black dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 py-2.5 text-sm font-semibold text-zinc-800 dark:text-zinc-200 transition hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >
             Abrir centro completo
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
             type="button"
-            onClick={() => { navigate('/saas/alerts?tab=history'); onClose(); }}
+            onClick={() => { navigate('/saas/alerts?tab=historial'); onClose(); }}
             className="w-full text-center text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 py-1"
           >
             Ver historial de alertas
           </button>
         </div>
       </div>
-
-      <AlertCenterSettingsSlide
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-        businessId={settingsBusinessId}
-        onSaved={() => void syncAndReload()}
-      />
     </>
   );
 }

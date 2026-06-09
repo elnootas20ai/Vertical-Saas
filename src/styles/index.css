@@ -47,12 +47,12 @@
 }
 
 /* Horarios PDV — inputs type=time legibles (Chrome/Edge, formato 12h) */
-.udar-time-field-wrap {
+.vertial-time-field-wrap {
   display: inline-flex;
   align-items: center;
 }
 
-.udar-time-input {
+.vertial-time-input {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -73,33 +73,33 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.udar-time-input:focus {
+.vertial-time-input:focus {
   border-color: #111827;
   box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.12);
 }
 
-.udar-time-input:disabled {
+.vertial-time-input:disabled {
   opacity: 0.45;
 }
 
-.udar-time-input::-webkit-datetime-edit {
+.vertial-time-input::-webkit-datetime-edit {
   padding: 0;
   margin: 0;
   line-height: 1.25rem;
 }
 
-.udar-time-input::-webkit-datetime-edit-fields-wrapper {
+.vertial-time-input::-webkit-datetime-edit-fields-wrapper {
   padding: 0;
   align-items: center;
 }
 
-.udar-time-input::-webkit-datetime-edit-hour-field,
-.udar-time-input::-webkit-datetime-edit-minute-field,
-.udar-time-input::-webkit-datetime-edit-ampm-field {
+.vertial-time-input::-webkit-datetime-edit-hour-field,
+.vertial-time-input::-webkit-datetime-edit-minute-field,
+.vertial-time-input::-webkit-datetime-edit-ampm-field {
   padding: 0 0.12em;
 }
 
-.udar-time-input::-webkit-calendar-picker-indicator {
+.vertial-time-input::-webkit-calendar-picker-indicator {
   width: 1.125rem;
   height: 1.125rem;
   margin-inline-start: 0.35rem;
@@ -107,12 +107,12 @@
   cursor: pointer;
 }
 
-.dark .udar-time-input {
+.dark .vertial-time-input {
   border-color: #4b5563;
   background-color: #111827;
   color: #f9fafb;
 }
 
-.dark .udar-time-input:focus {
+.dark .vertial-time-input:focus {
   border-color: #e5e7eb;
 }

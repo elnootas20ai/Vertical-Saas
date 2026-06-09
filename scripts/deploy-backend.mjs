@@ -81,8 +81,8 @@ if [ "$MODE" = "docker" ]; then
   docker ps --format 'table {{.Names}}\\t{{.Image}}\\t{{.Status}}'
 else
   npm ci --omit=dev
-  pm2 restart ${sq(pm2Name || 'udar-backend')}
-  pm2 logs ${sq(pm2Name || 'udar-backend')} --lines 25 --nostream
+  pm2 restart ${sq(pm2Name || 'vertial-backend')}
+  pm2 logs ${sq(pm2Name || 'vertial-backend')} --lines 25 --nostream
 fi
 
 echo "[deploy:backend] health:"

@@ -110,14 +110,14 @@ function TimeField({
   label: string;
 }) {
   return (
-    <label className="udar-time-field-wrap">
+    <label className="vertial-time-field-wrap">
       <span className="sr-only">{label}</span>
       <input
         type="time"
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="udar-time-input"
+        className="vertial-time-input"
       />
     </label>
   );

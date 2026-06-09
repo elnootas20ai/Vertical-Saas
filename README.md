@@ -1,4 +1,4 @@
-# udar
+# Vertial
 
 Frontend SaaS (React + Vite). Documentación en `readme/` (estructura: `readme/main.md`, instalación: `readme/install.md`).
 

@@ -1,13 +1,17 @@
 ---
-description: Visión UDar — SaaS core + verticales; delivery como primer motor operativo
+description: Visión Vertial — SaaS core + verticales; delivery como primer motor operativo
 alwaysApply: true
 ---
 
-# UDar — SaaS multi-vertical
+# Vertial — SaaS multi-vertical
+
+## Marca
+
+**Vertial** es el nombre del producto en UI, emails, ayudas, toasts y documentación para el cliente.
 
 ## Qué es el proyecto
 
-UDar es un **SaaS multi-vertical**: primero un **core** compartido (cuenta, negocio, permisos, PDV/tiendas, catálogo base, usuarios, informes transversales, etc.), y encima **verticales** con operativa propia.
+Vertial es un **SaaS multi-vertical**: primero un **core** compartido (cuenta, negocio, permisos, PDV/tiendas, catálogo base, usuarios, informes transversales, etc.), y encima **verticales** con operativa propia.
 
 ## Capas (respetar al codificar)
 

@@ -98,6 +98,8 @@ async function emitAlert({ businessId, userId, category, source, priority, level
   });
 }
 
+const emit = emitAlert;
+
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 function getAlertConfig(account) {
@@ -1670,20 +1672,18 @@ async function runAlertsForBusiness(business) {
   // OCR Transversal
   results.push(...await checkOcrAlerts(ctx, ownerId, config));
 
-  // Cash register alerts
-  if (config.cashRegister?.enabled) {
-    try {
+  // Caja: descuadre y devoluciones (apertura/cierre en vivo → deliveryAlertEngine cada 60s)
+  try {
+    const { getBusinessAlertsOperational, resolveCashRegisterAlertConfig } = await import('./cashRegisterAlertConfig.js');
+    const businessOp = businessId ? await getBusinessAlertsOperational(fakeReq, businessId) : null;
+    const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+    if (cashCfg.discrepancyEnabled || cashCfg.highReturnEnabled) {
       const deliveryDb = getDeliveryDbName();
-      const [tpvSessions, pointsOfSale] = await Promise.all([
-        fetchAllDocsOfType(deliveryDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId)),
-        fetchAllDocsOfType(deliveryDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
-      ]);
-      results.push(...await checkRegisterNotOpened(ctx, tpvSessions, pointsOfSale, config));
-      results.push(...await checkRegisterNotClosed(ctx, tpvSessions, config));
-      results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, config));
-      results.push(...await checkHighReturnInRegister(ctx, tpvSessions, config));
-    } catch { /* cash register not active */ }
-  }
+      const tpvSessions = await fetchAllDocsOfType(deliveryDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId));
+      if (cashCfg.discrepancyEnabled) results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg));
+      if (cashCfg.highReturnEnabled) results.push(...await checkHighReturnInRegister(ctx, tpvSessions, cashCfg));
+    }
+  } catch { /* cash register not active */ }
 
   return { businessId, alerts: results.length };
 }
@@ -2609,9 +2609,9 @@ async function checkRegisterNotClosed(ctx, tpvSessions, config) {
   return alerts.filter(Boolean);
 }
 
-async function checkRegisterDiscrepancy(ctx, tpvSessions, config) {
-  if (!config.cashRegister?.discrepancyEnabled) return [];
-  const threshold = config.cashRegister.discrepancyThreshold || 20;
+async function checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg) {
+  if (!cashCfg?.discrepancyEnabled) return [];
+  const threshold = cashCfg.discrepancyThreshold || 20;
   const todayStr = new Date().toISOString().slice(0, 10);
   const alerts = [];
 
@@ -2619,7 +2619,7 @@ async function checkRegisterDiscrepancy(ctx, tpvSessions, config) {
   for (const session of closedToday) {
     alerts.push(await emit({
       ...ctx, dedupKey: `reg-discrep-${session._id}`, level: Math.abs(session.difference) >= threshold * 5 ? 'alert' : 'warning',
-      category: 'register_discrepancy', source: 'cash_register',
+      category: 'delivery_cash_discrepancy', source: 'delivery', ruleId: 'delivery_cash_discrepancy',
       title: 'Descuadre de caja',
       message: `Diferencia de ${session.difference >= 0 ? '+' : ''}${Number(session.difference).toFixed(2)}€ en "${session.terminalName}"${session.pointOfSaleName ? ` (${session.pointOfSaleName})` : ''}.`,
       entityId: session._id, entityType: 'tpv_register_session', route: '/saas/vertical/delivery/caja',
@@ -2629,9 +2629,9 @@ async function checkRegisterDiscrepancy(ctx, tpvSessions, config) {
   return alerts.filter(Boolean);
 }
 
-async function checkHighReturnInRegister(ctx, tpvSessions, config) {
-  if (!config.cashRegister?.highReturnEnabled) return [];
-  const threshold = config.cashRegister.highReturnThreshold || 50;
+async function checkHighReturnInRegister(ctx, tpvSessions, cashCfg) {
+  if (!cashCfg?.highReturnEnabled) return [];
+  const threshold = cashCfg.highReturnThreshold || 50;
   const todayStr = new Date().toISOString().slice(0, 10);
   const alerts = [];
 

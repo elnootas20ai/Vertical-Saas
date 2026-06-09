@@ -328,6 +328,34 @@ export const CEO_ALERT_DEPARTMENTS: CeoAlertDepartment[] = [
     sources: ['verticales', 'stock', 'taller', 'crm'],
     gradient: 'from-blue-500 to-cyan-600',
   },
+  {
+    id: 'limpieza',
+    label: 'Limpieza',
+    icon: 'sparkles',
+    sources: ['limpieza'],
+    gradient: 'from-cyan-500 to-teal-600',
+  },
+  {
+    id: 'construccion',
+    label: 'Construcción',
+    icon: 'hard-hat',
+    sources: ['construccion'],
+    gradient: 'from-amber-500 to-orange-600',
+  },
+  {
+    id: 'verticales',
+    label: 'Verticales',
+    icon: 'layers',
+    sources: ['carniceria', 'compraventa', 'adquisiciones', 'desguaces'],
+    gradient: 'from-violet-500 to-purple-600',
+  },
+  {
+    id: 'sistema',
+    label: 'Sistema',
+    icon: 'shield',
+    sources: ['sistema'],
+    gradient: 'from-gray-500 to-slate-600',
+  },
 ];
 
 export function countAlertsForDepartment(

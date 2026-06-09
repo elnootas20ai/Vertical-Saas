@@ -3,7 +3,7 @@ import type { AlertHistoryEntry, AlertPriority, AlertRecord, AlertSource, AlertS
 import { SOURCE_LABELS, SOURCE_COLORS, PRIORITY_LABELS, CEO_ALERT_DEPARTMENTS, countAlertsForDepartment, formatHistoryEntry, HISTORY_ACTION_LABELS } from '../../lib/alertCenterApi';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ArrowRight, Clock, History, Inbox } from 'lucide-react';
+import { ArrowRight, Clock, History, Inbox, Settings2 } from 'lucide-react';
 
 export const PRIORITY_ACCENT: Record<AlertPriority, string> = {
   high: 'border-l-red-500',
@@ -244,6 +244,70 @@ export function AlertProEmpty({ label }: { label?: string }) {
       </div>
       <p className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Todo bajo control</p>
       <p className="mt-1 text-sm text-zinc-500">{label || 'No hay alertas que requieran acción ahora mismo'}</p>
+    </div>
+  );
+}
+
+export type AlertCenterPageTab = 'inbox' | 'history' | 'settings';
+
+export function AlertProCenterTabs({
+  activeId,
+  onChange,
+  inboxCount,
+  historyCount,
+}: {
+  activeId: AlertCenterPageTab;
+  onChange: (id: AlertCenterPageTab) => void;
+  inboxCount?: number;
+  historyCount?: number;
+}) {
+  const tabs: { id: AlertCenterPageTab; label: string; icon: typeof Inbox; count?: number; highlight?: boolean }[] = [
+    { id: 'inbox', label: 'Bandeja', icon: Inbox, count: inboxCount },
+    { id: 'history', label: 'Historial', icon: History, count: historyCount },
+    { id: 'settings', label: 'Ajustes', icon: Settings2, highlight: true },
+  ];
+
+  return (
+    <div className="shrink-0 border-b border-zinc-200/80 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-900">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeId === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onChange(tab.id)}
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
+                  active
+                    ? tab.id === 'settings'
+                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/25'
+                      : 'bg-zinc-900 text-white shadow-sm dark:bg-white dark:text-zinc-900'
+                    : tab.highlight
+                      ? 'text-violet-700 hover:bg-violet-50 dark:text-violet-300 dark:hover:bg-violet-950/40'
+                      : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white'
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                {tab.label}
+                {(tab.count ?? 0) > 0 && tab.id !== 'settings' && (
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    active ? 'bg-white/15 dark:bg-zinc-900/15' : 'bg-zinc-200 dark:bg-zinc-800'
+                  }`}>
+                    {tab.count! > 99 ? '99+' : tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {activeId === 'settings' && (
+          <span className="text-xs font-medium text-violet-600 dark:text-violet-400">
+            Configura qué vigila Vertial por ti
+          </span>
+        )}
+      </div>
     </div>
   );
 }

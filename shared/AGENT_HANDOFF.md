@@ -1,7 +1,9 @@
-# Handoff para el asistente (Vertial / udar)
+# Handoff para el asistente (Vertial)
 
 **Para quién:** futuras sesiones de chat con el mismo proyecto.  
 **Para quién no:** no es documentación de producto para el cliente final.
+
+**Marca del producto:** Vertial (en UI, emails y copys).
 
 **Visión general (SaaS, verticales, precios, PDV, módulos, disco/memoria):** `docs/VERTIAL-SAAS-VISION.md` — leer antes que este archivo si hace falta contexto de negocio o restricciones de servidor.
 

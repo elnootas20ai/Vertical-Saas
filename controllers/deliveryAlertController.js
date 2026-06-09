@@ -94,6 +94,7 @@ export async function updateDeliveryAlertSettings(req, res) {
       'channelSilenceMinutes', 'lowMarginThresholdPercent',
       'failedDeliveryThreshold', 'unpaidGraceMinutes',
       'repeatIncidentThreshold', 'repeatIncidentWindowDays', 'engineIntervalSeconds',
+      'cashMaxOpenHours',
     ];
     const allowedStrings = ['cashCloseDeadline'];
 

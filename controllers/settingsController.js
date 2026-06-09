@@ -3,9 +3,19 @@ import {
   couchRequest,
   ensureDatabase,
   findAccountByUserId,
+  findBusinessById,
   sanitizeAccount,
   saveSession,
 } from '../services/couchdb.js';
+import {
+  DEFAULT_CASH_REGISTER_OPERATIONAL,
+  sanitizeCashRegisterOperational,
+  syncCashRegisterAlertsToAccount,
+} from '../services/cashRegisterAlertConfig.js';
+import {
+  ALL_ALERT_RULE_DEFINITIONS,
+  mergeAlertRules,
+} from '../services/alertRulesCatalog.js';
 import {
   signAccessToken,
   signRefreshToken,
@@ -487,37 +497,10 @@ export async function impersonateUser(req, res) {
 
 // ─── ADM-09: Alerts config ───────────────────────────────────────────────────
 
-const DEFAULT_ALERT_RULES = [
-  { id: 'stock_low',           category: 'stock',      label: 'Stock bajo',                  description: 'Cuando un producto o vehículo alcanza el stock mínimo configurado',          enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'stock_new_entry',     category: 'stock',      label: 'Nueva entrada de stock',      description: 'Cuando se registra una nueva unidad en el inventario',                       enabled: true,  channels: ['inApp'],                  urgency: 'low',      schedule: 'instant', recipientRoles: ['Admin', 'Comercial'], customRecipients: [] },
-  { id: 'sale_completed',      category: 'ventas',     label: 'Venta completada',            description: 'Cuando una operación de venta se marca como completada',                     enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'medium',   schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'sale_cancelled',      category: 'ventas',     label: 'Venta cancelada',             description: 'Cuando una operación de venta se cancela',                                   enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'lead_new',            category: 'crm',        label: 'Nuevo lead',                  description: 'Cuando se recibe un nuevo lead desde web, portal o manualmente',             enabled: true,  channels: ['push', 'inApp'],          urgency: 'medium',   schedule: 'instant', recipientRoles: ['Admin', 'Comercial'], customRecipients: [] },
-  { id: 'lead_stale',          category: 'crm',        label: 'Lead sin actividad',          description: 'Cuando un lead lleva más de 48h sin interacción',                            enabled: true,  channels: ['email', 'inApp'],         urgency: 'medium',   schedule: 'digest_daily', recipientRoles: ['Comercial'], customRecipients: [] },
-  { id: 'appointment_reminder',category: 'citas',      label: 'Recordatorio de cita',        description: 'Recordatorio automático antes de una cita programada',                       enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'medium',   schedule: 'instant', recipientRoles: ['Comercial'], customRecipients: [] },
-  { id: 'appointment_missed',  category: 'citas',      label: 'Cita no atendida',            description: 'Cuando una cita pasa sin confirmación de asistencia',                        enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin', 'Comercial'], customRecipients: [] },
-  { id: 'workshop_ready',      category: 'taller',     label: 'Vehículo listo en taller',    description: 'Cuando una orden de trabajo se marca como completada',                       enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'medium',   schedule: 'instant', recipientRoles: ['Admin', 'Taller'], customRecipients: [] },
-  { id: 'workshop_delayed',    category: 'taller',     label: 'Reparación retrasada',        description: 'Cuando una orden de trabajo supera la fecha estimada de entrega',             enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin', 'Taller'], customRecipients: [] },
-  { id: 'payment_received',    category: 'finanzas',   label: 'Pago recibido',               description: 'Cuando se registra un cobro o pago en una operación',                        enabled: true,  channels: ['inApp'],                  urgency: 'low',      schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'payment_overdue',     category: 'finanzas',   label: 'Pago vencido',                description: 'Cuando un cobro pendiente supera la fecha de vencimiento',                   enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'critical', schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'invoice_generated',   category: 'finanzas',   label: 'Factura generada',            description: 'Cuando se genera una nueva factura automática o manualmente',                enabled: false, channels: ['inApp'],                  urgency: 'low',      schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'user_login_new',      category: 'seguridad',  label: 'Nuevo inicio de sesión',      description: 'Cuando un usuario inicia sesión desde un dispositivo o ubicación nueva',     enabled: true,  channels: ['email', 'inApp'],         urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'user_role_changed',   category: 'seguridad',  label: 'Cambio de rol de usuario',    description: 'Cuando se modifica el rol o permisos de un usuario',                         enabled: true,  channels: ['email', 'inApp'],         urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'document_expiring',   category: 'documentos', label: 'Documento por vencer',        description: 'Cuando un documento (ITV, seguro, etc.) está próximo a su vencimiento',      enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'system_update',       category: 'sistema',    label: 'Actualización del sistema',   description: 'Notificaciones sobre nuevas versiones y mantenimientos programados',         enabled: true,  channels: ['inApp'],                  urgency: 'low',      schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'worker_no_clockin',   category: 'equipo',     label: 'Trabajador no fichó',         description: 'Cuando un miembro activo del equipo no registra fichaje en el día',          enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin', 'Gerente'], customRecipients: [] },
-  { id: 'worker_late_clockin', category: 'equipo',     label: 'Fichaje tardío',              description: 'Cuando un trabajador ficha después de la hora configurada + tolerancia',     enabled: true,  channels: ['inApp'],                  urgency: 'medium',   schedule: 'instant', recipientRoles: ['Admin', 'Gerente'], customRecipients: [] },
-  { id: 'contract_expiring',   category: 'equipo',     label: 'Contrato próximo a vencer',   description: 'Cuando el contrato de un trabajador vence en los próximos 30 días',          enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'document_expired',    category: 'documentos', label: 'Documento caducado',          description: 'Cuando un documento ha superado su fecha de validez',                        enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'fleet_itv_expiring',  category: 'documentos', label: 'ITV próxima a vencer',        description: 'Cuando la ITV de un vehículo de flota está próxima a caducar',               enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'fleet_insurance_expiring', category: 'documentos', label: 'Seguro próximo a vencer', description: 'Cuando el seguro de un vehículo de flota está próximo a caducar',           enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'client_payment_overdue', category: 'finanzas', label: 'Impago de cliente',          description: 'Cuando una factura de venta vence sin cobrar',                               enabled: true,  channels: ['push', 'email', 'inApp'], urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin', 'Administración'], customRecipients: [] },
-  { id: 'negative_cash_flow',  category: 'finanzas',   label: 'Flujo de caja negativo',      description: 'Cuando los gastos del mes superan los ingresos significativamente',           enabled: false, channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'digest_daily', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'purchase_order_delayed', category: 'stock',    label: 'Pedido de compra retrasado',  description: 'Cuando un pedido a proveedor supera la fecha esperada de entrega',            enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'negative_stock',      category: 'stock',      label: 'Stock negativo',              description: 'Cuando un producto muestra stock negativo (posible error de inventario)',     enabled: true,  channels: ['push', 'inApp'],          urgency: 'high',     schedule: 'instant', recipientRoles: ['Admin'], customRecipients: [] },
-  { id: 'invoice_pending_validation', category: 'ocr',  label: 'Factura pendiente de validar', description: 'Factura escaneada por OCR pendiente de revisión manual',                    enabled: true,  channels: ['inApp'],                  urgency: 'medium',   schedule: 'digest_daily', recipientRoles: ['Admin', 'Administración'], customRecipients: [] },
-  { id: 'bank_unreconciled',   category: 'conciliacion', label: 'Movimientos sin conciliar', description: 'Movimientos bancarios importados sin emparejar con registros financieros',    enabled: true,  channels: ['inApp'],                  urgency: 'medium',   schedule: 'digest_daily', recipientRoles: ['Admin', 'Administración'], customRecipients: [] },
+const VALID_RULE_DEPARTMENTS = [
+  'delivery', 'finanzas', 'rrhh', 'operaciones', 'limpieza', 'construccion', 'verticales', 'sistema',
 ];
+const VALID_PLAN_TIERS = ['basic', 'normal', 'pro'];
 
 const DEFAULT_ALERTS_GLOBAL = {
   muteAll: false,
@@ -537,14 +520,21 @@ export async function getAlertsConfig(req, res) {
     const businessId = String(req.params.businessId || '').trim();
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
     const doc = await getSettingsDoc(req, 'alerts', businessId);
+    const rules = mergeAlertRules(doc?.rules);
+    const operational = {
+      cashRegister: sanitizeCashRegisterOperational(
+        doc?.operational?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
+      ),
+    };
     return res.json({
       ok: true,
       alerts: doc
         ? {
             global: { ...DEFAULT_ALERTS_GLOBAL, ...(doc.global || {}) },
-            rules: Array.isArray(doc.rules) ? doc.rules : DEFAULT_ALERT_RULES,
+            rules,
+            operational,
           }
-        : { global: DEFAULT_ALERTS_GLOBAL, rules: DEFAULT_ALERT_RULES },
+        : { global: DEFAULT_ALERTS_GLOBAL, rules, operational },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -556,7 +546,7 @@ export async function saveAlertsConfig(req, res) {
     const businessId = String(req.params.businessId || '').trim();
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
 
-    const { global: g, rules } = req.body || {};
+    const { global: g, rules, operational: op } = req.body || {};
 
     const sanitizedGlobal = {
       muteAll: Boolean(g?.muteAll),
@@ -570,9 +560,11 @@ export async function saveAlertsConfig(req, res) {
     };
 
     const sanitizedRules = Array.isArray(rules)
-      ? rules.slice(0, 100).map((r) => ({
+      ? rules.slice(0, 300).map((r) => ({
           id: String(r.id || ''),
           category: String(r.category || '').slice(0, 50),
+          department: VALID_RULE_DEPARTMENTS.includes(r.department) ? r.department : undefined,
+          planTier: VALID_PLAN_TIERS.includes(r.planTier) ? r.planTier : undefined,
           label: String(r.label || '').slice(0, 100),
           description: String(r.description || '').slice(0, 500),
           enabled: Boolean(r.enabled),
@@ -584,12 +576,26 @@ export async function saveAlertsConfig(req, res) {
           recipientRoles: Array.isArray(r.recipientRoles) ? r.recipientRoles.map((x) => String(x).slice(0, 50)) : [],
           customRecipients: Array.isArray(r.customRecipients) ? r.customRecipients.map((x) => String(x).slice(0, 200)) : [],
         }))
-      : DEFAULT_ALERT_RULES;
+      : ALL_ALERT_RULE_DEFINITIONS;
+
+    const sanitizedOperational = {
+      cashRegister: sanitizeCashRegisterOperational(
+        op?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
+      ),
+    };
 
     await saveSettingsDoc(req, 'alerts', businessId, {
       global: sanitizedGlobal,
-      rules: sanitizedRules,
+      rules: mergeAlertRules(sanitizedRules),
+      operational: sanitizedOperational,
     });
+
+    try {
+      const business = await findBusinessById(req, businessId);
+      if (business?.owner_user_id) {
+        await syncCashRegisterAlertsToAccount(req, business.owner_user_id, sanitizedOperational.cashRegister);
+      }
+    } catch { /* sync best-effort */ }
 
     return res.json({ ok: true });
   } catch (err) {

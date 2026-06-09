@@ -571,6 +571,7 @@ export const router = createBrowserRouter([
           { path: 'gdpr', element: <RequireBusinessOwner><GdprPanel /></RequireBusinessOwner> },
           { path: 'settings', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'settings/horarios', element: <Navigate to="/saas/settings/tienda?action=horarios" replace /> },
+          { path: 'settings/alertas', element: <Navigate to="/saas/alerts?tab=ajustes" replace /> },
           { path: 'settings/:tab', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'billing', element: <RequireBusinessOwner><Billing /></RequireBusinessOwner> },
           { path: 'help', Component: HelpCenter },

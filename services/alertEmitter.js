@@ -85,9 +85,11 @@ async function getBusinessAlertConfig(businessId) {
   try {
     await ensureDatabase(fakeReq, SETTINGS_DB);
     const docId = `alerts:${businessId}`;
-    const resp = await couchRequest(fakeReq, `/${encodeURIComponent(SETTINGS_DB)}/${encodeURIComponent(docId)}`);
-    if (!resp._id) return null;
-    return resp;
+    const res = await couchRequest(fakeReq, `/${encodeURIComponent(SETTINGS_DB)}/${encodeURIComponent(docId)}`);
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    const doc = await res.json();
+    return doc?._id ? doc : null;
   } catch {
     return null;
   }
@@ -181,6 +183,10 @@ export async function emitGlobalAlert({
     if (recipientUserIds.length === 0) return null;
 
     const quiet = await isQuietHours(businessId);
+    const bypassQuiet = quiet && (
+      ruleId === 'delivery_cash_pending_close'
+      || category === 'delivery_cash_pending_close'
+    ) && (resolvedPriority === 'high' || resolvedPriority === 'critical');
 
     const now = new Date().toISOString();
     const notifBase = buildNotificationDocument({
@@ -211,7 +217,7 @@ export async function emitGlobalAlert({
     for (const uid of recipientUserIds) {
       broadcastToUser(uid, 'notification', sanitized);
 
-      if (!quiet && channels.includes('push')) {
+      if ((!quiet || bypassQuiet) && channels.includes('push')) {
         sendPushToUser(fakeReq, uid, {
           title: sanitized.title,
           body: sanitized.message,
@@ -219,7 +225,7 @@ export async function emitGlobalAlert({
         }).catch(() => null);
       }
 
-      if (!quiet && channels.includes('email')) {
+      if ((!quiet || bypassQuiet) && channels.includes('email')) {
         try {
           const { findAccountByUserId } = await import('./couchdb.js');
           const account = await findAccountByUserId(fakeReq, uid);
