@@ -12,6 +12,8 @@ export interface BusinessContextType {
   currentBusiness: Business | null;
   isLoading: boolean;
   businessesFetchSettled: boolean;
+  /** Error al cargar empresas desde la API (distinto de «sin empresas»). */
+  businessesLoadError: string | null;
   switchBusiness: (businessId: string) => void;
   createBusiness: (
     data: CreateBusinessPayload,

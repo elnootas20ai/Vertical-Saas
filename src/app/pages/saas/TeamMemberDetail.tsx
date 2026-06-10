@@ -950,8 +950,12 @@ export function TeamMemberDetail() {
                 <InfoField label="Nombre completo" value={member.fullName} />
                 <InfoField label="Email" value={member.email} />
                 <InfoField label="Teléfono" value={member.phone} />
-                <InfoField label="Contacto de emergencia" value={emp.emergencyContact} />
-                <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
+                {emp.emergencyContact?.trim() ? (
+                  <InfoField label="Contacto de emergencia" value={emp.emergencyContact} />
+                ) : null}
+                {emp.emergencyPhone?.trim() ? (
+                  <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
+                ) : null}
                 <InfoField label="Fecha de registro" value={member.createdAt ? new Date(member.createdAt).toLocaleDateString('es-ES') : undefined} />
               </div>
             </div>

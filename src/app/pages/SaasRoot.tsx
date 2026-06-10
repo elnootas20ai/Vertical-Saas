@@ -334,6 +334,24 @@ function SaasContent() {
     || location.pathname === '/saas/user-dashboard'
     || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
 
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (isUserAccount || isLinkedWorker) return;
+    if (!businessesFetchSettled || isLoadingBusinesses) return;
+    if (businesses.length > 0) return;
+    navigate('/auth/gate', { replace: true });
+  }, [
+    isInitializing,
+    isAuthenticated,
+    user,
+    isUserAccount,
+    isLinkedWorker,
+    businessesFetchSettled,
+    isLoadingBusinesses,
+    businesses.length,
+    navigate,
+  ]);
+
   if (isInitializing || ((!skipBusinessLoadGate && isInitialBusinessLoad) || isAutoCreating)) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
@@ -352,12 +370,21 @@ function SaasContent() {
 
 
 
-  if (businesses.length === 0 && !isUserAccount && !isLinkedWorker) {
+  if (
+    businesses.length === 0 &&
+    !isUserAccount &&
+    !isLinkedWorker &&
+    (!businessesFetchSettled || isLoadingBusinesses)
+  ) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Preparando espacio de trabajo" />
       </div>
     );
+  }
+
+  if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
+    return null;
   }
 
 

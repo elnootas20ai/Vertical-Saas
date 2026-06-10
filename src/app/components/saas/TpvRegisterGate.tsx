@@ -39,7 +39,7 @@ import {
   isInvitedWorkerUser,
 } from '../../lib/pdvScope';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
-import { loadTpvPointsOfSaleForBusiness } from '../../lib/deliverySetup';
+import { loadTpvPointsOfSaleForBusiness, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import {
   isMemberAssignedToStore,
@@ -1869,7 +1869,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
-  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const businessId = resolveBusinessScopeId(currentBusiness);
 
   const isTabletSession = Boolean(tabletBinding?.pdvId && tabletBinding.businessId);
 
@@ -1877,8 +1877,9 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!tabletBinding?.businessId || !businessesFetchSettled) return;
-    const activeBid = String(currentBusiness?.business_id || currentBusiness?.id || '');
-    if (tabletBinding.businessId !== activeBid) {
+    const activeBid = resolveBusinessScopeId(currentBusiness);
+    const tabletBid = resolveBusinessScopeId(tabletBinding.businessId);
+    if (tabletBid && tabletBid !== activeBid) {
       switchBusiness(tabletBinding.businessId);
     }
   }, [tabletBinding, businessesFetchSettled, currentBusiness, switchBusiness]);
@@ -1887,7 +1888,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     if (!isTabletSession || !tabletRestrictedPdvId) return;
     setManagerPdvPickId(tabletRestrictedPdvId);
     skipManagerAutoPdvRef.current = false;
-    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const bid = resolveBusinessScopeId(currentBusiness);
     if (bid && tabletBinding?.dataUserId) {
       writeDeliveryOpsSelectedPdvId(bid, tabletBinding.dataUserId, tabletRestrictedPdvId);
     }
@@ -1906,7 +1907,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (isWorkerUser || managerPdvPickId || skipManagerAutoPdvRef.current) return;
-    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const bid = resolveBusinessScopeId(currentBusiness);
     if (bid && dataUserId) {
       const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
       const pdvId = resolvePreferenceToPdvId(pointsOfSale, saved);
@@ -2002,9 +2003,16 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   currentBusinessRef.current = currentBusiness;
 
   const loadData = useCallback(async () => {
-    if (!dataUserId || !user) return;
+    if (!dataUserId || !user) {
+      setLoading(false);
+      return;
+    }
     const biz = currentBusinessRef.current;
-    const bidAtStart = String(biz?.business_id || biz?.id || '').trim();
+    const bidAtStart = resolveBusinessScopeId(biz);
+    if (!bidAtStart) {
+      setLoading(false);
+      return;
+    }
     const seq = ++loadSeqRef.current;
     try {
       const sessData = await listTpvRegisterSessionsRequest(dataUserId);
@@ -2039,7 +2047,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         }
       }
 
-      const activeBid = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
+      const activeBid = resolveBusinessScopeId(currentBusinessRef.current);
       if (seq !== loadSeqRef.current || activeBid !== bidAtStart) return;
 
       const scopedIds = new Set(scopedPdvs.map((p) => p._id));
@@ -2073,9 +2081,9 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   }, [businessId]);
 
   useEffect(() => {
-    if (businessLoading || !dataUserId) return;
+    if (businessLoading || !businessesFetchSettled || !dataUserId || !businessId) return;
     void loadData();
-  }, [businessLoading, dataUserId, businessId, loadData]);
+  }, [businessLoading, businessesFetchSettled, dataUserId, businessId, loadData]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
@@ -2109,7 +2117,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       } as Partial<TpvRegisterSession>);
       setSessions(prev => [created, ...prev]);
       if (!isWorkerUser) {
-        const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+        const bid = resolveBusinessScopeId(currentBusiness);
         if (bid && dataUserId && data.pointOfSaleId) {
           writeDeliveryOpsSelectedPdvId(bid, dataUserId, data.pointOfSaleId);
           setManagerPdvPickId(data.pointOfSaleId);
@@ -2331,6 +2339,17 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     <TpvRegisterContext.Provider value={registerContextValue}>{body}</TpvRegisterContext.Provider>
   );
 
+  if (businessLoading || (!businessId && businessesFetchSettled && !isTabletSession)) {
+    return wrapRegisterContext(
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Preparando empresa y tiendas…</p>
+        </div>
+      </div>,
+    );
+  }
+
   if (loading) {
     return wrapRegisterContext(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -2525,7 +2544,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {
-                const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+                const bid = resolveBusinessScopeId(currentBusiness);
                 if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, null);
                 skipManagerAutoPdvRef.current = true;
                 setManagerPdvPickId(null);

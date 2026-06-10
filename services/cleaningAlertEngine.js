@@ -22,6 +22,7 @@ import {
 import { emitGlobalAlert } from './alertEmitter.js';
 import { broadcastToBusiness, broadcastToUser } from './sseService.js';
 import logger from './logger.js';
+import { canEmitCleaningAlerts } from './moduleAlertUtils.js';
 
 const TAG = 'CLEANING_ALERT_ENGINE';
 const DEFAULT_INTERVAL_MS = 120_000;
@@ -623,6 +624,9 @@ async function runForBusiness(business) {
   const todayTomorrowSvcs = services.filter((s) => s.date === today || s.date === tomorrow);
   const routes = cleaningDocs.filter((d) => d.type === 'cleaning_route' && d.user_id === ownerId);
   const incidents = cleaningDocs.filter((d) => d.type === 'cleaning_incident' && d.user_id === ownerId);
+  const workers = cleaningDocs.filter((d) => d.type === 'cleaning_worker' && d.user_id === ownerId);
+
+  if (!canEmitCleaningAlerts({ services, routes, workers })) return 0;
 
   const lookAheadDate = new Date(); lookAheadDate.setDate(lookAheadDate.getDate() + config.materialCriticalDaysLookahead);
   const lookAheadStr = lookAheadDate.toISOString().slice(0, 10);

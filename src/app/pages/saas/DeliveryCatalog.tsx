@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { DeliveryActivationGatePanel } from '../../components/saas/DeliveryActivationGatePanel';
 import { useDeliveryStorePdvGate } from '../../hooks/useDeliveryStorePdvGate';
 import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } from '../../lib/brandUtils';
-import { isDeliveryBusinessType, notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
+import { DELIVERY_MARCA_SETTINGS_PATH, DELIVERY_TIENDA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
+import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -79,6 +81,8 @@ import {
   Upload,
   Download,
   Loader2,
+  ArrowRight,
+  Store,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -1440,18 +1444,31 @@ function CatalogPageLoadingState({ message = 'Cargando catálogo…' }: { messag
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function CatalogPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
-  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const { currentBusiness, businessesFetchSettled } = useBusiness();
+  const activeStore = useActiveStoreScope();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+  const catalogScopeReady = businessesFetchSettled && Boolean(businessId) && Boolean(dataUserId);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const pdvGate = useDeliveryStorePdvGate();
+  const retailStoreCount = useMemo(
+    () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
+    [activeStore.retailWorkCenters],
+  );
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [brandsLoading, setBrandsLoading] = useState(true);
+  const [brandsLoading, setBrandsLoading] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const suppliersFetchedRef = useRef(false);
+  const invoicesFetchedRef = useRef(false);
+  const suppliersLoadStartedRef = useRef(false);
+  const invoicesLoadStartedRef = useRef(false);
   const [activeTab, setActiveTab] = useState('catalog');
 
   // Catalog state
@@ -1767,42 +1784,90 @@ export function CatalogPage() {
   }, [businessId]);
 
   useEffect(() => {
+    if (!businessesFetchSettled) return;
     void loadBrands();
-  }, [loadBrands]);
+  }, [businessesFetchSettled, businessId, loadBrands]);
 
   const loadCatalog = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const items = await listCatalogItemsRequest(user.id);
+      const items = await listCatalogItemsRequest(dataUserId);
       setCatalogItems(items);
     } catch {
       toast.error('Error al cargar el catálogo');
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   const loadSuppliers = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
+    setSuppliersLoading(true);
     try {
-      const data = await listSuppliersRequest(user.id);
+      const data = await listSuppliersRequest(dataUserId);
       setSuppliers(data);
+      suppliersFetchedRef.current = true;
     } catch {
       toast.error('Error al cargar proveedores');
+    } finally {
+      setSuppliersLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   const loadInvoices = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
+    setInvoicesLoading(true);
     try {
-      const data = await listPurchaseInvoicesRequest(user.id);
+      const data = await listPurchaseInvoicesRequest(dataUserId);
       setInvoices(data);
+      invoicesFetchedRef.current = true;
     } catch {
       toast.error('Error al cargar facturas');
+    } finally {
+      setInvoicesLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   useEffect(() => {
-    Promise.all([loadCatalog(), loadSuppliers(), loadInvoices()]).finally(() => setLoading(false));
-  }, [loadCatalog, loadSuppliers, loadInvoices]);
+    suppliersFetchedRef.current = false;
+    invoicesFetchedRef.current = false;
+    suppliersLoadStartedRef.current = false;
+    invoicesLoadStartedRef.current = false;
+    setSuppliers([]);
+    setInvoices([]);
+    if (!catalogScopeReady) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+      toast.error('La carga del catálogo está tardando mucho. Comprueba la conexión y recarga la página.');
+    }, 30_000);
+    void loadCatalog().finally(() => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [catalogScopeReady, businessesFetchSettled, dataUserId, businessId, loadCatalog]);
+
+  useEffect(() => {
+    if (activeTab !== 'suppliers' && activeTab !== 'invoices') return;
+    if (suppliersFetchedRef.current || suppliersLoadStartedRef.current) return;
+    suppliersLoadStartedRef.current = true;
+    void loadSuppliers();
+  }, [activeTab, loadSuppliers]);
+
+  useEffect(() => {
+    if (activeTab !== 'invoices') return;
+    if (invoicesFetchedRef.current || invoicesLoadStartedRef.current) return;
+    invoicesLoadStartedRef.current = true;
+    void loadInvoices();
+  }, [activeTab, loadInvoices]);
 
   // ── CRUD: Catalog Items ─────────────────────────────────────────────────────
 
@@ -2121,6 +2186,28 @@ export function CatalogPage() {
     paid: invoices.filter(i => i.status === 'paid').length,
     totalAmount: invoices.reduce((s, i) => s + (i.total || 0), 0),
   }), [invoices]);
+
+  const productItems = useMemo(
+    () => catalogItems.filter((i) => (i.itemType || 'product') === 'product'),
+    [catalogItems],
+  );
+
+  const lowStockItems = useMemo(
+    () => productItems.filter(
+      (i) => i.active && Number(i.minStock || 0) > 0 && Number(i.stockQuantity || 0) <= Number(i.minStock || 0),
+    ),
+    [productItems],
+  );
+
+  const sortedStockItems = useMemo(() => {
+    const isLow = (item: CatalogItem) =>
+      Number(item.minStock || 0) > 0 && Number(item.stockQuantity || 0) <= Number(item.minStock || 0);
+    return [...productItems].sort((a, b) => {
+      const aLow = isLow(a) ? 0 : 1;
+      const bLow = isLow(b) ? 0 : 1;
+      return aLow - bLow || Number(a.stockQuantity || 0) - Number(b.stockQuantity || 0);
+    });
+  }, [productItems]);
 
   // ── Tab: Catálogo ───────────────────────────────────────────────────────────
 
@@ -2494,14 +2581,8 @@ export function CatalogPage() {
   // ── Tab: Artículos (Stock) ──────────────────────────────────────────────────
 
   const renderStockTab = () => {
-    const stockItems = catalogItems.filter(i => (i.itemType || 'product') === 'product');
-    const sortedByStock = [...stockItems].sort((a, b) => {
-      const aLow = a.stockQuantity <= a.minStock ? 0 : 1;
-      const bLow = b.stockQuantity <= b.minStock ? 0 : 1;
-      return aLow - bLow || a.stockQuantity - b.stockQuantity;
-    });
-
-    const lowStockItems = stockItems.filter(i => i.active && Number(i.minStock || 0) > 0 && i.stockQuantity <= i.minStock);
+    const stockItems = productItems;
+    const sortedByStock = sortedStockItems;
 
     return (
       <div className="space-y-5">
@@ -2624,7 +2705,12 @@ export function CatalogPage() {
       </div>
 
       {/* Table */}
-      {suppliers.length === 0 ? (
+      {suppliersLoading ? (
+        <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
+          <Loader2 className="w-6 h-6 animate-spin mr-3" />
+          Cargando proveedores...
+        </div>
+      ) : suppliers.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
           <Truck className="w-12 h-12 text-gray-300 mb-3" />
           <p className="font-semibold">Sin proveedores registrados</p>
@@ -2763,7 +2849,12 @@ export function CatalogPage() {
         </div>
 
         {/* Table */}
-        {invoicesWithOverdue.length === 0 ? (
+        {invoicesLoading ? (
+          <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
+            <Loader2 className="w-6 h-6 animate-spin mr-3" />
+            Cargando facturas...
+          </div>
+        ) : invoicesWithOverdue.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
             <FileText className="w-12 h-12 text-gray-300 mb-3" />
             <p className="font-semibold">Sin facturas de compra</p>
@@ -2884,17 +2975,23 @@ export function CatalogPage() {
   ];
 
   const brandReady = useMemo(() => {
-    if (!isDelivery || brands.length === 0) return !isDelivery;
+    if (!isDelivery) return true;
+    if (catalogItems.length > 0) return true;
+    if (brands.length === 0) return false;
     const primary =
       brands.find((b) => isDefaultCommercialBrand(b)) ??
       brands.find((b) => b.active !== false) ??
       brands[0];
-    return primary ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount: 1 }) : false;
-  }, [isDelivery, brands]);
+    return primary
+      ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount })
+      : false;
+  }, [isDelivery, brands, catalogItems.length, retailStoreCount]);
 
-  const initialLoadPending = loading || brandsLoading;
+  const initialLoadPending =
+    (loading && catalogItems.length === 0)
+    || (isDelivery && !businessesFetchSettled);
 
-  if (isDelivery && pdvGate.loading) {
+  if (isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0) {
     return (
       <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
         <CatalogPageLoadingState message="Comprobando tienda y PDV…" />
@@ -2902,26 +2999,21 @@ export function CatalogPage() {
     );
   }
 
-  if (isDelivery && !pdvGate.ready) {
-    return (
-      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <DeliveryActivationGatePanel kind="store_pdv" />
-      </Layout>
-    );
-  }
-
   if (initialLoadPending) {
+    const loadingMessage =
+      activeTab === 'stock'
+        ? 'Cargando artículos de almacén…'
+        : activeTab === 'suppliers'
+          ? 'Cargando proveedores…'
+          : activeTab === 'invoices'
+            ? 'Cargando facturas…'
+            : 'Cargando catálogo…';
     return (
       <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <CatalogPageLoadingState />
-      </Layout>
-    );
-  }
-
-  if (isDelivery && !brandReady) {
-    return (
-      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <DeliveryActivationGatePanel kind="brand" />
+        <div className="space-y-6">
+          <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
+          <CatalogPageLoadingState message={loadingMessage} />
+        </div>
       </Layout>
     );
   }
@@ -2929,9 +3021,51 @@ export function CatalogPage() {
   return (
     <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
       <div className="space-y-6">
+        {isDelivery && !pdvGate.ready && (
+          <div className="flex flex-col gap-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/90 dark:bg-sky-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3 text-left">
+              <Store className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
+              <div>
+                <p className="font-semibold text-sky-950 dark:text-sky-100">Falta tienda o PDV activo</p>
+                <p className="mt-1 text-sm text-sky-900/80 dark:text-sky-200/80">
+                  Crea o enlaza un PDV en Ajustes → Tienda. Mientras tanto puedes revisar el catálogo.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(DELIVERY_TIENDA_SETTINGS_PATH)}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
+            >
+              Ir a Tienda
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {isDelivery && !brandReady && (
+          <div className="flex flex-col gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/90 dark:bg-amber-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3 text-left">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="font-semibold text-amber-950 dark:text-amber-100">Marca sin completar</p>
+                <p className="mt-1 text-sm text-amber-900/80 dark:text-amber-200/80">
+                  Puedes usar el catálogo igualmente. Completa la marca en Ajustes para carta, categorías y precios.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate(DELIVERY_MARCA_SETTINGS_PATH)}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700"
+            >
+              Ir a Marca
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
-        {activeTab === 'catalog' && renderCatalogTab()}
-        {activeTab === 'stock' && renderStockTab()}
+        <div className={activeTab === 'catalog' ? undefined : 'hidden'}>{renderCatalogTab()}</div>
+        <div className={activeTab === 'stock' ? undefined : 'hidden'}>{renderStockTab()}</div>
         {activeTab === 'staff-consumption' && dataUserId && (
           <StaffConsumptionSettingsTab
             userId={dataUserId}

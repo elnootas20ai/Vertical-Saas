@@ -16,6 +16,10 @@ import {
 import { generateAutoOrders } from '../services/autoOrderService.js';
 import { sendEmail } from '../services/email.js';
 import { recordMovement } from '../services/stockMovementService.js';
+import {
+  canEmitCatalogStockAlerts,
+  filterStockTrackedCatalogItems,
+} from '../services/stockAlertUtils.js';
 import logger from '../services/logger.js';
 
 function badRequest(res, error) {
@@ -576,8 +580,16 @@ export async function getPurchaseKpis(req, res) {
       pendingOrders: pending.length,
       pendingValue: Math.round(pending.reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
       monthlySpend: Math.round(orders.filter((o) => o.status === 'received' && o.receivedAt >= firstOfMonth).reduce((s, o) => s + Number(o.total || 0), 0) * 100) / 100,
-      lowStockCount: catalogItems.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length,
-      criticalProducts: catalogItems.filter((i) => i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length,
+      lowStockCount: (() => {
+        const infra = allDocs.filter((d) => d?.user_id === userId && !d?.deletedAt && (d?.type === 'warehouse' || d?.type === 'stock_movement'));
+        if (!canEmitCatalogStockAlerts(catalogItems, infra)) return 0;
+        return filterStockTrackedCatalogItems(catalogItems).filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
+      })(),
+      criticalProducts: (() => {
+        const infra = allDocs.filter((d) => d?.user_id === userId && !d?.deletedAt && (d?.type === 'warehouse' || d?.type === 'stock_movement'));
+        if (!canEmitCatalogStockAlerts(catalogItems, infra)) return 0;
+        return filterStockTrackedCatalogItems(catalogItems).filter((i) => i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
+      })(),
       overdueDeliveries: orders.filter((o) => o.status === 'sent' && o.expectedDate && new Date(o.expectedDate) < now).length,
       upcomingDeliveries: orders
         .filter((o) => o.status === 'sent' && o.expectedDate && new Date(o.expectedDate) >= now)

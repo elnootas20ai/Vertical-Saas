@@ -1,9 +1,43 @@
 import type { ReactNode, ComponentType } from 'react';
 import type { AlertHistoryEntry, AlertPriority, AlertRecord, AlertSource, AlertSummary } from '../../lib/alertCenterApi';
-import { SOURCE_LABELS, SOURCE_COLORS, PRIORITY_LABELS, CEO_ALERT_DEPARTMENTS, countAlertsForDepartment, formatHistoryEntry, HISTORY_ACTION_LABELS } from '../../lib/alertCenterApi';
+import { SOURCE_LABELS, SOURCE_COLORS, PRIORITY_LABELS, countAlertsForDepartment, formatHistoryEntry, HISTORY_ACTION_LABELS } from '../../lib/alertCenterApi';
+import type { BusinessAlertDepartment } from '../../lib/alertDepartments';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ArrowRight, Clock, History, Inbox, Settings2 } from 'lucide-react';
+import { ArrowRight, Clock, Crown, History, Inbox, Settings2 } from 'lucide-react';
+
+/** Gradiente premium Plan PRO — violeta → púrpura → dorado */
+export const PRO_PLAN_GRADIENT = 'bg-gradient-to-r from-violet-600 via-purple-600 to-amber-500';
+export const PRO_PLAN_GRADIENT_HOVER = 'hover:from-violet-700 hover:via-purple-700 hover:to-amber-600';
+export const PRO_PLAN_GRADIENT_TEXT = 'bg-gradient-to-r from-violet-600 via-purple-600 to-amber-500 bg-clip-text text-transparent';
+export const PRO_PLAN_RING = 'ring-violet-500/40 shadow-violet-500/20';
+export const PRO_PLAN_CARD_OPEN = 'border-violet-300/80 bg-gradient-to-br from-violet-50/90 via-purple-50/40 to-amber-50/50 shadow-md shadow-violet-500/15 ring-2 ring-violet-400/35 dark:from-violet-950/40 dark:via-purple-950/25 dark:to-amber-950/15 dark:border-violet-700/60';
+
+export function ProPlanBadge({
+  size = 'sm',
+  className = '',
+  label = 'PRO',
+  showIcon = true,
+}: {
+  size?: 'sm' | 'md';
+  className?: string;
+  label?: string;
+  showIcon?: boolean;
+}) {
+  const sizeClasses = size === 'sm'
+    ? 'gap-1 px-2 py-0.5 text-[10px]'
+    : 'gap-1.5 px-2.5 py-1 text-xs';
+  const iconSize = size === 'sm' ? 'h-3 w-3' : 'h-3.5 w-3.5';
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full font-bold uppercase tracking-wide text-white shadow-sm shadow-violet-500/30 ${PRO_PLAN_GRADIENT} ${sizeClasses} ${className}`}
+    >
+      {showIcon && <Crown className={iconSize} />}
+      {label}
+    </span>
+  );
+}
 
 export const PRIORITY_ACCENT: Record<AlertPriority, string> = {
   high: 'border-l-red-500',
@@ -104,19 +138,23 @@ export function AlertProDeptTabs({
   onChange,
   icons: IconMap,
   compact,
+  departments,
+  vertical,
 }: {
   summary: AlertSummary | null;
   activeId: string;
   onChange: (id: string) => void;
   icons: Record<string, ComponentType<{ className?: string }>>;
   compact?: boolean;
+  departments: BusinessAlertDepartment[];
+  vertical?: string | null;
 }) {
   return (
     <div className={`shrink-0 ${compact ? 'px-3 py-3' : 'px-1 py-4'} bg-zinc-50/80 dark:bg-zinc-900/40 border-b border-zinc-200/80 dark:border-zinc-800`}>
       <div className={`flex gap-1 overflow-x-auto ${compact ? '' : 'rounded-xl bg-white dark:bg-zinc-900 p-1 shadow-sm border border-zinc-200/80 dark:border-zinc-800 max-w-fit'}`}>
-        {CEO_ALERT_DEPARTMENTS.map((dept) => {
+        {departments.map((dept) => {
           const Icon = IconMap[dept.id];
-          const count = countAlertsForDepartment(summary, dept.id);
+          const count = countAlertsForDepartment(summary, dept.id, vertical);
           const active = activeId === dept.id;
           return (
             <button
@@ -133,7 +171,7 @@ export function AlertProDeptTabs({
               {dept.label}
               {count > 0 && (
                 <span className={`ml-0.5 min-w-[1.25rem] rounded-full px-1.5 py-0.5 text-center text-[10px] font-bold ${
-                  active ? 'bg-white/15 text-white dark:bg-zinc-900/15 dark:text-zinc-900' : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                  active ? 'bg-white/15 text-white dark:bg-zinc-900/15 dark:text-zinc-900' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                 }`}>
                   {count > 99 ? '99+' : count}
                 </span>
@@ -304,7 +342,7 @@ export function AlertProCenterTabs({
         </div>
         {activeId === 'settings' && (
           <span className="text-xs font-medium text-violet-600 dark:text-violet-400">
-            Configura qué vigila Vertial por ti
+            Configura las alertas de tu negocio
           </span>
         )}
       </div>

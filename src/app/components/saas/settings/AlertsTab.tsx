@@ -33,9 +33,11 @@ import {
   getAlertsConfig,
   saveAlertsConfig,
   DEFAULT_CASH_REGISTER_OPERATIONAL,
+  DEFAULT_DELIVERY_OPERATIONAL,
   ruleDepartment,
 } from '../../../lib/settingsApi';
-import { CEO_ALERT_DEPARTMENTS } from '../../../lib/alertCenterApi';
+import { useAlertDepartments } from '../../../hooks/useAlertDepartments';
+import { isRuleVisibleForVertical } from '../../../lib/alertDepartments';
 
 interface Props {
   businessId: string;
@@ -90,6 +92,7 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
 const AVAILABLE_ROLES = ['Admin', 'Comercial', 'Taller', 'Recepción', 'Finanzas'];
 
 export function AlertsTab({ businessId }: Props) {
+  const { departments: alertDepartments, vertical } = useAlertDepartments();
   const [config, setConfig] = useState<AlertsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -111,6 +114,14 @@ export function AlertsTab({ businessId }: Props) {
           cashRegister: {
             ...DEFAULT_CASH_REGISTER_OPERATIONAL,
             ...(data.operational?.cashRegister || {}),
+          },
+          delivery: {
+            ...DEFAULT_DELIVERY_OPERATIONAL,
+            delayThresholds: {
+              ...DEFAULT_DELIVERY_OPERATIONAL.delayThresholds,
+              ...(data.operational?.delivery?.delayThresholds || {}),
+            },
+            ...(data.operational?.delivery || {}),
           },
         },
       }))
@@ -231,8 +242,9 @@ export function AlertsTab({ businessId }: Props) {
     );
   }
 
-  const categories = [...new Set(config.rules.map((r) => r.category))];
-  const filteredRules = config.rules.filter((r) => {
+  const businessRules = config.rules.filter((r) => isRuleVisibleForVertical(ruleDepartment(r), vertical));
+  const categories = [...new Set(businessRules.map((r) => r.category))];
+  const filteredRules = businessRules.filter((r) => {
     if (filterDepartment !== 'all' && ruleDepartment(r) !== filterDepartment) return false;
     if (filterCategory !== 'all' && r.category !== filterCategory) return false;
     if (searchQuery) {
@@ -248,8 +260,8 @@ export function AlertsTab({ businessId }: Props) {
     return acc;
   }, {});
 
-  const enabledCount = config.rules.filter((r) => r.enabled).length;
-  const totalCount = config.rules.length;
+  const enabledCount = businessRules.filter((r) => r.enabled).length;
+  const totalCount = businessRules.length;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -300,8 +312,14 @@ export function AlertsTab({ businessId }: Props) {
           className="w-full flex items-center justify-between p-6 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
         >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-              <Bell className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+              config.global.muteAll
+                ? 'bg-red-50 dark:bg-red-950/40'
+                : 'bg-emerald-50 dark:bg-emerald-950/40'
+            }`}>
+              {config.global.muteAll
+                ? <BellOff className="w-5 h-5 text-red-500" />
+                : <Bell className="w-5 h-5 text-emerald-500" />}
             </div>
             <div className="text-left">
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Configuración global</h3>
@@ -324,7 +342,7 @@ export function AlertsTab({ businessId }: Props) {
               <button
                 onClick={() => updateGlobal({ muteAll: !config.global.muteAll })}
                 className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
-                  config.global.muteAll ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'
+                  config.global.muteAll ? 'bg-red-500' : 'bg-emerald-500'
                 }`}
               >
                 <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${
@@ -462,7 +480,7 @@ export function AlertsTab({ businessId }: Props) {
                 className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-blue-500 outline-none"
               >
                 <option value="all">Todas las ramas</option>
-                {CEO_ALERT_DEPARTMENTS.filter((d) => d.id !== 'all').map((dept) => (
+                {alertDepartments.filter((d) => d.id !== 'all').map((dept) => (
                   <option key={dept.id} value={dept.id}>{dept.label}</option>
                 ))}
               </select>
@@ -525,7 +543,7 @@ export function AlertsTab({ businessId }: Props) {
                               <button
                                 onClick={() => updateRule(rule.id, { enabled: !rule.enabled })}
                                 className={`relative inline-flex h-6 w-10 items-center rounded-full transition-colors shrink-0 ${
-                                  rule.enabled ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'
+                                  rule.enabled ? 'bg-emerald-500' : 'bg-red-500'
                                 }`}
                               >
                                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${

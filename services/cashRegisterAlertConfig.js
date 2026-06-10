@@ -3,12 +3,15 @@
  */
 
 import {
-  ACCOUNTS_DB,
   ensureDatabase,
   findAccountByUserId,
   saveAccount,
   couchRequest,
 } from './couchdb.js';
+import {
+  DEFAULT_DELIVERY_OPERATIONAL,
+  sanitizeDeliveryOperational,
+} from './deliveryOperationalAlertConfig.js';
 
 const SETTINGS_DB = 'settings';
 
@@ -80,6 +83,7 @@ export async function getBusinessAlertsOperational(req, businessId) {
     if (!op || typeof op !== 'object') return null;
     return {
       cashRegister: sanitizeCashRegisterOperational(op.cashRegister),
+      delivery: sanitizeDeliveryOperational(op.delivery || DEFAULT_DELIVERY_OPERATIONAL),
     };
   } catch {
     return null;

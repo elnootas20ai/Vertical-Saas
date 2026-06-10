@@ -11,6 +11,7 @@ import { isWorkerAccount } from '../../lib/authApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
+import { useAlertDepartments } from '../../hooks/useAlertDepartments';
 import {
   AlertProShell,
   AlertProKpiStrip,
@@ -24,8 +25,6 @@ import {
   bulkUpdateAlertStatus,
   updateAlertStatus,
   triggerAlertEngineCheck,
-  CEO_ALERT_DEPARTMENTS,
-  departmentSourceFilter,
   type AlertRecord,
 } from '../../lib/alertCenterApi';
 
@@ -36,9 +35,12 @@ interface Props {
 
 const DEPT_ICONS: Record<string, typeof Bell> = {
   all: Bell,
+  pdvs: Building2,
   delivery: Bike,
   finanzas: DollarSign,
   rrhh: Users,
+  catalogProviders: Layers,
+  documentacion: Shield,
   operaciones: Activity,
   limpieza: Sparkles,
   construccion: Building2,
@@ -136,6 +138,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const businessId = useAlertCenterBusinessId();
+  const { departments, departmentSourceFilter, vertical } = useAlertDepartments();
   const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, { pollMs: isOpen ? 30_000 : 60_000 });
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
@@ -166,14 +169,15 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
     if (!businessId) return;
     setSyncing(true);
     try {
-      if (user?.userId) {
-        await triggerAlertEngineCheck(user.userId).catch(() => null);
+      const accountUserId = user?.user_id || user?.id || '';
+      if (accountUserId) {
+        await triggerAlertEngineCheck(accountUserId).catch(() => null);
       }
       await Promise.all([reloadSummary(), loadAlerts(activeDept)]);
     } finally {
       setSyncing(false);
     }
-  }, [businessId, user?.userId, reloadSummary, loadAlerts, activeDept]);
+  }, [businessId, user?.user_id, user?.id, reloadSummary, loadAlerts, activeDept]);
 
   useEffect(() => {
     if (!isOpen || !businessId) return;
@@ -237,7 +241,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
           title="Centro de alertas"
           subtitle="Visión ejecutiva · Delivery · Finanzas · RRHH"
           badge={unresolved > 0 ? (
-            <span className="rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-bold text-red-300 ring-1 ring-red-500/30">
+            <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-300 ring-1 ring-emerald-500/30">
               {unresolved > 99 ? '99+' : unresolved} activas
             </span>
           ) : undefined}
@@ -270,6 +274,8 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
           activeId={activeDept}
           onChange={setActiveDept}
           icons={DEPT_ICONS}
+          departments={departments}
+          vertical={vertical}
         />
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-zinc-50 dark:bg-zinc-950">
@@ -278,7 +284,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
             </div>
           ) : alerts.length === 0 ? (
-            <AlertProEmpty label={`Sin alertas en ${CEO_ALERT_DEPARTMENTS.find((d) => d.id === activeDept)?.label || 'esta área'}`} />
+            <AlertProEmpty label={`Sin alertas en ${departments.find((d) => d.id === activeDept)?.label || 'esta área'}`} />
           ) : (
             alerts.map((alert) => (
               <AlertProRow key={alert.id} alert={alert} onClick={() => void handleAlertClick(alert)} />

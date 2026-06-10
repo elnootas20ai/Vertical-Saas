@@ -61,7 +61,7 @@ import { toast } from 'sonner';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import { ImportStockWizard } from '../../components/saas/ImportStockWizard';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
-import { bulkCreateCatalogItemsRequest } from '../../lib/deliveryApi';
+import { bulkCreateCatalogItemsRequest, bulkUpdateCatalogStockRequest } from '../../lib/deliveryApi';
 import { listBrandsRequest } from '../../lib/brandsApi';
 import {
   mapImportEntryToCatalogItem,
@@ -78,7 +78,17 @@ import {
   formatDeliveryCatalogImportValidationToast,
   validateDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
+import {
+  DELIVERY_STOCK_HEADER_ALIASES,
+  DELIVERY_STOCK_IMPORT_FIELDS,
+  DELIVERY_STOCK_SHEET_NAME,
+  DELIVERY_STOCK_TEMPLATE_FILENAME,
+  downloadDeliveryStockImportTemplate,
+  formatDeliveryStockImportValidationToast,
+  validateDeliveryStockImportEntries,
+} from '../../lib/deliveryStockExcelTemplate';
 import { notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -333,7 +343,11 @@ export function ConfiguracionGeneral() {
 
   const biz = currentBusiness;
   const bizId = biz?.business_id;
+  const dataUserId = resolveBusinessDataUserId(user, biz);
+  const isDeliveryBiz = biz?.businessType === 'delivery';
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
+  const catalogImportDone =
+    (resolvedImportStatus?.catalog ?? biz?.initialImportStatus?.catalog) === 'completed';
 
   const catalogImportFields: ImportFieldDef[] = useMemo(() => {
     if (biz?.businessType === 'delivery') return DELIVERY_CATALOG_IMPORT_FIELDS;
@@ -365,7 +379,7 @@ export function ConfiguracionGeneral() {
   }, [bizId]);
 
   const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
-    if (!user?.user_id) return 0;
+    if (!dataUserId) return 0;
     const businessType = biz?.businessType || 'delivery';
     const isDelivery = businessType === 'delivery';
     let brandCache = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
@@ -430,7 +444,7 @@ export function ConfiguracionGeneral() {
       return 0;
     }
 
-    const result = await bulkCreateCatalogItemsRequest(user.user_id, items as any);
+    const result = await bulkCreateCatalogItemsRequest(dataUserId, items as any);
 
     // Marcar como completado si se creó al menos 1.
     if (bizId && result.created > 0) {
@@ -455,7 +469,49 @@ export function ConfiguracionGeneral() {
     }
 
     return result.created;
-  }, [user?.user_id, biz?.businessType, bizId, resolvedImportStatus?.stock, resolvedImportStatus?.clients]);
+  }, [dataUserId, biz?.businessType, bizId, resolvedImportStatus?.stock, resolvedImportStatus?.clients]);
+
+  const handleStockImport = useCallback(async (entries: Record<string, string>[]) => {
+    if (!dataUserId) return 0;
+
+    const validation = validateDeliveryStockImportEntries(entries);
+    if (!validation.ok) {
+      toast.error('Revisa el archivo de stock', {
+        description: formatDeliveryStockImportValidationToast(validation),
+        duration: 12000,
+      });
+      return 0;
+    }
+
+    const result = await bulkUpdateCatalogStockRequest(
+      dataUserId,
+      entries.map((entry) => ({
+        sku: String(entry.sku || '').trim() || undefined,
+        name: String(entry.name || entry.nombre || '').trim() || undefined,
+        quantity: String(entry.quantity || entry.cantidad || '').trim(),
+        unit: String(entry.unit || entry.unidad || '').trim() || undefined,
+      })),
+    );
+
+    if (result.updated > 0 && bizId) {
+      const nextStatus = {
+        stock: 'completed' as const,
+        clients: resolvedImportStatus?.clients || 'pending',
+        catalog: resolvedImportStatus?.catalog || 'pending',
+      };
+      await saveInitialImportStatus(bizId, nextStatus).catch(() => {});
+      setImportData((prev) => prev ? { ...prev, ...nextStatus } : ({ ...nextStatus, onboardingImportPending: true } as InitialImportData));
+      notifyDeliveryCatalogChanged();
+      toast.success(`${result.updated} artículo(s) con stock actualizado`);
+    }
+    if (result.notFound > 0) {
+      toast.warning(`${result.notFound} fila(s) no encontradas en catálogo — importa primero el catálogo`);
+    }
+    if (result.updated === 0) {
+      toast.error('No se actualizó ningún artículo');
+    }
+    return result.updated;
+  }, [dataUserId, bizId, resolvedImportStatus?.clients, resolvedImportStatus?.catalog]);
 
   const loadWorkCenters = useCallback(async () => {
     if (!user || !bizId) {
@@ -917,30 +973,53 @@ export function ConfiguracionGeneral() {
             <div>
               <h2 className="font-bold text-gray-900 dark:text-gray-100">Importación inicial</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Sube tus datos iniciales para empezar a trabajar con información real
+                {isDeliveryBiz
+                  ? 'Delivery: primero catálogo (carta + precios), luego stock (unidades). El coste de compra se calcula al recibir pedidos a proveedores.'
+                  : 'Sube tus datos iniciales para empezar a trabajar con información real'}
               </p>
             </div>
           </div>
 
+          {isDeliveryBiz ? (
+            <div className="mb-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/20 px-4 py-3 text-xs text-blue-900 dark:text-blue-200">
+              <strong className="font-semibold">Orden recomendado:</strong>{' '}
+              1) Catálogo (productos y precio TPV) → 2) Stock (recuento de unidades) → 3) Clientes.
+              Los precios de compra los actualiza el sistema al registrar recepciones de proveedor.
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {([
-              { key: 'stock' as const, label: 'Stock', desc: 'Archivo de existencias iniciales', icon: Truck, route: '/saas/catalog' },
-              { key: 'clients' as const, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users, route: '/saas/clients' },
-              { key: 'catalog' as const, label: 'Catálogo', desc: 'Productos o servicios', icon: LayoutGrid, route: '/saas/catalog' },
-            ]).map((item) => {
+            {(isDeliveryBiz
+              ? [
+                  { key: 'catalog' as const, step: 1, label: 'Catálogo', desc: 'Productos y precios de venta (TPV)', icon: LayoutGrid },
+                  { key: 'stock' as const, step: 2, label: 'Stock', desc: 'Unidades en almacén (tras el catálogo)', icon: Truck, needsCatalog: true },
+                  { key: 'clients' as const, step: 3, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users },
+                ]
+              : [
+                  { key: 'stock' as const, step: 1, label: 'Stock', desc: 'Archivo de existencias iniciales', icon: Truck },
+                  { key: 'clients' as const, step: 2, label: 'Clientes', desc: 'Base de datos de clientes', icon: Users },
+                  { key: 'catalog' as const, step: 3, label: 'Catálogo', desc: 'Productos o servicios', icon: LayoutGrid },
+                ]
+            ).map((item) => {
               const importStatus = importData?.[item.key] ?? biz?.initialImportStatus?.[item.key] ?? 'pending';
               const Icon = item.icon;
+              const stockBlocked = isDeliveryBiz && item.key === 'stock' && !catalogImportDone && importStatus !== 'completed';
               return (
                 <div key={item.key}
                   className={`p-4 rounded-xl border transition-all ${
                     importStatus === 'completed'
                       ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10'
+                      : stockBlocked
+                        ? 'border-amber-200 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20'
                       : importStatus === 'skipped'
                         ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50'
                         : 'border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-800/30'
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 w-5 h-5 rounded-full border border-gray-300 dark:border-gray-600 flex items-center justify-center shrink-0">
+                      {item.step}
+                    </span>
                     <Icon className={`w-4 h-4 ${
                       importStatus === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400 dark:text-gray-500'
                     }`} />
@@ -948,11 +1027,21 @@ export function ConfiguracionGeneral() {
                     {importStatus === 'completed' && <CheckCircle className="w-3.5 h-3.5 text-emerald-500 ml-auto" />}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{item.desc}</p>
-                  {importStatus === 'completed' ? (
+                  {stockBlocked ? (
+                    <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                      Importa primero el catálogo
+                    </p>
+                  ) : importStatus === 'completed' ? (
                     <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Completado</span>
                   ) : (
                     <button
-                      onClick={() => setImportPopup(item.key)}
+                      onClick={() => {
+                        if (isDeliveryBiz && item.key === 'stock' && !catalogImportDone) {
+                          toast.error('Importa primero el catálogo (paso 1)');
+                          return;
+                        }
+                        setImportPopup(item.key);
+                      }}
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
                     >
                       <Upload className="w-3 h-3" />
@@ -971,7 +1060,24 @@ export function ConfiguracionGeneral() {
           onClose={() => setImportPopup(null)}
           initialMode="clients"
         />
-        {importPopup === 'stock' ? (
+        {importPopup === 'stock' && biz?.businessType === 'delivery' ? (
+          <GenericImportModal
+            isOpen
+            onClose={() => setImportPopup(null)}
+            moduleLabel="Stock"
+            importLabel="Existencias iniciales"
+            templateFileName={DELIVERY_STOCK_TEMPLATE_FILENAME}
+            fields={DELIVERY_STOCK_IMPORT_FIELDS}
+            onImport={handleStockImport}
+            onDownloadTemplate={() => {
+              downloadDeliveryStockImportTemplate();
+              toast.success('Plantilla de stock descargada');
+            }}
+            headerAliases={DELIVERY_STOCK_HEADER_ALIASES}
+            skipMappingWhenComplete
+            importSheetName={DELIVERY_STOCK_SHEET_NAME}
+          />
+        ) : importPopup === 'stock' ? (
           <ImportStockWizard onClose={() => setImportPopup(null)} />
         ) : null}
         <GenericImportModal
@@ -985,6 +1091,7 @@ export function ConfiguracionGeneral() {
           onDownloadTemplate={biz?.businessType === 'delivery' ? () => void handleDownloadCatalogTemplate() : undefined}
           headerAliases={biz?.businessType === 'delivery' ? DELIVERY_CATALOG_HEADER_ALIASES : undefined}
           skipMappingWhenComplete={biz?.businessType === 'delivery'}
+          importSheetName="catalogo"
         />
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}

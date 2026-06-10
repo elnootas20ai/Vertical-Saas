@@ -37,6 +37,8 @@ interface GenericImportModalProps {
   headerAliases?: ImportHeaderAliases;
   /** Si todos los campos obligatorios se auto-mapean, ir directo a vista previa (plantilla oficial). */
   skipMappingWhenComplete?: boolean;
+  /** Hoja Excel a leer (p. ej. catalogo, stock). Por defecto catalogo. */
+  importSheetName?: string;
 }
 
 type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing';
@@ -53,6 +55,7 @@ export function GenericImportModal({
   onDownloadTemplate,
   headerAliases,
   skipMappingWhenComplete,
+  importSheetName = 'catalogo',
 }: GenericImportModalProps) {
   const [step, setStep] = useState<ImportStep>('upload');
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
@@ -144,8 +147,9 @@ export function GenericImportModal({
       reader.onload = (e) => {
         try {
           const wb = XLSX.read(e.target?.result, { type: 'array' });
+          const sheetKey = String(importSheetName || 'catalogo').toLowerCase();
           const sheetName =
-            wb.SheetNames.find((n) => n.toLowerCase() === 'catalogo') || wb.SheetNames[0];
+            wb.SheetNames.find((n) => n.toLowerCase() === sheetKey) || wb.SheetNames[0];
           const ws = wb.Sheets[sheetName];
           const data: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
           if (data.length < 2) {

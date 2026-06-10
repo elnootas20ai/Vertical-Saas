@@ -8503,7 +8503,14 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     salesChannels: sanitizeSalesChannels(data.salesChannels ?? existing?.salesChannels),
     stockCategory: VALID_STOCK_CATEGORIES.includes(data.stockCategory) ? data.stockCategory : (existing?.stockCategory || 'other'),
     stockSubcategory: String(data.stockSubcategory || existing?.stockSubcategory || ''),
-    isStockItem: data.isStockItem !== undefined ? Boolean(data.isStockItem) : (existing?.isStockItem ?? false),
+    isStockItem: (() => {
+      if (data.isStockItem !== undefined) return Boolean(data.isStockItem);
+      if (existing?.isStockItem) return true;
+      if (data.module === 'stock' || existing?.module === 'stock') return true;
+      const whStock = Array.isArray(data.warehouseStock) ? data.warehouseStock : (existing?.warehouseStock || []);
+      if (whStock.some((ws) => ws?.warehouseId)) return true;
+      return false;
+    })(),
     isCritical: data.isCritical !== undefined ? Boolean(data.isCritical) : (existing?.isCritical ?? false),
     workCenterId: String(data.workCenterId || existing?.workCenterId || ''),
     workCenterName: String(data.workCenterName || existing?.workCenterName || ''),
@@ -9718,6 +9725,7 @@ export function normalizeEmailForLookup(email) {
 export function buildTeamInvitationDocument({
   email,
   fullName = '',
+  phone = '',
   businessId,
   businessName = '',
   role = 'Usuario',
@@ -9738,6 +9746,7 @@ export function buildTeamInvitationDocument({
     invitation_id: invitationId,
     email: normalizeEmailForLookup(email),
     fullName: String(fullName || '').trim(),
+    phone: String(phone || '').trim(),
     business_id: String(businessId || '').trim(),
     businessName: String(businessName || '').trim(),
     role: String(role || 'Usuario').trim() || 'Usuario',

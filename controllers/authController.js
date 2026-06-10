@@ -673,20 +673,42 @@ export async function listUsers(req, res) {
     const businessId = req.query.businessId || '';
     let accounts = await listAccounts(req);
 
+    let memberById = new Map();
     if (businessId) {
       const business = await findBusinessById(req, businessId);
       if (business) {
+        const members = Array.isArray(business.members) ? business.members : [];
+        for (const member of members) {
+          const uid = String(member?.user_id || '').trim();
+          if (uid && !memberById.has(uid)) memberById.set(uid, member);
+        }
         const memberIds = new Set([
           business.owner_user_id,
-          ...(Array.isArray(business.members) ? business.members.map((m) => m.user_id) : []),
+          ...memberById.keys(),
         ].filter(Boolean));
         accounts = accounts.filter((a) => memberIds.has(a.user_id));
       }
     }
 
+    const seenUserIds = new Set();
+    const users = [];
+    for (const account of accounts) {
+      if (!account?.user_id || seenUserIds.has(account.user_id)) continue;
+      seenUserIds.add(account.user_id);
+      const sanitized = sanitizeAccount(account);
+      const member = memberById.get(account.user_id);
+      if (member?.fullName?.trim() && !String(sanitized.fullName || '').trim()) {
+        sanitized.fullName = member.fullName.trim();
+      }
+      if (member?.email?.trim() && !String(sanitized.email || '').trim()) {
+        sanitized.email = member.email.trim();
+      }
+      users.push(sanitized);
+    }
+
     return res.json({
       ok: true,
-      users: accounts.map(sanitizeAccount),
+      users,
     });
   } catch (error) {
     return res.status(500).json({
@@ -1163,6 +1185,7 @@ export async function inviteUser(req, res) {
       : buildTeamInvitationDocument({
         email: normalizedEmail,
         fullName: name,
+        phone,
         businessId: business?.business_id || '',
         businessName: resolvedCompanyName,
         role,
@@ -1189,6 +1212,7 @@ export async function inviteUser(req, res) {
     // Si la invitación ya existía pero algún dato ha cambiado, actualizamos.
     if (existingInvitation) {
       invitationDoc.fullName = String(name || existingInvitation.fullName || '').trim();
+      invitationDoc.phone = String(phone || existingInvitation.phone || '').trim();
       invitationDoc.role = role || existingInvitation.role || 'Usuario';
       invitationDoc.permissions = normalizePermissionMatrix(permissions, invitationDoc.role);
       invitationDoc.landingPage = landingPage || existingInvitation.landingPage;
@@ -1385,6 +1409,7 @@ function sanitizeInvitation(inv) {
     invitationId: inv.invitation_id,
     email: inv.email,
     fullName: inv.fullName,
+    phone: inv.phone || '',
     businessId: inv.business_id,
     businessName: inv.businessName,
     role: inv.role,
@@ -1464,10 +1489,15 @@ export async function acceptInvitation(req, res) {
 
     const now = new Date().toISOString();
 
+    const inviteName = String(invitation.fullName || '').trim();
+    const invitePhone = String(invitation.phone || '').trim();
+    const resolvedFullName = inviteName || String(account.fullName || '').trim();
+    const resolvedPhone = invitePhone || String(account.phone || '').trim();
+
     if (!isOwner && !isAlreadyMember) {
       const newMember = {
         user_id: account.user_id,
-        fullName: account.fullName,
+        fullName: resolvedFullName,
         email: account.email,
         role: invitation.role || 'Usuario',
         permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
@@ -1476,6 +1506,21 @@ export async function acceptInvitation(req, res) {
       await saveBusiness(req, {
         ...business,
         members: [...members, newMember],
+        updatedAt: now,
+      });
+    } else if (!isOwner && isAlreadyMember) {
+      const nextMembers = members.map((member) => {
+        if (member.user_id !== account.user_id) return member;
+        return {
+          ...member,
+          fullName: resolvedFullName || member.fullName,
+          role: invitation.role || member.role || 'Usuario',
+          permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
+        };
+      });
+      await saveBusiness(req, {
+        ...business,
+        members: nextMembers,
         updatedAt: now,
       });
     }
@@ -1489,6 +1534,8 @@ export async function acceptInvitation(req, res) {
     });
     const profileDraft = {
       ...account,
+      fullName: resolvedFullName,
+      phone: resolvedPhone,
       employment: mergedEmployment,
       personalData: account.personalData,
       invitedBy: account.invitedBy || invitation.invitedBy || '',
@@ -1498,6 +1545,8 @@ export async function acceptInvitation(req, res) {
 
     const updatedAccount = await saveAccount(req, {
       ...account,
+      fullName: resolvedFullName,
+      phone: resolvedPhone,
       linkedBusinessId: account.linkedBusinessId || business.business_id,
       invitedBy: profileDraft.invitedBy,
       role: account.role && account.role !== 'Usuario' ? account.role : (invitation.role || 'Usuario'),

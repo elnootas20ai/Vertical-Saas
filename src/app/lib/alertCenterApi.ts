@@ -283,96 +283,33 @@ export const SOURCE_COLORS: Record<AlertSource, string> = {
   sistema: '#6B7280',
 };
 
-/** Agrupación CEO: departamentos visibles en el centro de alertas */
-export interface CeoAlertDepartment {
-  id: string;
-  label: string;
-  icon: string;
-  sources: AlertSource[];
-  gradient: string;
-}
+/** @deprecated Usar getAlertDepartmentsForVertical / useAlertDepartments */
+export type CeoAlertDepartment = import('./alertDepartments').BusinessAlertDepartment;
 
-export const CEO_ALERT_DEPARTMENTS: CeoAlertDepartment[] = [
-  {
-    id: 'all',
-    label: 'Todas',
-    icon: 'bell',
-    sources: [],
-    gradient: 'from-indigo-500 to-violet-600',
-  },
-  {
-    id: 'delivery',
-    label: 'Delivery',
-    icon: 'bike',
-    sources: ['delivery'],
-    gradient: 'from-red-500 to-orange-500',
-  },
-  {
-    id: 'finanzas',
-    label: 'Finanzas',
-    icon: 'dollar',
-    sources: ['finanzas', 'conciliacion', 'ocr'],
-    gradient: 'from-emerald-500 to-teal-600',
-  },
-  {
-    id: 'rrhh',
-    label: 'RRHH',
-    icon: 'users',
-    sources: ['equipo', 'documentacion'],
-    gradient: 'from-indigo-500 to-blue-600',
-  },
-  {
-    id: 'operaciones',
-    label: 'Operaciones',
-    icon: 'activity',
-    sources: ['verticales', 'stock', 'taller', 'crm'],
-    gradient: 'from-blue-500 to-cyan-600',
-  },
-  {
-    id: 'limpieza',
-    label: 'Limpieza',
-    icon: 'sparkles',
-    sources: ['limpieza'],
-    gradient: 'from-cyan-500 to-teal-600',
-  },
-  {
-    id: 'construccion',
-    label: 'Construcción',
-    icon: 'hard-hat',
-    sources: ['construccion'],
-    gradient: 'from-amber-500 to-orange-600',
-  },
-  {
-    id: 'verticales',
-    label: 'Verticales',
-    icon: 'layers',
-    sources: ['carniceria', 'compraventa', 'adquisiciones', 'desguaces'],
-    gradient: 'from-violet-500 to-purple-600',
-  },
-  {
-    id: 'sistema',
-    label: 'Sistema',
-    icon: 'shield',
-    sources: ['sistema'],
-    gradient: 'from-gray-500 to-slate-600',
-  },
-];
+import {
+  CEO_ALERT_DEPARTMENTS,
+  getAlertDepartmentsForVertical,
+  departmentSourceFilter,
+  isDepartmentVisibleForVertical,
+} from './alertDepartments';
+
+export {
+  CEO_ALERT_DEPARTMENTS,
+  getAlertDepartmentsForVertical,
+  departmentSourceFilter,
+  isDepartmentVisibleForVertical,
+};
 
 export function countAlertsForDepartment(
   summary: AlertSummary | null,
   deptId: string,
+  vertical?: string | null,
 ): number {
   if (!summary) return 0;
   if (deptId === 'all') return summary.unresolved;
-  const dept = CEO_ALERT_DEPARTMENTS.find((d) => d.id === deptId);
+  const dept = getAlertDepartmentsForVertical(vertical).find((d) => d.id === deptId);
   if (!dept || dept.sources.length === 0) return summary.unresolved;
   return dept.sources.reduce((sum, src) => sum + (summary.bySource[src] || 0), 0);
-}
-
-export function departmentSourceFilter(deptId: string): string | undefined {
-  if (deptId === 'all') return undefined;
-  const dept = CEO_ALERT_DEPARTMENTS.find((d) => d.id === deptId);
-  return dept?.sources.length ? dept.sources.join(',') : undefined;
 }
 
 export const PRIORITY_LABELS: Record<AlertPriority, string> = {

@@ -439,6 +439,34 @@ export async function bulkCreateCatalogItemsRequest(userId: string, items: Parti
   );
 }
 
+export interface BulkUpdateStockResult {
+  ok: boolean;
+  updated: number;
+  notFound: number;
+  errors: number;
+  items: CatalogItem[];
+  notFoundDetails?: { index: number; sku: string; name: string }[];
+  errorDetails?: { index: number; name?: string; sku?: string; error: string }[];
+}
+
+export async function bulkUpdateCatalogStockRequest(
+  userId: string,
+  entries: Array<{
+    sku?: string;
+    name?: string;
+    quantity?: number | string;
+    cantidad?: number | string;
+    unit?: string;
+    unidad?: string;
+  }>,
+): Promise<BulkUpdateStockResult> {
+  const id = normalizeUserId(userId);
+  return request<BulkUpdateStockResult>(
+    `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-stock`,
+    { method: 'POST', body: JSON.stringify({ entries }) },
+  );
+}
+
 export async function bulkApplyStaffPricesRequest(
   userId: string,
   data: { discountPercent: number; categories?: string[] },
@@ -1150,27 +1178,35 @@ export async function ensureDeliveryPdvForWorkCenter(
 export async function mergePointsOfSaleWithRetailWorkCenters(
   userId: string,
   existingPdvs: PointOfSale[],
-  options?: { business?: { members?: { user_id?: string }[] } | null },
+  options?: {
+    business?: { members?: { user_id?: string }[]; business_id?: string; id?: string } | null;
+    /** Centros ya filtrados por empresa (evita perder legacy sin businessId). */
+    workCenters?: WorkCenter[];
+  },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
   let pdvData = dedupePointsOfSale([...existingPdvs]);
   let wcs: WorkCenter[] = [];
   try {
-    wcs = await listWorkCentersForDelivery(id, options?.business ?? null);
-    const bid = String(
-      options?.business?.business_id || (options?.business as { id?: string } | null)?.id || '',
-    ).trim();
-    if (!bid) {
-      wcs = [];
+    if (options?.workCenters?.length) {
+      wcs = options.workCenters;
     } else {
-      wcs = wcs.filter((wc) => {
-        const wb = String(
-          (wc as WorkCenter & { business_id?: string }).businessId ||
-            (wc as WorkCenter & { business_id?: string }).business_id ||
-            '',
-        ).trim();
-        return wb === bid;
-      });
+      wcs = await listWorkCentersForDelivery(id, options?.business ?? null);
+      const bid = String(
+        options?.business?.business_id || (options?.business as { id?: string } | null)?.id || '',
+      ).trim();
+      if (!bid) {
+        wcs = [];
+      } else {
+        wcs = wcs.filter((wc) => {
+          const wb = String(
+            (wc as WorkCenter & { business_id?: string }).businessId ||
+              (wc as WorkCenter & { business_id?: string }).business_id ||
+              '',
+          ).trim();
+          return wb === bid;
+        });
+      }
     }
   } catch {
     return pdvData;

@@ -173,6 +173,19 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(wb.SheetNames).toContain('instrucciones');
   });
 
+  it('parseCatalogImportStockFields reads stock columns from Excel', async () => {
+    const { parseCatalogImportStockFields } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
+    const stock = parseCatalogImportStockFields({
+      stock_actual: '80',
+      stock_minimo: '15',
+      unidad: 'kg',
+    });
+    expect(stock.stockQuantity).toBe(80);
+    expect(stock.minStock).toBe(15);
+    expect(stock.unit).toBe('kg');
+    expect(stock.isStockItem).toBe(true);
+  });
+
   it('isOfficialCatalogTemplateHeaders detects official column row', async () => {
     const { isOfficialCatalogTemplateHeaders, DELIVERY_CATALOG_TEMPLATE_HEADERS } = await import(
       '../src/app/lib/deliveryCatalogExcelTemplate.ts',

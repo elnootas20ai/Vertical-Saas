@@ -4,6 +4,7 @@ import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
+import { useAlertDepartments } from '../../hooks/useAlertDepartments';
 import { AlertCenterAjustesView } from '../../components/saas/AlertCenterAjustesView';
 import {
   AlertHistoryTimeline,
@@ -19,8 +20,6 @@ import {
   deleteAlert as deleteAlertRequest,
   triggerAlertEngineCheck,
   normalizeAlertSummary,
-  departmentSourceFilter,
-  CEO_ALERT_DEPARTMENTS,
   SOURCE_LABELS,
   SOURCE_COLORS,
   PRIORITY_LABELS,
@@ -84,6 +83,7 @@ export default function AlertCenterPage() {
   const { user } = useAuth();
   const businessId = useAlertCenterBusinessId();
   const settingsBusinessId = useAlertSettingsBusinessId();
+  const { departments: alertDepartments, departmentSourceFilter } = useAlertDepartments();
 
   const [pageTab, setPageTab] = useState<AlertCenterPageTab>(() => tabFromSearch(searchParams.get('tab')));
 
@@ -106,8 +106,13 @@ export default function AlertCenterPage() {
   const isHistory = pageTab === 'history';
   const isSettings = pageTab === 'settings';
 
+  const accountUserId = user?.user_id || user?.id || '';
+
   const loadData = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const summaryRes = await fetchAlertSummary(businessId);
@@ -234,8 +239,8 @@ export default function AlertCenterPage() {
     if (!businessId) return;
     setSyncing(true);
     try {
-      if (user?.userId) {
-        await triggerAlertEngineCheck(user.userId).catch(() => null);
+      if (accountUserId) {
+        await triggerAlertEngineCheck(accountUserId).catch(() => null);
       }
       await loadData();
       toast.success('Alertas actualizadas');
@@ -244,24 +249,24 @@ export default function AlertCenterPage() {
     } finally {
       setSyncing(false);
     }
-  }, [businessId, user?.userId, loadData]);
+  }, [businessId, accountUserId, loadData]);
 
   useEffect(() => {
     setPageTab(tabFromSearch(searchParams.get('tab')));
   }, [searchParams]);
 
   useEffect(() => {
-    if (!businessId || !user?.userId) return;
-    void triggerAlertEngineCheck(user.userId).catch(() => null);
-  }, [businessId, user?.userId]);
+    if (!businessId || !accountUserId) return;
+    void triggerAlertEngineCheck(accountUserId).catch(() => null);
+  }, [businessId, accountUserId]);
 
   const layoutSubtitle = isSettings
-    ? 'Configura qué situaciones quieres que Vertial vigile por ti'
+    ? 'Configura qué debe vigilar tu negocio de delivery'
     : isHistory
       ? 'Alertas resueltas y cerradas'
       : 'Todo lo que requiere tu atención ahora mismo';
 
-  const deptLabel = CEO_ALERT_DEPARTMENTS.find((d) => d.id === activeDepartment)?.label || 'Todas';
+  const deptLabel = alertDepartments.find((d) => d.id === activeDepartment)?.label || 'Todas';
 
   return (
     <Layout title="Centro de alertas" subtitle={layoutSubtitle}>
@@ -330,7 +335,7 @@ export default function AlertCenterPage() {
                       onChange={(e) => selectDepartment(e.target.value)}
                       className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
                     >
-                      {CEO_ALERT_DEPARTMENTS.map((dept) => (
+                      {alertDepartments.map((dept) => (
                         <option key={dept.id} value={dept.id}>{dept.label}</option>
                       ))}
                     </select>

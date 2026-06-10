@@ -172,15 +172,15 @@ export async function mapImportEntryToCatalogItem(
     description: String(entry.description || '').trim(),
     unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
     costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
-    stockQuantity: Number(String(entry.stockQuantity || '').replace(',', '.')) || 0,
-    minStock: Number(String(entry.minStock || '').replace(',', '.')) || 0,
+    stockQuantity: 0,
+    minStock: 0,
     allergens: String(entry.allergens || '')
       .split(',')
       .map((a) => a.trim())
       .filter(Boolean),
     image: String(entry.image || '').trim() || undefined,
     sku: String(entry.sku || '').trim() || undefined,
-    unit: String(entry.unit || 'ud'),
+    unit: String(entry.unit || entry.unidad || 'ud').trim() || 'ud',
     active: true,
     available: true,
     webVisible: true,

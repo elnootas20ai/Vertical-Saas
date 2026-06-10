@@ -619,27 +619,8 @@ const MCP_MOCK_ACTIONS: Record<string, string[]> = {};
 
 const MCP_ENTITY_LABELS: Record<string, string[]> = {};
 
-function generateMcpHistory(mcp: AgentMCP, members: AuthUser[]): McpOrderEntry[] {
-  const active = members.filter((m) => m.status === 'active' || !m.status);
-  if (active.length === 0) return [];
-  const actions = MCP_MOCK_ACTIONS[mcp.id] || [`Procesó operación en ${mcp.name}`];
-  const labels = MCP_ENTITY_LABELS[mcp.id] || ['Registro #001', 'Registro #002'];
-  const now = Date.now();
-  return Array.from({ length: 10 }, (_, i) => {
-    const member = active[i % active.length];
-    const token = getRoleToken(member.role);
-    const minutesAgo = i * 14 + Math.floor(Math.random() * 10);
-    return {
-      id: `mock-${mcp.id}-${i}`,
-      agentName: member.fullName || member.email || 'Agente',
-      agentRole: member.role || 'Usuario',
-      agentAvatarBg: token.avatarBg,
-      action: actions[i % actions.length],
-      entityLabel: labels[i % labels.length],
-      processedAt: new Date(now - minutesAgo * 60000).toISOString(),
-      status: (i === 0 ? 'processing' : 'completed') as McpOrderEntry['status'],
-    };
-  });
+function generateMcpHistory(_mcp: AgentMCP, _members: AuthUser[]): McpOrderEntry[] {
+  return [];
 }
 
 function McpDetailModal({
@@ -652,37 +633,9 @@ function McpDetailModal({
   onClose: () => void;
 }) {
   useModalClose(true, onClose);
-  const [history, setHistory] = useState<McpOrderEntry[]>(() => generateMcpHistory(mcp, members));
-  const [liveCount, setLiveCount] = useState(0);
-  const [latestId, setLatestId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const active = members.filter((m) => m.status === 'active' || !m.status);
-    if (active.length === 0) return;
-    const actions = MCP_MOCK_ACTIONS[mcp.id] || [`Procesó operación en ${mcp.name}`];
-    const labels = MCP_ENTITY_LABELS[mcp.id] || ['Registro #001'];
-
-    const delay = 8000 + Math.random() * 7000;
-    const interval = setInterval(() => {
-      const member = active[Math.floor(Math.random() * active.length)];
-      const token = getRoleToken(member.role);
-      const newEntry: McpOrderEntry = {
-        id: `live-${Date.now()}`,
-        agentName: member.fullName || member.email || 'Agente',
-        agentRole: member.role || 'Usuario',
-        agentAvatarBg: token.avatarBg,
-        action: actions[Math.floor(Math.random() * actions.length)],
-        entityLabel: labels[Math.floor(Math.random() * labels.length)],
-        processedAt: new Date().toISOString(),
-        status: 'completed',
-      };
-      setHistory((prev) => [newEntry, ...prev.slice(0, 19)]);
-      setLiveCount((c) => c + 1);
-      setLatestId(newEntry.id);
-    }, delay);
-
-    return () => clearInterval(interval);
-  }, [mcp, members]);
+  const [history] = useState<McpOrderEntry[]>(() => generateMcpHistory(mcp, members));
+  const liveCount = 0;
+  const latestId: string | null = null;
 
   const agentsCount = members.filter((m) =>
     m.mcps?.some((mp) => mp.id === mcp.id && mp.enabled)
@@ -743,10 +696,6 @@ function McpDetailModal({
             <div className="px-6 py-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Historial de procesamiento</h3>
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  En vivo
-                </div>
               </div>
               {history.length === 0 ? (
                 <p className="py-6 text-center text-sm text-gray-400 dark:text-gray-500">Sin actividad registrada para este MCP.</p>
@@ -2389,7 +2338,7 @@ function MemberDrawer({
                     </div>
                     <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{memberState.employment?.salary || 'No definido'}</p>
                   </div>
-                  {(memberState.employment?.emergencyContact || memberState.employment?.emergencyPhone) && (
+                  {(memberState.employment?.emergencyContact?.trim() || memberState.employment?.emergencyPhone?.trim()) && (
                     <div className="rounded-xl bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 p-3 md:col-span-2">
                       <div className="mb-1 flex items-center gap-1.5 text-red-500">
                         <Heart className="w-3.5 h-3.5" />
@@ -2704,10 +2653,16 @@ function TeamActivityPanel({ members }: { members: AuthUser[] }) {
   const [filter, setFilter] = useState<'today' | 'week'>('today');
   const [activityMap, setActivityMap] = useState<Record<string, AccountActivityItem[]>>({});
   const [loading, setLoading] = useState(false);
+  const memberIdsKey = useMemo(
+    () => members.map((m) => m.user_id).sort().join('|'),
+    [members],
+  );
 
   useEffect(() => {
-    if (members.length === 0) return;
-    setLoading(true);
+    if (!memberIdsKey) return;
+    const hasCachedData = memberIdsKey.split('|').every((id) => id in activityMap);
+    if (!hasCachedData) setLoading(true);
+    let cancelled = false;
     Promise.allSettled(
       members.map(async (m) => {
         try {
@@ -2718,6 +2673,7 @@ function TeamActivityPanel({ members }: { members: AuthUser[] }) {
         }
       }),
     ).then((results) => {
+      if (cancelled) return;
       const map: Record<string, AccountActivityItem[]> = {};
       results.forEach((r) => {
         if (r.status === 'fulfilled') {
@@ -2727,7 +2683,8 @@ function TeamActivityPanel({ members }: { members: AuthUser[] }) {
       setActivityMap(map);
       setLoading(false);
     });
-  }, [members]);
+    return () => { cancelled = true; };
+  }, [memberIdsKey]);
 
   const now = new Date();
   const cutoff = filter === 'today'
@@ -2766,7 +2723,7 @@ function TeamActivityPanel({ members }: { members: AuthUser[] }) {
       </div>
 
       {/* Cards de miembros */}
-      {loading ? (
+      {loading && members.length === 0 ? (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 animate-pulse">
@@ -2914,18 +2871,19 @@ export function Team() {
     setPendingInvitations(list);
   };
 
+  const accountUserId = user?.user_id || user?.id || '';
+
   useEffect(() => {
+    if (!currentBusiness?.business_id) return;
     void loadDirectory();
     void loadPendingInvitations();
-    if (resolvedUserId && currentBusiness) {
+    if (accountUserId) {
       loadInviteWorkCenters(user, currentBusiness)
         .then(setWorkCentersData)
         .catch(() => {});
     }
-    if (currentBusiness?.business_id) {
-      fetchTeamAlerts(currentBusiness.business_id).then(setTeamAlerts).catch(() => {});
-    }
-  }, [currentBusiness?.business_id, resolvedUserId, user]);
+    fetchTeamAlerts(currentBusiness.business_id).then(setTeamAlerts).catch(() => {});
+  }, [currentBusiness?.business_id, accountUserId]);
 
   useEffect(() => {
     if (!resolvedUserId || !currentBusiness) return;
@@ -2949,7 +2907,14 @@ export function Team() {
   }, [memberIdParam, navigate]);
 
   const orderedMembers = useMemo(() => {
-    return [...members].sort((a, b) => {
+    const seen = new Set<string>();
+    const unique = members.filter((member) => {
+      const uid = String(member.user_id || '').trim();
+      if (!uid || seen.has(uid)) return false;
+      seen.add(uid);
+      return true;
+    });
+    return [...unique].sort((a, b) => {
       if (a.user_id === user?.user_id) {
         return -1;
       }
@@ -3371,7 +3336,9 @@ export function Team() {
                       {inv.fullName || inv.email}
                     </p>
                     <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                      {inv.email} · {inv.role}
+                      {inv.email}
+                      {inv.phone ? ` · ${inv.phone}` : ''}
+                      {' · '}{inv.role}
                       {inv.expiresAt
                         ? ` · caduca el ${new Date(inv.expiresAt).toLocaleDateString()}`
                         : ''}
@@ -3534,7 +3501,7 @@ export function Team() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                      {isLoading
+                      {isLoading && orderedMembers.length === 0
                         ? Array.from({ length: 4 }).map((_, i) => <TeamRowSkeleton key={i} />)
                         : displayMembers.map((member) => {
                         const token = getRoleToken(member.role);
@@ -3599,7 +3566,7 @@ export function Team() {
                 </div>
 
                 <div className="space-y-3 md:hidden">
-                  {isLoading
+                  {isLoading && orderedMembers.length === 0
                     ? Array.from({ length: 3 }).map((_, i) => <TeamCardSkeleton key={i} />)
                     : displayMembers.map((member) => (
                     <div key={member.user_id} onClick={() => navigate(`/saas/team/${member.user_id}`)} className={`cursor-pointer rounded-2xl border border-gray-200 dark:border-gray-700 border-l-4 bg-white dark:bg-gray-800 p-4 active:scale-[0.99] ${getRoleToken(member.role).accentBorder}`}>

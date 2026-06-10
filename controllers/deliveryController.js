@@ -79,6 +79,22 @@ import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js'
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
+import {
+  canEmitCatalogStockAlerts,
+  filterStockTrackedCatalogItems,
+} from '../services/stockAlertUtils.js';
+import { canEmitPdvCashAlerts } from '../services/pdvAlertUtils.js';
+import { canEmitDeliveryAlerts } from '../services/moduleAlertUtils.js';
+import {
+  getBusinessAlertsOperational,
+  resolveCashRegisterAlertConfig,
+} from '../services/cashRegisterAlertConfig.js';
+import { resolveDeliveryAlertConfig } from '../services/deliveryOperationalAlertConfig.js';
+import {
+  getOrderPhase,
+  getPhaseStartTime,
+  normalizeDeliveryOrderStatus,
+} from '../services/deliveryAlertStatusUtils.js';
 import { notifyManagersOrderCancelled } from '../services/deliveryOrderNotifications.js';
 import logger from '../services/logger.js';
 
@@ -1068,6 +1084,160 @@ export async function bulkApplyStaffPrices(req, res) {
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al aplicar precios empleado' });
+  }
+}
+
+function normalizeStockLookupKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/** Actualiza cantidades de productos existentes (recuento / carga inicial de stock). */
+export async function bulkUpdateCatalogStock(req, res) {
+  try {
+    const { userId } = req.params;
+    const { entries } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return badRequest(res, 'Falta el array entries en el body');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const existingItems = await listCatalogItemsByUser(req, userId);
+    const bySku = new Map();
+    const byName = new Map();
+
+    for (const item of existingItems) {
+      if (!item || item.active === false || item.deletedAt) continue;
+      const skuKey = normalizeStockLookupKey(item.sku);
+      const nameKey = normalizeStockLookupKey(item.name);
+      if (skuKey && !bySku.has(skuKey)) bySku.set(skuKey, item);
+      if (nameKey && !byName.has(nameKey)) byName.set(nameKey, item);
+    }
+
+    const errors = [];
+    const notFound = [];
+    const updated = [];
+    const performerName = account?.fullName || userId;
+
+    for (let idx = 0; idx < entries.length; idx += 1) {
+      const entry = entries[idx];
+      if (!entry || typeof entry !== 'object') continue;
+      const skuKey = normalizeStockLookupKey(entry.sku);
+      const nameKey = normalizeStockLookupKey(entry.name || entry.nombre);
+      const qtyRaw = String(
+        entry.stockQuantity ?? entry.quantity ?? entry.cantidad ?? '',
+      ).trim();
+      const qty = Number(qtyRaw.replace(',', '.'));
+
+      if (!skuKey && !nameKey) {
+        errors.push({ index: idx, error: 'Falta SKU o nombre' });
+        continue;
+      }
+      if (!qtyRaw || !Number.isFinite(qty) || qty < 0) {
+        errors.push({
+          index: idx,
+          sku: entry.sku,
+          name: entry.name || entry.nombre,
+          error: 'Cantidad no válida',
+        });
+        continue;
+      }
+
+      const match = (skuKey && bySku.get(skuKey)) || (nameKey && byName.get(nameKey));
+      if (!match) {
+        notFound.push({
+          index: idx,
+          sku: entry.sku || '',
+          name: entry.name || entry.nombre || '',
+        });
+        continue;
+      }
+
+      const unit = String(entry.unit || entry.unidad || match.unit || 'ud').trim() || 'ud';
+      const prevQty = Number(match.stockQuantity || 0);
+      const diff = qty - prevQty;
+
+      try {
+        if (diff !== 0) {
+          const movementType =
+            prevQty === 0 && qty > 0 ? 'initial' : diff > 0 ? 'adjustment_in' : 'adjustment_out';
+          await recordMovement(req, userId, {
+            catalogItemId: match._id,
+            movementType,
+            quantity: Math.abs(diff),
+            unitCost: Number(match.costPrice || 0),
+            referenceType: 'stock_import',
+            notes: `Recuento importado — ${prevQty} → ${qty} ${unit}`,
+            performedBy: performerName,
+          });
+        }
+
+        const needsMetaPatch =
+          diff === 0 && (match.isStockItem !== true || String(match.unit || 'ud') !== unit);
+        if (needsMetaPatch) {
+          const fresh = await getDocument(req, db, match._id);
+          const patched = buildCatalogItemDocument(
+            userId,
+            { ...fresh, isStockItem: true, unit },
+            fresh,
+          );
+          await putDocument(req, db, patched._id, patched);
+        }
+
+        const saved = await getDocument(req, db, match._id);
+        updated.push(sanitizeCatalogItem(saved));
+        triggerReactiveAlert(userId, 'stock_updated', { itemId: match._id }).catch(() => null);
+      } catch (err) {
+        errors.push({
+          index: idx,
+          name: match.name,
+          error: err instanceof Error ? err.message : 'Error al actualizar stock',
+        });
+      }
+    }
+
+    if (updated.length === 0) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Ningún producto del archivo coincide con el catálogo',
+        updated: 0,
+        notFound,
+        errors,
+      });
+    }
+
+    if (updated.length > 0) {
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'catalog_item',
+        action: `Recuento de stock: ${updated.length} artículo(s) actualizado(s)`,
+        entityId: updated[0]._id,
+        entityLabel: `Stock importado (${updated.length})`,
+        metadata: { count: updated.length, notFound: notFound.length },
+      });
+    }
+
+    return res.json({
+      ok: true,
+      updated: updated.length,
+      notFound: notFound.length,
+      errors: errors.length,
+      items: updated,
+      notFoundDetails: notFound.length > 0 ? notFound : undefined,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar stock' });
   }
 }
 
@@ -2296,93 +2466,120 @@ function isInTimeSlot(dateStr, slot) {
   return hhmm >= slot.start && hhmm <= slot.end;
 }
 
-function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) {
+function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale = [], deliveryAlertCfg = null, cashCfg = null) {
   const alerts = [];
   const now = new Date().toISOString();
-  const threshold = config.delayThresholdMinutes || 30;
-  const kitchenMax = config.kitchenSaturationThreshold || 10;
-  const discrepancyThreshold = Number(config.cashRegister?.discrepancyThreshold || 20);
+  const alertCfg = deliveryAlertCfg || resolveDeliveryAlertConfig({}, null);
+  const cash = cashCfg || {};
+  const discrepancyThreshold = Number(cash.discrepancyThreshold || config.cashRegister?.discrepancyThreshold || 20);
+  const maxCashHours = Number(cash.cashMaxOpenHours || 12);
 
-  const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
-  for (const o of orders) {
-    if (!activeStatuses.includes(o.status)) continue;
-    const mins = minutesSince(o.createdAt);
-    if (mins > threshold) {
+  const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders: orders, pointsOfSale, deliveryConfig: config });
+
+  if (deliveryReady) {
+    const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
+    const activeOrders = orders.filter((o) => activeStatuses.includes(o.status));
+    const nowMs = Date.now();
+
+    for (const o of activeOrders) {
+      const phase = getOrderPhase(o);
+      if (!phase) continue;
+      const thr = alertCfg.delayThresholds?.[phase];
+      if (!thr) continue;
+      const start = getPhaseStartTime(o);
+      if (Number.isNaN(start.getTime())) continue;
+      const mins = (nowMs - start.getTime()) / 60_000;
+      if (mins < thr) continue;
+      const status = normalizeDeliveryOrderStatus(o.status);
       alerts.push({
-        id: `delayed_${o._id}`, type: 'delayed_order', severity: mins > threshold * 2 ? 'critical' : 'warning',
+        id: `delayed_${o._id}`, type: 'delayed_order', severity: mins >= thr * 2 ? 'critical' : 'warning',
         title: `Pedido ${o.orderNumber} retrasado`,
-        message: `${Math.round(mins)} min desde creación (umbral: ${threshold} min)`,
+        message: `${Math.floor(mins)} min en ${status} (umbral CEO: ${thr} min)`,
         orderId: o._id, route: '/saas/delivery', createdAt: now,
       });
     }
-  }
 
-  const inKitchen = orders.filter(o => o.status === 'cocina').length;
-  if (inKitchen >= kitchenMax) {
-    alerts.push({
-      id: 'kitchen_saturated', type: 'kitchen_saturated', severity: 'critical',
-      title: 'Cocina saturada',
-      message: `${inKitchen} pedidos en cocina (umbral: ${kitchenMax})`,
-      route: '/saas/delivery', createdAt: now,
-    });
+    const inKitchen = orders.filter((o) => o.status === 'cocina').length;
+    const cap = alertCfg.kitchenCapacity || 10;
+    const pct = cap > 0 ? (inKitchen / cap) * 100 : 0;
+    if (pct >= (alertCfg.kitchenCriticalPercent || 90)) {
+      alerts.push({
+        id: 'kitchen_saturated', type: 'kitchen_saturated', severity: 'critical',
+        title: 'Cocina saturada',
+        message: `${inKitchen}/${cap} pedidos (${Math.round(pct)}%, umbral CEO: ${alertCfg.kitchenCriticalPercent}%)`,
+        route: '/saas/delivery', createdAt: now,
+      });
+    } else if (pct >= (alertCfg.kitchenWarningPercent || 70)) {
+      alerts.push({
+        id: 'kitchen_saturated_warn', type: 'kitchen_saturated', severity: 'warning',
+        title: 'Cocina con carga alta',
+        message: `${inKitchen}/${cap} pedidos (${Math.round(pct)}%, aviso CEO: ${alertCfg.kitchenWarningPercent}%)`,
+        route: '/saas/delivery', createdAt: now,
+      });
+    }
   }
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const openTpv = tpvSessions.filter(s => s.status === 'open');
-  const hasActiveOrders = orders.some((o) => activeStatuses.includes(o.status));
+  const pdvReady = canEmitPdvCashAlerts(pointsOfSale);
 
-  if (hasActiveOrders && openTpv.length === 0) {
-    alerts.push({
-      id: 'register_not_open_today', type: 'register_not_open', severity: 'warning',
-      title: 'Caja sin abrir',
-      message: 'Hay pedidos activos pero ninguna caja TPV está abierta hoy.',
-      route: '/saas/vertical/delivery/caja', createdAt: now,
-    });
-  }
+  if (pdvReady) {
+    const openTpv = tpvSessions.filter(s => s.status === 'open');
+    const hasActiveOrders = orders.some((o) => activeStatuses.includes(o.status));
 
-  for (const s of openTpv) {
-    const hours = minutesSince(s.openedAt) / 60;
-    if (hours > 14) {
+    if (hasActiveOrders && openTpv.length === 0) {
       alerts.push({
-        id: `cash_pending_${s._id}`, type: 'cash_pending_close', severity: 'warning',
-        title: 'Caja pendiente de cierre',
-        message: `${s.terminalName || 'Terminal'} — ${s.pointOfSaleName || 'PDV'} abierta ${Math.round(hours)}h`,
-        sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+        id: 'register_not_open_today', type: 'register_not_open', severity: 'warning',
+        title: 'Caja sin abrir',
+        message: 'Hay pedidos activos pero ninguna caja TPV está abierta hoy.',
+        route: '/saas/vertical/delivery/caja', createdAt: now,
       });
+    }
+
+    for (const s of openTpv) {
+      const hours = minutesSince(s.openedAt) / 60;
+      if (hours >= maxCashHours) {
+        alerts.push({
+          id: `cash_pending_${s._id}`, type: 'cash_pending_close', severity: hours >= maxCashHours * 1.25 ? 'critical' : 'warning',
+          title: 'Caja pendiente de cierre',
+          message: `${s.terminalName || 'Terminal'} — ${s.pointOfSaleName || 'PDV'} abierta ${Math.round(hours)}h (máx. CEO: ${maxCashHours}h)`,
+          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+        });
+      }
+    }
+
+    const pendingValidation = tpvSessions.filter(
+      (s) => s.status === 'closed' && s.closingValidationStatus === 'pending',
+    );
+    if (pendingValidation.length > 0) {
+      alerts.push({
+        id: 'cash_pending_validation', type: 'cash_pending_validation',
+        severity: pendingValidation.length > 2 ? 'critical' : 'warning',
+        title: `${pendingValidation.length} cierre${pendingValidation.length > 1 ? 's' : ''} pendiente${pendingValidation.length > 1 ? 's' : ''} de validación`,
+        message: pendingValidation.slice(0, 2).map((s) => s.pointOfSaleName || s.terminalName || 'Caja').join(', '),
+        route: '/saas/vertical/delivery/caja', createdAt: now,
+      });
+    }
+
+    const closedToday = tpvSessions.filter(
+      (s) => s.status === 'closed' && String(s.closedAt || '').startsWith(todayStr),
+    );
+    for (const s of closedToday) {
+      const diff = Math.abs(Number(s.difference || 0));
+      if (diff >= discrepancyThreshold) {
+        alerts.push({
+          id: `register_discrep_${s._id}`, type: 'register_discrepancy',
+          severity: diff >= discrepancyThreshold * 3 ? 'critical' : 'warning',
+          title: 'Descuadre de caja',
+          message: `${s.pointOfSaleName || s.terminalName || 'Caja'}: ${Number(s.difference) >= 0 ? '+' : ''}${Number(s.difference).toFixed(2)}€`,
+          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+        });
+      }
     }
   }
 
-  const pendingValidation = tpvSessions.filter(
-    (s) => s.status === 'closed' && s.closingValidationStatus === 'pending',
-  );
-  if (pendingValidation.length > 0) {
-    alerts.push({
-      id: 'cash_pending_validation', type: 'cash_pending_validation',
-      severity: pendingValidation.length > 2 ? 'critical' : 'warning',
-      title: `${pendingValidation.length} cierre${pendingValidation.length > 1 ? 's' : ''} pendiente${pendingValidation.length > 1 ? 's' : ''} de validación`,
-      message: pendingValidation.slice(0, 2).map((s) => s.pointOfSaleName || s.terminalName || 'Caja').join(', '),
-      route: '/saas/vertical/delivery/caja', createdAt: now,
-    });
-  }
-
-  const closedToday = tpvSessions.filter(
-    (s) => s.status === 'closed' && String(s.closedAt || '').startsWith(todayStr),
-  );
-  for (const s of closedToday) {
-    const diff = Math.abs(Number(s.difference || 0));
-    if (diff >= discrepancyThreshold) {
-      alerts.push({
-        id: `register_discrep_${s._id}`, type: 'register_discrepancy',
-        severity: diff >= discrepancyThreshold * 3 ? 'critical' : 'warning',
-        title: 'Descuadre de caja',
-        message: `${s.pointOfSaleName || s.terminalName || 'Caja'}: ${Number(s.difference) >= 0 ? '+' : ''}${Number(s.difference).toFixed(2)}€`,
-        sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
-      });
-    }
-  }
-
-  if (Array.isArray(catalogItems)) {
-    const critical = catalogItems.filter(i => i.active !== false && i.stockQuantity != null && i.minStock > 0 && i.stockQuantity <= i.minStock);
+  if (Array.isArray(catalogItems) && canEmitCatalogStockAlerts(catalogItems)) {
+    const critical = filterStockTrackedCatalogItems(catalogItems)
+      .filter((i) => i.stockQuantity != null && i.minStock > 0 && i.stockQuantity <= i.minStock);
     for (const item of critical.slice(0, 5)) {
       alerts.push({
         id: `stock_${item._id}`, type: 'critical_stock', severity: item.stockQuantity <= 0 ? 'critical' : 'warning',
@@ -2393,14 +2590,16 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config) 
     }
   }
 
-  const incidents = orders.filter(o => o.status === 'incident');
-  if (incidents.length > 0) {
-    alerts.push({
-      id: 'open_incidents', type: 'open_incident', severity: 'warning',
-      title: `${incidents.length} incidencia(s) abierta(s)`,
-      message: incidents.slice(0, 2).map(o => `${o.orderNumber}: ${o.incidentType || 'General'}`).join(', '),
-      route: '/saas/delivery', createdAt: now,
-    });
+  if (deliveryReady) {
+    const incidents = orders.filter(o => o.status === 'incident');
+    if (incidents.length > 0) {
+      alerts.push({
+        id: 'open_incidents', type: 'open_incident', severity: 'warning',
+        title: `${incidents.length} incidencia(s) abierta(s)`,
+        message: incidents.slice(0, 2).map(o => `${o.orderNumber}: ${o.incidentType || 'General'}`).join(', '),
+        route: '/saas/delivery', createdAt: now,
+      });
+    }
   }
 
   return alerts;
@@ -2476,12 +2675,18 @@ export async function getOpsCenter(req, res) {
       .map(o => o.createdAt && o.deliveredAt ? (new Date(o.deliveredAt) - new Date(o.createdAt)) / 60000 : null)
       .filter(Boolean);
     const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
-    const delayThreshold = config.delayThresholdMinutes || 30;
+    const businessOp = account.businessId ? await getBusinessAlertsOperational(req, account.businessId) : null;
+    const deliveryAlertCfg = resolveDeliveryAlertConfig(account, businessOp);
+    const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+    const delayThreshold = deliveryAlertCfg.delayThresholds?.delivery || config.delayThresholdMinutes || 40;
     const deliveredOnTime = deliveryTimes.filter(t => t <= delayThreshold).length;
     const deliveredLate = deliveryTimes.filter(t => t > delayThreshold).length;
 
-    const tpvSessions = await listTpvRegisterSessionsByUser(req, userId);
-    const driverSessions = await listDriverCashSessionsByUser(req, userId);
+    const [tpvSessions, driverSessions, pointsOfSale] = await Promise.all([
+      listTpvRegisterSessionsByUser(req, userId),
+      listDriverCashSessionsByUser(req, userId),
+      listPointsOfSaleByUser(req, userId).catch(() => []),
+    ]);
     let openTpv = tpvSessions.filter(s => s.status === 'open');
     if (salesPointId) {
       const pdv = String(salesPointId).trim();
@@ -2492,7 +2697,7 @@ export async function getOpsCenter(req, res) {
     let catalogItems = [];
     try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
 
-    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config);
+    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale, deliveryAlertCfg, cashCfg);
 
     const inKitchen = orders.filter(o => o.status === 'cocina');
     const kitchenOldest = inKitchen.reduce((max, o) => Math.max(max, minutesSince(o.createdAt)), 0);

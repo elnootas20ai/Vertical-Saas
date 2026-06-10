@@ -9,6 +9,7 @@ import { anyActiveRetailStoreHasOpeningHours } from '../../lib/businessHoursUtil
 import { listWorkCentersForDelivery } from '../../lib/workCentersApi';
 import {
   filterPointsOfSaleForWorkCenters,
+  resolveBusinessScopeId,
   workCentersStrictlyForBusiness,
 } from '../../lib/deliverySetup';
 
@@ -37,11 +38,11 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
   const [pdvs, setPdvs] = useState<PointOfSale[] | null>(null);
   const [retailStoresOk, setRetailStoresOk] = useState<boolean | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const businessId = currentBusiness?.business_id || currentBusiness?.id || '';
+  const businessId = resolveBusinessScopeId(currentBusiness);
 
   useEffect(() => {
     let cancelled = false;
-    if (businessLoading || !dataUserId || !businessId) return;
+    if (businessLoading || !currentBusiness?.business_id || !dataUserId || !businessId) return;
     setPdvs(null);
     Promise.all([
       listPointsOfSaleRequest(dataUserId),

@@ -18,6 +18,7 @@ import {
   ensureDatabase,
   couchRequest,
   getAllDocuments,
+  getDocument,
 } from './couchdb.js';
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
@@ -148,13 +149,40 @@ async function isQuietHours(businessId) {
   }
 }
 
-async function isDuplicate(dedupKey) {
-  if (!dedupKey) return false;
+function buildStableAlertId(category, dedupKey) {
+  return `alert:${category}:${dedupKey}`;
+}
+
+function buildLegacyDatedAlertId(category, dedupKey, dateStr) {
+  return `alert:${category}:${dedupKey}:${dateStr}`;
+}
+
+async function findOpenAlertDoc(category, dedupKey) {
+  if (!category || !dedupKey) return null;
+  try {
+    await ensureDatabase(fakeReq, NOTIFICATIONS_DB);
+    const stableId = buildStableAlertId(category, dedupKey);
+    const doc = await getDocument(fakeReq, NOTIFICATIONS_DB, stableId);
+    if (!doc || doc.deletedAt) return null;
+    const status = doc.status || (doc.read ? 'seen' : 'new');
+    if (status === 'resolved') return null;
+    return doc;
+  } catch {
+    return null;
+  }
+}
+
+async function hasLegacyDatedAlertToday(category, dedupKey) {
+  if (!category || !dedupKey) return false;
   try {
     const today = new Date().toISOString().slice(0, 10);
-    const notifId = `alert:${dedupKey}:${today}`;
+    const notifId = buildLegacyDatedAlertId(category, dedupKey, today);
     const resp = await couchRequest(fakeReq, `/${encodeURIComponent(NOTIFICATIONS_DB)}/${encodeURIComponent(notifId)}`);
-    return !!resp?._id;
+    if (!resp?.ok) return false;
+    const doc = await resp.json();
+    if (!doc?._id || doc.deletedAt) return false;
+    const status = doc.status || (doc.read ? 'seen' : 'new');
+    return status !== 'resolved';
   } catch {
     return false;
   }
@@ -170,11 +198,6 @@ export async function emitGlobalAlert({
     const resolvedSource = normalizeSource(source || deriveSourceFromCategory(category));
     const resolvedPriority = normalizePriority(priority || derivePriorityFromLevel(level || 'warning'));
     const resolvedLevel = level || PRIORITY_TO_LEVEL[resolvedPriority] || 'warning';
-
-    if (dedupKey) {
-      const dup = await isDuplicate(`${category}:${dedupKey}`);
-      if (dup) return null;
-    }
 
     const channels = await resolveChannels(businessId, ruleId, category);
     if (channels.length === 0) return null;
@@ -208,7 +231,27 @@ export async function emitGlobalAlert({
     });
 
     if (dedupKey) {
-      notifBase._id = `alert:${category}:${dedupKey}:${now.slice(0, 10)}`;
+      const existing = await findOpenAlertDoc(category, dedupKey);
+      if (existing) {
+        const refreshed = {
+          ...existing,
+          title,
+          message,
+          priority: resolvedPriority,
+          level: resolvedLevel,
+          metadata: { ...(existing.metadata || {}), ...metadata },
+          updatedAt: now,
+          channels,
+        };
+        const saved = await saveNotification(fakeReq, refreshed);
+        const sanitized = sanitizeNotification(saved);
+        for (const uid of recipientUserIds) {
+          broadcastToUser(uid, 'notification', sanitized);
+        }
+        return sanitized;
+      }
+      if (await hasLegacyDatedAlertToday(category, dedupKey)) return null;
+      notifBase._id = buildStableAlertId(category, dedupKey);
     }
 
     const saved = await saveNotification(fakeReq, notifBase);

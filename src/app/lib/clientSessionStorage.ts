@@ -15,6 +15,35 @@ const KEEP_ON_ACCOUNT_SWITCH = new Set([
  * Limpia cachés locales de Vertial al cerrar sesión o antes de iniciar con otra cuenta.
  * Evita mezclar empresa/PDV/datos de un usuario con la cookie de otro en el mismo PC.
  */
+/** Libera espacio si localStorage está lleno (p. ej. cachés de notificaciones). */
+export function pruneVertialStorageIfNeeded(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const lsRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (
+        key.startsWith('vertial-notifications:')
+        || key.startsWith('vertial_businesses_cache:')
+        || key.startsWith('vertial_delivery_stores_cache:')
+      ) {
+        lsRemove.push(key);
+      }
+    }
+    for (const key of lsRemove) localStorage.removeItem(key);
+
+    const ssRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith('vertial_delivery_stores_cache:')) ssRemove.push(key);
+    }
+    for (const key of ssRemove) sessionStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export function clearVertialClientCaches(extraKeepKeys: string[] = []): void {
   if (typeof window === 'undefined') return;
 

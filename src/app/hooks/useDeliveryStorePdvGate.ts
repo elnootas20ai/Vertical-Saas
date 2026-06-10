@@ -31,6 +31,9 @@ export function useDeliveryStorePdvGate() {
     if (!isDelivery) return true;
     if (!businessesFetchSettled || !businessId) return false;
 
+    const activePdvs = activeStore.pointsOfSale.filter((p) => p.active !== false);
+    if (activePdvs.length > 0) return true;
+
     const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
     if (retailActive.length === 0) return false;
 
@@ -43,6 +46,7 @@ export function useDeliveryStorePdvGate() {
     isDelivery,
     businessesFetchSettled,
     businessId,
+    activeStore.pointsOfSale,
     activeStore.retailWorkCenters,
     activeStore.allPointsOfSale,
   ]);

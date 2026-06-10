@@ -11,6 +11,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
@@ -818,9 +819,11 @@ function ArticleDetailDrawer({ item, onClose, onStockAdjust, onUpdate, suppliers
 
 export function ArticlesPage() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businessesFetchSettled } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+  const stockScopeReady = businessesFetchSettled && Boolean(businessId) && Boolean(dataUserId);
   const navigate = useNavigate();
   const { config: vc, businessType } = useVerticalCatalog();
   const articleLabels = getArticleLabel(businessType);
@@ -846,28 +849,46 @@ export function ArticlesPage() {
 
   const loadData = useCallback(async () => {
     if (!dataUserId) return;
-    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
-    try {
-      const [items, sps, sups, invs, brandList] = await Promise.all([
-        listCatalogItemsRequest(dataUserId, 'stock'),
-        listSalesPoints(dataUserId),
-        listSuppliersRequest(dataUserId).catch(() => [] as Supplier[]),
-        listPurchaseInvoicesRequest(dataUserId).catch(() => [] as PurchaseInvoice[]),
-        businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
-      ]);
-      setCatalogItems(items);
-      setSalesPoints(sps);
-      setSuppliers(sups);
-      setInvoices(invs);
-      setBrands(brandList);
-    } catch {
-      toast.error('Error al cargar stock');
-    } finally {
-      setLoading(false);
-    }
-  }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
+    const [items, sps, sups, invs, brandList] = await Promise.all([
+      listCatalogItemsRequest(dataUserId, 'stock'),
+      listSalesPoints(dataUserId),
+      listSuppliersRequest(dataUserId).catch(() => [] as Supplier[]),
+      listPurchaseInvoicesRequest(dataUserId).catch(() => [] as PurchaseInvoice[]),
+      businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
+    ]);
+    setCatalogItems(items);
+    setSalesPoints(sps);
+    setSuppliers(sups);
+    setInvoices(invs);
+    setBrands(brandList);
+  }, [dataUserId, businessId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (!stockScopeReady) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      setLoading(false);
+      toast.error('La carga del stock está tardando mucho. Comprueba la conexión y recarga la página.');
+    }, 30_000);
+    void loadData()
+      .catch(() => {
+        toast.error('Error al cargar stock');
+      })
+      .finally(() => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [stockScopeReady, businessesFetchSettled, dataUserId, businessId, loadData]);
 
   const activeWorkCenterId = useMemo(() => {
     const pdv = activeStoreScope.pointsOfSale.find(

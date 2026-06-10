@@ -51,8 +51,8 @@ export function AlertCenterSettingsSlide({ isOpen, onClose, businessId, onSaved 
   );
 }
 
-/** Botón secundario Vertial (borde gris) */
-export function VertialSecondaryButton({
+/** Botón secundario (borde gris) */
+export function AlertSecondaryButton({
   children,
   onClick,
   active,
@@ -78,7 +78,7 @@ export function VertialSecondaryButton({
   );
 }
 
-export function VertialPrimaryButton({
+export function AlertPrimaryButton({
   children,
   onClick,
   disabled,

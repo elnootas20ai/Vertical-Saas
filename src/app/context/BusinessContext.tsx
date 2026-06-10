@@ -46,16 +46,29 @@ function storeBusinessId(userId: string, businessId: string | null) {
   }
 }
 
-function businessesCacheKey(userId: string) {
+function businessesSessionCacheKey(userId: string) {
   return `vertial_businesses_cache:${userId}`;
+}
+
+function businessesLocalCacheKey(userId: string) {
+  return `vertial_businesses_cache_ls:${userId}`;
+}
+
+function parseBusinessesCache(raw: string | null): Business[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as Business[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function readBusinessesCache(userId: string): Business[] {
   try {
-    const raw = sessionStorage.getItem(businessesCacheKey(userId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as Business[]) : [];
+    const fromSession = parseBusinessesCache(sessionStorage.getItem(businessesSessionCacheKey(userId)));
+    if (fromSession.length > 0) return fromSession;
+    return parseBusinessesCache(localStorage.getItem(businessesLocalCacheKey(userId)));
   } catch {
     return [];
   }
@@ -64,13 +77,28 @@ function readBusinessesCache(userId: string): Business[] {
 function writeBusinessesCache(userId: string, list: Business[]) {
   try {
     if (list.length > 0) {
-      sessionStorage.setItem(businessesCacheKey(userId), JSON.stringify(list));
-    } else {
-      sessionStorage.removeItem(businessesCacheKey(userId));
+      const serialized = JSON.stringify(list);
+      sessionStorage.setItem(businessesSessionCacheKey(userId), serialized);
+      localStorage.setItem(businessesLocalCacheKey(userId), serialized);
     }
+    // No borrar caché ante [] de la API: evita pantalla vacía por fallos puntuales en dev/recarga.
   } catch {
     // ignore
   }
+}
+
+function clearBusinessesCache(userId: string) {
+  try {
+    sessionStorage.removeItem(businessesSessionCacheKey(userId));
+    localStorage.removeItem(businessesLocalCacheKey(userId));
+  } catch {
+    // ignore
+  }
+}
+
+/** Solo la caché de lista confirma empresas previas (el id guardado puede quedar obsoleto). */
+function userLikelyHasBusinesses(userId: string): boolean {
+  return readBusinessesCache(userId).length > 0;
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -82,6 +110,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [businessesFetchSettled, setBusinessesFetchSettled] = useState(false);
+  const [businessesLoadError, setBusinessesLoadError] = useState<string | null>(null);
   const businessesLoadSeqRef = useRef(0);
 
   const resolveCurrentBusiness = useCallback(
@@ -122,6 +151,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         setBusinessesFetchSettled(true);
         setBusinesses([]);
         setCurrentBusiness(null);
+        setBusinessesLoadError(null);
       }
       return;
     }
@@ -132,31 +162,69 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     if (cachedBeforeFetch.length === 0) {
       setIsLoading(true);
     }
+    setBusinessesLoadError(null);
 
     const fetchWithRetry = async (): Promise<Business[]> => {
       try {
         const response = await listBusinessesRequest(userId);
         return response.businesses || [];
-      } catch {
+      } catch (firstError) {
         await new Promise((r) => setTimeout(r, 450));
-        const response = await listBusinessesRequest(userId);
-        return response.businesses || [];
+        try {
+          const response = await listBusinessesRequest(userId);
+          return response.businesses || [];
+        } catch (secondError) {
+          const message =
+            secondError instanceof Error
+              ? secondError.message
+              : firstError instanceof Error
+                ? firstError.message
+                : 'No se pudieron cargar las empresas';
+          throw new Error(message);
+        }
       }
     };
 
     try {
       const list = await fetchWithRetry();
       if (loadSeq !== businessesLoadSeqRef.current) return;
+
+      if (list.length === 0 && userLikelyHasBusinesses(userId)) {
+        const cached = readBusinessesCache(userId);
+        if (cached.length > 0) {
+          setBusinesses(cached);
+          resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
+        }
+        setBusinessesLoadError(
+          'El servidor devolvió 0 empresas, pero esta cuenta ya tenía negocios en este navegador. No se ha borrado nada: reintenta la carga.',
+        );
+        return;
+      }
+
       setBusinesses(list);
       resolveCurrentBusiness(list, userId, user?.linkedBusinessId);
-      writeBusinessesCache(userId, list);
+      if (list.length > 0) {
+        writeBusinessesCache(userId, list);
+        setBusinessesLoadError(null);
+      } else {
+        clearBusinessesCache(userId);
+        storeBusinessId(userId, null);
+        setBusinessesLoadError(null);
+      }
     } catch (error) {
       console.error('Error loading businesses:', error);
       if (loadSeq !== businessesLoadSeqRef.current) return;
       const cached = readBusinessesCache(userId);
+      const message =
+        error instanceof Error ? error.message : 'No se pudieron cargar las empresas';
       if (cached.length > 0) {
         setBusinesses(cached);
         resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
+        setBusinessesLoadError(
+          `${message} Se muestran los datos guardados en este navegador.`,
+        );
+      } else {
+        setBusinessesLoadError(message);
       }
     } finally {
       if (loadSeq === businessesLoadSeqRef.current) {
@@ -172,6 +240,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     setBusinesses([]);
     setCurrentBusiness(null);
     setBusinessesFetchSettled(false);
+    setBusinessesLoadError(null);
     setIsLoading(!isInitializing);
   }, [user?.user_id, isInitializing]);
 
@@ -313,7 +382,13 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
         const newList = businesses.filter((b) => b.business_id !== businessId);
         setBusinesses(newList);
-        if (user?.user_id) writeBusinessesCache(user.user_id, newList);
+        if (user?.user_id) {
+          if (newList.length > 0) {
+            writeBusinessesCache(user.user_id, newList);
+          } else {
+            clearBusinessesCache(user.user_id);
+          }
+        }
 
         if (currentBusiness?.business_id === businessId) {
           const next = newList[0] || null;
@@ -416,6 +491,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         currentBusiness,
         isLoading,
         businessesFetchSettled,
+        businessesLoadError,
         switchBusiness,
         createBusiness,
         updateBusiness,

@@ -121,6 +121,18 @@ import { workerPerformanceRouter } from './routers/workerPerformanceRouter.js';
 import { scrapyardSalesRouter } from './routers/scrapyardSalesRouter.js';
 import scrapyardAlertRouter from './routers/scrapyardAlertRouter.js';
 import { adminMoneiRouter } from './routers/adminMoneiRouter.js';
+import {
+  canEmitCatalogStockAlerts,
+  filterStockTrackedCatalogItems,
+  filterStockTrackedParts,
+  hasPartsStockSetup,
+} from './services/stockAlertUtils.js';
+import {
+  canEmitCrmAlerts,
+  canEmitFinanceAlerts,
+  canEmitHrAlerts,
+  canEmitVehicleAlerts,
+} from './services/moduleAlertUtils.js';
 import { startAlertEngine } from './services/alertEngine.js';
 import { startButcherAlertEngine } from './services/butcherAlertEngine.js';
 import { startConstructionAlertEngine } from './services/constructionAlertEngine.js';
@@ -1979,19 +1991,38 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     const totalExpenses = userFinance.filter((d) => d.type === 'pago').reduce((s, d) => s + Number(d.totalAmount || 0), 0);
     const cashBalance = totalIncomes - totalExpenses;
 
-    // Stock crítico: catalog items + parts below min
+    // Stock crítico: solo si hay infraestructura de inventario y artículos inventariables
     const userCatalog = catalogDocs.filter((d) => d.user_id === userId && d.active !== false && !d.deletedAt);
-    const criticalStockItems = userCatalog.filter((d) => d.minStock > 0 && Number(d.stockQuantity || 0) <= Number(d.minStock));
+    const catalogInfraDocs = catalogDocs.filter((d) => d.user_id === userId && !d.deletedAt && (d.type === 'warehouse' || d.type === 'stock_movement'));
+    const stockAlertsEnabled = canEmitCatalogStockAlerts(
+      userCatalog.filter((d) => d.type === 'catalog_item'),
+      catalogInfraDocs,
+    );
+    const stockTrackedCatalog = filterStockTrackedCatalogItems(userCatalog);
     const userParts = partsDocs.filter((d) => d.user_id === userId && !d.deletedAt);
-    const criticalStockParts = userParts.filter((d) => d.minStock > 0 && Number(d.stockQuantity || 0) <= Number(d.minStock));
+    const stockTrackedParts = filterStockTrackedParts(userParts);
+    const criticalStockItems = stockAlertsEnabled
+      ? stockTrackedCatalog.filter((d) => d.minStock > 0 && Number(d.stockQuantity || 0) <= Number(d.minStock))
+      : [];
+    const criticalStockParts = hasPartsStockSetup(userParts)
+      ? stockTrackedParts.filter((d) => Number(d.stockQuantity || 0) <= Number(d.minStock))
+      : [];
     const criticalStockCount = criticalStockItems.length + criticalStockParts.length;
 
     // ── Stock & Purchase KPIs ──
-    const stockProducts = userCatalog.filter((i) => i.type === 'catalog_item' && i.itemType === 'product');
+    const stockProducts = stockAlertsEnabled
+      ? stockTrackedCatalog.filter((i) => i.type === 'catalog_item' && i.itemType === 'product')
+      : [];
     const stockValue = stockProducts.reduce((s, i) => s + (Number(i.stockQuantity || 0) * Number(i.costPrice || 0)), 0);
-    const lowStockCount = stockProducts.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) > 0 && Number(i.stockQuantity) <= i.minStock).length;
-    const outOfStockCount = stockProducts.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) <= 0).length;
-    const negativeStockCount = stockProducts.filter((i) => Number(i.stockQuantity || 0) < 0).length;
+    const lowStockCount = stockAlertsEnabled
+      ? stockProducts.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) > 0 && Number(i.stockQuantity) <= i.minStock).length
+      : 0;
+    const outOfStockCount = stockAlertsEnabled
+      ? stockProducts.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) <= 0).length
+      : 0;
+    const negativeStockCount = stockAlertsEnabled
+      ? stockProducts.filter((i) => Number(i.stockQuantity || 0) < 0).length
+      : 0;
 
     const purchaseOrders = catalogDocs.filter((d) => d?.type === 'purchase_order' && d?.user_id === userId && !d?.deletedAt);
     const pendingPurchaseOrders = purchaseOrders.filter((o) => ['draft', 'pending', 'sent', 'partial'].includes(o.status)).length;
@@ -2033,27 +2064,36 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       }
     } catch { /* fallback to inline */ }
 
+    const financeReady = canEmitFinanceAlerts({ financeDocs: userFinance });
+    const hrReady = clockinDocs.some((d) => d.type === 'clockin' && !d.deletedAt);
+    const vehiclesReady = canEmitVehicleAlerts({ vehicles: userVehicles });
+    const crmReady = canEmitCrmAlerts({ leads: userLeads });
+
     if (dashAlerts.length === 0) {
-      if (cobrosCount > 0) {
+      if (financeReady && cobrosCount > 0) {
         dashAlerts.push({ id: 'unpaid', severity: 'error', type: 'unpaid', message: `${cobrosCount} pago${cobrosCount > 1 ? 's' : ''} pendiente${cobrosCount > 1 ? 's' : ''} · ${Math.round(cobrosPendientes).toLocaleString('es-ES')} €`, count: cobrosCount, route: '/saas/income-expenses' });
       }
       if (criticalStockCount > 0) {
         dashAlerts.push({ id: 'low_stock', severity: 'warning', type: 'low_stock', message: `${criticalStockCount} producto${criticalStockCount > 1 ? 's' : ''} con stock crítico`, count: criticalStockCount, route: '/saas/compras-stock?tab=stock' });
       }
-      if (totalClockinsToday === 0 && now.getHours() >= 9) {
+      if (hrReady && totalClockinsToday === 0 && now.getHours() >= 9) {
         dashAlerts.push({ id: 'no_clockins', severity: 'warning', type: 'no_clockins', message: 'Nadie ha fichado hoy', count: 0, route: '/saas/clockins' });
       }
-      if (cashBalance < 0) {
+      if (financeReady && cashBalance < 0) {
         dashAlerts.push({ id: 'negative_cash', severity: 'error', type: 'negative_cash', message: `Caja en negativo: ${Math.round(cashBalance).toLocaleString('es-ES')} €`, count: 1, route: '/saas/finance' });
       }
-      if (salesMonthTotal > 0 && estimatedProfit / salesMonthTotal < 0.1) {
+      if (financeReady && salesMonthTotal > 0 && estimatedProfit / salesMonthTotal < 0.1) {
         dashAlerts.push({ id: 'low_margin', severity: 'warning', type: 'low_margin', message: `Margen bajo este mes: ${Math.round((estimatedProfit / salesMonthTotal) * 100)}%`, count: 1, route: '/saas/ebitda' });
       }
-      const agingVehicles = userVehicles.filter((v) => v.status === 'available' && v.daysInStock > 90).length;
+      const agingVehicles = vehiclesReady
+        ? userVehicles.filter((v) => v.status === 'available' && v.daysInStock > 90).length
+        : 0;
       if (agingVehicles > 0) {
         dashAlerts.push({ id: 'aging_stock', severity: 'warning', type: 'aging_stock', message: `${agingVehicles} vehículo${agingVehicles > 1 ? 's' : ''} con más de 90 días en stock`, count: agingVehicles, route: '/saas/vehicles' });
       }
-      const staleLeads = userLeads.filter((l) => { if (l.status === 'won' || l.status === 'lost') return false; if (!l.lastContact) return true; return (now.getTime() - new Date(l.lastContact).getTime()) / (1000 * 60 * 60) > 48; }).length;
+      const staleLeads = crmReady
+        ? userLeads.filter((l) => { if (l.status === 'won' || l.status === 'lost') return false; if (!l.lastContact) return true; return (now.getTime() - new Date(l.lastContact).getTime()) / (1000 * 60 * 60) > 48; }).length
+        : 0;
       if (staleLeads > 0) {
         dashAlerts.push({ id: 'stale_leads', severity: 'info', type: 'stale_leads', message: `${staleLeads} oportunidad${staleLeads > 1 ? 'es' : ''} sin contacto en +48h`, count: staleLeads, route: '/saas/clients' });
       }
@@ -2928,7 +2968,7 @@ setTimeout(() => {
 // Reemplaza el antiguo runStockAlerts individual. Fase 1.
 startAlertEngine();
 
-// ALDV-02: Motor alertas delivery — ciclo rápido 60s independiente
+// ALDV-02: Motor alertas delivery — eventos + barrido seguridad 15 min (umbrales CEO)
 startDeliveryAlertEngine();
 
 // ALLP-03: Motor alertas limpieza — ciclo rápido 120s independiente

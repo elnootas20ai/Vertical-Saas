@@ -172,15 +172,22 @@ export interface DeliveryStoresState {
   pointsOfSale: PointOfSale[];
 }
 
+/** Quita prefijo Couch `business:` para comparar IDs de forma consistente. */
+export function normalizeBusinessScopeId(value: string | null | undefined): string {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
 /** Id estable de la empresa activa (selector superior). */
 export function resolveBusinessScopeId(business?: Business | null): string {
-  return String(business?.business_id || (business as { id?: string } | null)?.id || '').trim();
+  return normalizeBusinessScopeId(
+    business?.business_id || (business as { id?: string } | null)?.id,
+  );
 }
 
 /** Lee `businessId` del documento (también alias legacy `business_id`). */
 export function readWorkCenterBusinessId(wc: WorkCenter | Record<string, unknown>): string {
   const raw = wc as Record<string, unknown>;
-  return String(raw.businessId || raw.business_id || '').trim();
+  return normalizeBusinessScopeId(String(raw.businessId || raw.business_id || ''));
 }
 
 /**
@@ -192,7 +199,7 @@ export function filterWorkCentersForBusinessScope(
   businessId: string,
   options?: { accountBusinessCount?: number },
 ): WorkCenter[] {
-  const bid = String(businessId || '').trim();
+  const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
 
   const active = workCenters.filter((wc) => !wc.deletedAt);
@@ -260,7 +267,7 @@ export function workCentersStrictlyForBusiness(
   workCenters: WorkCenter[],
   businessId: string,
 ): WorkCenter[] {
-  const bid = String(businessId || '').trim();
+  const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return [];
   return workCenters.filter((wc) => readWorkCenterBusinessId(wc) === bid);
 }
@@ -287,6 +294,38 @@ export type LoadDeliveryStoresOptions = {
   priorityWorkCenterId?: string;
 };
 
+/**
+ * Corrige tiendas retail con `businessId` antiguo pero PDV activo y mismo nombre que la empresa.
+ * Evita que modomio (u otra) quede sin tienda tras recrear la empresa con otro UUID.
+ */
+export function alignRetailWorkCentersToActiveBusiness(
+  workCenters: WorkCenter[],
+  business: Business | null | undefined,
+  pointsOfSale: PointOfSale[],
+): WorkCenter[] {
+  const bid = resolveBusinessScopeId(business);
+  const bizName = String(business?.name || '').trim().toLowerCase();
+  if (!bid || !bizName) return workCenters;
+
+  const linkedWcIds = new Set(
+    pointsOfSale
+      .filter((p) => p.active !== false && p.workCenterId)
+      .map((p) => String(p.workCenterId).trim())
+      .filter(Boolean),
+  );
+
+  return workCenters.map((wc) => {
+    const isRetail =
+      wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
+    if (!isRetail || wc.deletedAt) return wc;
+    if (readWorkCenterBusinessId(wc) === bid) return wc;
+    if (!linkedWcIds.has(String(wc._id || '').trim())) return wc;
+    const wcName = String(wc.name || '').trim().toLowerCase();
+    if (wcName !== bizName) return wc;
+    return { ...wc, businessId: bid, business_id: bid };
+  });
+}
+
 /** Fuente única: centros de trabajo + PDV de caja enlazados y deduplicados. */
 export async function loadDeliveryStores(
   authUser: AuthLike,
@@ -305,7 +344,13 @@ export async function loadDeliveryStores(
     listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]),
   ]);
 
-  let workCenters = filterWorkCentersForBusinessScope(allWorkCenters, businessId, {
+  const scopedWorkCenters = alignRetailWorkCentersToActiveBusiness(
+    allWorkCenters,
+    business ?? null,
+    dedupePointsOfSale(rawPdvs),
+  );
+
+  let workCenters = filterWorkCentersForBusinessScope(scopedWorkCenters, businessId, {
     accountBusinessCount: options?.accountBusinessCount,
   });
   workCenters = dedupeRetailWorkCentersForBusiness(workCenters);

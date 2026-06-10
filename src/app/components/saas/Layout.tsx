@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { SubscriptionBanner } from './SubscriptionBanner';
+import { BusinessesSyncBanner } from './BusinessesSyncBanner';
 import { PendingInvitationsBanner } from './PendingInvitationsBanner';
 import { WorkerProfileCompletionBanner } from './WorkerProfileCompletionBanner';
 import { BottomNav } from './BottomNav';
@@ -260,6 +261,7 @@ function LayoutInner({
       {/* Main content */}
       <div className={`transition-all duration-300 ${desktopMargin}`}>
         <SubscriptionBanner />
+        <BusinessesSyncBanner />
         <UnverifiedEmailBanner user={user} />
         <PendingInvitationsBanner />
         <Topbar

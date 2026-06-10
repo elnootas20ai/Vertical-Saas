@@ -13,6 +13,11 @@ import {
   syncCashRegisterAlertsToAccount,
 } from '../services/cashRegisterAlertConfig.js';
 import {
+  DEFAULT_DELIVERY_OPERATIONAL,
+  sanitizeDeliveryOperational,
+  syncDeliveryAlertsToAccount,
+} from '../services/deliveryOperationalAlertConfig.js';
+import {
   ALL_ALERT_RULE_DEFINITIONS,
   mergeAlertRules,
 } from '../services/alertRulesCatalog.js';
@@ -525,6 +530,9 @@ export async function getAlertsConfig(req, res) {
       cashRegister: sanitizeCashRegisterOperational(
         doc?.operational?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
       ),
+      delivery: sanitizeDeliveryOperational(
+        doc?.operational?.delivery || DEFAULT_DELIVERY_OPERATIONAL,
+      ),
     };
     return res.json({
       ok: true,
@@ -582,6 +590,9 @@ export async function saveAlertsConfig(req, res) {
       cashRegister: sanitizeCashRegisterOperational(
         op?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
       ),
+      delivery: sanitizeDeliveryOperational(
+        op?.delivery || DEFAULT_DELIVERY_OPERATIONAL,
+      ),
     };
 
     await saveSettingsDoc(req, 'alerts', businessId, {
@@ -594,6 +605,7 @@ export async function saveAlertsConfig(req, res) {
       const business = await findBusinessById(req, businessId);
       if (business?.owner_user_id) {
         await syncCashRegisterAlertsToAccount(req, business.owner_user_id, sanitizedOperational.cashRegister);
+        await syncDeliveryAlertsToAccount(req, business.owner_user_id, sanitizedOperational.delivery);
       }
     } catch { /* sync best-effort */ }
 

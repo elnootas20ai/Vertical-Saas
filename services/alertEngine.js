@@ -9,6 +9,28 @@
  */
 
 import {
+  canEmitCatalogStockAlerts,
+  filterStockTrackedCatalogItems,
+  filterStockTrackedParts,
+  hasPartsStockSetup,
+} from './stockAlertUtils.js';
+import { canEmitPdvCashAlerts } from './pdvAlertUtils.js';
+import {
+  canEmitCleaningAlerts,
+  canEmitConstructionAlerts,
+  canEmitCompraventaAlerts,
+  canEmitDeliveryAlerts,
+  canEmitDocumentsAlerts,
+  canEmitFinanceAlerts,
+  canEmitFleetAlerts,
+  canEmitHrAlerts,
+  canEmitPurchaseAlerts,
+  canEmitScrapyardAlerts,
+  canEmitVehicleAlerts,
+  canEmitWebOrderAlerts,
+  canEmitWorkshopAlerts,
+} from './moduleAlertUtils.js';
+import {
   ACCOUNTS_DB,
   BUSINESSES_DB,
   VEHICLES_DB,
@@ -264,12 +286,12 @@ function getAlertConfig(account) {
 
 // ─── STOCK RULES ─────────────────────────────────────────────────────────────
 
-async function checkLowStock(ctx, items, config) {
-  if (!config.lowStockEnabled) return [];
+async function checkLowStock(ctx, items, config, catalogInfraDocs = []) {
+  if (!config.lowStockEnabled || !canEmitCatalogStockAlerts(items, catalogInfraDocs)) return [];
   const alerts = [];
 
-  for (const item of items) {
-    if (!item.active || !item.minStock || item.minStock <= 0) continue;
+  for (const item of filterStockTrackedCatalogItems(items)) {
+    if (!item.minStock || item.minStock <= 0) continue;
     const qty = Number(item.stockQuantity || 0);
     const min = Number(item.minStock);
 
@@ -311,11 +333,10 @@ async function checkLowStock(ctx, items, config) {
 }
 
 async function checkPartsLowStock(ctx, parts, config) {
-  if (!config.partsLowStockEnabled) return [];
+  if (!config.partsLowStockEnabled || !hasPartsStockSetup(parts)) return [];
   const alerts = [];
 
-  for (const part of parts) {
-    if (!part.minStock || part.minStock <= 0) continue;
+  for (const part of filterStockTrackedParts(parts)) {
     const qty = Number(part.stockQuantity || 0);
     const min = Number(part.minStock);
 
@@ -333,12 +354,11 @@ async function checkPartsLowStock(ctx, parts, config) {
   return alerts.filter(Boolean);
 }
 
-async function checkNegativeStock(ctx, items, config) {
-  if (!config.negativeStockEnabled) return [];
+async function checkNegativeStock(ctx, items, config, catalogInfraDocs = []) {
+  if (!config.negativeStockEnabled || !canEmitCatalogStockAlerts(items, catalogInfraDocs)) return [];
   const alerts = [];
 
-  for (const item of items) {
-    if (!item.active) continue;
+  for (const item of filterStockTrackedCatalogItems(items)) {
     const qty = Number(item.stockQuantity || 0);
     if (qty < 0) {
       alerts.push(await emit({
@@ -1396,7 +1416,10 @@ async function checkWeeklyPurchaseMissing(userId, purchaseOrders, catalogItems, 
 
   if (recentOrders.length > 0) return [];
 
-  const lowStockCount = catalogItems.filter((i) => i.active && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
+  if (!canEmitCatalogStockAlerts(catalogItems)) return [];
+
+  const lowStockCount = filterStockTrackedCatalogItems(catalogItems)
+    .filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).length;
   if (lowStockCount === 0) return [];
 
   const alert = await emitAlert({
@@ -1481,7 +1504,7 @@ async function checkPendingReception(userId, purchaseOrders, config) {
 // ── 13. Producto clave sin pedir ─────────────────────────────────────────────
 
 async function checkCriticalProductNotOrdered(userId, catalogItems, purchaseOrders, config) {
-  if (!config.criticalProductAlertEnabled) return [];
+  if (!config.criticalProductAlertEnabled || !canEmitCatalogStockAlerts(catalogItems)) return [];
   const alerts = [];
 
   const activeOrderItemIds = new Set();
@@ -1492,8 +1515,8 @@ async function checkCriticalProductNotOrdered(userId, catalogItems, purchaseOrde
     }
   }
 
-  const criticalLow = catalogItems.filter((i) =>
-    i.active && i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock && !activeOrderItemIds.has(i._id),
+  const criticalLow = filterStockTrackedCatalogItems(catalogItems).filter((i) =>
+    i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock && !activeOrderItemIds.has(i._id),
   );
 
   for (const item of criticalLow) {
@@ -1548,8 +1571,9 @@ async function runAlertsForBusiness(business) {
 
   const members = Array.isArray(business.members) ? business.members : [];
 
-  const [catalogItems, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, clockinDocs, financeDocs, fleetDocs, prepExpenses] = await Promise.all([
+  const [catalogItems, catalogInfraDocs, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, clockinDocs, financeDocs, fleetDocs, prepExpenses, pointsOfSale] = await Promise.all([
     fetchAllDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === ownerId)),
+    fetchAllDocs(getCatalogDbName()).then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt && (i.type === 'warehouse' || i.type === 'stock_movement'))),
     fetchAllDocsOfType(getCatalogDbName(), 'purchase_invoice').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(getPartsDbName(), 'part').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocs(VEHICLES_DB).then((d) => d.filter((i) => i.type === 'car' && i.user_id === ownerId)),
@@ -1561,71 +1585,91 @@ async function runAlertsForBusiness(business) {
     fetchAllDocs(getFinanceDbName()).then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []),
     fetchAllDocs(FLEET_DB).then((d) => d.filter((i) => i.type === 'fleet_vehicle' && i.user_id === ownerId)).catch(() => []),
     fetchAllDocs(VEHICLES_DB).then((d) => d.filter((i) => i.type === 'preparation_expense' && i.active !== false && !i.deletedAt && i.user_id === ownerId)).catch(() => []),
+    fetchAllDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
   ]);
 
+  const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders, pointsOfSale, deliveryConfig: account?.deliveryConfig });
+  const financeReady = canEmitFinanceAlerts({ financeDocs, purchaseInvoices });
+  const purchaseReady = canEmitPurchaseAlerts({ purchaseOrders, purchaseInvoices });
+  const webReady = canEmitWebOrderAlerts({ webOrders });
+  const workshopReady = canEmitWorkshopAlerts({ workOrders, parts });
+  const vehiclesReady = canEmitVehicleAlerts({ vehicles });
+  const hrReady = canEmitHrAlerts({ members, clockinDocs });
+  const fleetReady = canEmitFleetAlerts({ fleetDocs });
+
   // Stock
-  results.push(...await checkLowStock(ctx, catalogItems, config));
+  results.push(...await checkLowStock(ctx, catalogItems, config, catalogInfraDocs));
   results.push(...await checkPartsLowStock(ctx, parts, config));
-  results.push(...await checkNegativeStock(ctx, catalogItems, config));
+  results.push(...await checkNegativeStock(ctx, catalogItems, config, catalogInfraDocs));
 
   // Finanzas
-  results.push(...await checkOverdueInvoices(ctx, purchaseInvoices, config));
-  results.push(...await checkHighPayables(ctx, purchaseInvoices, config));
-  results.push(...await checkClientPaymentOverdue(ctx, financeDocs, config));
-  results.push(...await checkNegativeCashFlow(ctx, financeDocs, config));
-  results.push(...await checkTaxDeadline(ctx, financeDocs, config));
-  results.push(...await checkExpenseWithoutDocument(ctx, financeDocs, config));
+  if (financeReady) {
+    results.push(...await checkOverdueInvoices(ctx, purchaseInvoices, config));
+    results.push(...await checkHighPayables(ctx, purchaseInvoices, config));
+    results.push(...await checkClientPaymentOverdue(ctx, financeDocs, config));
+    results.push(...await checkNegativeCashFlow(ctx, financeDocs, config));
+    results.push(...await checkTaxDeadline(ctx, financeDocs, config));
+    results.push(...await checkExpenseWithoutDocument(ctx, financeDocs, config));
+  }
 
   // Ventas / Operaciones
-  results.push(...await checkStaleWebOrders(ctx, webOrders, config));
-  results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
-  results.push(...await checkDeliveryUnattended(ctx, deliveryOrders, config));
-  results.push(...await checkDeliveryUnpaid(ctx, deliveryOrders, config));
-  results.push(...await checkDeliveryNoAddress(ctx, deliveryOrders, config));
-  results.push(...await checkDeliveryChannelIncident(ctx, deliveryOrders, config));
-  results.push(...await checkVehicleStockAging(ctx, vehicles, config));
-  results.push(...await checkVehicleLowMargin(ctx, vehicles, config));
-  results.push(...await checkVehicleNoPhotos(ctx, vehicles, config));
-  results.push(...await checkVehicleIncompleteData(ctx, vehicles, config));
-  results.push(...await checkVehiclesMissingDocs(ctx, vehicles, config));
-  results.push(...await checkVehiclesMissingPrice(ctx, vehicles, config));
-  results.push(...await checkDuplicatePlates(ctx, vehicles));
-  results.push(...await checkDuplicateVins(ctx, vehicles));
-  results.push(...await checkStaleWorkOrders(ctx, workOrders, config));
-  results.push(...await checkLowSalesVelocity(ctx, vehicles, config));
-  results.push(...await checkLowAvgMargin(ctx, vehicles, config));
-  results.push(...await checkExcessPreparationCost(ctx, vehicles, config));
-  results.push(...await checkPendingPurchaseOrders(ctx, purchaseOrders, config));
+  if (webReady) results.push(...await checkStaleWebOrders(ctx, webOrders, config));
+  if (deliveryReady) {
+    results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
+    results.push(...await checkDeliveryUnattended(ctx, deliveryOrders, config));
+    results.push(...await checkDeliveryUnpaid(ctx, deliveryOrders, config));
+    results.push(...await checkDeliveryNoAddress(ctx, deliveryOrders, config));
+    results.push(...await checkDeliveryChannelIncident(ctx, deliveryOrders, config));
+  }
+  if (vehiclesReady && business.businessType !== 'carDealership') {
+    results.push(...await checkVehicleStockAging(ctx, vehicles, config));
+    results.push(...await checkVehicleLowMargin(ctx, vehicles, config));
+    results.push(...await checkVehicleNoPhotos(ctx, vehicles, config));
+    results.push(...await checkVehicleIncompleteData(ctx, vehicles, config));
+    results.push(...await checkVehiclesMissingDocs(ctx, vehicles, config));
+    results.push(...await checkVehiclesMissingPrice(ctx, vehicles, config));
+    results.push(...await checkDuplicatePlates(ctx, vehicles));
+    results.push(...await checkDuplicateVins(ctx, vehicles));
+    results.push(...await checkLowSalesVelocity(ctx, vehicles, config));
+    results.push(...await checkLowAvgMargin(ctx, vehicles, config));
+    results.push(...await checkExcessPreparationCost(ctx, vehicles, config));
+  }
+  if (workshopReady) results.push(...await checkStaleWorkOrders(ctx, workOrders, config));
+  if (purchaseReady) results.push(...await checkPendingPurchaseOrders(ctx, purchaseOrders, config));
 
   // Gastos de preparación
-  results.push(...await checkExpensesWithoutDocument(ctx.userId, prepExpenses, config));
-  results.push(...await checkPendingExpenses(ctx.userId, prepExpenses, config));
-  results.push(...await checkVehicleHighPreparationCost(ctx.userId, vehicles, prepExpenses, config));
-  results.push(...await checkDuplicateExpenseInvoices(ctx.userId, prepExpenses, config));
+  if (vehiclesReady && prepExpenses.length > 0) {
+    results.push(...await checkExpensesWithoutDocument(ctx.userId, prepExpenses, config));
+    results.push(...await checkPendingExpenses(ctx.userId, prepExpenses, config));
+    results.push(...await checkVehicleHighPreparationCost(ctx.userId, vehicles, prepExpenses, config));
+    results.push(...await checkDuplicateExpenseInvoices(ctx.userId, prepExpenses, config));
+  }
 
   // Equipo
-  results.push(...await checkWorkerNoClockIn(ctx, members, clockinDocs, config));
-  results.push(...await checkContractExpiring(ctx, members, config));
+  if (hrReady) {
+    results.push(...await checkWorkerNoClockIn(ctx, members, clockinDocs, config));
+    results.push(...await checkContractExpiring(ctx, members, config));
+  }
 
   // Sala
   results.push(...await runSalaAlerts(ctx, ownerId, config));
 
   // Documentación
-  results.push(...await checkFleetDocumentExpiry(ctx, fleetDocs, config));
+  if (fleetReady) results.push(...await checkFleetDocumentExpiry(ctx, fleetDocs, config));
 
   // Documentación compraventa
   const userDocs = await fetchAllDocsOfType(getDocumentsDbName(), 'document').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []);
-  results.push(...await checkDocumentExpiry(ctx, userDocs, config));
-  results.push(...await checkMissingVehicleDocs(ctx, userDocs, config));
-  results.push(...await checkItvExpiry(ctx, userDocs, config));
-  results.push(...await checkPendingContracts(ctx, userDocs, config));
-  results.push(...await checkIncompleteOcr(ctx, userDocs, config));
-
-  // Firma digital
   const sigReqs = await fetchAllDocsOfType(getDocumentsDbName(), 'signature_request').then((d) => d.filter((i) => i.user_id === ownerId)).catch(() => []);
-  results.push(...await checkPendingSignatures(ctx, sigReqs, config));
-  results.push(...await checkRejectedSignatures(ctx, sigReqs, config));
-  results.push(...await checkExpiringSignatures(ctx, sigReqs, config));
+  if (canEmitDocumentsAlerts({ documents: userDocs, signatureRequests: sigReqs })) {
+    results.push(...await checkDocumentExpiry(ctx, userDocs, config));
+    results.push(...await checkMissingVehicleDocs(ctx, userDocs, config));
+    results.push(...await checkItvExpiry(ctx, userDocs, config));
+    results.push(...await checkPendingContracts(ctx, userDocs, config));
+    results.push(...await checkIncompleteOcr(ctx, userDocs, config));
+    results.push(...await checkPendingSignatures(ctx, sigReqs, config));
+    results.push(...await checkRejectedSignatures(ctx, sigReqs, config));
+    results.push(...await checkExpiringSignatures(ctx, sigReqs, config));
+  }
 
   // Scrapyard (desguaces)
   if (business.businessType === 'scrapyard') {
@@ -1639,13 +1683,15 @@ async function runAlertsForBusiness(business) {
         fetchAllDocsOfType(getScrapyardDbName(), 'scrapyard_worker').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt && i.status === 'active')).catch(() => []),
         fetchAllDocsOfType(getScrapyardDbName(), 'scrapyard_task').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []),
       ]);
-      results.push(...await runScrapyardAlerts(ctx, scrapConfig, vehicles, scrapParts, scrapSessions, scrapSales, scrapDocs));
-      results.push(...await checkPartsWithoutPrice(ctx, scrapParts, config));
-      results.push(...await checkPartsWithoutLocation(ctx, scrapParts, config));
-      results.push(...await checkDuplicatePartReferences(ctx, scrapParts, config));
-      results.push(...await checkPartsWithoutPhotos(ctx, scrapParts, config));
-      results.push(...await checkIncompleteDismantling(ctx, scrapSessions, config));
-      results.push(...await checkScrapyardWorkerAlerts(ctx, scrapWorkers, scrapTasks, clockinDocs));
+      if (canEmitScrapyardAlerts({ parts: scrapParts, sessions: scrapSessions, sales: scrapSales, vehicles })) {
+        results.push(...await runScrapyardAlerts(ctx, scrapConfig, vehicles, scrapParts, scrapSessions, scrapSales, scrapDocs));
+        results.push(...await checkPartsWithoutPrice(ctx, scrapParts, config));
+        results.push(...await checkPartsWithoutLocation(ctx, scrapParts, config));
+        results.push(...await checkDuplicatePartReferences(ctx, scrapParts, config));
+        results.push(...await checkPartsWithoutPhotos(ctx, scrapParts, config));
+        results.push(...await checkIncompleteDismantling(ctx, scrapSessions, config));
+        results.push(...await checkScrapyardWorkerAlerts(ctx, scrapWorkers, scrapTasks, clockinDocs));
+      }
     } catch (err) {
       logger.warn({ tag: 'ALERT_ENGINE', err: err?.message, businessId }, 'Error ejecutando alertas desguace');
     }
@@ -1660,7 +1706,9 @@ async function runAlertsForBusiness(business) {
         fetchAllDocsOfType(getLeadsDbName(), 'lead').then((d) => d.filter((i) => i.user_id === ownerId || i.responsible === ownerId)).catch(() => []),
         fetchAllDocsOfType(getDocumentsDbName(), 'document').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []),
       ]);
-      results.push(...await runCompraventaAlerts(ctx, cvConfig, vehicles, cvSales, cvLeads, cvDocuments));
+      if (canEmitCompraventaAlerts({ vehicles, sales: cvSales, leads: cvLeads })) {
+        results.push(...await runCompraventaAlerts(ctx, cvConfig, vehicles, cvSales, cvLeads, cvDocuments));
+      }
     } catch (err) {
       logger.warn({ tag: 'ALERT_ENGINE', err: err?.message, businessId }, 'Error ejecutando alertas compraventa');
     }
@@ -1679,9 +1727,14 @@ async function runAlertsForBusiness(business) {
     const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
     if (cashCfg.discrepancyEnabled || cashCfg.highReturnEnabled) {
       const deliveryDb = getDeliveryDbName();
-      const tpvSessions = await fetchAllDocsOfType(deliveryDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId));
-      if (cashCfg.discrepancyEnabled) results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg));
-      if (cashCfg.highReturnEnabled) results.push(...await checkHighReturnInRegister(ctx, tpvSessions, cashCfg));
+      const [tpvSessions, pointsOfSale] = await Promise.all([
+        fetchAllDocsOfType(deliveryDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId)),
+        fetchAllDocsOfType(deliveryDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
+      ]);
+      if (canEmitPdvCashAlerts(pointsOfSale)) {
+        if (cashCfg.discrepancyEnabled) results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg, pointsOfSale));
+        if (cashCfg.highReturnEnabled) results.push(...await checkHighReturnInRegister(ctx, tpvSessions, cashCfg, pointsOfSale));
+      }
     }
   } catch { /* cash register not active */ }
 
@@ -2557,7 +2610,7 @@ async function checkMaterialExpiring(ctx, catalogItems, config) {
 // ─── CASH REGISTER ALERTS ───────────────────────────────────────────────────
 
 async function checkRegisterNotOpened(ctx, tpvSessions, pointsOfSale, config) {
-  if (!config.cashRegister?.registerNotOpenedEnabled) return [];
+  if (!config.cashRegister?.registerNotOpenedEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const now = new Date();
   const hour = now.getHours();
   if (hour < config.cashRegister.registerNotOpenedCheckHour) return [];
@@ -2584,8 +2637,8 @@ async function checkRegisterNotOpened(ctx, tpvSessions, pointsOfSale, config) {
   return alerts.filter(Boolean);
 }
 
-async function checkRegisterNotClosed(ctx, tpvSessions, config) {
-  if (!config.cashRegister?.registerNotClosedEnabled) return [];
+async function checkRegisterNotClosed(ctx, tpvSessions, config, pointsOfSale = []) {
+  if (!config.cashRegister?.registerNotClosedEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const now = new Date();
   const hour = now.getHours();
   if (hour < config.cashRegister.registerNotClosedCheckHour) return [];
@@ -2609,8 +2662,8 @@ async function checkRegisterNotClosed(ctx, tpvSessions, config) {
   return alerts.filter(Boolean);
 }
 
-async function checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg) {
-  if (!cashCfg?.discrepancyEnabled) return [];
+async function checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg, pointsOfSale = []) {
+  if (!cashCfg?.discrepancyEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const threshold = cashCfg.discrepancyThreshold || 20;
   const todayStr = new Date().toISOString().slice(0, 10);
   const alerts = [];
@@ -2629,8 +2682,8 @@ async function checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg) {
   return alerts.filter(Boolean);
 }
 
-async function checkHighReturnInRegister(ctx, tpvSessions, cashCfg) {
-  if (!cashCfg?.highReturnEnabled) return [];
+async function checkHighReturnInRegister(ctx, tpvSessions, cashCfg, pointsOfSale = []) {
+  if (!cashCfg?.highReturnEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const threshold = cashCfg.highReturnThreshold || 50;
   const todayStr = new Date().toISOString().slice(0, 10);
   const alerts = [];
@@ -2957,8 +3010,9 @@ async function runAlertsForUser(userId) {
   const ctx = { businessId: '', userId };
   const results = [];
 
-  const [catalogItems, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, financeDocs, clientInvoices, prepExpenses] = await Promise.all([
+  const [catalogItems, catalogInfraDocs, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, financeDocs, clientInvoices, prepExpenses, pointsOfSale] = await Promise.all([
     fetchAllDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId)),
+    fetchAllDocs(getCatalogDbName()).then((d) => d.filter((i) => i.user_id === userId && !i.deletedAt && (i.type === 'warehouse' || i.type === 'stock_movement'))),
     fetchAllDocsOfType(getCatalogDbName(), 'purchase_invoice').then((d) => d.filter((i) => i.user_id === userId)),
     fetchAllDocsOfType(getPartsDbName(), 'part').then((d) => d.filter((i) => i.user_id === userId)),
     fetchAllDocs(VEHICLES_DB).then((d) => d.filter((i) => i.type === 'car' && i.user_id === userId)),
@@ -2969,52 +3023,70 @@ async function runAlertsForUser(userId) {
     fetchAllDocs(getFinanceDbName()).then((d) => d.filter((i) => i.user_id === userId && !i.deletedAt)).catch(() => []),
     fetchAllDocsOfType(getInvoicesDbName(), 'client_invoice').then((d) => d.filter((i) => i.user_id === userId)).catch(() => []),
     fetchAllDocs(VEHICLES_DB).then((d) => d.filter((i) => i.type === 'preparation_expense' && i.active !== false && !i.deletedAt && i.user_id === userId)).catch(() => []),
+    fetchAllDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((i) => i.user_id === userId)),
   ]);
 
-  results.push(...await checkLowStock(ctx, catalogItems, config));
+  const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders, pointsOfSale, deliveryConfig: account?.deliveryConfig });
+  const financeReady = canEmitFinanceAlerts({ financeDocs, purchaseInvoices, clientInvoices });
+  const purchaseReady = canEmitPurchaseAlerts({ purchaseOrders, purchaseInvoices });
+  const webReady = canEmitWebOrderAlerts({ webOrders });
+  const workshopReady = canEmitWorkshopAlerts({ workOrders, parts });
+  const vehiclesReady = canEmitVehicleAlerts({ vehicles });
+
+  results.push(...await checkLowStock(ctx, catalogItems, config, catalogInfraDocs));
   results.push(...await checkPartsLowStock(ctx, parts, config));
-  results.push(...await checkNegativeStock(ctx, catalogItems, config));
-  results.push(...await checkOverdueInvoices(ctx, purchaseInvoices, config));
-  results.push(...await checkHighPayables(ctx, purchaseInvoices, config));
-  results.push(...await checkClientPaymentOverdue(ctx, financeDocs, config));
-  results.push(...await checkNegativeCashFlow(ctx, financeDocs, config));
-  results.push(...await checkTaxDeadline(ctx, financeDocs, config));
-  results.push(...await checkExpenseWithoutDocument(ctx, financeDocs, config));
-  results.push(...await checkStaleWebOrders(ctx, webOrders, config));
-  results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
-  results.push(...await checkVehicleStockAging(ctx, vehicles, config));
-  results.push(...await checkStaleWorkOrders(ctx, workOrders, config));
-  results.push(...await checkLowSalesVelocity(ctx, vehicles, config));
-  results.push(...await checkLowAvgMargin(ctx, vehicles, config));
-  results.push(...await checkExcessPreparationCost(ctx, vehicles, config));
-  results.push(...await checkPendingPurchaseOrders(ctx, purchaseOrders, config));
-  results.push(...await checkWeeklyPurchaseMissing(userId, purchaseOrders, catalogItems, config));
-  results.push(...await checkSupplierNotDelivering(userId, purchaseOrders, config));
-  results.push(...await checkPendingReception(userId, purchaseOrders, config));
+  results.push(...await checkNegativeStock(ctx, catalogItems, config, catalogInfraDocs));
+  if (financeReady) {
+    results.push(...await checkOverdueInvoices(ctx, purchaseInvoices, config));
+    results.push(...await checkHighPayables(ctx, purchaseInvoices, config));
+    results.push(...await checkClientPaymentOverdue(ctx, financeDocs, config));
+    results.push(...await checkNegativeCashFlow(ctx, financeDocs, config));
+    results.push(...await checkTaxDeadline(ctx, financeDocs, config));
+    results.push(...await checkExpenseWithoutDocument(ctx, financeDocs, config));
+  }
+  if (webReady) results.push(...await checkStaleWebOrders(ctx, webOrders, config));
+  if (deliveryReady) results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
+  if (vehiclesReady) {
+    results.push(...await checkVehicleStockAging(ctx, vehicles, config));
+    results.push(...await checkLowSalesVelocity(ctx, vehicles, config));
+    results.push(...await checkLowAvgMargin(ctx, vehicles, config));
+    results.push(...await checkExcessPreparationCost(ctx, vehicles, config));
+  }
+  if (workshopReady) results.push(...await checkStaleWorkOrders(ctx, workOrders, config));
+  if (purchaseReady) {
+    results.push(...await checkPendingPurchaseOrders(ctx, purchaseOrders, config));
+    results.push(...await checkWeeklyPurchaseMissing(userId, purchaseOrders, catalogItems, config));
+    results.push(...await checkSupplierNotDelivering(userId, purchaseOrders, config));
+    results.push(...await checkPendingReception(userId, purchaseOrders, config));
+    results.push(...await checkCriticalProductNotOrdered(userId, catalogItems, purchaseOrders, config));
+    results.push(...await checkSupplierInvoiceEmailAlerts(ctx, purchaseInvoices, config));
+  }
 
   // Gastos de preparación
-  results.push(...await checkExpensesWithoutDocument(userId, prepExpenses, config));
-  results.push(...await checkPendingExpenses(userId, prepExpenses, config));
-  results.push(...await checkVehicleHighPreparationCost(userId, vehicles, prepExpenses, config));
-  results.push(...await checkDuplicateExpenseInvoices(userId, prepExpenses, config));
-  results.push(...await checkCriticalProductNotOrdered(userId, catalogItems, purchaseOrders, config));
+  if (vehiclesReady && prepExpenses.length > 0) {
+    results.push(...await checkExpensesWithoutDocument(userId, prepExpenses, config));
+    results.push(...await checkPendingExpenses(userId, prepExpenses, config));
+    results.push(...await checkVehicleHighPreparationCost(userId, vehicles, prepExpenses, config));
+    results.push(...await checkDuplicateExpenseInvoices(userId, prepExpenses, config));
+  }
 
   // Sala
   results.push(...await runSalaAlerts(ctx, userId, config));
 
-  // Facturas proveedor por email
-  results.push(...await checkSupplierInvoiceEmailAlerts(ctx, purchaseInvoices, config));
-
   // Facturacion clientes
-  results.push(...await checkOverdueClientInvoices(ctx, clientInvoices, config));
-  results.push(...await checkUnpaidClientInvoices(ctx, clientInvoices, config));
-  results.push(...await checkClientMultiplePending(ctx, clientInvoices, config));
+  if (financeReady && clientInvoices.length > 0) {
+    results.push(...await checkOverdueClientInvoices(ctx, clientInvoices, config));
+    results.push(...await checkUnpaidClientInvoices(ctx, clientInvoices, config));
+    results.push(...await checkClientMultiplePending(ctx, clientInvoices, config));
+  }
 
   // Firma digital
   const sigReqs = await fetchAllDocsOfType(getDocumentsDbName(), 'signature_request').then((d) => d.filter((i) => i.user_id === userId)).catch(() => []);
-  results.push(...await checkPendingSignatures(ctx, sigReqs, config));
-  results.push(...await checkRejectedSignatures(ctx, sigReqs, config));
-  results.push(...await checkExpiringSignatures(ctx, sigReqs, config));
+  if (sigReqs.length > 0) {
+    results.push(...await checkPendingSignatures(ctx, sigReqs, config));
+    results.push(...await checkRejectedSignatures(ctx, sigReqs, config));
+    results.push(...await checkExpiringSignatures(ctx, sigReqs, config));
+  }
 
   // Scrapyard — piezas y despiece
   try {
@@ -3023,7 +3095,7 @@ async function runAlertsForUser(userId) {
       fetchAllDocsOfType(scrapyardDb, 'scrapyard_part').then((d) => d.filter((i) => i.user_id === userId)).catch(() => []),
       fetchAllDocsOfType(scrapyardDb, 'dismantling_session').then((d) => d.filter((i) => i.user_id === userId)).catch(() => []),
     ]);
-    if (scrapParts.length || scrapSessions.length) {
+    if (canEmitScrapyardAlerts({ parts: scrapParts, sessions: scrapSessions, vehicles })) {
       results.push(...await checkPartsWithoutPrice(ctx, scrapParts, config));
       results.push(...await checkPartsWithoutLocation(ctx, scrapParts, config));
       results.push(...await checkDuplicatePartReferences(ctx, scrapParts, config));
@@ -3039,11 +3111,13 @@ async function runAlertsForUser(userId) {
       fetchAllDocsOfType(cleaningDb, 'cleaning_service').then((d) => d.filter((i) => i.user_id === userId)),
       fetchAllDocsOfType(cleaningDb, 'material_delivery').then((d) => d.filter((i) => i.user_id === userId)),
     ]);
-    results.push(...await checkMaterialNotDelivered(ctx, cleaningServices, cleaningDeliveries, config));
-    results.push(...await checkAbnormalConsumption(ctx, cleaningDeliveries, config));
-    results.push(...await checkMaterialExpiring(ctx, catalogItems, config));
-    results.push(...await checkCleaningRouteAlerts(ctx, cleaningDb, userId, config));
-    results.push(...await checkCleaningProfitabilityAlerts(ctx, cleaningDb, userId, config));
+    if (canEmitCleaningAlerts({ services: cleaningServices })) {
+      results.push(...await checkMaterialNotDelivered(ctx, cleaningServices, cleaningDeliveries, config));
+      results.push(...await checkAbnormalConsumption(ctx, cleaningDeliveries, config));
+      results.push(...await checkMaterialExpiring(ctx, catalogItems, config));
+      results.push(...await checkCleaningRouteAlerts(ctx, cleaningDb, userId, config));
+      results.push(...await checkCleaningProfitabilityAlerts(ctx, cleaningDb, userId, config));
+    }
   } catch { /* vertical not active */ }
 
   // Construcción — pagos internos + conversión presupuesto → obra
@@ -3054,7 +3128,7 @@ async function runAlertsForUser(userId) {
       fetchAllDocsOfType(constructionDb, 'construction_project').then((d) => d.filter((i) => i.user_id === userId)),
       fetchAllDocsOfType(constructionDb, 'construction_budget').then((d) => d.filter((i) => i.user_id === userId)),
     ]);
-    if (cPayments.length || cProjects.length || cBudgets.length) {
+    if (canEmitConstructionAlerts({ projects: cProjects, budgets: cBudgets })) {
       results.push(...await checkConstructionPaymentUpcoming(ctx, cPayments, config));
       results.push(...await checkConstructionPaymentOverdue(ctx, cPayments));
       results.push(...await checkConstructionPaymentNoReceipt(ctx, cPayments));
@@ -3532,10 +3606,21 @@ export async function getAlertSummary(userId) {
     fetchAllDocsOfType(getCatalogDbName(), 'purchase_order').then((d) => d.filter((i) => i.user_id === userId)),
   ]);
 
-  const outOfStockItems = catalogItems.filter((i) => i.active && i.minStock > 0 && Number(i.stockQuantity || 0) <= 0);
-  const lowStockItems = catalogItems.filter((i) => i.active && i.minStock > 0 && Number(i.stockQuantity || 0) > 0 && Number(i.stockQuantity) <= i.minStock);
-  const lowStockParts = parts.filter((p) => p.minStock > 0 && Number(p.stockQuantity || 0) <= p.minStock);
-  const negativeStockItems = catalogItems.filter((i) => i.active && Number(i.stockQuantity || 0) < 0);
+  const stockAlertsEnabled = canEmitCatalogStockAlerts(catalogItems);
+  const stockTrackedItems = filterStockTrackedCatalogItems(catalogItems);
+  const stockTrackedParts = filterStockTrackedParts(parts);
+  const outOfStockItems = stockAlertsEnabled
+    ? stockTrackedItems.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) <= 0)
+    : [];
+  const lowStockItems = stockAlertsEnabled
+    ? stockTrackedItems.filter((i) => i.minStock > 0 && Number(i.stockQuantity || 0) > 0 && Number(i.stockQuantity) <= i.minStock)
+    : [];
+  const lowStockParts = hasPartsStockSetup(parts)
+    ? stockTrackedParts.filter((p) => Number(p.stockQuantity || 0) <= p.minStock)
+    : [];
+  const negativeStockItems = stockAlertsEnabled
+    ? stockTrackedItems.filter((i) => Number(i.stockQuantity || 0) < 0)
+    : [];
   const overdueInvoices = purchaseInvoices.filter((inv) => inv.status !== 'paid' && inv.dueDate && new Date(inv.dueDate) < now);
   const pendingPayables = purchaseInvoices.filter((inv) => inv.status !== 'paid').reduce((s, i) => s + Number(i.total || 0), 0);
   const staleWebOrders = webOrders.filter((o) => ['pending', 'processing'].includes(o.status) && daysBetween(o.createdAt, now) >= config.staleWebOrderDays);
@@ -3601,7 +3686,9 @@ export async function getAlertSummary(userId) {
       })(),
       overdueDeliveries: purchaseOrders.filter((o) => o.status === 'sent' && o.expectedDate && new Date(o.expectedDate) < now).map((o) => ({ id: o._id, number: o.orderNumber, supplier: o.supplierName, daysLate: Math.floor((now.getTime() - new Date(o.expectedDate).getTime()) / 86_400_000) })),
       pendingReception: purchaseOrders.filter((o) => ['sent', 'partial'].includes(o.status)).length,
-      criticalNotOrdered: catalogItems.filter((i) => i.active && i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).filter((i) => !purchaseOrders.some((o) => ['draft', 'pending', 'sent'].includes(o.status) && (o.items || []).some((it) => it.catalogItemId === i._id))).map((i) => ({ id: i._id, name: i.name, stock: Number(i.stockQuantity || 0), min: i.minStock })),
+      criticalNotOrdered: stockAlertsEnabled
+        ? filterStockTrackedCatalogItems(catalogItems).filter((i) => i.isCritical && i.minStock > 0 && Number(i.stockQuantity || 0) < i.minStock).filter((i) => !purchaseOrders.some((o) => ['draft', 'pending', 'sent'].includes(o.status) && (o.items || []).some((it) => it.catalogItemId === i._id))).map((i) => ({ id: i._id, name: i.name, stock: Number(i.stockQuantity || 0), min: i.minStock }))
+        : [],
     },
     construction: await getConstructionSummaryForUser(userId, now, config),
     butcher: await getButcherAlerts(userId, now),

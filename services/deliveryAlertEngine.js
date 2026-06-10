@@ -1,29 +1,64 @@
 /**
- * Delivery Alert Engine — Motor de alertas operativas delivery/restaurante
+ * Delivery Alert Engine — Motor de alertas delivery/restaurante
  *
- * Ciclo rápido (60s) independiente del motor genérico (1h).
- * Usa emitGlobalAlert() del alertEmitter para emisión y routing.
+ * Evalúa umbrales configurados por el CEO (settings) al cruzar condiciones
+ * o en eventos (caja, pedido). Barrido de seguridad cada 15 min, no polling 60s.
  */
 
 import {
   ACCOUNTS_DB,
+  NOTIFICATIONS_DB,
   ensureDatabase,
   findAccountByUserId,
   getAllDocuments,
   getCatalogDbName,
   getDeliveryDbName,
+  putDocument,
 } from './couchdb.js';
 import { emitGlobalAlert } from './alertEmitter.js';
+import { mutateAlertStatus } from './alertHistory.js';
+import {
+  filterActiveDeliveryOrders,
+  getOrderPhase,
+  getPhaseStartTime,
+  isDeliveredStatus,
+  normalizeDeliveryOrderStatus,
+  orderHasDeliveryPhase,
+} from './deliveryAlertStatusUtils.js';
+import {
+  canEmitCatalogStockAlerts,
+  filterStockTrackedCatalogItems,
+} from './stockAlertUtils.js';
+import {
+  canEmitDriverCashAlerts,
+  canEmitPdvCashAlerts,
+} from './pdvAlertUtils.js';
+import {
+  canEmitDeliveryAlerts,
+  canEmitRiderAlerts,
+} from './moduleAlertUtils.js';
 import {
   getBusinessAlertsOperational,
   minutesPastCloseDeadline,
   resolveCashRegisterAlertConfig,
 } from './cashRegisterAlertConfig.js';
+import { resolveDeliveryAlertConfig } from './deliveryOperationalAlertConfig.js';
 import { broadcastToBusiness } from './sseService.js';
 import logger from './logger.js';
 
 const TAG = 'DELIVERY_ALERT_ENGINE';
-const DEFAULT_INTERVAL_MS = 60_000;
+/** Barrido de seguridad (no polling operativo). Eventos + umbrales horarios primero. */
+const SAFETY_SWEEP_MS = 15 * 60_000;
+
+/** Solo alertas CEO en bandeja global. Operación (retrasos, cocina…) vive en el Centro OP. */
+const CEO_DELIVERY_ALERT_TYPES = new Set([
+  'delivery_cash_pending_close',
+  'delivery_register_not_opened',
+  'delivery_driver_mismatch',
+  'delivery_low_margin',
+  'delivery_failed_delivery',
+  'delivery_unpaid_order',
+]);
 const STARTUP_DELAY_MS = 20_000;
 const DEDUP_WINDOW_MS = 5 * 60_000;
 const MARGIN_CHECK_INTERVAL = 15;
@@ -77,44 +112,9 @@ const ALERT_CLASSIFICATION = {
   delivery_repeat_incident_client: { defaultPriority: 'low',    escalable: true  },
 };
 
+/** @deprecated Usar resolveDeliveryAlertConfig(account, businessOperational) */
 export function getDeliveryAlertConfig(account) {
-  const cfg = account?.alertConfig?.delivery || {};
-  return {
-    enabled: cfg.enabled !== false,
-    delayedOrderEnabled: cfg.delayedOrderEnabled !== false,
-    delayThresholds: {
-      pending: Number(cfg.delayThresholds?.pending || 10),
-      preparing: Number(cfg.delayThresholds?.preparing || 15),
-      kitchen: Number(cfg.delayThresholds?.kitchen || 20),
-      assembly: Number(cfg.delayThresholds?.assembly || 10),
-      delivery: Number(cfg.delayThresholds?.delivery || 40),
-    },
-    kitchenSaturationEnabled: cfg.kitchenSaturationEnabled !== false,
-    kitchenCapacity: Number(cfg.kitchenCapacity || 10),
-    kitchenWarningPercent: Number(cfg.kitchenWarningPercent || 70),
-    kitchenCriticalPercent: Number(cfg.kitchenCriticalPercent || 90),
-    productOutOfStockEnabled: cfg.productOutOfStockEnabled !== false,
-    riderSaturationEnabled: cfg.riderSaturationEnabled !== false,
-    maxOrdersPerRider: Number(cfg.maxOrdersPerRider || 4),
-    riderWarningRatio: Number(cfg.riderWarningRatio || 3),
-    cashPendingCloseEnabled: cfg.cashPendingCloseEnabled !== false,
-    cashCloseDeadline: cfg.cashCloseDeadline || '23:30',
-    cashWarningMinutes: Number(cfg.cashWarningMinutes || 30),
-    cashMaxOpenHours: Number(cfg.cashMaxOpenHours || 12),
-    channelDownEnabled: cfg.channelDownEnabled !== false,
-    channelSilenceMinutes: Number(cfg.channelSilenceMinutes || 60),
-    monitoredChannels: cfg.monitoredChannels || ['web', 'app', 'glovo', 'uber_eats', 'just_eat'],
-    lowMarginEnabled: cfg.lowMarginEnabled !== false,
-    lowMarginThresholdPercent: Number(cfg.lowMarginThresholdPercent || 20),
-    failedDeliveryEnabled: cfg.failedDeliveryEnabled !== false,
-    failedDeliveryThreshold: Number(cfg.failedDeliveryThreshold || 3),
-    unpaidOrderEnabled: cfg.unpaidOrderEnabled !== false,
-    unpaidGraceMinutes: Number(cfg.unpaidGraceMinutes || 30),
-    repeatIncidentEnabled: cfg.repeatIncidentEnabled !== false,
-    repeatIncidentThreshold: Number(cfg.repeatIncidentThreshold || 3),
-    repeatIncidentWindowDays: Number(cfg.repeatIncidentWindowDays || 30),
-    engineIntervalSeconds: Number(cfg.engineIntervalSeconds || 60),
-  };
+  return resolveDeliveryAlertConfig(account, null);
 }
 
 async function fetchDocsOfType(dbName, type) {
@@ -123,6 +123,22 @@ async function fetchDocsOfType(dbName, type) {
     const docs = await getAllDocuments(fakeReq, dbName);
     return docs.filter((d) => d?.type === type && !d?.deletedAt);
   } catch { return []; }
+}
+
+async function fetchCatalogInfraDocs(userId) {
+  try {
+    await ensureDatabase(fakeReq, getCatalogDbName());
+    const docs = await getAllDocuments(fakeReq, getCatalogDbName());
+    return docs.filter((d) => d.user_id === userId && !d.deletedAt && (d.type === 'warehouse' || d.type === 'stock_movement'));
+  } catch { return []; }
+}
+
+async function fetchPointsOfSale(userId) {
+  return fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId));
+}
+
+async function fetchDrivers(userId) {
+  return fetchDocsOfType(getDeliveryDbName(), 'driver').then((d) => d.filter((i) => i.user_id === userId && i.active !== false));
 }
 
 function todayStart() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
@@ -143,7 +159,7 @@ async function emitDeliveryAlert({ userId, businessId, alertType, dedupKey, prio
     priority: finalPriority, title, message,
     entityId: data?.orderId || data?.itemId || data?.sessionId || '',
     entityType: 'delivery_alert', route: route || '/saas/delivery',
-    metadata: { ...data, alertType, targetRoles, escalated }, dedupKey,
+    metadata: { ...data, alertType, targetRoles, escalated, dedupKey }, dedupKey,
   });
   if (result && businessId) {
     broadcastToBusiness(businessId, 'delivery:alert_triggered', {
@@ -156,16 +172,6 @@ async function emitDeliveryAlert({ userId, businessId, alertType, dedupKey, prio
 
 // ─── RULES ──────────────────────────────────────────────────────────────────
 
-function getPhaseStartTime(order) {
-  if (order.status === 'kitchen' && order.kitchenStartedAt) return new Date(order.kitchenStartedAt);
-  if (order.status === 'assembly' && order.assemblyStartedAt) return new Date(order.assemblyStartedAt);
-  for (let i = (order.stageHistory || []).length - 1; i >= 0; i--) {
-    const h = order.stageHistory[i];
-    if (h.status === order.status && h.date) return new Date(h.date);
-  }
-  return new Date(order.createdAt);
-}
-
 const PHASE_ROLES = { pending: ['manager', 'owner'], preparing: ['manager', 'owner', 'kitchen'], kitchen: ['manager', 'owner', 'kitchen'], assembly: ['manager', 'owner', 'kitchen'], delivery: ['manager', 'owner', 'driver'] };
 
 function checkDelayedOrders(orders, config) {
@@ -173,15 +179,28 @@ function checkDelayedOrders(orders, config) {
   const now = Date.now();
   const alerts = [];
   for (const o of orders) {
-    const thr = config.delayThresholds[o.status]; if (!thr) continue;
-    const start = getPhaseStartTime(o); if (Number.isNaN(start.getTime())) continue;
-    const mins = (now - start.getTime()) / 60_000; if (mins < thr) continue;
-    let prio = 'low'; if (mins >= thr * 2) prio = 'high'; else if (mins >= thr * 1.5) prio = 'medium';
-    alerts.push({ alertType: 'delivery_delayed_order', dedupKey: `del-${o._id}-${o.status}`, priority: prio,
-      title: `Pedido ${o.orderNumber || ''} retrasado en ${o.status}`,
-      message: `Lleva ${Math.floor(mins)} min en ${o.status} (umbral: ${thr} min).`,
-      data: { orderId: o._id, orderNumber: o.orderNumber, phase: o.status, minutesInPhase: Math.floor(mins), threshold: thr },
-      route: '/saas/delivery', targetRoles: PHASE_ROLES[o.status] || ['manager', 'owner'] });
+    const status = normalizeDeliveryOrderStatus(o.status);
+    const phase = getOrderPhase(o);
+    if (!phase) continue;
+    const thr = config.delayThresholds[phase];
+    if (!thr) continue;
+    const start = getPhaseStartTime(o);
+    if (Number.isNaN(start.getTime())) continue;
+    const mins = (now - start.getTime()) / 60_000;
+    if (mins < thr) continue;
+    let prio = 'low';
+    if (mins >= thr * 2) prio = 'high';
+    else if (mins >= thr * 1.5) prio = 'medium';
+    alerts.push({
+      alertType: 'delivery_delayed_order',
+      dedupKey: `del-${o._id}-${status}`,
+      priority: prio,
+      title: `Pedido ${o.orderNumber || ''} retrasado en ${status}`,
+      message: `Lleva ${Math.floor(mins)} min en ${status} (umbral: ${thr} min).`,
+      data: { orderId: o._id, orderNumber: o.orderNumber, phase: status, minutesInPhase: Math.floor(mins), threshold: thr },
+      route: '/saas/delivery',
+      targetRoles: PHASE_ROLES[phase] || ['manager', 'owner'],
+    });
   }
   return alerts;
 }
@@ -189,8 +208,8 @@ function checkDelayedOrders(orders, config) {
 function checkKitchenSaturation(orders, config) {
   if (!config.kitchenSaturationEnabled) return [];
   const now = Date.now();
-  const inK = orders.filter((o) => o.status === 'kitchen');
-  const inP = orders.filter((o) => o.status === 'preparing');
+  const inK = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'cocina');
+  const inP = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'nuevo');
   const cnt = inK.length, cap = config.kitchenCapacity;
   if (cap <= 0 || cnt === 0) return [];
   const pct = (cnt / cap) * 100;
@@ -209,15 +228,16 @@ function checkKitchenSaturation(orders, config) {
   return alerts;
 }
 
-function checkDeliveryStock(catalogItems, activeOrders, config) {
-  if (!config.productOutOfStockEnabled) return [];
+function checkDeliveryStock(catalogItems, activeOrders, config, catalogInfraDocs = []) {
+  if (!config.productOutOfStockEnabled || !canEmitCatalogStockAlerts(catalogItems, catalogInfraDocs)) return [];
   const alerts = [];
-  for (const it of catalogItems) {
-    if (!it.active) continue;
-    const qty = Number(it.stockQuantity ?? -1), min = Number(it.minStock || 0);
-    if (min <= 0 && qty > 0) continue;
+  for (const it of filterStockTrackedCatalogItems(catalogItems)) {
+    if (it.stockQuantity == null || it.stockQuantity === '') continue;
+    const qty = Number(it.stockQuantity);
+    const min = Number(it.minStock || 0);
+    if (!Number.isFinite(qty) || min <= 0) continue;
     const imp = activeOrders.filter((o) => (o.items || []).some((i) => i.catalogItemId === it._id)).length;
-    if (qty <= 0 && min > 0) {
+    if (qty <= 0) {
       alerts.push({ alertType: 'delivery_product_out_of_stock', dedupKey: `oos-${it._id}`, priority: 'high', title: `Producto agotado: ${it.name}`, message: `"${it.name}" sin stock.${imp > 0 ? ` ${imp} pedido(s) afectado(s).` : ''}`, data: { itemId: it._id, itemName: it.name, itemSku: it.sku, stockQuantity: qty, minStock: min, impactedOrders: imp }, route: `/saas/catalog/${it._id}`, targetRoles: ['manager', 'owner', 'kitchen'] });
     } else if (qty > 0 && min > 0 && qty <= min) {
       const dem = activeOrders.reduce((s, o) => { const oi = (o.items || []).find((i) => i.catalogItemId === it._id); return s + (oi ? Number(oi.quantity || 0) : 0); }, 0);
@@ -227,11 +247,12 @@ function checkDeliveryStock(catalogItems, activeOrders, config) {
   return alerts;
 }
 
-function checkRiderSaturation(orders, driverSessions, config) {
-  if (!config.riderSaturationEnabled) return [];
+function checkRiderSaturation(orders, driverSessions, config, drivers = []) {
+  if (!config.riderSaturationEnabled || !canEmitRiderAlerts({ drivers })) return [];
   const alerts = [];
   const ad = driverSessions.filter((s) => s.status === 'open').length;
-  const inD = orders.filter((o) => o.status === 'delivery'), wt = orders.filter((o) => o.status === 'assembly');
+  const inD = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'en_reparto');
+  const wt = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'listo');
   if (ad === 0 && (inD.length > 0 || wt.length > 0)) {
     alerts.push({ alertType: 'delivery_no_active_riders', dedupKey: 'no-riders', priority: 'high', title: 'Sin repartidores activos', message: `${inD.length + wt.length} pedido(s) esperando y 0 riders.`, data: { driversActive: 0, ordersInDelivery: inD.length, ordersWaitingPickup: wt.length }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
     return alerts;
@@ -240,12 +261,12 @@ function checkRiderSaturation(orders, driverSessions, config) {
   const r = inD.length / ad;
   if (r >= config.maxOrdersPerRider) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-sat', priority: 'high', title: 'Reparto saturado', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}, max: ${config.maxOrdersPerRider}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
   else if (r >= config.riderWarningRatio) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-warn', priority: 'medium', title: 'Reparto carga alta', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
-  const un = inD.filter((o) => !o.driverName);
+  const un = inD.filter((o) => !o.assignedDriver && !o.driverId);
   if (un.length > 0) alerts.push({ alertType: 'delivery_unassigned_order', dedupKey: `una-${un.length}`, priority: 'medium', title: `${un.length} pedido(s) sin repartidor`, message: `Sin asignar: ${un.map((o) => o.orderNumber).join(', ')}.`, data: { unassignedOrders: un.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber })) }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner'] });
   return alerts;
 }
 
-function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg) {
+function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg, pointsOfSale = [], drivers = []) {
   if (!cashCfg?.cashPendingCloseEnabled) return [];
   const alerts = [];
   const now = new Date();
@@ -253,8 +274,10 @@ function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg) {
   const warnMin = Number(cashCfg.cashWarningMinutes || 30);
   const maxHours = Number(cashCfg.cashMaxOpenHours || 12);
   const cajaRoute = '/saas/vertical/delivery/caja';
+  const pdvReady = canEmitPdvCashAlerts(pointsOfSale);
+  const driverCashReady = canEmitDriverCashAlerts(drivers);
 
-  for (const s of tpvSessions) {
+  if (pdvReady) for (const s of tpvSessions) {
     if (s.status !== 'open') continue;
     const op = new Date(s.openedAt || s.createdAt);
     const hrs = (now.getTime() - op.getTime()) / 3_600_000;
@@ -289,10 +312,10 @@ function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg) {
     }
   }
 
-  for (const s of driverSessions) {
+  if (driverCashReady) for (const s of driverSessions) {
     if (s.status !== 'open') continue;
     const hrs = (now.getTime() - new Date(s.openedAt || s.createdAt).getTime()) / 3_600_000;
-    if (hrs > 2 && !orders.some((o) => o.status === 'delivery' && o.driverName === s.driverName)) {
+    if (hrs > 2 && !orders.some((o) => normalizeDeliveryOrderStatus(o.status) === 'en_reparto' && (o.assignedDriver === s.driverName || o.driverId === s.driverId))) {
       alerts.push({
         alertType: 'delivery_cash_pending_close', dedupKey: `drv-${s._id}`, priority: 'medium',
         title: 'Caja repartidor sin actividad',
@@ -306,7 +329,7 @@ function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg) {
 }
 
 function checkRegisterNotOpened(tpvSessions, pointsOfSale, cashCfg) {
-  if (!cashCfg?.registerNotOpenedEnabled) return [];
+  if (!cashCfg?.registerNotOpenedEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const now = new Date();
   if (now.getHours() < Number(cashCfg.registerNotOpenedCheckHour || 10)) return [];
   const todayStr = now.toISOString().slice(0, 10);
@@ -349,7 +372,7 @@ function checkChannelHealth(orders, config, dc) {
 
 function checkLowMargin(orders, catalogItems, config) {
   if (!config.lowMarginEnabled) return [];
-  const comp = orders.filter((o) => ['delivered', 'delivery'].includes(o.status) && isToday(o.createdAt));
+  const comp = orders.filter((o) => ['entregado', 'en_reparto'].includes(normalizeDeliveryOrderStatus(o.status)) && isToday(o.createdAt));
   if (comp.length < 3) return [];
   const cm = new Map(); for (const it of catalogItems) { if (it.costPrice > 0) cm.set(it._id, Number(it.costPrice)); }
   if (cm.size === 0) return [];
@@ -364,7 +387,7 @@ function checkLowMargin(orders, catalogItems, config) {
 
 function checkFailedDeliveries(orders, config) {
   if (!config.failedDeliveryEnabled) return [];
-  const fl = orders.filter((o) => (o.status === 'incident' || o.status === 'cancelled') && (o.stageHistory || []).some((h) => h.status === 'delivery')).filter((o) => isToday(o.updatedAt || o.createdAt));
+  const fl = orders.filter((o) => (o.status === 'incident' || o.status === 'cancelled') && orderHasDeliveryPhase(o)).filter((o) => isToday(o.updatedAt || o.createdAt));
   const alerts = [];
   if (fl.length >= config.failedDeliveryThreshold) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `fb-${fl.length}`, priority: 'high', title: `${fl.length} entregas fallidas`, message: `Umbral superado (${config.failedDeliveryThreshold}).`, data: { failedOrders: fl.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber, status: o.status })), totalFailed: fl.length, threshold: config.failedDeliveryThreshold }, route: '/saas/delivery?tab=incidents', targetRoles: ['manager', 'owner', 'driver'] });
   else for (const o of fl) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `f-${o._id}`, priority: 'low', title: `Entrega fallida: ${o.orderNumber || ''}`, message: `Paso a ${o.status} tras reparto.`, data: { orderId: o._id, orderNumber: o.orderNumber, status: o.status }, route: '/saas/delivery?tab=incidents', targetRoles: ['manager', 'owner', 'driver'] });
@@ -374,7 +397,7 @@ function checkFailedDeliveries(orders, config) {
 function checkUnpaidOrders(orders, config) {
   if (!config.unpaidOrderEnabled) return [];
   const now = Date.now();
-  const up = orders.filter((o) => o.status === 'delivered' && o.paymentStatus !== 'paid' && !o.paymentMethod && (now - new Date(o.deliveredAt || o.updatedAt || o.createdAt).getTime()) / 60_000 > config.unpaidGraceMinutes);
+  const up = orders.filter((o) => isDeliveredStatus(o.status) && o.paymentStatus !== 'paid' && !o.paymentMethod && (now - new Date(o.deliveredAt || o.updatedAt || o.createdAt).getTime()) / 60_000 > config.unpaidGraceMinutes);
   if (!up.length) return [];
   const tot = up.reduce((s, o) => s + Number(o.totalAmount || 0), 0), alerts = [];
   if (up.length >= 5) alerts.push({ alertType: 'delivery_unpaid_order', dedupKey: `ub-${up.length}`, priority: 'high', title: `${up.length} pedidos sin cobrar`, message: `Pendiente: ${tot.toFixed(2)} EUR.`, data: { totalUnpaid: up.length, totalAmount: tot }, route: '/saas/delivery?tab=cash', targetRoles: ['manager', 'owner', 'cashier'] });
@@ -393,6 +416,67 @@ function checkRepeatIncidentClients(orders, config) {
   return alerts;
 }
 
+// ─── RECONCILIACIÓN ─────────────────────────────────────────────────────────
+
+function parseNotificationDedupKey(notifId) {
+  if (!notifId || !String(notifId).startsWith('alert:')) return null;
+  const parts = String(notifId).split(':');
+  if (parts.length < 3) return null;
+  const category = parts[1];
+  if (parts.length === 3) {
+    return { category, dedupKey: parts[2], key: `${category}:${parts[2]}` };
+  }
+  const dedupKey = parts.slice(2, -1).join(':');
+  return { category, dedupKey, key: `${category}:${dedupKey}` };
+}
+
+function isDeliveryNotification(doc) {
+  const cat = String(doc?.category || '');
+  const src = String(doc?.source || '');
+  return cat.startsWith('delivery_') || src === 'delivery';
+}
+
+async function reconcileDeliveryAlerts(businessId, userId, activeAlerts) {
+  if (!businessId && !userId) return 0;
+  const activeKeys = new Set(activeAlerts.map((a) => `${a.alertType}:${a.dedupKey}`));
+  let resolved = 0;
+  const now = new Date().toISOString();
+
+  try {
+    await ensureDatabase(fakeReq, NOTIFICATIONS_DB);
+    const docs = await getAllDocuments(fakeReq, NOTIFICATIONS_DB);
+
+    for (const doc of docs) {
+      if (doc.type !== 'notification' || doc.deletedAt || !isDeliveryNotification(doc)) continue;
+      if (businessId && doc.businessId !== businessId) continue;
+      if (!businessId && doc.user_id !== userId) continue;
+
+      const status = doc.status || (doc.read ? 'seen' : 'new');
+      if (status === 'resolved') continue;
+
+      const parsed = parseNotificationDedupKey(doc._id);
+      const metaKey = doc.metadata?.alertType && doc.metadata?.dedupKey
+        ? `${doc.metadata.alertType}:${doc.metadata.dedupKey}`
+        : null;
+      const key = parsed?.key || metaKey;
+      if (!key || activeKeys.has(key)) continue;
+
+      const updated = mutateAlertStatus(doc, { status: 'resolved', userId: null, now });
+      updated.resolvedBy = 'system';
+      updated.statusHistory = [
+        ...(Array.isArray(updated.statusHistory) ? updated.statusHistory : []),
+        { action: 'auto_resolved', from: status, to: 'resolved', at: now, by: null, meta: { reason: 'condition_cleared' } },
+      ].slice(-50);
+      await putDocument(fakeReq, NOTIFICATIONS_DB, doc._id, updated);
+      resolved++;
+    }
+  } catch (e) {
+    logger.warn({ tag: TAG, businessId, userId, err: e?.message }, 'Error reconciliando alertas delivery');
+  }
+
+  return resolved;
+}
+
 // ─── ENGINE LOOP ────────────────────────────────────────────────────────────
 
 async function getAllUserIds() {
@@ -403,35 +487,36 @@ async function getAllUserIds() {
 async function runForUser(userId) {
   const account = await findAccountByUserId(fakeReq, userId);
   if (!account) return 0;
-  const config = getDeliveryAlertConfig(account);
+  const bId = account.businessId || '';
+  const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+  const config = resolveDeliveryAlertConfig(account, businessOp);
   if (!config.enabled) return 0;
-  const [allOrders, catItems, tpvS, drvS] = await Promise.all([
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers] = await Promise.all([
     fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
     fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
+    fetchCatalogInfraDocs(userId),
     fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
     fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchPointsOfSale(userId),
+    fetchDrivers(userId),
   ]);
-  const active = allOrders.filter((o) => !['delivered', 'cancelled'].includes(o.status));
+  const active = filterActiveDeliveryOrders(allOrders);
   const today = allOrders.filter((o) => isToday(o.createdAt));
-  const bId = account.businessId || '';
   const dc = account.deliveryConfig || null;
-  const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+  if (!canEmitDeliveryAlerts({ deliveryOrders: allOrders, pointsOfSale, deliveryConfig: dc })) {
+    await reconcileDeliveryAlerts(bId, userId, []);
+    return 0;
+  }
   const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
-  const pointsOfSale = cashCfg.registerNotOpenedEnabled
-    ? await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId))
-    : [];
-  const pending = [
-    ...checkDelayedOrders(active, config), ...checkKitchenSaturation(active, config),
-    ...checkDeliveryStock(catItems, active, config), ...checkRiderSaturation(active, drvS, config),
-    ...checkCashPendingClose(tpvS, drvS, active, cashCfg),
-    ...checkRegisterNotOpened(tpvS, pointsOfSale, cashCfg),
-    ...checkChannelHealth(today, config, dc),
-    ...(cycleCount % MARGIN_CHECK_INTERVAL === 0 ? checkLowMargin(today, catItems, config) : []),
-    ...checkFailedDeliveries(allOrders, config), ...checkUnpaidOrders(today, config),
-    ...checkRepeatIncidentClients(allOrders, config),
-  ];
+  const allPending = collectDeliveryAlerts({
+    active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
+    includeMargin: cycleCount % MARGIN_CHECK_INTERVAL === 0,
+  });
+  const ceoPending = allPending.filter((a) => CEO_DELIVERY_ALERT_TYPES.has(a.alertType));
+  const reconciled = await reconcileDeliveryAlerts(bId, userId, ceoPending);
   let cnt = 0;
-  for (const a of pending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
+  for (const a of ceoPending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
+  if (reconciled > 0) logger.info({ tag: TAG, userId, businessId: bId, reconciled }, 'Alertas delivery obsoletas resueltas');
   return cnt;
 }
 
@@ -450,59 +535,78 @@ export async function runDeliveryAlerts() {
 export async function getDeliveryAlertSummary(userId) {
   const account = await findAccountByUserId(fakeReq, userId);
   if (!account) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
-  const config = getDeliveryAlertConfig(account);
-  if (!config.enabled) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
-  const [allOrders, catItems, tpvS, drvS] = await Promise.all([
-    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
-    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
-    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
-    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
-  ]);
-  const active = allOrders.filter((o) => !['delivered', 'cancelled'].includes(o.status));
-  const today = allOrders.filter((o) => isToday(o.createdAt));
-  const dc = account.deliveryConfig || null;
   const bId = account.businessId || '';
   const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+  const config = resolveDeliveryAlertConfig(account, businessOp);
+  if (!config.enabled) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers] = await Promise.all([
+    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
+    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
+    fetchCatalogInfraDocs(userId),
+    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchPointsOfSale(userId),
+    fetchDrivers(userId),
+  ]);
+  const active = filterActiveDeliveryOrders(allOrders);
+  const today = allOrders.filter((o) => isToday(o.createdAt));
+  const dc = account.deliveryConfig || null;
+  if (!canEmitDeliveryAlerts({ deliveryOrders: allOrders, pointsOfSale, deliveryConfig: dc })) {
+    return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
+  }
   const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
-  const pointsOfSale = cashCfg.registerNotOpenedEnabled
-    ? await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId))
-    : [];
-  const pending = [
-    ...checkDelayedOrders(active, config), ...checkKitchenSaturation(active, config),
-    ...checkDeliveryStock(catItems, active, config), ...checkRiderSaturation(active, drvS, config),
-    ...checkCashPendingClose(tpvS, drvS, active, cashCfg),
-    ...checkRegisterNotOpened(tpvS, pointsOfSale, cashCfg),
-    ...checkChannelHealth(today, config, dc),
-    ...checkLowMargin(today, catItems, config), ...checkFailedDeliveries(allOrders, config),
-    ...checkUnpaidOrders(today, config), ...checkRepeatIncidentClients(allOrders, config),
-  ];
+  const pending = collectDeliveryAlerts({
+    active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
+    includeMargin: true,
+  });
   const byP = { high: 0, medium: 0, low: 0 }, byT = {};
   for (const a of pending) { byP[a.priority] = (byP[a.priority] || 0) + 1; byT[a.alertType] = (byT[a.alertType] || 0) + 1; }
   return { alerts: pending, summary: { total: pending.length, active: pending.length, byPriority: byP, byType: byT } };
 }
 
+function collectDeliveryAlerts({
+  active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
+  includeMargin = cycleCount % MARGIN_CHECK_INTERVAL === 0,
+}) {
+  return [
+    ...checkDelayedOrders(active, config),
+    ...checkKitchenSaturation(active, config),
+    ...checkDeliveryStock(catItems, active, config, catalogInfraDocs),
+    ...checkRiderSaturation(active, drvS, config, drivers),
+    ...checkCashPendingClose(tpvS, drvS, active, cashCfg, pointsOfSale, drivers),
+    ...checkRegisterNotOpened(tpvS, pointsOfSale, cashCfg),
+    ...checkChannelHealth(today, config, dc),
+    ...(includeMargin ? checkLowMargin(today, catItems, config) : []),
+    ...checkFailedDeliveries(allOrders, config),
+    ...checkUnpaidOrders(today, config),
+    ...checkRepeatIncidentClients(allOrders, config),
+  ];
+}
+
 export async function triggerReactiveAlert(userId, eventType, payload) {
   try {
     const account = await findAccountByUserId(fakeReq, userId); if (!account) return;
-    const config = getDeliveryAlertConfig(account); if (!config.enabled) return;
-    const bId = account.businessId || '', db = getDeliveryDbName();
+    const bId = account.businessId || '';
+    const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+    const config = resolveDeliveryAlertConfig(account, businessOp);
+    if (!config.enabled) return;
+    const db = getDeliveryDbName();
     let toE = [];
-    if (eventType === 'order_created' || eventType === 'order_status_changed') {
-      const act = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId && !['delivered', 'cancelled'].includes(o.status));
-      toE.push(...checkKitchenSaturation(act, config), ...checkDelayedOrders(act, config));
-      if (payload?.newStatus === 'incident' || payload?.newStatus === 'cancelled') { const all = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId); toE.push(...checkFailedDeliveries(all, config), ...checkRepeatIncidentClients(all, config)); }
-      const ds = (await fetchDocsOfType(db, 'driver_cash_session')).filter((s) => s.user_id === userId);
-      toE.push(...checkRiderSaturation(act, ds, config));
+    if (eventType === 'order_status_changed' && (payload?.newStatus === 'incident' || payload?.newStatus === 'cancelled')) {
+      const all = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId);
+      toE.push(...checkFailedDeliveries(all, config));
     }
-    if (eventType === 'stock_updated') { const its = (await fetchDocsOfType(getCatalogDbName(), 'catalog_item')).filter((i) => i.user_id === userId && i.active); const act = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId && !['delivered', 'cancelled'].includes(o.status)); toE.push(...checkDeliveryStock(its, act, config)); }
     if (eventType === 'cash_session_changed') {
-      const ts = (await fetchDocsOfType(db, 'tpv_register_session')).filter((s) => s.user_id === userId);
-      const ds = (await fetchDocsOfType(db, 'driver_cash_session')).filter((s) => s.user_id === userId);
-      const act = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId && !['delivered', 'cancelled'].includes(o.status));
-      const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+      const [ts, ds, act, pointsOfSale, drivers] = await Promise.all([
+        fetchDocsOfType(db, 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
+        fetchDocsOfType(db, 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+        fetchDocsOfType(db, 'delivery_order').then((d) => filterActiveDeliveryOrders(d.filter((o) => o.user_id === userId))),
+        fetchPointsOfSale(userId),
+        fetchDrivers(userId),
+      ]);
       const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
-      toE.push(...checkCashPendingClose(ts, ds, act, cashCfg));
-      if (payload?.action === 'closed' || payload?.action === 'pending_review') {
+      toE.push(...checkCashPendingClose(ts, ds, act, cashCfg, pointsOfSale, drivers));
+      if ((payload?.action === 'closed' || payload?.action === 'pending_review') && canEmitDriverCashAlerts(drivers)) {
         const sess = ds.find(s => s._id === payload?.sessionId);
         if (sess && Math.abs(sess.difference || 0) >= (config.driverMismatchThreshold || 5)) {
           toE.push({
@@ -517,13 +621,19 @@ export async function triggerReactiveAlert(userId, eventType, payload) {
         }
       }
     }
-    for (const a of toE) { await emitDeliveryAlert({ userId, businessId: bId, ...a }); }
+    for (const a of toE.filter((x) => CEO_DELIVERY_ALERT_TYPES.has(x.alertType))) {
+      await emitDeliveryAlert({ userId, businessId: bId, ...a });
+    }
+    if (toE.length > 0) {
+      const ceoKeys = toE.filter((x) => CEO_DELIVERY_ALERT_TYPES.has(x.alertType));
+      await reconcileDeliveryAlerts(bId, userId, ceoKeys);
+    }
   } catch (e) { logger.warn({ tag: TAG, userId, eventType, err: e?.message }, 'Error alerta reactiva'); }
 }
 
 let engineTimer = null;
 export function startDeliveryAlertEngine() {
-  logger.info({ tag: TAG }, `Motor alertas delivery — inicio en ${STARTUP_DELAY_MS / 1000}s, ciclo: ${DEFAULT_INTERVAL_MS / 1000}s`);
-  setTimeout(() => { runDeliveryAlerts().catch(() => null); engineTimer = setInterval(() => runDeliveryAlerts().catch(() => null), DEFAULT_INTERVAL_MS); }, STARTUP_DELAY_MS);
+  logger.info({ tag: TAG }, `Motor alertas delivery — eventos + barrido cada ${SAFETY_SWEEP_MS / 60_000} min (solo CEO)`);
+  setTimeout(() => { runDeliveryAlerts().catch(() => null); engineTimer = setInterval(() => runDeliveryAlerts().catch(() => null), SAFETY_SWEEP_MS); }, STARTUP_DELAY_MS);
 }
 export function stopDeliveryAlertEngine() { if (engineTimer) { clearInterval(engineTimer); engineTimer = null; } }

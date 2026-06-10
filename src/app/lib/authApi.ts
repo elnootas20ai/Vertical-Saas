@@ -269,6 +269,7 @@ export interface TeamInvitation {
   invitationId: string;
   email: string;
   fullName: string;
+  phone?: string;
   businessId: string;
   businessName: string;
   role: string;

@@ -190,11 +190,19 @@ export async function importTenantData(
 export type AlertChannel = 'push' | 'email' | 'sms' | 'inApp';
 export type AlertUrgency = 'low' | 'medium' | 'high' | 'critical';
 export type AlertRuleDepartment =
-  | 'delivery' | 'finanzas' | 'rrhh' | 'operaciones'
-  | 'limpieza' | 'construccion' | 'verticales' | 'sistema';
+  | 'pdvs' | 'delivery' | 'rrhh' | 'catalogProviders' | 'finanzas' | 'documentacion'
+  | 'operaciones' | 'limpieza' | 'construccion' | 'verticales' | 'sistema';
+
+const PDV_RULE_IDS = new Set([
+  'delivery_cash_pending_close',
+  'delivery_register_not_opened',
+  'delivery_cash_discrepancy',
+  'delivery_driver_mismatch',
+  'register_high_return',
+]);
 
 const CATEGORY_TO_DEPARTMENT: Record<string, AlertRuleDepartment> = {
-  stock: 'operaciones',
+  stock: 'catalogProviders',
   ventas: 'operaciones',
   crm: 'operaciones',
   citas: 'operaciones',
@@ -203,10 +211,10 @@ const CATEGORY_TO_DEPARTMENT: Record<string, AlertRuleDepartment> = {
   finanzas: 'finanzas',
   conciliacion: 'finanzas',
   ocr: 'finanzas',
-  compras: 'finanzas',
+  compras: 'catalogProviders',
   equipo: 'rrhh',
-  documentos: 'rrhh',
-  documentacion: 'rrhh',
+  documentos: 'documentacion',
+  documentacion: 'documentacion',
   seguridad: 'sistema',
   sistema: 'sistema',
   delivery: 'delivery',
@@ -219,8 +227,9 @@ const CATEGORY_TO_DEPARTMENT: Record<string, AlertRuleDepartment> = {
   verticales: 'operaciones',
 };
 
-export function ruleDepartment(rule: Pick<AlertRule, 'department' | 'category'>): AlertRuleDepartment {
+export function ruleDepartment(rule: Pick<AlertRule, 'id' | 'department' | 'category'>): AlertRuleDepartment {
   if (rule.department) return rule.department;
+  if (rule.id && PDV_RULE_IDS.has(rule.id)) return 'pdvs';
   return CATEGORY_TO_DEPARTMENT[rule.category] || 'operaciones';
 }
 
@@ -264,9 +273,57 @@ export interface CashRegisterOperationalConfig {
   highReturnThreshold: number;
 }
 
+export interface DeliveryDelayThresholds {
+  pending: number;
+  preparing: number;
+  kitchen: number;
+  assembly: number;
+  delivery: number;
+}
+
+/** Umbrales operativos delivery (cuándo dispara cada alerta). */
+export interface DeliveryOperationalConfig {
+  delayThresholds: DeliveryDelayThresholds;
+  kitchenCapacity: number;
+  kitchenWarningPercent: number;
+  kitchenCriticalPercent: number;
+  maxOrdersPerRider: number;
+  riderWarningRatio: number;
+  channelSilenceMinutes: number;
+  lowMarginThresholdPercent: number;
+  failedDeliveryThreshold: number;
+  unpaidGraceMinutes: number;
+  repeatIncidentThreshold: number;
+  repeatIncidentWindowDays: number;
+  driverMismatchThreshold: number;
+}
+
 export interface AlertsOperationalConfig {
   cashRegister: CashRegisterOperationalConfig;
+  delivery: DeliveryOperationalConfig;
 }
+
+export const DEFAULT_DELIVERY_OPERATIONAL: DeliveryOperationalConfig = {
+  delayThresholds: {
+    pending: 10,
+    preparing: 15,
+    kitchen: 20,
+    assembly: 10,
+    delivery: 40,
+  },
+  kitchenCapacity: 10,
+  kitchenWarningPercent: 70,
+  kitchenCriticalPercent: 90,
+  maxOrdersPerRider: 4,
+  riderWarningRatio: 3,
+  channelSilenceMinutes: 60,
+  lowMarginThresholdPercent: 20,
+  failedDeliveryThreshold: 3,
+  unpaidGraceMinutes: 30,
+  repeatIncidentThreshold: 3,
+  repeatIncidentWindowDays: 30,
+  driverMismatchThreshold: 5,
+};
 
 export const DEFAULT_CASH_REGISTER_OPERATIONAL: CashRegisterOperationalConfig = {
   registerNotOpenedEnabled: true,

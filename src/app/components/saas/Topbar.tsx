@@ -251,9 +251,9 @@ export function Topbar({
               className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               title={isWorker ? t('topbar.notifications') : 'Centro de alertas'}
             >
-              <Bell className={`w-5 h-5 ${unreadCount > 0 && !isWorker ? 'text-red-500 dark:text-red-400' : 'text-gray-600 dark:text-gray-300'}`} />
+              <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900">
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-emerald-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}

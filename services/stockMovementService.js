@@ -135,6 +135,7 @@ export async function recordMovement(req, userId, movementData) {
 
       await putDocument(req, db, catItem._id, {
         ...catItem,
+        isStockItem: true,
         stockQuantity: newStock,
         updatedAt: new Date().toISOString(),
       });

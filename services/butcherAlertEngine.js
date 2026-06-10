@@ -23,6 +23,7 @@ import {
   fakeReq,
 } from './alertEmitter.js';
 import logger from './logger.js';
+import { canEmitPdvCashAlerts } from './pdvAlertUtils.js';
 
 const MAIN_INTERVAL_MS = 30 * 60_000;
 const SCALE_INTERVAL_MS = 5 * 60_000;
@@ -344,8 +345,8 @@ async function checkButcherScales(ctx, scales, config) {
 
 // --- Rule 9: Register session pending close --------------------------------
 
-async function checkButcherRegister(ctx, tpvSessions, config) {
-  if (!config.butcherRegisterAlertEnabled) return [];
+async function checkButcherRegister(ctx, tpvSessions, config, pointsOfSale = []) {
+  if (!config.butcherRegisterAlertEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const now = new Date();
   const alerts = [];
   for (const s of tpvSessions.filter((s) => s.status === 'open' && s.openedAt)) {
@@ -367,8 +368,8 @@ async function checkButcherRegister(ctx, tpvSessions, config) {
 
 // --- Rule 10: Unpaid tickets -----------------------------------------------
 
-async function checkButcherTickets(ctx, tpvSessions, config) {
-  if (!config.butcherRegisterAlertEnabled) return [];
+async function checkButcherTickets(ctx, tpvSessions, config, pointsOfSale = []) {
+  if (!config.butcherRegisterAlertEnabled || !canEmitPdvCashAlerts(pointsOfSale)) return [];
   const now = new Date();
   const alerts = [];
   for (const session of tpvSessions.filter((s) => s.status === 'open')) {
@@ -525,7 +526,7 @@ async function runButcherAlertsForBusiness(business) {
   const bDb = getButcherDbName();
   const dDb = getDeliveryDbName();
 
-  const [products, batches, waste, scales, invCounts, tpvSessions, purchaseEntries] = await Promise.all([
+  const [products, batches, waste, scales, invCounts, tpvSessions, pointsOfSale, purchaseEntries] = await Promise.all([
     fetchAllDocsOfType(bDb, 'butcher_product').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_batch').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_waste').then((d) => d.filter((i) => i.user_id === ownerId)),
@@ -534,6 +535,7 @@ async function runButcherAlertsForBusiness(business) {
       d.filter((i) => i.user_id === ownerId).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))),
     ),
     fetchAllDocsOfType(dDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId)),
+    fetchAllDocsOfType(dDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_purchase_entry').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)),
   ]);
 
@@ -544,8 +546,8 @@ async function runButcherAlertsForBusiness(business) {
   results.push(...await checkButcherWaste(ctx, waste, batches, config));
   results.push(...await checkButcherPrices(ctx, products, config));
   results.push(...await checkButcherScales(ctx, scales, config));
-  results.push(...await checkButcherRegister(ctx, tpvSessions, config));
-  results.push(...await checkButcherTickets(ctx, tpvSessions, config));
+  results.push(...await checkButcherRegister(ctx, tpvSessions, config, pointsOfSale));
+  results.push(...await checkButcherTickets(ctx, tpvSessions, config, pointsOfSale));
   results.push(...await checkButcherInventory(ctx, invCounts, config));
   results.push(...await checkButcherPurchases(ctx, purchaseEntries, config));
 

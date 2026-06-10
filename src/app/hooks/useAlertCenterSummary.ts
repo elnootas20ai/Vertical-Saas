@@ -24,7 +24,7 @@ export function useAlertCenterSummary(businessId: string | undefined, options?: 
   useEffect(() => {
     setLoading(Boolean(businessId));
     void reload();
-    const pollMs = options?.pollMs ?? 60_000;
+    const pollMs = options?.pollMs ?? 300_000;
     if (!businessId || pollMs <= 0) return undefined;
     const id = window.setInterval(() => { void reload(); }, pollMs);
     return () => window.clearInterval(id);

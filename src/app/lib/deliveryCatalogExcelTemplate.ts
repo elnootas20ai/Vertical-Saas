@@ -22,6 +22,8 @@ export const DELIVERY_CATALOG_IMPORT_COLUMNS = [
   'description',
 ] as const;
 
+export const DELIVERY_CATALOG_CORE_COLUMNS = DELIVERY_CATALOG_IMPORT_COLUMNS;
+
 export const DELIVERY_CATALOG_IMPORT_LABELS: Record<(typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number], string> = {
   name: 'nombre',
   sku: 'sku',
@@ -154,7 +156,14 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
     ['Tiramisú', 'POS-001', 'Postres', 'Dejar linea vacía'],
   ];
   for (const [name, sku, cat, note] of sharedExamples) {
-    rows.push([name, sku, cat, '', cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50', note]);
+    rows.push([
+      name,
+      sku,
+      cat,
+      '',
+      cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50',
+      note,
+    ]);
   }
 
   if (lines.length === 0) {
@@ -208,6 +217,9 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '  · categoria — sección dentro de la línea (Pizzas, Rolls, Bebidas…)',
     '  · precio — número con punto (9.50). Sin precio no se vende en TPV',
     '',
+    'STOCK — usa la plantilla aparte «plantilla_stock_delivery.xlsx» (pestaña «stock»).',
+    '  · Este archivo es solo carta y precios de venta.',
+    '',
     'COLUMNA linea (organizador / pestaña superior del TPV):',
     `  · Pon el nombre EXACTO de Ajustes → Marca: ${namesText}`,
     '  · En Bebidas, Complementos y Postres deja linea VACÍA (pestañas compartidas)',
@@ -240,8 +252,9 @@ function buildValidValuesRows(commercialLines: ImportBrandLike[]): string[][] {
 }
 
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
-  if (headers.length < DELIVERY_CATALOG_TEMPLATE_HEADERS.length) return false;
-  return DELIVERY_CATALOG_TEMPLATE_HEADERS.every(
+  const coreHeaders = DELIVERY_CATALOG_CORE_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]);
+  if (headers.length < coreHeaders.length) return false;
+  return coreHeaders.every(
     (expected, idx) => normalizeImportHeader(String(headers[idx] ?? '')) === normalizeImportHeader(expected),
   );
 }

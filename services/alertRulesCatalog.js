@@ -3,35 +3,7 @@
  * El `id` debe coincidir con ruleId o category que emite cada motor (emitGlobalAlert).
  */
 
-/** Reglas esenciales incluidas en plan Básico. */
-const BASIC_PLAN_RULE_IDS = new Set([
-  'delivery_delayed_order',
-  'delivery_kitchen_saturated',
-  'delivery_product_out_of_stock',
-  'delivery_no_active_riders',
-  'delivery_cash_pending_close',
-  'delivery_register_not_opened',
-  'delivery_cash_discrepancy',
-  'stale_delivery',
-  'delivery_unattended',
-  'stock_low',
-  'out_of_stock',
-  'low_stock',
-  'negative_stock',
-  'worker_no_clockin',
-  'payment_overdue',
-  'client_payment_overdue',
-  'sale_cancelled',
-  'lead_new',
-]);
-
-const PRO_PLAN_DEPARTMENTS = new Set(['limpieza', 'construccion', 'verticales', 'sistema']);
-
-function inferPlanTier(id, department) {
-  if (BASIC_PLAN_RULE_IDS.has(id)) return 'basic';
-  if (PRO_PLAN_DEPARTMENTS.has(department)) return 'pro';
-  return 'normal';
-}
+import { resolveAlertPlanTier } from './alertPlanTiers.js';
 
 function r(id, category, department, label, description, opts = {}) {
   return {
@@ -40,7 +12,7 @@ function r(id, category, department, label, description, opts = {}) {
     department,
     label,
     description,
-    planTier: opts.planTier || inferPlanTier(id, department),
+    planTier: opts.planTier || resolveAlertPlanTier(id, department),
     enabled: opts.enabled !== false,
     channels: opts.channels || ['inApp'],
     urgency: opts.urgency || 'medium',
@@ -74,21 +46,21 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_rider_saturated', 'delivery', 'delivery', 'Reparto saturado', 'Demasiados pedidos por repartidor activo', { ...pushInApp, urgency: 'high' }),
   r('delivery_no_active_riders', 'delivery', 'delivery', 'Sin repartidores activos', 'Hay pedidos esperando reparto y ningún rider disponible', { ...pushInApp, urgency: 'high' }),
   r('delivery_unassigned_order', 'delivery', 'delivery', 'Pedido sin repartidor', 'Pedido en reparto sin repartidor asignado', { urgency: 'medium' }),
-  r('delivery_cash_pending_close', 'delivery', 'delivery', 'Caja sin cerrar', 'Caja abierta después de la hora límite o demasiadas horas', { ...pushEmail, urgency: 'high' }),
-  r('delivery_register_not_opened', 'delivery', 'delivery', 'Caja sin abrir', 'Terminal activo sin sesión de caja abierta hoy', { ...pushInApp, urgency: 'medium' }),
-  r('delivery_cash_discrepancy', 'delivery', 'delivery', 'Descuadre de caja', 'Diferencia al cerrar caja respecto al esperado', { ...pushInApp, urgency: 'critical' }),
+  r('delivery_cash_pending_close', 'delivery', 'pdvs', 'Caja sin cerrar', 'Caja abierta después de la hora límite o demasiadas horas', { ...pushEmail, urgency: 'high' }),
+  r('delivery_register_not_opened', 'delivery', 'pdvs', 'Caja sin abrir', 'Terminal activo sin sesión de caja abierta hoy', { ...pushInApp, urgency: 'medium' }),
+  r('delivery_cash_discrepancy', 'delivery', 'pdvs', 'Descuadre de caja', 'Diferencia al cerrar caja respecto al esperado', { ...pushInApp, urgency: 'critical' }),
   r('delivery_channel_silent', 'delivery', 'delivery', 'Canal sin actividad', 'Canal de pedidos (web, app, agregador) sin pedidos en X minutos', { urgency: 'medium' }),
   r('delivery_low_margin', 'delivery', 'delivery', 'Margen bajo en delivery', 'Margen estimado del día por debajo del umbral', { urgency: 'medium' }),
   r('delivery_failed_delivery', 'delivery', 'delivery', 'Entrega fallida', 'Pedido que falló o se canceló tras salir a reparto', { ...pushInApp, urgency: 'high' }),
   r('delivery_unpaid_order', 'delivery', 'delivery', 'Pedido sin cobrar', 'Pedido entregado con pago pendiente demasiado tiempo', { urgency: 'medium' }),
   r('delivery_repeat_incident_client', 'delivery', 'delivery', 'Cliente reincidente en incidencias', 'Mismo cliente con varias incidencias en el periodo configurado', { urgency: 'low' }),
-  r('delivery_driver_mismatch', 'delivery', 'delivery', 'Descuadre caja repartidor', 'Diferencia al cerrar la caja de un repartidor', { urgency: 'medium' }),
+  r('delivery_driver_mismatch', 'delivery', 'pdvs', 'Descuadre caja repartidor', 'Diferencia al cerrar la caja de un repartidor', { urgency: 'medium' }),
   r('stale_delivery', 'delivery', 'delivery', 'Pedido delivery estancado', 'Pedido en curso demasiado tiempo sin avanzar', { ...pushInApp, urgency: 'high' }),
   r('delivery_unattended', 'delivery', 'delivery', 'Pedido nuevo sin atender', 'Pedido recién entrado sin tomar en demasiado tiempo', { urgency: 'high' }),
   r('delivery_unpaid', 'delivery', 'delivery', 'Cobro pendiente (motor general)', 'Pedido delivery con cobro pendiente', { urgency: 'medium' }),
   r('delivery_no_address', 'delivery', 'delivery', 'Pedido sin dirección', 'Pedido a domicilio sin dirección de entrega', { urgency: 'medium' }),
   r('delivery_channel_incident', 'delivery', 'delivery', 'Canal con incidencias', 'Varias incidencias en un canal de pedidos', { urgency: 'high' }),
-  r('register_high_return', 'delivery', 'delivery', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { urgency: 'medium' }),
+  r('register_high_return', 'delivery', 'pdvs', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { urgency: 'medium' }),
 
   // ─── Finanzas / compras / conciliación / OCR ─────────────────────────────
   r('payment_received', 'finanzas', 'finanzas', 'Pago recibido', 'Se registra un cobro o pago', { enabled: false, urgency: 'low' }),
@@ -139,11 +111,11 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('ocr_incomplete', 'documentacion', 'rrhh', 'OCR con baja confianza', 'Escaneo OCR con datos incompletos o dudosos', { urgency: 'medium' }),
 
   // ─── Operaciones / stock / taller / CRM / ventas ─────────────────────────
-  r('stock_low', 'stock', 'operaciones', 'Stock bajo', 'Producto por debajo del stock mínimo', { ...pushInApp, urgency: 'high' }),
-  r('out_of_stock', 'stock', 'operaciones', 'Sin stock', 'Producto agotado', { ...pushInApp, urgency: 'high' }),
-  r('low_stock', 'stock', 'operaciones', 'Stock bajo (automático)', 'Alerta automática de stock bajo del motor', { ...pushInApp, urgency: 'high' }),
+  r('stock_low', 'stock', 'catalogProviders', 'Stock bajo', 'Producto por debajo del stock mínimo', { ...pushInApp, urgency: 'high' }),
+  r('out_of_stock', 'stock', 'catalogProviders', 'Sin stock', 'Producto agotado', { ...pushInApp, urgency: 'high' }),
+  r('low_stock', 'stock', 'catalogProviders', 'Stock bajo (automático)', 'Alerta automática de stock bajo del motor', { ...pushInApp, urgency: 'high' }),
   r('stock_new_entry', 'stock', 'operaciones', 'Nueva entrada de stock', 'Nueva unidad registrada en inventario', { enabled: false, urgency: 'low' }),
-  r('negative_stock', 'stock', 'operaciones', 'Stock negativo', 'Producto con stock negativo (error de inventario)', { ...pushInApp, urgency: 'high' }),
+  r('negative_stock', 'stock', 'catalogProviders', 'Stock negativo', 'Producto con stock negativo (error de inventario)', { ...pushInApp, urgency: 'high' }),
   r('parts_low_stock', 'stock', 'operaciones', 'Recambio con stock bajo', 'Pieza de taller por debajo del mínimo', { urgency: 'high' }),
   r('purchase_order_delayed', 'stock', 'operaciones', 'Pedido de compra retrasado', 'Pedido a proveedor fuera de plazo', { ...pushInApp, urgency: 'high' }),
   r('weekly_purchase_missing', 'stock', 'operaciones', 'Compra semanal pendiente', 'Sin pedido de compra en la semana esperada', { urgency: 'medium' }),
@@ -152,8 +124,8 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('critical_product_not_ordered', 'stock', 'operaciones', 'Producto crítico sin pedir', 'Producto crítico sin pedido de reposición', { urgency: 'high' }),
   r('vehicle_stock_aging', 'stock', 'operaciones', 'Vehículo sin vender', 'Vehículo en stock demasiado tiempo', { urgency: 'medium', schedule: 'digest_daily' }),
   r('sale_completed', 'ventas', 'operaciones', 'Venta completada', 'Operación de venta marcada como completada', { enabled: false, ...pushEmail, urgency: 'medium' }),
-  r('sale_cancelled', 'ventas', 'operaciones', 'Venta cancelada', 'Operación de venta cancelada', { ...pushInApp, urgency: 'high' }),
-  r('lead_new', 'crm', 'operaciones', 'Nuevo lead', 'Lead recibido desde web, portal o manual', { ...pushInApp, urgency: 'medium' }),
+  r('sale_cancelled', 'ventas', 'finanzas', 'Venta cancelada', 'Operación de venta cancelada', { ...pushInApp, urgency: 'high' }),
+  r('lead_new', 'crm', 'finanzas', 'Nuevo lead', 'Lead recibido desde web, portal o manual', { ...pushInApp, urgency: 'medium' }),
   r('lead_stale', 'crm', 'operaciones', 'Lead sin actividad', 'Lead sin interacción en 48h o más', { urgency: 'medium', schedule: 'digest_daily' }),
   r('appointment_reminder', 'citas', 'operaciones', 'Recordatorio de cita', 'Cita programada próxima', { ...pushEmail, urgency: 'medium' }),
   r('appointment_missed', 'citas', 'operaciones', 'Cita no atendida', 'Cita sin confirmación de asistencia', { ...pushInApp, urgency: 'high' }),
@@ -264,7 +236,7 @@ export function mergeAlertRules(existing) {
         description: prev.description || def.description,
         department: prev.department || def.department,
         category: prev.category || def.category,
-        planTier: prev.planTier || def.planTier,
+        planTier: def.planTier,
       });
     }
   }

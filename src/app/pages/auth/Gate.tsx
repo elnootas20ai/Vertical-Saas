@@ -16,6 +16,8 @@ import {
   FolderOpen,
   Download,
   Wrench,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { ACCESO__Modal } from '../../components/design-system/ACCESO__Modal';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
@@ -89,7 +91,16 @@ export function Gate() {
   const navigate = useNavigate();
   const { data } = useOnboarding();
   const { logout, user } = useAuth();
-  const { businesses, currentBusiness, switchBusiness, isLoading: isLoadingBusinesses, createBusiness, reloadBusinesses } = useBusiness();
+  const {
+    businesses,
+    currentBusiness,
+    switchBusiness,
+    isLoading: isLoadingBusinesses,
+    businessesFetchSettled,
+    businessesLoadError,
+    createBusiness,
+    reloadBusinesses,
+  } = useBusiness();
   const { vehicles, leads, clients, sales } = useApp();
   const isSuperAdmin = isVertialSuperAdminEmail(user?.email);
   const showAncoveIntegration = currentBusiness?.businessType === 'carDealership';
@@ -152,6 +163,17 @@ export function Gate() {
 
   // Datos reales del onboarding (sin placeholders)
   const hasApiBusinesses = businesses.length > 0;
+  const isBusinessesPending = !businessesFetchSettled || (isLoadingBusinesses && !hasApiBusinesses);
+  const showBusinessesLoadError = Boolean(businessesLoadError) && !isBusinessesPending;
+  const showTrulyEmptyBusinesses =
+    businessesFetchSettled && !isBusinessesPending && !hasApiBusinesses && !businessesLoadError;
+
+  // Si hay empresas pero aún no hay activa (race tras F5), elegir la primera.
+  useEffect(() => {
+    if (isBusinessesPending || !hasApiBusinesses || currentBusiness) return;
+    const first = businesses[0];
+    if (first?.business_id) switchBusiness(first.business_id);
+  }, [isBusinessesPending, hasApiBusinesses, currentBusiness, businesses, switchBusiness]);
   const hasCIF = hasApiBusinesses
     ? Boolean(currentBusiness?.taxId?.trim())
     : data.companyProfile.taxId.length > 0;
@@ -342,15 +364,49 @@ export function Gate() {
           {/* Left column - 2/3 */}
           <div className="lg:col-span-2 space-y-6">
             {/* Todas las empresas — grid completo */}
-            {!isLoadingBusinesses && (
-              <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 space-y-4">
+            <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 space-y-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Todas las empresas</h3>
                   <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium rounded-full">
-                    {businesses.length}
+                    {isBusinessesPending ? '…' : businesses.length}
                   </span>
                 </div>
-                {hasApiBusinesses && businesses.length > 0 ? (
+                {isBusinessesPending ? (
+                  <div className="space-y-3 animate-pulse">
+                    <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
+                    <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
+                  </div>
+                ) : showBusinessesLoadError ? (
+                  <div className="rounded-2xl border border-amber-300 dark:border-amber-700 bg-amber-50/90 dark:bg-amber-950/30 p-8 text-center">
+                    <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto mb-3" />
+                    <p className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
+                      Conexión lenta con el servidor
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 max-w-md mx-auto">
+                      Tus empresas y datos <strong>no se han borrado</strong>. Suele ser un fallo puntual de red o
+                      sincronización. Pulsa Reintentar y deberían aparecer en unos segundos.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                      <ACCESO__Button variant="primary" onClick={() => void reloadBusinesses()}>
+                        <RefreshCw className="w-4 h-4" />
+                        Reintentar
+                      </ACCESO__Button>
+                      {hasApiBusinesses ? (
+                        <ACCESO__Button
+                          variant="outline"
+                          onClick={() => {
+                            if (currentBusiness?.business_id) {
+                              switchBusiness(currentBusiness.business_id);
+                            }
+                            navigate('/saas/dashboard');
+                          }}
+                        >
+                          Entrar con datos en caché
+                        </ACCESO__Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : hasApiBusinesses && businesses.length > 0 ? (
                   <BusinessGrid
                     businesses={businesses}
                     currentBusinessId={currentBusiness?.business_id}
@@ -362,7 +418,7 @@ export function Gate() {
                     vehicles={vehicles}
                     sales={sales}
                   />
-                ) : (
+                ) : showTrulyEmptyBusinesses ? (
                   <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-800 p-8 text-center">
                     <Building2 className="w-10 h-10 text-gray-400 mx-auto mb-3" />
                     <p className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">Todavia no hay empresas</p>
@@ -377,9 +433,8 @@ export function Gate() {
                       Crear primera empresa
                     </ACCESO__Button>
                   </div>
-                )}
+                ) : null}
               </div>
-            )}
 
           </div>
 
@@ -388,10 +443,24 @@ export function Gate() {
             {/* Tu espacio / Empresa activa */}
             <div className="p-7 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 shadow-sm">
               <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-5">Tu espacio</h3>
-              {isLoadingBusinesses ? (
+              {isBusinessesPending ? (
                 <div className="space-y-3 animate-pulse">
                   <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded-xl" />
                   <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
+                </div>
+              ) : showBusinessesLoadError && hasApiBusinesses && currentBusiness ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/25 p-4 text-sm text-amber-900 dark:text-amber-200">
+                    Conexión inestable. Puedes entrar con la última empresa guardada en este navegador.
+                  </div>
+                  <ACCESO__Button onClick={handleEnterDashboard} variant="primary" fullWidth size="lg">
+                    <span className="flex-1 text-left">Entrar al panel ({currentBusiness.name})</span>
+                    <ArrowRight className="w-5 h-5 shrink-0" />
+                  </ACCESO__Button>
+                  <ACCESO__Button variant="outline" fullWidth onClick={() => void reloadBusinesses()}>
+                    <RefreshCw className="w-5 h-5" />
+                    Reintentar carga
+                  </ACCESO__Button>
                 </div>
               ) : hasApiBusinesses && currentBusiness ? (
                 <div className="space-y-4">
@@ -444,7 +513,7 @@ export function Gate() {
                     Invitar a un trabajador
                   </ACCESO__Button>
                 </div>
-              ) : (
+              ) : showTrulyEmptyBusinesses ? (
                 <div className="text-center py-8">
                   <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Plus className="w-7 h-7 text-amber-600" />
@@ -463,7 +532,21 @@ export function Gate() {
                     Nueva empresa
                   </ACCESO__Button>
                 </div>
-              )}
+              ) : showBusinessesLoadError ? (
+                <div className="text-center py-8 space-y-4">
+                  <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto" />
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{businessesLoadError}</p>
+                  <ACCESO__Button variant="primary" fullWidth onClick={() => void reloadBusinesses()}>
+                    <RefreshCw className="w-5 h-5" />
+                    Reintentar
+                  </ACCESO__Button>
+                </div>
+              ) : hasApiBusinesses ? (
+                <div className="space-y-3 animate-pulse">
+                  <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded-xl" />
+                  <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
+                </div>
+              ) : null}
             </div>
 
             {/* Integraciones (solo Compraventa) */}

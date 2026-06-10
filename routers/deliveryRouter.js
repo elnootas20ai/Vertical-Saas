@@ -15,6 +15,7 @@ import {
   createCatalogItem,
   bulkCreateCatalogItems,
   bulkApplyStaffPrices,
+  bulkUpdateCatalogStock,
   updateCatalogItem,
   removeCatalogItem,
   listSuppliers,
@@ -133,6 +134,7 @@ deliveryRouter.get('/catalog/:userId', listCatalogItems);
 deliveryRouter.post('/catalog/:userId', createCatalogItem);
 deliveryRouter.post('/catalog/:userId/bulk', bulkCreateCatalogItems);
 deliveryRouter.post('/catalog/:userId/bulk-staff-prices', bulkApplyStaffPrices);
+deliveryRouter.post('/catalog/:userId/bulk-stock', bulkUpdateCatalogStock);
 deliveryRouter.put('/catalog/:userId/:itemId', updateCatalogItem);
 deliveryRouter.delete('/catalog/:userId/:itemId', removeCatalogItem);
 

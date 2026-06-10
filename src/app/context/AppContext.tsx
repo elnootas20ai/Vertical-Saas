@@ -6,6 +6,7 @@ import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
 import { isWorkerAccount, logActivityRequest } from '../lib/authApi';
+import { pruneVertialStorageIfNeeded } from '../lib/clientSessionStorage';
 import {
   bulkCreateVehiclesRequest,
   createVehicleRequest,
@@ -715,6 +716,67 @@ function deserializeNotification(notification: NotificationRecord): AppNotificat
   };
 }
 
+/** Max notifications kept in React state (newest first). */
+const NOTIFICATIONS_STATE_LIMIT = 80;
+/** Max notifications written to localStorage (offline cache). */
+const NOTIFICATIONS_CACHE_LIMIT = 40;
+
+function sortNotificationsNewestFirst(list: AppNotification[]): AppNotification[] {
+  return [...list].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+function capNotifications(list: AppNotification[], limit = NOTIFICATIONS_STATE_LIMIT): AppNotification[] {
+  if (list.length <= limit) return list;
+  return sortNotificationsNewestFirst(list).slice(0, limit);
+}
+
+function notificationForCache(notification: AppNotification): AppNotification {
+  const metadata = notification.metadata;
+  if (!metadata || typeof metadata !== 'object') {
+    return notification;
+  }
+  const keys = Object.keys(metadata);
+  if (keys.length <= 12) {
+    return notification;
+  }
+  const trimmed: Record<string, unknown> = {};
+  for (const key of keys.slice(0, 12)) {
+    trimmed[key] = metadata[key];
+  }
+  return { ...notification, metadata: trimmed };
+}
+
+function persistNotificationsCache(key: string, notifications: AppNotification[]) {
+  if (typeof window === 'undefined') return;
+
+  const limits = [NOTIFICATIONS_CACHE_LIMIT, 25, 10, 5];
+  for (const limit of limits) {
+    try {
+      const payload = JSON.stringify(
+        sortNotificationsNewestFirst(notifications)
+          .slice(0, limit)
+          .map(notificationForCache),
+      );
+      window.localStorage.setItem(key, payload);
+      return;
+    } catch (error) {
+      const isQuotaError =
+        error instanceof DOMException &&
+        (error.name === 'QuotaExceededError' || error.code === 22);
+      if (!isQuotaError) {
+        console.error('Error saving notification cache:', error);
+        return;
+      }
+    }
+  }
+
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+}
+
 export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
 export const DEV_EXTRA_PDV_KEY = 'vertial_dev_extra_pdv';
 export const DEV_UNLIMITED_PDV_KEY = 'vertial_dev_unlimited_pdv';
@@ -863,6 +925,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const leadsStorageKey = `vertial-leads:${scopeKey}`;
   const clientsStorageKey = `vertial-clients:${scopeKey}`;
   const notificationsStorageKey = `vertial-notifications:${scopeKey}`;
+
+  useEffect(() => {
+    pruneVertialStorageIfNeeded();
+  }, []);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
@@ -1023,7 +1089,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
     try {
       const saved = localStorage.getItem('vertial-notifications:guest');
-      return saved ? JSON.parse(saved).map(deserializeNotification) : [];
+      return saved ? capNotifications(JSON.parse(saved).map(deserializeNotification)) : [];
     } catch {
       return [];
     }
@@ -1247,7 +1313,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!authUser?.user_id) {
       try {
         const saved = localStorage.getItem('vertial-notifications:guest');
-        setNotifications(saved ? JSON.parse(saved).map(deserializeNotification) : []);
+        setNotifications(saved ? capNotifications(JSON.parse(saved).map(deserializeNotification)) : []);
       } catch (storageError) {
         console.error('Error loading guest notifications:', storageError);
         setNotifications([]);
@@ -1260,15 +1326,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     listNotificationsRequest(authUser.user_id)
       .then((response) => {
         if (!cancelled) {
-          setNotifications((response.notifications || []).map(deserializeNotification));
+          setNotifications(
+            capNotifications((response.notifications || []).map(deserializeNotification)),
+          );
         }
       })
       .catch((error) => {
         console.error('Error loading notifications:', error);
         try {
-          const saved = localStorage.getItem(`vertial-notifications:${authUser.user_id}`);
+          const saved = localStorage.getItem(notificationsStorageKey);
           if (saved && !cancelled) {
-            setNotifications(JSON.parse(saved).map(deserializeNotification));
+            setNotifications(capNotifications(JSON.parse(saved).map(deserializeNotification)));
           } else if (!cancelled) {
             setNotifications([]);
           }
@@ -1283,7 +1351,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, notificationsStorageKey]);
 
   // ─── Load sales from CouchDB ──────────────────────────────────────────────
   useEffect(() => {
@@ -1400,7 +1468,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { localStorage.setItem(vehiclesStorageKey, JSON.stringify(vehicles)); }, [vehicles, vehiclesStorageKey]);
   useEffect(() => { localStorage.setItem(leadsStorageKey, JSON.stringify(leads)); }, [leads, leadsStorageKey]);
   useEffect(() => { localStorage.setItem(clientsStorageKey, JSON.stringify(clients)); }, [clients, clientsStorageKey]);
-  useEffect(() => { localStorage.setItem(notificationsStorageKey, JSON.stringify(notifications)); }, [notifications, notificationsStorageKey]);
+  useEffect(() => {
+    persistNotificationsCache(notificationsStorageKey, notifications);
+  }, [notifications, notificationsStorageKey]);
 
   const canAccessFeature = () =>
     ['trial_active', 'trial_expiring', 'subscription_active'].includes(subscription.status);
@@ -1446,7 +1516,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         createdAt: notification.createdAt || new Date().toISOString(),
         updatedAt: notification.createdAt || new Date().toISOString(),
       };
-      setNotifications((prev) => [localNotification, ...prev]);
+      setNotifications((prev) => capNotifications([localNotification, ...prev]));
       return localNotification;
     }
 
@@ -1459,7 +1529,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextNotification = deserializeNotification(response.notification);
       setNotifications((prev) => {
         const withoutCurrent = prev.filter((item) => item.id !== nextNotification.id);
-        return [nextNotification, ...withoutCurrent];
+        return capNotifications([nextNotification, ...withoutCurrent]);
       });
       return nextNotification;
     } catch {
@@ -2064,7 +2134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!n?.id) return;
     setNotifications((prev) => {
       if (prev.some((x) => x.id === n.id)) return prev;
-      return [deserializeNotification(n), ...prev];
+      return capNotifications([deserializeNotification(n), ...prev]);
     });
     // Evento DOM para que cualquier pantalla pueda reaccionar al SSE sin tener
     // que enchufarse al provider. Se usa, por ejemplo, en Clockins para

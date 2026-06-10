@@ -24,14 +24,22 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?._id?.replace('business:', '') || currentBusiness?.id || user?.userId || '';
+  const businessId =
+    currentBusiness?.business_id?.replace(/^business:/, '')
+    || currentBusiness?.id?.replace(/^business:/, '')
+    || user?.user_id
+    || user?.id
+    || '';
 
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [recent, setRecent] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const [summaryRes, alertsRes] = await Promise.all([

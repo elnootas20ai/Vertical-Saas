@@ -296,3 +296,19 @@ export function mergeBrandCatalogCategories(existing: string[] | undefined, impo
   for (const cat of imported) add(cat);
   return out;
 }
+
+export function parseCatalogImportStockFields(entry: Record<string, string>) {
+  const stockRaw = String(entry.stockQuantity || entry.stock_actual || entry.stock || '').trim();
+  const minStockRaw = String(entry.minStock || entry.stock_minimo || '').trim();
+  const stockQuantity = stockRaw ? Number(stockRaw.replace(',', '.')) : 0;
+  const minStock = minStockRaw ? Number(minStockRaw.replace(',', '.')) : 0;
+  const unit = String(entry.unit || entry.unidad || 'ud').trim() || 'ud';
+  const tracksStock = stockRaw !== '' || minStockRaw !== '' || stockQuantity > 0 || minStock > 0;
+
+  return {
+    stockQuantity: Number.isFinite(stockQuantity) ? Math.max(0, stockQuantity) : 0,
+    minStock: Number.isFinite(minStock) ? Math.max(0, minStock) : 0,
+    unit,
+    isStockItem: tracksStock,
+  };
+}

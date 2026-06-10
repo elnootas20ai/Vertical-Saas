@@ -24,6 +24,7 @@ import {
   isDeliveryBusinessType,
   loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
+  resolveBusinessScopeId,
 } from '../lib/deliverySetup';
 import { filterStoresForWorkerAssignment, isInvitedWorkerUser } from '../lib/pdvScope';
 import type { AuthUser } from '../lib/authApi';
@@ -115,7 +116,7 @@ function ActiveStoreScopeProviderImpl({
   const [initialLoading, setInitialLoading] = useState(false);
   const [version, setVersion] = useState(0);
 
-  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user?.user_id, user?.id, currentBusiness?.business_id, currentBusiness?.id],
@@ -145,6 +146,7 @@ function ActiveStoreScopeProviderImpl({
   }, []);
 
   useLayoutEffect(() => {
+    setInitialLoading(false);
     if (!businessId) {
       setPointsOfSale([]);
       setAllPointsOfSale([]);
@@ -174,7 +176,7 @@ function ActiveStoreScopeProviderImpl({
 
     const run = async () => {
       const biz = currentBusinessRef.current;
-      const bidAtStart = String(biz?.business_id || biz?.id || '');
+      const bidAtStart = resolveBusinessScopeId(biz);
       const seq = ++loadSeqRef.current;
       const authUser = userRef.current;
       const uid = String(authUser?.user_id || authUser?.id || '').trim();
@@ -240,7 +242,9 @@ function ActiveStoreScopeProviderImpl({
       } catch {
         /* conservar caché / última lista */
       } finally {
-        if (seq === loadSeqRef.current && showInitialSpinner) setInitialLoading(false);
+        if (seq === loadSeqRef.current && showInitialSpinner) {
+          setInitialLoading(false);
+        }
       }
     };
 
