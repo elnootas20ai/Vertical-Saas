@@ -6,6 +6,8 @@ import { useWorkCenters } from '../../hooks/useWorkCenters';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
 import {
   listFinanceMovements,
   createFinanceMovementInCouch,
@@ -147,9 +149,15 @@ interface CreateMovementModalProps {
   editItem?: FinanceMovementRecord | null;
   defaultType?: FinanceMovementDocType;
   userId?: string;
+  businessId?: string;
+  businessName?: string;
+  workCenters?: { id: string; name: string }[];
 }
 
-function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType, userId }: CreateMovementModalProps) {
+function CreateMovementModal({
+  isOpen, onClose, onCreate, editItem, defaultType, userId,
+  businessId, businessName, workCenters = [],
+}: CreateMovementModalProps) {
   const [form, setForm] = useState({
     type: (defaultType || 'cobro') as FinanceMovementDocType,
     concept: '', reference: '', category: '', amountBase: '', taxRate: '21',
@@ -157,6 +165,7 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
     notes: '', companyName: '',
     status: 'paid' as FinanceMovementStatus,
     dueDate: '',
+    workCenterId: '',
   });
   const [suggestedCategory, setSuggestedCategory] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -170,6 +179,7 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
         payMethod: editItem.payMethod, notes: editItem.notes, companyName: editItem.companyName || '',
         status: editItem.status || 'paid',
         dueDate: editItem.dueDate || '',
+        workCenterId: editItem.workCenterId || '',
       });
     } else {
       setForm({
@@ -177,6 +187,7 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
         amountBase: '', taxRate: '21', date: new Date().toISOString().slice(0, 10),
         payMethod: 'transferencia', notes: '', companyName: '',
         status: 'paid', dueDate: '',
+        workCenterId: '',
       });
     }
     setSuggestedCategory(null);
@@ -212,6 +223,7 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
     if (!form.concept.trim()) { toast.error('El concepto es obligatorio'); return; }
     if (!form.category) { toast.error('Selecciona una categoría'); return; }
     if (base <= 0) { toast.error('El importe debe ser mayor que 0'); return; }
+    const wc = workCenters.find((w) => w.id === form.workCenterId);
     onCreate({
       type: form.type, concept: form.concept, reference: form.reference,
       category: form.category, amountBase: base, taxRate: tax,
@@ -220,6 +232,10 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
       status: form.status,
       dueDate: form.status === 'pending' ? form.dueDate : undefined,
       paidAt: form.status === 'paid' ? new Date().toISOString() : undefined,
+      businessId: businessId || undefined,
+      businessName: businessName || undefined,
+      workCenterId: form.workCenterId || undefined,
+      workCenterName: wc?.name || undefined,
     });
   };
 
@@ -293,6 +309,22 @@ function CreateMovementModal({ isOpen, onClose, onCreate, editItem, defaultType,
               <input className={inputClass} placeholder="Nombre de la empresa" value={form.companyName} onChange={e => setForm(f => ({ ...f, companyName: e.target.value }))} />
             </div>
           </div>
+
+          {workCenters.length > 0 && (
+            <div>
+              <label className={labelClass}>Tienda / centro</label>
+              <select
+                className={inputClass}
+                value={form.workCenterId}
+                onChange={(e) => setForm((f) => ({ ...f, workCenterId: e.target.value }))}
+              >
+                <option value="">Sin asignar (central)</option>
+                {workCenters.map((wc) => (
+                  <option key={wc.id} value={wc.id}>{wc.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Amounts */}
           <div className="grid grid-cols-3 gap-4">
@@ -513,6 +545,8 @@ function CategoryChart({ movements, type }: { movements: FinanceMovementRecord[]
 
 export function IncomeExpensesPage() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const financeUserId = useFinanceUserId();
   const navigate = useNavigate();
   const [movements, setMovements] = useState<FinanceMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -535,30 +569,44 @@ export function IncomeExpensesPage() {
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const [filterWorkCenter, setFilterWorkCenter] = useState<string>('all');
 
+  const businessId = String(currentBusiness?.business_id || '');
+  const businessWorkCenters = useMemo(
+    () =>
+      activeWorkCenters
+        .filter((wc) => !businessId || !wc.businessId || wc.businessId === businessId)
+        .map((wc) => ({ id: wc._id || wc.id, name: wc.name })),
+    [activeWorkCenters, businessId],
+  );
+
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
+    setLoading(true);
     try {
-      const [mvs, recon] = await Promise.all([
-        listFinanceMovements(user.id),
-        fetchReconciliationSuggestions(user.id).catch(() => []),
+      const [movs, suggestions] = await Promise.all([
+        listFinanceMovements(financeUserId),
+        fetchReconciliationSuggestions(financeUserId).catch(() => []),
       ]);
-      setMovements(mvs);
-      setReconcSuggestions(recon);
-    } catch { toast.error('Error al cargar movimientos'); } finally { setLoading(false); }
-  }, [user?.id]);
+      setMovements(movs);
+      setReconcSuggestions(suggestions);
+    } catch {
+      toast.error('Error al cargar movimientos');
+    } finally {
+      setLoading(false);
+    }
+  }, [financeUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useModalClose(showCreate, () => { setShowCreate(false); setEditingItem(null); });
 
   const handleCreate = async (data: CreateFinanceMovementPayload) => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
       if (editingItem) {
-        const updated = await updateFinanceMovementInCouch(user.id, { ...editingItem, ...data, user_id: user.id });
+        const updated = await updateFinanceMovementInCouch(financeUserId, { ...editingItem, ...data, user_id: financeUserId });
         setMovements(prev => prev.map(m => m._id === updated._id ? updated : m));
         toast.success('Movimiento actualizado');
       } else {
-        const created = await createFinanceMovementInCouch(user.id, { ...data, user_id: user.id });
+        const created = await createFinanceMovementInCouch(financeUserId, { ...data, user_id: financeUserId });
         setMovements(prev => [created, ...prev]);
         toast.success(data.type === 'cobro' ? 'Ingreso registrado' : 'Gasto registrado');
       }
@@ -567,9 +615,9 @@ export function IncomeExpensesPage() {
   };
 
   const handleDelete = async (m: FinanceMovementRecord) => {
-    if (!user?.id || !confirm(`¿Eliminar "${m.concept}"?`)) return;
+    if (!financeUserId || !confirm(`¿Eliminar "${m.concept}"?`)) return;
     try {
-      await deleteFinanceMovementFromCouch(user.id, m._id);
+      await deleteFinanceMovementFromCouch(financeUserId, m._id);
       setMovements(prev => prev.filter(x => x._id !== m._id));
       setSelected(prev => { const n = new Set(prev); n.delete(m._id); return n; });
       toast.success('Movimiento eliminado');
@@ -577,26 +625,26 @@ export function IncomeExpensesPage() {
   };
 
   const handleMarkPaid = async (m: FinanceMovementRecord) => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
-      const updated = await markMovementPaid(user.id, m._id);
+      const updated = await markMovementPaid(financeUserId, m._id);
       setMovements(prev => prev.map(x => x._id === updated._id ? updated : x));
       toast.success('Marcado como pagado');
     } catch { toast.error('Error al actualizar'); }
   };
 
   const handleBulkMarkPaid = async () => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     const pending = [...selected].map(id => movements.find(m => m._id === id)).filter((m): m is FinanceMovementRecord => !!m && m.status === 'pending');
     for (const m of pending) await handleMarkPaid(m);
     setSelected(new Set());
   };
 
   const handleBulkDelete = async () => {
-    if (!user?.id || !confirm(`¿Eliminar ${selected.size} movimiento(s)?`)) return;
+    if (!financeUserId || !confirm(`¿Eliminar ${selected.size} movimiento(s)?`)) return;
     for (const id of selected) {
       const m = movements.find(x => x._id === id);
-      if (m) await deleteFinanceMovementFromCouch(user.id, m._id);
+      if (m) await deleteFinanceMovementFromCouch(financeUserId, m._id);
     }
     setMovements(prev => prev.filter(m => !selected.has(m._id)));
     setSelected(new Set());
@@ -613,7 +661,7 @@ export function IncomeExpensesPage() {
 
   const filtered = useMemo(() => {
     let items = movements;
-    if (filterWorkCenter !== 'all') items = items.filter(item => (item as any).workCenterId === filterWorkCenter);
+    if (filterWorkCenter !== 'all') items = items.filter(item => item.workCenterId === filterWorkCenter);
     if (filterMonth) items = items.filter(m => m.date.startsWith(filterMonth));
     if (activeTab === 'income') items = items.filter(m => m.type === 'cobro');
     else if (activeTab === 'expense') items = items.filter(m => m.type === 'pago');
@@ -1070,6 +1118,9 @@ export function IncomeExpensesPage() {
         editItem={editingItem}
         defaultType={defaultType}
         userId={user?.id}
+        businessId={businessId}
+        businessName={currentBusiness?.name}
+        workCenters={businessWorkCenters}
       />
 
       <SAAS__OcrScanModal

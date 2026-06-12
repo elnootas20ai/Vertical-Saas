@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
-import { useAuth } from '../../context/AuthContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
 import {
   listBankTransactions, importBankFile, triggerAutoMatch,
   updateBankTransaction, reconcileTransaction, unlinkTransaction,
@@ -18,7 +18,7 @@ import {
 function fmt(n: number) { return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 export function BankReconciliationPage() {
-  const { user } = useAuth();
+  const financeUserId = useFinanceUserId();
   const [bankTxs, setBankTxs] = useState<BankTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
@@ -30,11 +30,11 @@ export function BankReconciliationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
       const [txs, alertsData] = await Promise.all([
-        listBankTransactions(user.id),
-        fetchReconciliationAlerts(user.id).catch(() => []),
+        listBankTransactions(financeUserId),
+        fetchReconciliationAlerts(financeUserId).catch(() => []),
       ]);
       setBankTxs(txs);
       setAlerts(alertsData);
@@ -43,17 +43,17 @@ export function BankReconciliationPage() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [financeUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !user?.id) return;
+    if (!file || !financeUserId) return;
     setImporting(true);
     try {
       const text = await file.text();
-      const result = await importBankFile(user.id, text, file.name);
+      const result = await importBankFile(financeUserId, text, file.name);
       if (result.imported === 0 && result.duplicates === 0) {
         toast.error('No se encontraron transacciones en el archivo');
         return;
@@ -72,9 +72,9 @@ export function BankReconciliationPage() {
   };
 
   const handleAutoMatch = async () => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
-      const result = await triggerAutoMatch(user.id);
+      const result = await triggerAutoMatch(financeUserId);
       setMatches(result.matches);
       if (result.totalMatches === 0) toast.info('No se encontraron coincidencias automáticas');
       else toast.success(`${result.totalMatches} coincidencia(s) encontrada(s) de ${result.totalProcessed} analizadas`);
@@ -84,10 +84,10 @@ export function BankReconciliationPage() {
   };
 
   const handleApplyMatch = async (bankTxId: string, suggestion: ReconciliationMatch['suggestions'][0]) => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
       const action = suggestion.entityType === 'movement' ? 'link_existing' : 'link_invoice';
-      const updated = await reconcileTransaction(user.id, bankTxId, {
+      const updated = await reconcileTransaction(financeUserId, bankTxId, {
         action,
         targetId: suggestion.entityId,
       });
@@ -98,28 +98,28 @@ export function BankReconciliationPage() {
   };
 
   const handleUnmatch = async (tx: BankTransaction) => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
-      const updated = await unlinkTransaction(user.id, tx._id);
+      const updated = await unlinkTransaction(financeUserId, tx._id);
       setBankTxs(prev => prev.map(t => t._id === tx._id ? updated : t));
       toast.success('Conciliación deshecha');
     } catch { toast.error('Error al deshacer'); }
   };
 
   const handleIgnore = async (tx: BankTransaction) => {
-    if (!user?.id) return;
+    if (!financeUserId) return;
     try {
       const newStatus = tx.status === 'ignored' ? 'unmatched' : 'ignored';
-      const updated = await updateBankTransaction(user.id, { _id: tx._id, status: newStatus } as BankTransaction);
+      const updated = await updateBankTransaction(financeUserId, { _id: tx._id, status: newStatus } as BankTransaction);
       setBankTxs(prev => prev.map(t => t._id === tx._id ? updated : t));
       toast.success(newStatus === 'ignored' ? 'Transacción ignorada' : 'Transacción restaurada');
     } catch { toast.error('Error al actualizar'); }
   };
 
   const handleDelete = async (tx: BankTransaction) => {
-    if (!user?.id || !confirm('¿Eliminar esta transacción bancaria?')) return;
+    if (!financeUserId || !confirm('¿Eliminar esta transacción bancaria?')) return;
     try {
-      await deleteBankTransaction(user.id, tx._id);
+      await deleteBankTransaction(financeUserId, tx._id);
       setBankTxs(prev => prev.filter(t => t._id !== tx._id));
       toast.success('Transacción eliminada');
     } catch { toast.error('Error al eliminar'); }

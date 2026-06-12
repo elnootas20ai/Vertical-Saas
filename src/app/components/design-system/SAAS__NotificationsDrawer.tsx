@@ -7,6 +7,8 @@ import {
 import { useNavigate } from 'react-router';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
@@ -27,6 +29,12 @@ import {
   triggerAlertEngineCheck,
   type AlertRecord,
 } from '../../lib/alertCenterApi';
+import {
+  fetchDocumentAlertsAsRecords,
+  mergeAlertLists,
+  shouldIncludeDocumentAlerts,
+  isSyntheticDocumentAlert,
+} from '../../lib/documentAlertsApi';
 
 interface Props {
   isOpen: boolean;
@@ -137,9 +145,14 @@ function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
 function AlertCenterDrawer({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = useAlertCenterBusinessId();
   const { departments, departmentSourceFilter, vertical } = useAlertDepartments();
-  const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, { pollMs: isOpen ? 30_000 : 60_000 });
+  const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, {
+    pollMs: isOpen ? 30_000 : 60_000,
+    dataUserId,
+  });
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -152,18 +165,24 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
     setLoading(true);
     try {
       const sourceFilter = departmentSourceFilter(deptId);
-      const res = await fetchAlerts(businessId, {
-        status: 'new,seen',
-        order: 'desc',
-        page: 1,
-        limit: 20,
-        ...(sourceFilter ? { source: sourceFilter } : {}),
-      });
-      setAlerts(res.alerts || []);
+      const includeDocs = shouldIncludeDocumentAlerts(sourceFilter);
+      const [res, docAlerts] = await Promise.all([
+        fetchAlerts(businessId, {
+          status: 'new,seen',
+          order: 'desc',
+          page: 1,
+          limit: 20,
+          ...(sourceFilter ? { source: sourceFilter } : {}),
+        }),
+        includeDocs && dataUserId
+          ? fetchDocumentAlertsAsRecords(dataUserId, businessId)
+          : Promise.resolve([]),
+      ]);
+      setAlerts(mergeAlertLists(res.alerts || [], docAlerts, 20));
     } catch { /* silent */ } finally {
       setLoading(false);
     }
-  }, [businessId, activeDept]);
+  }, [businessId, activeDept, dataUserId, departmentSourceFilter]);
 
   const syncAndReload = useCallback(async () => {
     if (!businessId) return;
@@ -189,7 +208,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
   }, [activeDept, isOpen, businessId, loadAlerts]);
 
   const handleAlertClick = async (alert: AlertRecord) => {
-    if (alert.status === 'new') {
+    if (alert.status === 'new' && !isSyntheticDocumentAlert(alert.id)) {
       try {
         await updateAlertStatus(businessId, alert.id, 'seen');
       } catch { /* silent */ }
@@ -204,7 +223,7 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
   };
 
   const markAllSeen = async () => {
-    const newIds = alerts.filter((a) => a.status === 'new').map((a) => a.id);
+    const newIds = alerts.filter((a) => a.status === 'new' && !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
     if (newIds.length === 0) return;
     try {
       await bulkUpdateAlertStatus(businessId, newIds, 'seen');
@@ -239,9 +258,9 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
         <AlertProShell
           compact
           title="Centro de alertas"
-          subtitle="Visión ejecutiva · Delivery · Finanzas · RRHH"
+          subtitle="Stock · Finanzas · RRHH · Documentación"
           badge={unresolved > 0 ? (
-            <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-bold text-emerald-300 ring-1 ring-emerald-500/30">
+            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700 ring-1 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900/50">
               {unresolved > 99 ? '99+' : unresolved} activas
             </span>
           ) : undefined}

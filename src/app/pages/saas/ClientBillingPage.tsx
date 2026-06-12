@@ -3,19 +3,20 @@ import { useNotificationOpen } from '../../hooks/useNotificationOpen';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Layout } from '../../components/saas/Layout';
-import { useAuth } from '../../context/AuthContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   listClientInvoicesRequest, createClientInvoiceRequest, updateClientInvoiceRequest,
   deleteClientInvoiceRequest, getNextInvoiceNumber, sendInvoiceByEmail, registerInvoicePayment,
   calcInvoiceTotals, type ClientInvoiceRecord, type ClientInvoiceStatus, type InvoiceLine, type InvoicePayment,
 } from '../../lib/clientInvoicesApi';
+import { linkClientInvoiceToFinance } from '../../lib/clientInvoiceFinanceSync';
 import { listClientsRequest } from '../../lib/crmApi';
 import { generateInvoicePdf, type InvoiceData } from '../../lib/invoicePdfGenerator';
 import {
   Plus, Search, X, Trash2, Edit3, Receipt, CheckCircle2, Clock,
   AlertTriangle, Download, Filter, Calendar, FileText, Send,
-  ChevronDown, ChevronUp, ArrowUpDown, Loader2, CircleDollarSign,
+  ChevronDown, ChevronUp, ArrowUpDown, Loader2, CircleDollarSign, Wallet,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -253,8 +254,7 @@ function PaymentModal({ invoice, onClose, onSave }: { invoice: ClientInvoiceReco
 }
 
 export function ClientBillingPage() {
-  const { authUser } = useAuth();
-  const userId = authUser?.user_id || '';
+  const financeUserId = useFinanceUserId();
   const [invoices, setInvoices] = useState<ClientInvoiceRecord[]>([]);
   const [clients, setClients] = useState<SimpleClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,13 +303,13 @@ export function ClientBillingPage() {
   };
 
   const loadData = useCallback(async () => {
-    if (!userId) return; setLoading(true);
+    if (!financeUserId) return; setLoading(true);
     try {
-      const [invs, cls] = await Promise.all([listClientInvoicesRequest(userId), listClientsRequest(userId).catch(() => [])]);
+      const [invs, cls] = await Promise.all([listClientInvoicesRequest(financeUserId), listClientsRequest(financeUserId).catch(() => [])]);
       setInvoices(invs);
       setClients(cls.map((c: any) => ({ id: c.id, name: c.name || '', dni: c.dni || '', email: c.email || '', phone: c.phone || '', address: c.address, city: c.city, postalCode: c.postalCode })));
     } catch (err: any) { toast.error(err.message || 'Error cargando datos'); } finally { setLoading(false); }
-  }, [userId]);
+  }, [financeUserId]);
   useEffect(() => { loadData(); }, [loadData]);
 
   const filtered = useMemo(() => {
@@ -330,15 +330,26 @@ export function ClientBillingPage() {
 
   const handleSave = async (data: Partial<ClientInvoiceRecord>) => {
     try {
-      if (modalMode === 'edit' && editInv) { const u = await updateClientInvoiceRequest(userId, { ...editInv, ...data } as ClientInvoiceRecord); if (u) { setInvoices(p => p.map(i => i.id === u.id ? u : i)); toast.success('Factura actualizada'); } }
-      else { const c = await createClientInvoiceRequest(userId, data as any); if (c) { setInvoices(p => [c, ...p]); toast.success('Factura creada'); } }
+      if (modalMode === 'edit' && editInv) { const u = await updateClientInvoiceRequest(financeUserId, { ...editInv, ...data } as ClientInvoiceRecord); if (u) { setInvoices(p => p.map(i => i.id === u.id ? u : i)); toast.success('Factura actualizada'); } }
+      else { const c = await createClientInvoiceRequest(financeUserId, data as any); if (c) { setInvoices(p => [c, ...p]); toast.success('Factura creada'); } }
       setModalMode(null); setEditInv(null);
     } catch (err: any) { toast.error(err.message || 'Error guardando factura'); }
   };
-  const handleDel = async (inv: ClientInvoiceRecord) => { if (!confirm('Eliminar factura ' + inv.number + '?')) return; try { await deleteClientInvoiceRequest(userId, inv.id); setInvoices(p => p.filter(i => i.id !== inv.id)); toast.success('Eliminada'); } catch (e: any) { toast.error(e.message); } };
-  const handleSend = async (inv: ClientInvoiceRecord) => { if (!inv.clientEmail) { toast.error('Cliente sin email'); return; } if (!confirm('Enviar ' + inv.number + ' a ' + inv.clientEmail + '?')) return; try { const r = await sendInvoiceByEmail(userId, inv.id); setInvoices(p => p.map(i => i.id === inv.id ? { ...i, sentAt: r.sentAt, sentTo: r.sentTo } : i)); toast.success('Enviada a ' + r.sentTo); } catch (e: any) { toast.error(e.message); } };
+  const handleDel = async (inv: ClientInvoiceRecord) => { if (!confirm('Eliminar factura ' + inv.number + '?')) return; try { await deleteClientInvoiceRequest(financeUserId, inv.id); setInvoices(p => p.filter(i => i.id !== inv.id)); toast.success('Eliminada'); } catch (e: any) { toast.error(e.message); } };
+  const handleSend = async (inv: ClientInvoiceRecord) => { if (!inv.clientEmail) { toast.error('Cliente sin email'); return; } if (!confirm('Enviar ' + inv.number + ' a ' + inv.clientEmail + '?')) return; try { const r = await sendInvoiceByEmail(financeUserId, inv.id); setInvoices(p => p.map(i => i.id === inv.id ? { ...i, sentAt: r.sentAt, sentTo: r.sentTo } : i)); toast.success('Enviada a ' + r.sentTo); } catch (e: any) { toast.error(e.message); } };
   const handlePdf = (inv: ClientInvoiceRecord) => { try { generateInvoicePdf(buildPdfData(inv)); toast.success('PDF descargado'); } catch { toast.error('Error PDF'); } };
-  const handlePay = async (id: string, pay: Omit<InvoicePayment, 'id'>) => { try { const u = await registerInvoicePayment(userId, id, pay); if (u) { setInvoices(p => p.map(i => i.id === u.id ? u : i)); toast.success('Cobro registrado'); } setPayInv(null); } catch (e: any) { toast.error(e.message); } };
+  const handlePay = async (id: string, pay: Omit<InvoicePayment, 'id'>) => { try { const u = await registerInvoicePayment(financeUserId, id, pay); if (u) { setInvoices(p => p.map(i => i.id === u.id ? u : i)); toast.success('Cobro registrado'); } setPayInv(null); } catch (e: any) { toast.error(e.message); } };
+  const handleLinkFinance = async (inv: ClientInvoiceRecord) => {
+    try {
+      const u = await linkClientInvoiceToFinance(financeUserId, inv.id);
+      if (u) {
+        setInvoices((p) => p.map((i) => (i.id === u.id ? u : i)));
+        toast.success('Cobro registrado en finanzas');
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo vincular con finanzas');
+    }
+  };
   const toggleSort = (k: SortKey) => setSort(p => p.key === k ? { key: k, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'desc' });
 
   return (
@@ -397,6 +408,12 @@ export function ClientBillingPage() {
                 <ActBtn icon={Edit3} title="Editar" onClick={() => { setEditInv(inv); setModalMode('edit'); }} />
                 <ActBtn icon={Download} title="PDF" onClick={() => handlePdf(inv)} />
                 <ActBtn icon={Send} title="Enviar" onClick={() => handleSend(inv)} disabled={!inv.clientEmail} />
+                {!inv.financeMovementId && inv.status !== 'draft' && (
+                  <ActBtn icon={Wallet} title="Registrar en finanzas" onClick={() => handleLinkFinance(inv)} cls="text-violet-500 hover:text-violet-600 hover:bg-violet-50" />
+                )}
+                {inv.financeMovementId && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-50 text-violet-600" title="Vinculada a finanzas">Finanzas</span>
+                )}
                 {inv.status !== 'paid' && <ActBtn icon={CircleDollarSign} title="Cobrar" onClick={() => setPayInv(inv)} cls="text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50" />}
                 <ActBtn icon={Trash2} title="Eliminar" onClick={() => handleDel(inv)} cls="text-red-400 hover:text-red-600 hover:bg-red-50" />
               </div></td>
@@ -405,7 +422,7 @@ export function ClientBillingPage() {
         </div>
         <div className="text-xs text-gray-400 text-center pb-2">{filtered.length} de {invoices.length} facturas</div>
       </div>
-      {modalMode && <InvoiceModal mode={modalMode} invoice={editInv} clients={clients} onSave={handleSave} onClose={() => { setModalMode(null); setEditInv(null); }} userId={userId} />}
+      {modalMode && <InvoiceModal mode={modalMode} invoice={editInv} clients={clients} onSave={handleSave} onClose={() => { setModalMode(null); setEditInv(null); }} userId={financeUserId} />}
       {payInv && <PaymentModal invoice={payInv} onClose={() => setPayInv(null)} onSave={handlePay} />}
     
       <AIAddModal

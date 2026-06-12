@@ -1,0 +1,40 @@
+# Smoke test SaaS en push/PR a main (si hay credenciales en Secrets).
+# Secrets opcionales: SAAS_LOGIN_EMAIL, SAAS_LOGIN_PASSWORD, SMOKE_API_BASE
+# Si no están configurados, el job se omite.
+
+name: Smoke SaaS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ secrets.SAAS_LOGIN_EMAIL != '' && secrets.SAAS_LOGIN_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Smoke test (API remota)
+        run: node scripts/smoke-saas.mjs
+        env:
+          SAAS_LOGIN_EMAIL: ${{ secrets.SAAS_LOGIN_EMAIL }}
+          SAAS_LOGIN_PASSWORD: ${{ secrets.SAAS_LOGIN_PASSWORD }}
+          SMOKE_API_BASE: ${{ secrets.SMOKE_API_BASE || 'https://vertialapp.com' }}

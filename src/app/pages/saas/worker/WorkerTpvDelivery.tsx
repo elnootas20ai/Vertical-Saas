@@ -10,10 +10,12 @@ import {
   filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
   cancelDeliveryOrderRequest,
+  getDeliveryConfigRequest,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryType,
 } from '../../../lib/deliveryApi';
+import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { readTpvTabletBinding } from '../../../lib/tpvTabletSession';
 import { TpvRegisterProvider, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
@@ -22,6 +24,7 @@ import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
+import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
 import {
   ChefHat,
@@ -612,6 +615,7 @@ export function WorkerTpvDelivery() {
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
+  const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(false);
 
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const register = useTpvRegisterIfOpen();
@@ -662,6 +666,24 @@ export function WorkerTpvDelivery() {
   }, [userId, scopedPdvId, primaryPdvId, scopedPdvName]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  useEffect(() => {
+    if (!userId) {
+      setStaffConsumptionEnabled(false);
+      return;
+    }
+    getDeliveryConfigRequest(userId)
+      .then((cfg) => {
+        setStaffConsumptionEnabled(normalizeStaffConsumptionConfig(cfg.staffConsumption).enabled);
+      })
+      .catch(() => setStaffConsumptionEnabled(false));
+  }, [userId]);
+
+  useEffect(() => {
+    if (!staffConsumptionEnabled && view === 'staff-consumption') {
+      setView('board');
+    }
+  }, [staffConsumptionEnabled, view]);
 
   useEffect(() => {
     if (!isBrowserOnline()) return;
@@ -898,6 +920,7 @@ export function WorkerTpvDelivery() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      <WorkerStockReviewBanner />
       {/* Header compacto */}
       <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
         <div className="flex items-center justify-between gap-3 mb-3">
@@ -924,7 +947,7 @@ export function WorkerTpvDelivery() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+        <div className={`grid gap-2.5 mb-3 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
           <button
             type="button"
             onClick={() => setView('new-order')}
@@ -933,14 +956,16 @@ export function WorkerTpvDelivery() {
             <Plus className="w-5 h-5" strokeWidth={2.5} />
             Nuevo pedido
           </button>
-          <button
-            type="button"
-            onClick={() => setView('staff-consumption')}
-            className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white font-bold text-sm sm:text-base shadow-lg shadow-violet-900/25 transition-colors"
-          >
-            <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
-            Consumo equipo
-          </button>
+          {staffConsumptionEnabled && (
+            <button
+              type="button"
+              onClick={() => setView('staff-consumption')}
+              className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white font-bold text-sm sm:text-base shadow-lg shadow-violet-900/25 transition-colors"
+            >
+              <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
+              Consumo equipo
+            </button>
+          )}
         </div>
 
         {register && (

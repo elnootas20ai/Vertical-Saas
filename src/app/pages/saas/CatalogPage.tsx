@@ -1294,7 +1294,7 @@ export function CatalogPage() {
           <button onClick={() => navigate('/saas/suppliers')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
             <Factory className="w-3.5 h-3.5" /> Proveedores <ExternalLink className="w-3 h-3" />
           </button>
-          <button onClick={() => navigate('/saas/orders')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
+          <button onClick={() => navigate('/saas/suppliers/ordenes-compra')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
             <ShoppingBag className="w-3.5 h-3.5" /> Pedidos <ExternalLink className="w-3 h-3" />
           </button>
         </div>

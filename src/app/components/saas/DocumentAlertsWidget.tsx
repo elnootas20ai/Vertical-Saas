@@ -5,7 +5,7 @@ import { authFetch, getAuthHeaders } from '../../lib/authApi';
 import { getApiBase } from '../../lib/apiBase';
 import {
   AlertTriangle, ShieldCheck, FileText, ClipboardList,
-  ScanLine, ChevronRight, X, RefreshCw,
+  ScanLine, ChevronRight, X, RefreshCw, Building2,
 } from 'lucide-react';
 
 const _env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
@@ -23,23 +23,23 @@ interface DocAlert {
   registrationPlate?: string;
   actionUrl?: string;
   missingDocs?: string[];
+  category?: string;
 }
 
 const ALERT_ICON: Record<string, React.ReactNode> = {
-  itv_expired:          <ShieldCheck className="w-4 h-4 text-red-500" />,
-  itv_expiring:         <ShieldCheck className="w-4 h-4 text-amber-500" />,
-  missing_vehicle_docs: <FileText className="w-4 h-4 text-amber-500" />,
-  contract_pending_sign:<ClipboardList className="w-4 h-4 text-amber-500" />,
-  ocr_incomplete:       <ScanLine className="w-4 h-4 text-blue-500" />,
-  expired:              <AlertTriangle className="w-4 h-4 text-red-500" />,
-  expiring_soon:        <AlertTriangle className="w-4 h-4 text-amber-500" />,
+  itv_expired:           <ShieldCheck className="w-4 h-4 text-red-500" />,
+  itv_expiring:          <ShieldCheck className="w-4 h-4 text-amber-500" />,
+  missing_vehicle_docs:  <FileText className="w-4 h-4 text-amber-500" />,
+  missing_required:      <Building2 className="w-4 h-4 text-blue-500" />,
+  document_missing_required: <Building2 className="w-4 h-4 text-blue-500" />,
+  contract_pending_sign: <ClipboardList className="w-4 h-4 text-amber-500" />,
+  stale_pending:         <ClipboardList className="w-4 h-4 text-amber-500" />,
+  ocr_incomplete:        <ScanLine className="w-4 h-4 text-blue-500" />,
+  expired:               <AlertTriangle className="w-4 h-4 text-red-500" />,
+  expiring_soon:         <AlertTriangle className="w-4 h-4 text-amber-500" />,
 };
 
-const SEVERITY_STYLES: Record<string, string> = {
-  critical: 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800',
-  warning:  'bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800',
-  info:     'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800',
-};
+const SEVERITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2, alert: 0 };
 
 export function DocumentAlertsWidget() {
   const navigate = useNavigate();
@@ -61,16 +61,16 @@ export function DocumentAlertsWidget() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchAlerts(); }, [user?.id]);
+  useEffect(() => { void fetchAlerts(); }, [user?.id]);
 
-  const compraventaAlerts = useMemo(() =>
-    alerts.filter(a => ['itv_expired', 'itv_expiring', 'missing_vehicle_docs', 'contract_pending_sign', 'ocr_incomplete'].includes(a.type)),
-  [alerts]);
+  const sortedAlerts = useMemo(() => (
+    [...alerts].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9))
+  ), [alerts]);
 
-  if (dismissed || compraventaAlerts.length === 0) return null;
+  if (dismissed || sortedAlerts.length === 0) return null;
 
-  const critCount = compraventaAlerts.filter(a => a.severity === 'critical').length;
-  const warnCount = compraventaAlerts.filter(a => a.severity === 'warning').length;
+  const critCount = sortedAlerts.filter(a => a.severity === 'critical' || a.severity === 'alert').length;
+  const warnCount = sortedAlerts.filter(a => a.severity === 'warning').length;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden">
@@ -79,11 +79,11 @@ export function DocumentAlertsWidget() {
           <FileText className="w-4 h-4 text-amber-500" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Alertas documentación</h3>
           <span className="text-xs font-bold px-2 py-0.5 bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 rounded-full">
-            {compraventaAlerts.length}
+            {sortedAlerts.length}
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={fetchAlerts} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Actualizar">
+          <button onClick={() => void fetchAlerts()} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Actualizar">
             <RefreshCw className={`w-3.5 h-3.5 text-gray-400 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button onClick={() => setDismissed(true)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
@@ -100,9 +100,9 @@ export function DocumentAlertsWidget() {
       )}
 
       <div className="divide-y divide-gray-50 dark:divide-gray-700/50 max-h-60 overflow-y-auto">
-        {compraventaAlerts.slice(0, 8).map((alert, i) => (
+        {sortedAlerts.slice(0, 8).map((alert, i) => (
           <div
-            key={i}
+            key={`${alert.type}-${alert.documentId || alert.message}-${i}`}
             onClick={() => alert.actionUrl && navigate(alert.actionUrl)}
             className={`flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${alert.actionUrl ? 'cursor-pointer' : ''}`}
           >
@@ -111,10 +111,10 @@ export function DocumentAlertsWidget() {
             {alert.actionUrl && <ChevronRight className="w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-0.5" />}
           </div>
         ))}
-        {compraventaAlerts.length > 8 && (
+        {sortedAlerts.length > 8 && (
           <div className="px-4 py-2.5 text-center">
             <button onClick={() => navigate('/saas/documents')} className="text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline">
-              Ver todas las alertas ({compraventaAlerts.length})
+              Ver todas las alertas ({sortedAlerts.length})
             </button>
           </div>
         )}

@@ -1,11 +1,19 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useDeliveryStorePdvGate } from '../../hooks/useDeliveryStorePdvGate';
 import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH, DELIVERY_TIENDA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
+import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
+import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
+import { listWarehousesRequest, type Warehouse } from '../../lib/warehouseApi';
+import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
+import { StockTabPanel } from '../../components/saas/StockTabPanel';
+import { PurchaseOrdersPage } from './PurchaseOrdersPage';
+import { EscandalloPanel } from './CostingPage';
 import JSZip from 'jszip';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -76,13 +84,13 @@ import {
   ArrowUpDown,
   Minus,
   Users,
-  Archive,
   Tag,
   Upload,
   Download,
   Loader2,
   ArrowRight,
   Store,
+  Wallet,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -90,8 +98,9 @@ import { GenericImportModal, type ImportFieldDef } from '../../components/saas/G
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
-import { StaffConsumptionSettingsTab } from '../../components/saas/StaffConsumptionSettingsTab';
+import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -1430,27 +1439,66 @@ function StockAdjustModal({ isOpen, onClose, item, onAdjust }: StockAdjustModalP
   );
 }
 
-// ─── Loading state ─────────────────────────────────────────────────────────────
+// ─── Loading state (progresivo por pasos) ─────────────────────────────────────
 
-function CatalogPageLoadingState({ message = 'Cargando catálogo…' }: { message?: string }) {
+const CATALOG_LOAD_STEPS = [
+  'Sesión',
+  'Datos',
+  'Listo',
+] as const;
+
+type CatalogLoadPhase = 'session' | 'catalog' | 'suppliers' | 'invoices' | 'pdv';
+
+function CatalogTabLoadingState({ phase }: { phase: CatalogLoadPhase }) {
+  const copy: Record<CatalogLoadPhase, { step: number; message: string }> = {
+    session: { step: 0, message: 'Preparando tu espacio de trabajo…' },
+    pdv: { step: 0, message: 'Comprobando tienda activa…' },
+    catalog: { step: 1, message: 'Cargando artículos y almacenes…' },
+    suppliers: { step: 1, message: 'Cargando proveedores…' },
+    invoices: { step: 1, message: 'Cargando facturas de compra…' },
+  };
+  const { step, message } = copy[phase];
+
   return (
-    <div className="py-20 flex flex-col items-center justify-center gap-3 text-gray-500 dark:text-gray-400">
+    <div className="py-16 flex flex-col items-center justify-center gap-4 text-gray-500 dark:text-gray-400">
       <Loader2 className="w-8 h-8 animate-spin text-gray-400 dark:text-gray-500" aria-hidden />
-      <p className="text-sm">{message}</p>
+      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{message}</p>
+      <div className="flex items-center gap-2 mt-1">
+        {CATALOG_LOAD_STEPS.map((label, idx) => (
+          <span
+            key={label}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+              idx < step
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                : idx === step
+                  ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900'
+                  : 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500'
+            }`}
+          >
+            {label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
+
+const TABS_NEED_CATALOG = new Set(['catalog', 'stock', 'staff-consumption']);
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function CatalogPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const CATALOG_TABS = ['catalog', 'stock', 'staff-consumption', 'suppliers', 'purchase-orders', 'invoices', 'escandallo'] as const;
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const catalogScopeReady = businessesFetchSettled && Boolean(businessId) && Boolean(dataUserId);
+  const { config: verticalConfig, businessType } = useVerticalCatalog();
+  const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const pdvGate = useDeliveryStorePdvGate();
   const retailStoreCount = useMemo(
@@ -1465,11 +1513,36 @@ export function CatalogPage() {
   const [loading, setLoading] = useState(true);
   const [suppliersLoading, setSuppliersLoading] = useState(false);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoiceFinanceLinks, setInvoiceFinanceLinks] = useState<Set<string>>(new Set());
   const suppliersFetchedRef = useRef(false);
   const invoicesFetchedRef = useRef(false);
   const suppliersLoadStartedRef = useRef(false);
   const invoicesLoadStartedRef = useRef(false);
-  const [activeTab, setActiveTab] = useState('catalog');
+  const catalogLoadedRef = useRef(false);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const activeTab = useMemo(() => {
+    const tab = searchParams.get('tab') || 'catalog';
+    return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
+  }, [searchParams]);
+  const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
+
+  const storeLabel = activeStore.displayLabelForActive || 'Tienda activa';
+  const activeWorkCenterId = useMemo(() => {
+    const pdv = activeStore.pointsOfSale.find((p) => p._id === activeStore.activeSalesPointId);
+    return String(pdv?.workCenterId || activeStore.activeSalesPointId || '').trim();
+  }, [activeStore.pointsOfSale, activeStore.activeSalesPointId]);
+
+  const catalogForActiveStore = useMemo(() => {
+    if (!activeWorkCenterId) return catalogItems;
+    return catalogItems.filter((i) => catalogItemOperatesAtWorkCenter(i, brands, activeWorkCenterId));
+  }, [catalogItems, brands, activeWorkCenterId]);
+
+  const storeWarehouseId = useMemo(() => {
+    const activeWh = warehouses.filter((w) => w.active);
+    const label = storeLabel.toLowerCase();
+    const byName = activeWh.find((w) => label && w.name.toLowerCase().includes(label.split(/\s+/)[0] || ''));
+    return byName?._id || activeWh.find((w) => w.isDefault)?._id || activeWh[0]?._id || '';
+  }, [warehouses, storeLabel]);
 
   // Catalog state
   const [showCreateItem, setShowCreateItem] = useState(false);
@@ -1791,8 +1864,12 @@ export function CatalogPage() {
   const loadCatalog = useCallback(async () => {
     if (!dataUserId) return;
     try {
-      const items = await listCatalogItemsRequest(dataUserId);
+      const [items, wh] = await Promise.all([
+        listCatalogItemsRequest(dataUserId),
+        listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
+      ]);
       setCatalogItems(items);
+      setWarehouses(wh);
     } catch {
       toast.error('Error al cargar el catálogo');
     }
@@ -1826,34 +1903,72 @@ export function CatalogPage() {
     }
   }, [dataUserId]);
 
+  const loadInvoiceFinanceLinks = useCallback(async () => {
+    if (!dataUserId) return;
+    try {
+      const movements = await listFinanceMovements(dataUserId);
+      const linked = new Set(
+        movements
+          .filter((m) => m.source === 'invoice' && m.sourceRef)
+          .map((m) => String(m.sourceRef)),
+      );
+      setInvoiceFinanceLinks(linked);
+    } catch {
+      // no bloquea la pestaña de facturas
+    }
+  }, [dataUserId]);
+
   useEffect(() => {
+    if (activeTab === 'invoices' && dataUserId) {
+      void loadInvoiceFinanceLinks();
+    }
+  }, [activeTab, dataUserId, loadInvoiceFinanceLinks]);
+
+  useEffect(() => {
+    catalogLoadedRef.current = false;
     suppliersFetchedRef.current = false;
     invoicesFetchedRef.current = false;
     suppliersLoadStartedRef.current = false;
     invoicesLoadStartedRef.current = false;
+    setCatalogItems([]);
     setSuppliers([]);
     setInvoices([]);
-    if (!catalogScopeReady) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    setInvoiceFinanceLinks(new Set());
+    setWarehouses([]);
+    setLoading(false);
+  }, [businessId, dataUserId]);
+
+  useEffect(() => {
+    if (!catalogScopeReady) return;
+    if (!TABS_NEED_CATALOG.has(activeTab)) return;
+    if (catalogLoadedRef.current) return;
+
     let cancelled = false;
+    setLoading(true);
     const timeoutId = window.setTimeout(() => {
       if (cancelled) return;
       setLoading(false);
-      toast.error('La carga del catálogo está tardando mucho. Comprueba la conexión y recarga la página.');
-    }, 30_000);
+      toast.error('La carga está tardando mucho. Comprueba la conexión e inténtalo de nuevo.');
+    }, 25_000);
+
     void loadCatalog().finally(() => {
-      cancelled = true;
+      if (cancelled) return;
       window.clearTimeout(timeoutId);
+      catalogLoadedRef.current = true;
       setLoading(false);
     });
+
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [catalogScopeReady, businessesFetchSettled, dataUserId, businessId, loadCatalog]);
+  }, [catalogScopeReady, activeTab, dataUserId, loadCatalog]);
+
+  useEffect(() => {
+    const onStoreChange = () => { void loadCatalog(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
+  }, [loadCatalog]);
 
   useEffect(() => {
     if (activeTab !== 'suppliers' && activeTab !== 'invoices') return;
@@ -2042,14 +2157,14 @@ export function CatalogPage() {
   // ── CRUD: Invoices ──────────────────────────────────────────────────────────
 
   const handleCreateInvoice = async (data: Partial<PurchaseInvoice>) => {
-    if (!user?.id) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
     try {
       if (editingInvoice) {
-        const updated = await updatePurchaseInvoiceRequest(user.id, { ...editingInvoice, ...data } as PurchaseInvoice);
+        const updated = await updatePurchaseInvoiceRequest(dataUserId, { ...editingInvoice, ...data } as PurchaseInvoice);
         setInvoices(prev => prev.map(i => i._id === updated._id ? updated : i));
         toast.success('Factura actualizada');
       } else {
-        const created = await createPurchaseInvoiceRequest(user.id, data);
+        const created = await createPurchaseInvoiceRequest(dataUserId, data);
         setInvoices(prev => [created, ...prev]);
         toast.success('Factura creada');
       }
@@ -2061,10 +2176,10 @@ export function CatalogPage() {
   };
 
   const handleDeleteInvoice = async (invoice: PurchaseInvoice) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     if (!confirm(`¿Eliminar factura ${invoice.invoiceNumber}?`)) return;
     try {
-      await deletePurchaseInvoiceRequest(user.id, invoice._id);
+      await deletePurchaseInvoiceRequest(dataUserId, invoice._id);
       setInvoices(prev => prev.filter(i => i._id !== invoice._id));
       toast.success('Factura eliminada');
     } catch {
@@ -2073,10 +2188,10 @@ export function CatalogPage() {
   };
 
   const handleToggleInvoiceStatus = async (invoice: PurchaseInvoice) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     const newStatus = invoice.status === 'paid' ? 'pending' : 'paid';
     try {
-      const updated = await updatePurchaseInvoiceRequest(user.id, {
+      const updated = await updatePurchaseInvoiceRequest(dataUserId, {
         ...invoice,
         status: newStatus,
         paidAt: newStatus === 'paid' ? new Date().toISOString() : '',
@@ -2085,6 +2200,17 @@ export function CatalogPage() {
       toast.success(`Factura marcada como ${INVOICE_STATUS_CONFIG[newStatus].label.toLowerCase()}`);
     } catch {
       toast.error('Error al actualizar la factura');
+    }
+  };
+
+  const handleLinkInvoiceToFinance = async (invoice: PurchaseInvoice) => {
+    if (!dataUserId) return;
+    try {
+      await createMovementFromInvoice(dataUserId, invoice._id, 'purchase_invoice');
+      setInvoiceFinanceLinks((prev) => new Set(prev).add(invoice._id));
+      toast.success('Gasto registrado en finanzas');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo registrar en finanzas');
     }
   };
 
@@ -2187,27 +2313,11 @@ export function CatalogPage() {
     totalAmount: invoices.reduce((s, i) => s + (i.total || 0), 0),
   }), [invoices]);
 
-  const productItems = useMemo(
-    () => catalogItems.filter((i) => (i.itemType || 'product') === 'product'),
-    [catalogItems],
-  );
-
-  const lowStockItems = useMemo(
-    () => productItems.filter(
-      (i) => i.active && Number(i.minStock || 0) > 0 && Number(i.stockQuantity || 0) <= Number(i.minStock || 0),
-    ),
-    [productItems],
-  );
-
-  const sortedStockItems = useMemo(() => {
-    const isLow = (item: CatalogItem) =>
-      Number(item.minStock || 0) > 0 && Number(item.stockQuantity || 0) <= Number(item.minStock || 0);
-    return [...productItems].sort((a, b) => {
-      const aLow = isLow(a) ? 0 : 1;
-      const bLow = isLow(b) ? 0 : 1;
-      return aLow - bLow || Number(a.stockQuantity || 0) - Number(b.stockQuantity || 0);
-    });
-  }, [productItems]);
+  const stockTabCount = useMemo(() => {
+    const scoped = filterStockInventoryItems(catalogForActiveStore);
+    const pending = scoped.filter((i) => Number(i.stockQuantity || 0) === 0).length;
+    return pending > 0 ? pending : scoped.filter((i) => Number(i.stockQuantity || 0) > 0).length;
+  }, [catalogForActiveStore]);
 
   // ── Tab: Catálogo ───────────────────────────────────────────────────────────
 
@@ -2379,12 +2489,13 @@ export function CatalogPage() {
       )}
 
       {/* Table */}
-      {loading ? (
-        <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
-          <div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full mr-3" />
-          Cargando catálogo...
+      {loading && catalogItems.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          Actualizando catálogo…
         </div>
-      ) : filteredCatalog.length === 0 ? (
+      )}
+      {!loading && filteredCatalog.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
           <Package className="w-12 h-12 text-gray-300 mb-3" />
           <p className="font-semibold">No hay artículos en el catálogo</p>
@@ -2577,103 +2688,6 @@ export function CatalogPage() {
       )}
     </div>
   );
-
-  // ── Tab: Artículos (Stock) ──────────────────────────────────────────────────
-
-  const renderStockTab = () => {
-    const stockItems = productItems;
-    const sortedByStock = sortedStockItems;
-
-    return (
-      <div className="space-y-5">
-        {/* Low stock alert */}
-        {lowStockItems.length > 0 && (
-          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
-            <h3 className="font-bold text-red-900 mb-3 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-              Alertas de stock bajo ({lowStockItems.length})
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {lowStockItems.map(item => (
-                <div key={item._id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border border-red-200">
-                  <div>
-                    <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{item.name}</div>
-                    <div className="text-xs text-red-600">
-                      Stock: {item.stockQuantity} {item.unit} (mín: {item.minStock})
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setStockAdjustItem(item)}
-                    className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded-lg transition-colors"
-                  >
-                    Reponer
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stock grid */}
-        {sortedByStock.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-            <Archive className="w-12 h-12 text-gray-300 mb-3" />
-            <p className="font-semibold">Sin artículos en inventario</p>
-            <p className="text-sm mt-1">Añade artículos desde la pestaña Catálogo</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {sortedByStock.map(item => {
-              const isLow = item.stockQuantity <= item.minStock;
-              const stockPct = item.minStock > 0
-                ? Math.min(100, Math.round((item.stockQuantity / (item.minStock * 3)) * 100))
-                : 100;
-              return (
-                <div
-                  key={item._id}
-                  className={`bg-white dark:bg-gray-800 border-2 rounded-xl p-4 transition-all ${
-                    isLow ? 'border-red-300 dark:border-red-800' : 'border-gray-200 dark:border-gray-700'
-                  }`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{item.name}</div>
-                      {item.category && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400">{item.category}</span>
-                      )}
-                    </div>
-                    {isLow && <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />}
-                  </div>
-
-                  <div className={`text-3xl font-bold mb-1 ${isLow ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                    {item.stockQuantity}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-3">{item.unit} · Mín: {item.minStock}</div>
-
-                  {/* Stock bar */}
-                  <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden mb-3">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        isLow ? 'bg-red-500' : stockPct > 60 ? 'bg-green-500' : 'bg-amber-500'
-                      }`}
-                      style={{ width: `${stockPct}%` }}
-                    />
-                  </div>
-
-                  <button
-                    onClick={() => setStockAdjustItem(item)}
-                    className="w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center gap-1.5"
-                  >
-                    <ArrowUpDown className="w-3.5 h-3.5" /> Ajustar stock
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // ── Tab: Proveedores ────────────────────────────────────────────────────────
 
@@ -2919,6 +2933,15 @@ export function CatalogPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
+                          {!invoiceFinanceLinks.has(originalInvoice._id) && (
+                            <button
+                              onClick={() => handleLinkInvoiceToFinance(originalInvoice)}
+                              className="p-1.5 hover:bg-violet-100 rounded-lg transition-colors"
+                              title="Registrar pago en finanzas"
+                            >
+                              <Wallet className="w-4 h-4 text-violet-600" />
+                            </button>
+                          )}
                           {originalInvoice.status !== 'paid' && (
                             <button
                               onClick={() => handleToggleInvoiceStatus(originalInvoice)}
@@ -2966,13 +2989,15 @@ export function CatalogPage() {
 
   // ── Tabs config ─────────────────────────────────────────────────────────────
 
-  const tabsConfig = [
-    { id: 'catalog', label: 'Catálogo', count: catalogItems.length || undefined },
-    { id: 'stock', label: 'Artículos', count: catalogKpis.lowStock || undefined },
+  const tabsConfig = useMemo(() => [
+    { id: 'catalog', label: 'Catálogo', count: catalogItems.filter((i) => i.active && i.module === 'catalog').length || undefined },
+    { id: 'stock', label: 'Stock', count: stockTabCount || undefined },
     { id: 'staff-consumption', label: 'Consumos equipo' },
     { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
+    { id: 'purchase-orders', label: 'Órdenes de compra' },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
-  ];
+    { id: 'escandallo', label: 'Escandallo' },
+  ], [stockTabCount, catalogItems, supplierKpis.active, invoiceKpis.pending]);
 
   const brandReady = useMemo(() => {
     if (!isDelivery) return true;
@@ -2987,41 +3012,25 @@ export function CatalogPage() {
       : false;
   }, [isDelivery, brands, catalogItems.length, retailStoreCount]);
 
-  const initialLoadPending =
-    (loading && catalogItems.length === 0)
-    || (isDelivery && !businessesFetchSettled);
-
-  if (isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0) {
-    return (
-      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <CatalogPageLoadingState message="Comprobando tienda y PDV…" />
-      </Layout>
-    );
-  }
-
-  if (initialLoadPending) {
-    const loadingMessage =
-      activeTab === 'stock'
-        ? 'Cargando artículos de almacén…'
-        : activeTab === 'suppliers'
-          ? 'Cargando proveedores…'
-          : activeTab === 'invoices'
-            ? 'Cargando facturas…'
-            : 'Cargando catálogo…';
-    return (
-      <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
-        <div className="space-y-6">
-          <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
-          <CatalogPageLoadingState message={loadingMessage} />
-        </div>
-      </Layout>
-    );
-  }
+  const catalogBusy = loading && catalogItems.length === 0;
 
   return (
     <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
       <div className="space-y-6">
-        {isDelivery && !pdvGate.ready && (
+        {!catalogScopeReady && (
+          <CatalogTabLoadingState phase="session" />
+        )}
+
+        {catalogScopeReady && isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0 && (
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            Comprobando tienda y PDV… puedes seguir navegando.
+          </div>
+        )}
+
+        {catalogScopeReady && (
+          <>
+        {isDelivery && !pdvGate.ready && !pdvGate.loading && (
           <div className="flex flex-col gap-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/90 dark:bg-sky-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-left">
               <Store className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
@@ -3064,17 +3073,59 @@ export function CatalogPage() {
           </div>
         )}
         <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
-        <div className={activeTab === 'catalog' ? undefined : 'hidden'}>{renderCatalogTab()}</div>
-        <div className={activeTab === 'stock' ? undefined : 'hidden'}>{renderStockTab()}</div>
-        {activeTab === 'staff-consumption' && dataUserId && (
-          <StaffConsumptionSettingsTab
-            userId={dataUserId}
-            catalogItems={catalogItems}
-            onCatalogUpdated={loadCatalog}
-          />
+
+        {activeTab === 'catalog' && (
+          catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
         )}
-        {activeTab === 'suppliers' && renderSuppliersTab()}
-        {activeTab === 'invoices' && renderInvoicesTab()}
+
+        {activeTab === 'stock' && (
+          catalogBusy ? (
+            <CatalogTabLoadingState phase="catalog" />
+          ) : dataUserId ? (
+            <StockTabPanel
+              items={filterStockInventoryItems(catalogForActiveStore)}
+              warehouses={warehouses}
+              userId={dataUserId}
+              searchQuery=""
+              itemLabelPlural={itemLabelPlural}
+              storeLabel={storeLabel}
+              warehouseId={storeWarehouseId}
+              businessType={businessType}
+              onReload={loadCatalog}
+            />
+          ) : null
+        )}
+
+        {activeTab === 'staff-consumption' && (
+          catalogBusy ? (
+            <CatalogTabLoadingState phase="catalog" />
+          ) : dataUserId && user ? (
+            <StaffConsumptionTabPanel
+              userId={dataUserId}
+              catalogItems={catalogItems}
+              currentUser={user}
+              onCatalogUpdated={loadCatalog}
+            />
+          ) : null
+        )}
+
+        {activeTab === 'suppliers' && (
+          suppliersLoading && suppliers.length === 0
+            ? <CatalogTabLoadingState phase="suppliers" />
+            : renderSuppliersTab()
+        )}
+
+        {activeTab === 'purchase-orders' && <PurchaseOrdersPage />}
+
+        {activeTab === 'invoices' && (
+          (invoicesLoading || suppliersLoading) && invoices.length === 0
+            ? <CatalogTabLoadingState phase="invoices" />
+            : renderInvoicesTab()
+        )}
+
+        {activeTab === 'escandallo' && <EscandalloPanel />}
+          </>
+        )}
       </div>
 
       <CreateCatalogItemModal

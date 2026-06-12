@@ -360,7 +360,7 @@ export function SupplierDetailPage() {
               ) : (
                 <div className="space-y-2">
                   {supplierOrders.slice(0, 5).map(order => (
-                    <div key={order._id} onClick={() => navigate('/saas/purchase-orders')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                    <div key={order._id} onClick={() => navigate('/saas/suppliers/ordenes-compra')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                       <div>
                         <span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{order.orderNumber}</span>
                         <span className="text-xs text-gray-400 ml-2">{order.createdAt ? new Date(order.createdAt).toLocaleDateString('es-ES') : ''}</span>
@@ -393,7 +393,7 @@ export function SupplierDetailPage() {
                     const displayStatus = isOverdue(inv) ? 'overdue' : inv.status;
                     const statusCfg = INV_STATUS[displayStatus] || INV_STATUS.pending;
                     return (
-                      <div key={inv._id} onClick={() => navigate('/saas/supplier-billing')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                      <div key={inv._id} onClick={() => navigate('/saas/suppliers/facturas')} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                         <div>
                           <span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{inv.invoiceNumber || '—'}</span>
                           <span className="text-xs text-gray-400 ml-2">{inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : ''}</span>
@@ -455,10 +455,10 @@ export function SupplierDetailPage() {
 
               {/* Quick links */}
               <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-2">
-                <button onClick={() => navigate('/saas/purchase-orders')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
+                <button onClick={() => navigate('/saas/suppliers/ordenes-compra')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
                   <ClipboardList className="w-3.5 h-3.5" /> Pedidos de compra <ExternalLink className="w-3 h-3" />
                 </button>
-                <button onClick={() => navigate('/saas/supplier-billing')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
+                <button onClick={() => navigate('/saas/suppliers/facturas')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
                   <Receipt className="w-3.5 h-3.5" /> Facturación <ExternalLink className="w-3 h-3" />
                 </button>
                 <button onClick={() => navigate('/saas/catalog')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors flex items-center gap-1.5">
@@ -480,7 +480,7 @@ export function SupplierDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Histórico de pedidos</h3>
-              <button onClick={() => navigate('/saas/purchase-orders')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
+              <button onClick={() => navigate('/saas/suppliers/ordenes-compra')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                 <ShoppingBag className="w-4 h-4" /> Ir a pedidos
               </button>
             </div>
@@ -524,7 +524,7 @@ export function SupplierDetailPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                       {supplierOrders.map(order => (
-                        <tr key={order._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/purchase-orders')}>
+                        <tr key={order._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/suppliers/ordenes-compra')}>
                           <td className="px-4 py-3"><span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{order.orderNumber}</span></td>
                           <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{order.createdAt ? new Date(order.createdAt).toLocaleDateString('es-ES') : '—'}</td>
                           <td className="px-4 py-3">
@@ -554,7 +554,7 @@ export function SupplierDetailPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Histórico de facturas</h3>
-              <button onClick={() => navigate('/saas/supplier-billing')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
+              <button onClick={() => navigate('/saas/suppliers/facturas')} className="px-4 py-2 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-colors">
                 <Receipt className="w-4 h-4" /> Ir a facturación
               </button>
             </div>
@@ -601,7 +601,7 @@ export function SupplierDetailPage() {
                         const displayStatus = isOverdue(inv) ? 'overdue' : inv.status;
                         const statusCfg = INV_STATUS[displayStatus] || INV_STATUS.pending;
                         return (
-                          <tr key={inv._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/supplier-billing')}>
+                          <tr key={inv._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer" onClick={() => navigate('/saas/suppliers/facturas')}>
                             <td className="px-4 py-3"><span className="font-mono text-sm font-bold text-gray-900 dark:text-gray-100">{inv.invoiceNumber || '—'}</span></td>
                             <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{inv.date ? new Date(inv.date).toLocaleDateString('es-ES') : '—'}</td>
                             <td className="px-4 py-3">

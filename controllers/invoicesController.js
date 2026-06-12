@@ -20,6 +20,17 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function financeScopeFromEntity(entity = {}) {
+  return {
+    businessId: String(entity.businessId || entity.business_id || '').trim(),
+    businessName: String(entity.businessName || entity.business_name || '').trim(),
+    workCenterId: String(entity.workCenterId || entity.costCenterId || '').trim(),
+    workCenterName: String(entity.workCenterName || entity.costCenterName || '').trim(),
+    pointOfSaleId: String(entity.pointOfSaleId || '').trim(),
+    pointOfSaleName: String(entity.pointOfSaleName || '').trim(),
+  };
+}
+
 async function ensureInvoiceOwner(req, userId, invoiceId) {
   const db = getInvoicesDbName();
   await ensureDatabase(req, db);
@@ -64,10 +75,13 @@ export async function createInvoice(req, res) {
     await ensureDatabase(req, db);
     const doc = buildInvoiceDocument(userId, invoice);
     const saved = await putDocument(req, db, doc._id, doc);
+    let resultDoc = { ...doc, _rev: saved.rev };
 
-    if (doc.status === 'pending' || doc.status === 'overdue') {
+    if (['pending', 'overdue', 'paid', 'partial'].includes(doc.status)) {
       try {
-        await createFinanceEntryForInvoice(req, userId, doc, account);
+        await createFinanceEntryForInvoice(req, userId, resultDoc, account);
+        const refreshed = await getDocument(req, db, doc._id);
+        if (refreshed) resultDoc = refreshed;
       } catch { /* non-critical */ }
     }
 
@@ -82,7 +96,7 @@ export async function createInvoice(req, res) {
       metadata: { total: doc.total, status: doc.status },
     });
 
-    return res.status(201).json({ ok: true, invoice: sanitizeInvoice({ ...doc, _rev: saved.rev }) });
+    return res.status(201).json({ ok: true, invoice: sanitizeInvoice(resultDoc) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear factura' });
   }
@@ -326,6 +340,27 @@ export async function registerPayment(req, res) {
       status: newStatus,
     }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
+    let resultDoc = { ...doc, _rev: saved.rev };
+
+    try {
+      if (!existing.financeMovementId && ['pending', 'partial', 'overdue', 'paid'].includes(newStatus)) {
+        await createFinanceEntryForInvoice(req, userId, resultDoc, account);
+        const refreshed = await getDocument(req, db, doc._id);
+        if (refreshed) resultDoc = refreshed;
+      } else if (existing.financeMovementId && newStatus === 'paid') {
+        const finDb = getFinanceDbName();
+        await ensureDatabase(req, finDb);
+        const finDoc = await getDocument(req, finDb, existing.financeMovementId);
+        if (finDoc && finDoc.type === 'cobro') {
+          const paidFin = buildFinanceDocument(userId, {
+            ...finDoc,
+            status: 'paid',
+            paidAt: newPayment.date || now,
+          }, finDoc);
+          await putDocument(req, finDb, paidFin._id, paidFin);
+        }
+      }
+    } catch { /* non-critical */ }
 
     await logAccountActivity(req, {
       actorUserId: userId,
@@ -338,7 +373,7 @@ export async function registerPayment(req, res) {
       metadata: { paymentAmount: newPayment.amount, totalPaid: newPaid, status: newStatus },
     });
 
-    return res.json({ ok: true, invoice: sanitizeInvoice({ ...doc, _rev: saved.rev }) });
+    return res.json({ ok: true, invoice: sanitizeInvoice(resultDoc) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar cobro' });
   }
@@ -350,7 +385,7 @@ async function createFinanceEntryForInvoice(req, userId, invoiceDoc, account) {
   const finDb = getFinanceDbName();
   await ensureDatabase(req, finDb);
 
-  const isPending = invoiceDoc.status === 'pending' || invoiceDoc.status === 'overdue';
+  const isPending = invoiceDoc.status !== 'paid';
 
   const movement = buildFinanceDocument(userId, {
     type: 'cobro',
@@ -366,10 +401,12 @@ async function createFinanceEntryForInvoice(req, userId, invoiceDoc, account) {
     notes: `Generado automáticamente desde factura ${invoiceDoc.number}`,
     status: isPending ? 'pending' : 'paid',
     dueDate: invoiceDoc.dueDate || '',
+    paidAt: isPending ? '' : (invoiceDoc.payments?.[0]?.date || new Date().toISOString()),
     source: 'invoice',
     sourceRef: invoiceDoc._id,
     linkedInvoiceId: invoiceDoc._id,
     linkedInvoiceType: 'client_invoice',
+    ...financeScopeFromEntity(invoiceDoc),
   });
 
   const saved = await putDocument(req, finDb, movement._id, movement);
@@ -379,4 +416,46 @@ async function createFinanceEntryForInvoice(req, userId, invoiceDoc, account) {
   await putDocument(req, invDb, invoiceDoc._id, updated);
 
   return { ...movement, _rev: saved.rev };
+}
+
+export async function linkInvoiceToFinance(req, res) {
+  try {
+    const { userId, invoiceId } = req.params;
+
+    const existing = await ensureInvoiceOwner(req, userId, invoiceId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (existing.financeMovementId) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Esta factura ya está vinculada a finanzas',
+        financeMovementId: existing.financeMovementId,
+      });
+    }
+    if (existing.status === 'draft') {
+      return badRequest(res, 'La factura debe estar emitida (no borrador) para vincularla a finanzas');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    await createFinanceEntryForInvoice(req, userId, existing, account);
+
+    const db = getInvoicesDbName();
+    const updated = await getDocument(req, db, invoiceId);
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'invoice',
+      action: `Vinculó factura ${existing.number} a finanzas`,
+      entityId: existing._id,
+      entityLabel: `${existing.number} — ${existing.clientName}`,
+      metadata: { financeMovementId: updated?.financeMovementId || '' },
+    });
+
+    return res.status(201).json({ ok: true, invoice: sanitizeInvoice(updated) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al vincular con finanzas' });
+  }
 }

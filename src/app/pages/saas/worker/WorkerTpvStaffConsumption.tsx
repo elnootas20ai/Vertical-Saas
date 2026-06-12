@@ -175,8 +175,9 @@ export function WorkerTpvStaffConsumption({
 
     setSubmitting(true);
     try {
+      const allStockWarnings: string[] = [];
       for (const line of cart) {
-        await createStaffConsumptionRequest(userId, {
+        const result = await createStaffConsumptionRequest(userId, {
           workerId: selectedWorker.id,
           workerName: selectedWorker.name,
           catalogItemId: line.item._id,
@@ -187,12 +188,18 @@ export function WorkerTpvStaffConsumption({
           salesPointName: salesPointName || undefined,
           registerSessionId: register.session?._id,
         });
+        if (result.stockWarnings?.length) {
+          allStockWarnings.push(...result.stockWarnings);
+        }
       }
       toast.success(
         paymentMode === 'cash_now'
           ? `${formatCurrency(cartTotal)} cobrado y apuntado`
           : `${formatCurrency(cartTotal)} apuntado a nómina`,
       );
+      if (allStockWarnings.length > 0) {
+        toast.warning(allStockWarnings[0], { description: allStockWarnings.length > 1 ? `+${allStockWarnings.length - 1} aviso(s) de stock` : undefined });
+      }
       setCart([]);
       setPaymentMode(null);
       onBack();

@@ -6,6 +6,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { ensureTpvSessionIncome } from '../../lib/tpvFinanceSync';
 import {
   listTpvRegisterSessionsRequest,
   updateTpvRegisterSessionRequest,
@@ -602,6 +603,19 @@ export function CajaPage() {
       });
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       setValidatingSession(null);
+      try {
+        const pdv = activeStoreScope.allPointsOfSale.find((p) => p._id === updated.pointOfSaleId);
+        await ensureTpvSessionIncome(dataUserId, updated, {
+          businessId: currentBusiness?.business_id || '',
+          businessName: currentBusiness?.name || '',
+          workCenterId: pdv?.workCenterId || '',
+          workCenterName: pdv?.workCenterName || updated.pointOfSaleName,
+          pointOfSaleId: updated.pointOfSaleId,
+          pointOfSaleName: updated.pointOfSaleName,
+        });
+      } catch {
+        // finanzas opcional; el cierre ya quedó validado
+      }
       toast.success('Cierre validado correctamente');
     } catch {
       toast.error('Error al validar cierre');

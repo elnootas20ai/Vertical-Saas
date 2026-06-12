@@ -427,7 +427,7 @@ async function emitRealtimeAlert(userId, { title, message, level, route, invoice
       message,
       entityId: invoiceId || '',
       entityType: 'purchase_invoice',
-      route: route || '/saas/supplier-billing',
+      route: route || '/saas/suppliers/facturas',
       metadata: metadata || {},
     });
     notification._id = `alert:supplier_invoice:${dedupKey}`;
@@ -491,7 +491,7 @@ export async function processIncomingEmails(userId, imapOverrides) {
             message: `La factura ${alert.data.invoiceNumber} de ${alert.data.supplierName} por ${alert.data.total?.toFixed(2) || '0.00'}€ podría estar duplicada.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/supplier-billing?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         } else if (alert.type === 'no_attachment') {
@@ -508,7 +508,7 @@ export async function processIncomingEmails(userId, imapOverrides) {
             message: `Factura desde ${alert.data.from} — no se encontró proveedor registrado${alert.data.cif ? ` con CIF ${alert.data.cif}` : ''}.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/supplier-billing?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         } else if (alert.type === 'ocr_failed') {
@@ -517,7 +517,7 @@ export async function processIncomingEmails(userId, imapOverrides) {
             message: `No se pudo extraer datos de ${alert.data.filename} (email de ${alert.data.from}). Requiere revisión manual.`,
             level: 'warning',
             invoiceId: alert.data.invoiceId,
-            route: `/saas/supplier-billing?invoiceId=${alert.data.invoiceId}`,
+            route: `/saas/suppliers/facturas?invoiceId=${alert.data.invoiceId}`,
             metadata: alert.data,
           });
         }

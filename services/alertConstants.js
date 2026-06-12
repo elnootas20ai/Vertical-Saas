@@ -55,6 +55,10 @@ export const PRIORITY_TO_LEVEL = {
 export const CATEGORY_TO_SOURCE = {
   out_of_stock: 'stock',
   low_stock: 'stock',
+  stock_inventory_discrepancy: 'stock',
+  stock_count_worker_progress: 'stock',
+  stock_count_completed: 'stock',
+  stock_purchase_list_ready: 'stock',
   parts_low_stock: 'stock',
   overdue_purchase: 'finanzas',
   high_payables: 'finanzas',
@@ -79,6 +83,7 @@ export const CATEGORY_TO_SOURCE = {
   contract_expiring: 'equipo',
   document_expired: 'documentacion',
   document_expiring_soon: 'documentacion',
+  document_missing_required: 'documentacion',
   fleet_itv_expiring: 'documentacion',
   fleet_insurance_expiring: 'documentacion',
   purchase_order_delayed: 'stock',

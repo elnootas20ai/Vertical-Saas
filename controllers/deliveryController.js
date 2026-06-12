@@ -77,7 +77,7 @@ import {
 } from '../shared/delivery/orderLineRevenueSplit.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { recordMovement } from '../services/stockMovementService.js';
-import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements } from '../services/recipeStockService.js';
+import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements, deductStaffConsumptionStock } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
 import {
   canEmitCatalogStockAlerts,
@@ -1010,7 +1010,7 @@ export async function bulkCreateCatalogItems(req, res) {
 export async function bulkApplyStaffPrices(req, res) {
   try {
     const { userId } = req.params;
-    const { discountPercent, categories } = req.body || {};
+    const { discountPercent, categories, enabled } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
 
     const pct = Math.max(0, Math.min(100, Number(discountPercent)));
@@ -1063,7 +1063,7 @@ export async function bulkApplyStaffPrices(req, res) {
     if (!configExisting || configExisting.type !== 'delivery_config') configExisting = null;
     const configDoc = buildDeliveryConfigDocument(userId, {
       staffConsumption: {
-        enabled: true,
+        enabled: enabled !== false,
         pricingMode: 'staff_price_field',
         defaultDiscountPercent: pct,
         eligibleCategories: Array.isArray(categories)
@@ -2416,7 +2416,32 @@ export async function createStaffConsumption(req, res) {
       }
     }
 
-    return res.status(201).json({ ok: true, consumption });
+    let stockDeducted = 0;
+    const stockWarnings = [];
+    try {
+      const stockResult = await deductStaffConsumptionStock(req, userId, {
+        catalogItemId,
+        quantity,
+        consumptionId: consumption._id,
+        workerId,
+        workerName,
+        itemName: catalogItem.name || '',
+        performedBy: recordedBy,
+      });
+      stockDeducted = stockResult.deducted?.length ?? 0;
+      if (stockResult.warnings?.length) stockWarnings.push(...stockResult.warnings);
+    } catch (stockErr) {
+      const msg = stockErr instanceof Error ? stockErr.message : String(stockErr);
+      stockWarnings.push(`No se pudo descontar stock: ${msg}`);
+      logger.warn({ tag: 'STAFF_CONSUMPTION', consumptionId: consumption._id, err: msg }, 'Error descontando stock');
+    }
+
+    return res.status(201).json({
+      ok: true,
+      consumption,
+      stockDeducted,
+      stockWarnings,
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar consumo del equipo' });
   }

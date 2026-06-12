@@ -66,9 +66,6 @@ export const DELIVERY_SIDEBAR_REQUIRES_PDV = new Set([
   'catalog',
   'articles',
   'suppliers',
-  'orders',
-  'purchase-orders',
-  'supplier-billing',
   'costing',
   'tpv-rapido',
   'caja',
@@ -86,9 +83,6 @@ export const DELIVERY_SIDEBAR_REQUIRES_BRAND = new Set([
   'catalog',
   'articles',
   'suppliers',
-  'orders',
-  'purchase-orders',
-  'supplier-billing',
   'costing',
 ]);
 

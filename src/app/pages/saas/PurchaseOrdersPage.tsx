@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useTranslation } from 'react-i18next';
 import { listSuppliersRequest, listCatalogItemsRequest, type Supplier, type CatalogItem } from '../../lib/deliveryApi';
 import {
@@ -26,6 +28,7 @@ import {
   type SmartListItem,
   type PurchaseOrderUrgency,
 } from '../../lib/purchaseOrderApi';
+import { StockPurchaseListPreview } from '../../components/saas/StockPurchaseListPreview';
 import {
   Plus, Search, X, Trash2, Edit3, CheckCircle2, Clock, AlertTriangle, Minus, Package,
   ShoppingBag, Zap, TrendingDown, Send, Archive, Eye, RotateCcw, Factory,
@@ -741,7 +744,11 @@ const PO_IMPORT_FIELDS: ImportFieldDef[] = [
 
 export function PurchaseOrdersPage() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const fromCountId = searchParams.get('fromCount') || '';
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
@@ -770,12 +777,12 @@ export function PurchaseOrdersPage() {
   const [sendingOrder, setSendingOrder] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
       const [ords, sups, items] = await Promise.all([
-        listPurchaseOrdersRequest(user.id),
-        listSuppliersRequest(user.id),
-        listCatalogItemsRequest(user.id),
+        listPurchaseOrdersRequest(dataUserId),
+        listSuppliersRequest(dataUserId),
+        listCatalogItemsRequest(dataUserId),
       ]);
       setOrders(ords);
       setSuppliers(sups);
@@ -785,40 +792,50 @@ export function PurchaseOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   const loadLowStock = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const report = await getLowStockReportRequest(user.id);
+      const report = await getLowStockReportRequest(dataUserId);
       setLowStockItems(report.items || []);
     } catch { /* ignore */ } finally {
       setLowStockLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   const loadSmartList = useCallback(async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     setSmartListLoading(true);
     try {
-      const result = await getSmartPurchaseListRequest(user.id);
+      const result = await getSmartPurchaseListRequest(dataUserId);
       setSmartList(result.items || []);
     } catch { /* ignore */ } finally {
       setSmartListLoading(false);
     }
-  }, [user?.id]);
+  }, [dataUserId]);
 
   useEffect(() => { loadData(); loadLowStock(); loadSmartList(); }, [loadData, loadLowStock, loadSmartList]);
 
+  useEffect(() => {
+    if (fromCountId) setActiveTab('smart-list');
+  }, [fromCountId]);
+
+  const dismissFromCount = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('fromCount');
+    setSearchParams(next, { replace: true });
+  };
+
   const handleSaveOrder = async (data: Partial<PurchaseOrder>) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
       if (editingOrder) {
-        const updated = await updatePurchaseOrderRequest(user.id, { ...editingOrder, ...data } as PurchaseOrder);
+        const updated = await updatePurchaseOrderRequest(dataUserId, { ...editingOrder, ...data } as PurchaseOrder);
         setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
         toast.success('Pedido actualizado');
       } else {
-        const created = await createPurchaseOrderRequest(user.id, data);
+        const created = await createPurchaseOrderRequest(dataUserId, data);
         setOrders(prev => [created, ...prev]);
         toast.success('Pedido creado');
       }
@@ -830,10 +847,10 @@ export function PurchaseOrdersPage() {
   };
 
   const handleDelete = async (order: PurchaseOrder) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     if (!confirm('¿Eliminar este pedido de compra?')) return;
     try {
-      await deletePurchaseOrderRequest(user.id, order._id);
+      await deletePurchaseOrderRequest(dataUserId, order._id);
       setOrders(prev => prev.filter(o => o._id !== order._id));
       toast.success('Pedido eliminado');
     } catch (err: any) {
@@ -842,9 +859,9 @@ export function PurchaseOrdersPage() {
   };
 
   const handleStatusChange = async (order: PurchaseOrder, status: PurchaseOrderStatus) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const updated = await updatePurchaseOrderRequest(user.id, {
+      const updated = await updatePurchaseOrderRequest(dataUserId, {
         ...order,
         status,
         ...(status === 'sent' ? { sentAt: new Date().toISOString() } : {}),
@@ -858,9 +875,9 @@ export function PurchaseOrdersPage() {
   };
 
   const handleReceive = async (order: PurchaseOrder) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const updated = await markOrderReceivedRequest(user.id, order._id);
+      const updated = await markOrderReceivedRequest(dataUserId, order._id);
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
       setViewingOrder(updated);
       toast.success('Pedido marcado como recibido — stock actualizado');
@@ -871,10 +888,10 @@ export function PurchaseOrdersPage() {
   };
 
   const handleAutoGenerate = async () => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     setGenerating(true);
     try {
-      const result = await triggerAutoOrdersRequest(user.id);
+      const result = await triggerAutoOrdersRequest(dataUserId);
       if (result.created > 0) {
         setOrders(prev => [...(result.orders || []), ...prev]);
         toast.success(`${result.created} pedido(s) automático(s) generado(s)`);
@@ -890,10 +907,10 @@ export function PurchaseOrdersPage() {
   };
 
   const handleSendOrder = async (order: PurchaseOrder, method: 'email' | 'whatsapp' | 'portal') => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     setSendingOrder(order._id);
     try {
-      const result = await sendPurchaseOrderRequest(user.id, order._id, method);
+      const result = await sendPurchaseOrderRequest(dataUserId, order._id, method);
       if (method === 'whatsapp' && result.waUrl) {
         window.open(result.waUrl, '_blank');
       }
@@ -935,7 +952,7 @@ export function PurchaseOrdersPage() {
   };
 
   const handleCreateFromSmartList = async () => {
-    if (!user?.id || selectedSmartItems.size === 0) return;
+    if (!dataUserId || selectedSmartItems.size === 0) return;
     const selectedItems = smartList.filter(i => selectedSmartItems.has(i.catalogItemId));
 
     const groups: Record<string, typeof selectedItems> = {};
@@ -976,7 +993,7 @@ export function PurchaseOrdersPage() {
     });
 
     try {
-      const result = await createBulkPurchaseOrdersRequest(user.id, orderDataList);
+      const result = await createBulkPurchaseOrdersRequest(dataUserId, orderDataList);
       if (result.created > 0) {
         setOrders(prev => [...(result.orders || []), ...prev]);
         toast.success(`${result.created} pedido(s) creado(s) desde lista sugerida`);
@@ -1052,17 +1069,14 @@ export function PurchaseOrdersPage() {
 
   if (loading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center min-h-[60vh]">
-          <div className="w-8 h-8 border-[3px] border-gray-200 border-t-gray-900 dark:border-gray-700 dark:border-t-gray-200 rounded-full animate-spin" />
-        </div>
-      </Layout>
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <div className="w-8 h-8 border-[3px] border-gray-200 border-t-gray-900 dark:border-gray-700 dark:border-t-gray-200 rounded-full animate-spin" />
+      </div>
     );
   }
 
   return (
-    <Layout>
-      <div className="p-4 md:p-6 max-w-[1400px] mx-auto space-y-6">
+    <div className="p-4 md:p-0 max-w-[1400px] mx-auto space-y-6">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
@@ -1095,6 +1109,28 @@ export function PurchaseOrdersPage() {
             />
           </div>
         </div>
+
+        {fromCountId && dataUserId && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Lista de compra desde inventario
+              </p>
+              <button
+                type="button"
+                onClick={dismissFromCount}
+                className="text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+              >
+                Cerrar
+              </button>
+            </div>
+            <StockPurchaseListPreview
+              userId={dataUserId}
+              countId={fromCountId}
+              onOrdersCreated={() => void loadData()}
+            />
+          </div>
+        )}
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1275,7 +1311,6 @@ export function PurchaseOrdersPage() {
             </span>
           </div>
         )}
-      </div>
 
       <CreateOrderModal
         isOpen={showCreate}
@@ -1307,7 +1342,7 @@ export function PurchaseOrdersPage() {
         moduleLabel="Pedidos de compra"
         fields={PO_IMPORT_FIELDS}
         onImport={async (entries) => {
-          if (!user?.id) return;
+          if (!dataUserId) return;
           let created = 0;
           for (const entry of entries) {
             try {
@@ -1326,7 +1361,7 @@ export function PurchaseOrdersPage() {
                 received: 0,
                 notes: '',
               }];
-              const order = await createPurchaseOrderRequest(user.id, {
+              const order = await createPurchaseOrderRequest(dataUserId, {
                 supplierId: supplier?._id || '',
                 supplierName: entry.supplierName || '',
                 items,
@@ -1345,6 +1380,6 @@ export function PurchaseOrdersPage() {
           toast.success(`${created} pedido(s) importado(s)`);
         }}
       />
-    </Layout>
+    </div>
   );
 }

@@ -222,13 +222,10 @@ const menuItemDefs = [
   { id: 'payroll',          navKey: 'payroll',         icon: <FileText className="w-5 h-5" />,       path: '/saas/payroll', isNew: true },
 
   // ── Catálogo y Proveedores ───────────────────────────────────────────────────
-  { id: 'catalog',          navKey: 'catalog',         icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog' },
-  { id: 'articles',         navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/articles' },
+  { id: 'catalog',          navKey: 'catalog',         icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
+  { id: 'catalog-stock',    navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/catalog?tab=stock' },
+  { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
-  { id: 'orders',           navKey: 'orders',          icon: <ShoppingBag className="w-5 h-5" />, path: '/saas/orders' },
-  { id: 'purchase-orders',  navKey: 'purchaseOrders',  icon: <ShoppingCart className="w-5 h-5" />, path: '/saas/purchase-orders', isNew: true },
-  { id: 'supplier-billing', navKey: 'supplierBilling', icon: <Receipt className="w-5 h-5" />,    path: '/saas/supplier-billing' },
-  { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/costing', isNew: true },
 
   // ── Finanzas ─────────────────────────────────────────────────────────────────
   { id: 'finance',             navKey: 'finance',            icon: <DollarSign className="w-5 h-5" />,  path: '/saas/finance' },
@@ -403,6 +400,7 @@ const workerMenuItemDefs = [
   // ── Principal ───────────────────────────────────────────────────────────────
   { id: 'worker-tpv',        navKey: 'workerTpv',        icon: <Monitor className="w-5 h-5" />,         path: '/saas/worker/tpv', isNew: true },
   { id: 'worker-tasks',      navKey: 'workerTasks',      icon: <ClipboardList className="w-5 h-5" />,   path: '/saas/worker/tasks' },
+  { id: 'worker-stock-review', navKey: 'workerStockReview', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/worker/stock-review' },
   { id: 'worker-calendar',   navKey: 'workerCalendar',   icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/worker/calendar' },
   { id: 'worker-clock',      navKey: 'workerClock',      icon: <Clock className="w-5 h-5" />,           path: '/saas/worker/clock' },
   { id: 'worker-chat',       navKey: 'workerChat',       icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/worker/chat' },
@@ -425,7 +423,7 @@ const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
   label: 'Principal',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['worker-tasks', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
+  itemIds: ['worker-tasks', 'worker-stock-review', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
 };
 
 const workerSidebarGroupDefs = [
@@ -435,7 +433,7 @@ const workerSidebarGroupDefs = [
 const sidebarGroupDefs = [
   { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'promotions'] },
   { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'] },
-  { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'articles', 'suppliers', 'orders', 'purchase-orders', 'supplier-billing', 'costing'] },
+  { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
@@ -843,8 +841,8 @@ function SidebarInner({
   const BUSINESS_OWNER_ONLY_IDS = new Set<string>([
     'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'commissions', 'payroll',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation',
-    'supplier-billing', 'client-billing', 'costing', 'billing',
-    'suppliers', 'orders', 'purchase-orders', 'compras-stock',
+    'client-billing', 'costing', 'billing',
+    'suppliers', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
     // 'delivery' apunta a /saas/delivery que requiere RequireBusinessOwner: si lo viese
@@ -909,6 +907,7 @@ function SidebarInner({
     const deliveryOperational =
       item.id === 'sala' || item.id === 'delivery-clients';
     const permission = permissionMap[item.id]
+      || (item.id === 'catalog-stock' ? permissionMap.catalog : undefined)
       || (item.id === 'leads' ? permissionMap.clients : undefined)
       || (item.id === 'billing' ? permissionMap.finance : undefined)
       || (item.id === 'client-billing' ? permissionMap.finance : undefined)
@@ -922,7 +921,11 @@ function SidebarInner({
     return Boolean(permission.view);
   });
 
-  const isItemActive = (item: SidebarItem) =>
+  const isItemActive = (item: SidebarItem) => {
+    const catalogTab = location.pathname.startsWith('/saas/catalog')
+      ? (new URLSearchParams(location.search).get('tab') || 'catalog')
+      : '';
+    return (
     `${location.pathname}${location.search}` === item.path ||
     location.pathname === item.path ||
     (item.id === 'alertas' && location.pathname.startsWith('/saas/alerts')) ||
@@ -959,11 +962,11 @@ function SidebarInner({
     (item.id === 'cleaning-quality' && location.pathname.startsWith('/saas/cleaning-quality')) ||
     (item.id === 'cleaning-reviews' && location.pathname.startsWith('/saas/cleaning-reviews')) ||
     (item.id === 'cleaning-incidents' && location.pathname.startsWith('/saas/cleaning-incidents')) ||
-    (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog')) ||
-    (item.id === 'articles' && location.pathname.startsWith('/saas/articles')) ||
+    (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
+    (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
+    (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
+    (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
     (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers')) ||
-    (item.id === 'orders' && location.pathname.startsWith('/saas/orders')) ||
-    (item.id === 'purchase-orders' && location.pathname.startsWith('/saas/purchase-orders')) ||
     (item.id === 'income-expenses' && location.pathname.startsWith('/saas/income-expenses')) ||
     (item.id === 'ebitda' && location.pathname.startsWith('/saas/ebitda')) ||
     (item.id === 'taxes' && location.pathname.startsWith('/saas/taxes')) ||
@@ -1000,7 +1003,9 @@ function SidebarInner({
       }
       if (!selectedSidebarWorkCenterId) return false;
       return selectedSidebarWorkCenterId === rawId;
-    })());
+    })())
+    );
+  };
 
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
   const COMMON_SIDEBAR_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);

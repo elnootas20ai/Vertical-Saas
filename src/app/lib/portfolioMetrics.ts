@@ -20,6 +20,8 @@ export type PortfolioFinanceTotals = {
   incomeMonth: number;
   expensesMonth: number;
   profitMonth: number;
+  ebitdaMonth: number;
+  ebitdaMarginMonth: number;
   pendingAmount: number;
   cashBalance: number;
 };
@@ -185,6 +187,8 @@ export function sumFinanceMonth(
     incomeMonth,
     expensesMonth,
     profitMonth: incomeMonth - expensesMonth,
+    ebitdaMonth: 0,
+    ebitdaMarginMonth: 0,
     pendingAmount,
     cashBalance: 0,
   };

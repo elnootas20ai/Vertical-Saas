@@ -320,7 +320,7 @@ function SortIcon({ field, activeField, dir }: { field: SortField; activeField: 
 export function DocumentsPage() {
   const navigate  = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { vehicles, clients, user, documents, addDocument, updateDocument } = useApp();
+  const { vehicles, clients, user, documents, addDocument, updateDocument, refreshDocuments } = useApp();
   const { workCenters } = useWorkCenters();
   const { currentBusiness } = useBusiness();
 
@@ -561,11 +561,56 @@ export function DocumentsPage() {
     setShowGenerate(false);
   };
 
-  const handleUploadDocument = async (payload: any) => {
+  const handleUploadDocument = async (payload: {
+    name: string;
+    category: string;
+    costCenterId?: string;
+    file: File | null;
+    notes?: string;
+    expiresAt?: string;
+  }) => {
+    const userId = user?.id;
+    if (!userId || !payload.file) return;
+
+    const category = normalizeCategory(payload.category);
     const relatedTo = payload.costCenterId ? 'cost_center' : undefined;
     const relatedToId = payload.costCenterId || undefined;
-    await addDocument({ name: payload.name, type: normalizeCategory(payload.category), status: 'pending', relatedTo, relatedToId });
-    setShowUpload(false);
+    const fileName = payload.file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const mimeType = payload.file.type || 'application/octet-stream';
+
+    try {
+      const record = await createDocumentRequest(userId, {
+        user_id: userId,
+        name: payload.name,
+        docType: category,
+        status: 'pending',
+        relatedTo,
+        relatedToId,
+        notes: payload.notes?.trim() || undefined,
+        expiresAt: payload.expiresAt || undefined,
+        fileName,
+        mimeType,
+        size: String(payload.file.size),
+      });
+
+      if (record._id && record._rev) {
+        const buffer = await payload.file.arrayBuffer();
+        await authFetch(
+          `${getApiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': mimeType, ...getAuthHeaders(), ..._couchHeaders() },
+            body: buffer,
+          },
+        );
+      }
+
+      await refreshDocuments();
+      setShowUpload(false);
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      alert(error instanceof Error ? error.message : 'No se pudo subir el documento');
+    }
   };
 
   const handleOcrDocument = async (payload: any) => {

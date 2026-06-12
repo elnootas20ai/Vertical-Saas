@@ -51,7 +51,7 @@ export const PRIORITY_GLOW: Record<AlertPriority, string> = {
   low: 'shadow-[inset_3px_0_0_0_rgb(14_165_233)]',
 };
 
-/** Cabecera ejecutiva oscura — drawer y página */
+/** Cabecera del centro de alertas — clara, alineada con el resto del dashboard */
 export function AlertProShell({
   title,
   subtitle,
@@ -68,26 +68,18 @@ export function AlertProShell({
   compact?: boolean;
 }) {
   return (
-    <div className={`relative shrink-0 overflow-hidden bg-zinc-950 text-white ${compact ? '' : 'rounded-t-2xl'}`}>
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35]"
-        style={{
-          backgroundImage: 'radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.07) 1px, transparent 0)',
-          backgroundSize: '24px 24px',
-        }}
-      />
-      <div className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-transparent via-amber-500/80 to-transparent" />
+    <div className={`relative shrink-0 overflow-hidden border-b border-zinc-200/90 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${compact ? '' : 'rounded-t-2xl'}`}>
       <div className={`relative ${compact ? 'px-5 py-4' : 'px-6 py-5'}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className={`font-bold tracking-tight text-white ${compact ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
+              <h2 className={`font-bold tracking-tight text-zinc-900 dark:text-white ${compact ? 'text-lg' : 'text-2xl sm:text-3xl'}`}>
                 {title}
               </h2>
               {badge}
             </div>
             {subtitle && (
-              <p className={`mt-1 text-zinc-400 ${compact ? 'text-xs' : 'text-sm'}`}>{subtitle}</p>
+              <p className={`mt-1 text-zinc-500 dark:text-zinc-400 ${compact ? 'text-xs' : 'text-sm'}`}>{subtitle}</p>
             )}
           </div>
           {actions && <div className="flex items-center gap-1 shrink-0">{actions}</div>}
@@ -119,10 +111,19 @@ export function AlertProKpiStrip({
   ];
 
   return (
-    <div className={`grid gap-px overflow-hidden rounded-xl bg-zinc-800/80 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
+    <div className={`grid gap-2 ${compact ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}`}>
       {items.slice(0, compact ? 3 : items.length).map((item) => (
-        <div key={item.label} className="bg-zinc-900/90 px-3 py-2.5 sm:px-4 sm:py-3">
-          <p className={`font-bold tabular-nums tracking-tight ${compact ? 'text-xl' : 'text-2xl'} ${item.warn ? 'text-white' : 'text-zinc-500'}`}>
+        <div
+          key={item.label}
+          className={`rounded-xl border px-3 py-2.5 sm:px-4 sm:py-3 ${
+            item.warn
+              ? 'border-amber-200 bg-amber-50/80 dark:border-amber-900/50 dark:bg-amber-950/30'
+              : 'border-zinc-200/80 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950/50'
+          }`}
+        >
+          <p className={`font-bold tabular-nums tracking-tight ${compact ? 'text-xl' : 'text-2xl'} ${
+            item.warn ? 'text-zinc-900 dark:text-white' : 'text-zinc-400'
+          }`}>
             {item.value}
           </p>
           <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 mt-0.5">{item.label}</p>
@@ -267,7 +268,7 @@ export function AlertProIconButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="rounded-lg p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
+      className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white disabled:opacity-40"
     >
       {children}
     </button>

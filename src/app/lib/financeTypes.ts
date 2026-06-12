@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 export type FinanceMovementDocType = 'cobro' | 'pago';
 export type FinanceMovementStatus = 'paid' | 'pending';
-export type FinanceMovementSource = 'manual' | 'invoice' | 'ocr' | 'sale';
+export type FinanceMovementSource = 'manual' | 'invoice' | 'ocr' | 'sale' | 'tpv_session' | 'supplier_invoice';
 
 export interface LinkedDocument {
   id: string;
@@ -44,6 +44,14 @@ export interface FinanceMovementRecord {
   bankAccountName?: string;
   linkedInvoiceId?: string;
   linkedInvoiceType?: 'client_invoice' | 'purchase_invoice' | 'vertical_billing';
+  businessId?: string;
+  businessName?: string;
+  workCenterId?: string;
+  workCenterName?: string;
+  pointOfSaleId?: string;
+  pointOfSaleName?: string;
+  brandId?: string;
+  brandName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +81,14 @@ export interface CreateFinanceMovementPayload {
   bankAccountName?: string;
   linkedInvoiceId?: string;
   linkedInvoiceType?: 'client_invoice' | 'purchase_invoice' | 'vertical_billing';
+  businessId?: string;
+  businessName?: string;
+  workCenterId?: string;
+  workCenterName?: string;
+  pointOfSaleId?: string;
+  pointOfSaleName?: string;
+  brandId?: string;
+  brandName?: string;
 }
 
 function normalizeText(value: unknown) {
@@ -136,6 +152,14 @@ export function createFinanceMovementRecord(
     bankAccountName: normalizeText(payload.bankAccountName) || undefined,
     linkedInvoiceId: normalizeText(payload.linkedInvoiceId) || undefined,
     linkedInvoiceType: payload.linkedInvoiceType || undefined,
+    businessId: normalizeText(payload.businessId) || undefined,
+    businessName: normalizeText(payload.businessName) || undefined,
+    workCenterId: normalizeText(payload.workCenterId) || undefined,
+    workCenterName: normalizeText(payload.workCenterName) || undefined,
+    pointOfSaleId: normalizeText(payload.pointOfSaleId) || undefined,
+    pointOfSaleName: normalizeText(payload.pointOfSaleName) || undefined,
+    brandId: normalizeText(payload.brandId) || undefined,
+    brandName: normalizeText(payload.brandName) || undefined,
     createdAt: now,
     updatedAt: now,
   };
@@ -205,6 +229,14 @@ export function normalizeFinanceMovementRecord(value: unknown): FinanceMovementR
     bankAccountName: normalizeText((doc as any).bankAccountName) || undefined,
     linkedInvoiceId: normalizeText((doc as any).linkedInvoiceId) || undefined,
     linkedInvoiceType: (doc as any).linkedInvoiceType || undefined,
+    businessId: normalizeText((doc as any).businessId) || undefined,
+    businessName: normalizeText((doc as any).businessName) || undefined,
+    workCenterId: normalizeText((doc as any).workCenterId) || undefined,
+    workCenterName: normalizeText((doc as any).workCenterName) || undefined,
+    pointOfSaleId: normalizeText((doc as any).pointOfSaleId) || undefined,
+    pointOfSaleName: normalizeText((doc as any).pointOfSaleName) || undefined,
+    brandId: normalizeText((doc as any).brandId) || undefined,
+    brandName: normalizeText((doc as any).brandName) || undefined,
     createdAt: normalizeText(doc.createdAt) || new Date().toISOString(),
     updatedAt: normalizeText(doc.updatedAt || doc.createdAt) || new Date().toISOString(),
   } as FinanceMovementRecord;

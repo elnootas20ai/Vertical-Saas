@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   fetchAlerts,
   fetchAlertSummary,
@@ -12,6 +13,12 @@ import {
   type AlertRecord,
   type AlertSource,
 } from '../../lib/alertCenterApi';
+import {
+  fetchDocumentAlertsAsRecords,
+  mergeAlertLists,
+  mergeDocumentAlertsIntoSummary,
+  isSyntheticDocumentAlert,
+} from '../../lib/documentAlertsApi';
 import { ArrowRight, RefreshCw } from 'lucide-react';
 import {
   AlertProShell,
@@ -30,6 +37,7 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
     || user?.user_id
     || user?.id
     || '';
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
 
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [recent, setRecent] = useState<AlertRecord[]>([]);
@@ -42,22 +50,31 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
     }
     setLoading(true);
     try {
-      const [summaryRes, alertsRes] = await Promise.all([
+      const [summaryRes, alertsRes, docAlerts] = await Promise.all([
         fetchAlertSummary(businessId),
-        fetchAlerts(businessId, { status: 'new,seen', order: 'desc', page: 1, limit: 4 }),
+        fetchAlerts(businessId, { status: 'new,seen', order: 'desc', page: 1, limit: 8 }),
+        dataUserId ? fetchDocumentAlertsAsRecords(dataUserId, businessId) : Promise.resolve([]),
       ]);
-      setSummary(normalizeAlertSummary(summaryRes.summary));
-      setRecent(alertsRes.alerts || []);
+      const baseSummary = normalizeAlertSummary(summaryRes.summary);
+      const mergedSummary = mergeDocumentAlertsIntoSummary(baseSummary, docAlerts);
+      const mergedRecent = mergeAlertLists(alertsRes.alerts || [], docAlerts, 5);
+      setSummary(mergedSummary);
+      setRecent(mergedRecent);
     } catch {
       /* silent */
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, dataUserId]);
 
   useEffect(() => { void load(); }, [load]);
 
   const goCenter = () => navigate('/saas/alerts');
+
+  const handleAlertClick = (alert: AlertRecord) => {
+    if (alert.route) navigate(alert.route);
+    else goCenter();
+  };
 
   if (loading && !summary) {
     return (
@@ -83,7 +100,7 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
         <AlertProShell
           compact
           title="Centro de alertas"
-          subtitle="Visión ejecutiva del negocio"
+          subtitle="Stock · Finanzas · RRHH · Documentación"
         />
         <div className="bg-white dark:bg-zinc-950">
           <AlertProEmpty />
@@ -99,23 +116,19 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
 
   const topSources = Object.entries(summary?.bySource || {})
     .sort(([, a], [, b]) => (b as number) - (a as number))
-    .slice(0, 4) as [AlertSource, number][];
+    .slice(0, 5) as [AlertSource, number][];
 
   return (
     <div
-      className={`group cursor-pointer overflow-hidden rounded-2xl border border-zinc-200/90 transition hover:shadow-lg dark:border-zinc-800 ${embedded ? '' : 'shadow-sm'}`}
-      role="button"
-      tabIndex={0}
-      onClick={goCenter}
-      onKeyDown={(e) => { if (e.key === 'Enter') goCenter(); }}
+      className={`group overflow-hidden rounded-2xl border border-zinc-200/90 transition hover:shadow-lg dark:border-zinc-800 ${embedded ? '' : 'shadow-sm'}`}
     >
       <AlertProShell
         compact
         title="Centro de alertas"
-        subtitle="Delivery · Finanzas · RRHH · Operaciones"
+        subtitle="Stock · Finanzas · RRHH · Documentación · Operaciones"
         badge={
           unresolved > 0 ? (
-            <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-300 ring-1 ring-red-500/30">
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700 ring-1 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900/50">
               {unresolved} activas
             </span>
           ) : undefined
@@ -131,15 +144,12 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
       />
 
       <div className="space-y-2 bg-zinc-50 p-3 dark:bg-zinc-950">
-        {recent.slice(0, 3).map((alert) => (
+        {recent.slice(0, 5).map((alert) => (
           <AlertProRow
             key={alert.id}
             alert={alert}
             showArrow={false}
-            onClick={() => {
-              if (alert.route) navigate(alert.route);
-              else goCenter();
-            }}
+            onClick={() => handleAlertClick(alert)}
           />
         ))}
 
@@ -161,10 +171,15 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
         <div className="flex items-center justify-between border-t border-zinc-200/80 px-1 pt-3 dark:border-zinc-800">
           <span className="text-[11px] text-zinc-500">
             {summary?.byStatus?.new ?? 0} nuevas sin leer
+            {recent.some((a) => isSyntheticDocumentAlert(a.id)) && ' · incl. documentación'}
           </span>
-          <span className="text-[11px] font-semibold text-zinc-700 transition group-hover:text-zinc-900 dark:text-zinc-300 dark:group-hover:text-white">
+          <button
+            type="button"
+            onClick={goCenter}
+            className="text-[11px] font-semibold text-zinc-700 transition hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
+          >
             Ver todas →
-          </span>
+          </button>
         </div>
       </div>
     </div>

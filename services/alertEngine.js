@@ -194,6 +194,7 @@ function getAlertConfig(account) {
     // Documentación
     documentExpiryEnabled: cfg.documentExpiryEnabled !== false,
     documentExpiryDays: Number(cfg.documentExpiryDays || 30),
+    missingRequiredDocsEnabled: cfg.missingRequiredDocsEnabled !== false,
     fleetItvAlertEnabled: cfg.fleetItvAlertEnabled !== false,
     fleetInsuranceAlertEnabled: cfg.fleetInsuranceAlertEnabled !== false,
 
@@ -322,7 +323,7 @@ async function checkLowStock(ctx, items, config, catalogInfraDocs = []) {
             ...ctx, dedupKey: `lowstock-wh-${item._id}-${ws.warehouseId}`, level: 'warning', category: 'low_stock',
             source: 'stock', title: 'Stock bajo en almacén',
             message: `"${item.name}" tiene ${wsQty} ${item.unit || 'ud'} en ${ws.warehouseName || ws.warehouseId} (mínimo: ${wsMin}).`,
-            entityId: item._id, entityType: 'catalog_item', route: '/saas/compras-stock?tab=stock',
+            entityId: item._id, entityType: 'catalog_item', route: '/saas/catalog?tab=stock',
             metadata: { sku: item.sku, name: item.name, warehouseId: ws.warehouseId, warehouseName: ws.warehouseName, stockQuantity: wsQty, minStock: wsMin },
           }));
         }
@@ -365,7 +366,7 @@ async function checkNegativeStock(ctx, items, config, catalogInfraDocs = []) {
         ...ctx, dedupKey: `negstock-${item._id}`, level: 'alert', category: 'negative_stock',
         source: 'stock', title: 'Stock negativo',
         message: `"${item.name}" (${item.sku}) tiene stock negativo: ${qty} ${item.unit || 'ud'}.`,
-        entityId: item._id, entityType: 'catalog_item', route: `/saas/compras-stock?tab=stock&itemId=${item._id}`,
+        entityId: item._id, entityType: 'catalog_item', route: `/saas/catalog?tab=stock&itemId=${item._id}`,
         metadata: { sku: item.sku, name: item.name, stockQuantity: qty },
       }));
     }
@@ -386,7 +387,7 @@ async function checkOverdueInvoices(ctx, invoices, config) {
       ...ctx, dedupKey: `overdueinv-${inv._id}`, level: daysLate > 30 ? 'alert' : 'warning',
       category: 'overdue_purchase', source: 'finanzas', title: 'Factura de compra vencida',
       message: `Factura ${inv.invoiceNumber} de ${inv.supplierName || 'proveedor'} venció hace ${daysLate} días. Importe: ${inv.total?.toFixed(2) || '0.00'} €.`,
-      entityId: inv._id, entityType: 'purchase_invoice', route: '/saas/supplier-billing',
+      entityId: inv._id, entityType: 'purchase_invoice', route: '/saas/suppliers/facturas',
       metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, daysLate },
     }));
   }
@@ -409,7 +410,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
           category: 'supplier_invoice_pending', source: 'facturas_proveedor',
           title: 'Factura de proveedor pendiente de revisar',
           message: `La factura ${inv.invoiceNumber || '(sin número)'} de ${inv.supplierName || inv.sourceEmailFrom || 'desconocido'} lleva ${days} días sin revisar.`,
-          entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/supplier-billing?invoiceId=${inv._id}`,
+          entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
           metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, from: inv.sourceEmailFrom, days },
         }));
       }
@@ -424,7 +425,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_unknown', source: 'facturas_proveedor',
         title: 'Factura de proveedor no identificado',
         message: `Se recibió factura desde ${inv.sourceEmailFrom || 'email desconocido'} pero no se encontró proveedor registrado. Asigna manualmente.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/supplier-billing?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
         metadata: { from: inv.sourceEmailFrom, emitter: inv.ocrData?.emitter, cif: inv.supplierCif },
       }));
     }
@@ -438,7 +439,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_duplicate', source: 'facturas_proveedor',
         title: 'Posible factura duplicada',
         message: `La factura ${inv.invoiceNumber} de ${inv.supplierName || 'proveedor'} por ${inv.total?.toFixed(2) || '0.00'}€ podría estar duplicada.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/supplier-billing?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
         metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, duplicateOf: inv.flags?.duplicateOf },
       }));
     }
@@ -455,7 +456,7 @@ async function checkSupplierInvoiceEmailAlerts(ctx, invoices, config) {
         category: 'supplier_invoice_overdue', source: 'facturas_proveedor',
         title: 'Factura de proveedor vencida',
         message: `La factura ${inv.invoiceNumber} de ${inv.supplierName} por ${inv.total?.toFixed(2) || '0.00'}€ venció hace ${daysLate} días.`,
-        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/supplier-billing?invoiceId=${inv._id}`,
+        entityId: inv._id, entityType: 'purchase_invoice', route: `/saas/suppliers/facturas?invoiceId=${inv._id}`,
         metadata: { invoiceNumber: inv.invoiceNumber, supplierName: inv.supplierName, total: inv.total, dueDate: inv.dueDate, daysLate },
       }));
     }
@@ -1178,19 +1179,21 @@ async function checkDocumentExpiry(ctx, documents, config) {
   const alerts = [];
 
   for (const doc of documents) {
-    const expiryField = doc.expiryDate || doc.expirationDate || doc.validUntil;
+    const expiryField = doc.expiresAt || doc.expiryDate || doc.expirationDate || doc.validUntil;
     if (!expiryField) continue;
 
     const expiryDate = new Date(expiryField);
     if (Number.isNaN(expiryDate.getTime())) continue;
     const daysUntil = Math.floor((expiryDate.getTime() - now.getTime()) / 86_400_000);
+    const docId = doc.id || doc._id;
+    const docRoute = docId ? `/saas/documents/${encodeURIComponent(docId)}` : '/saas/documents';
 
     if (daysUntil < 0) {
       alerts.push(await emit({
         ...ctx, dedupKey: `docexp-${doc._id}`, level: 'alert',
         category: 'document_expired', source: 'documentacion', title: 'Documento caducado',
         message: `"${doc.name || doc.title || doc._id}" caducó hace ${Math.abs(daysUntil)} días.`,
-        entityId: doc._id, entityType: doc.type || 'document', route: '/saas/documents',
+        entityId: doc._id, entityType: doc.type || 'document', route: docRoute,
         metadata: { documentName: doc.name || doc.title, expiryDate: expiryField, daysOverdue: Math.abs(daysUntil) },
       }));
     } else if (daysUntil <= threshold) {
@@ -1198,8 +1201,43 @@ async function checkDocumentExpiry(ctx, documents, config) {
         ...ctx, dedupKey: `docexpiring-${doc._id}`, level: 'warning',
         category: 'document_expiring_soon', source: 'documentacion', title: 'Documento próximo a caducar',
         message: `"${doc.name || doc.title || doc._id}" caduca en ${daysUntil} días (${expiryDate.toLocaleDateString('es-ES')}).`,
-        entityId: doc._id, entityType: doc.type || 'document', route: '/saas/documents',
+        entityId: doc._id, entityType: doc.type || 'document', route: docRoute,
         metadata: { documentName: doc.name || doc.title, expiryDate: expiryField, daysUntil },
+      }));
+    }
+  }
+  return alerts.filter(Boolean);
+}
+
+const REQUIRED_DOCS_BY_CATEGORY = {
+  society: ['Estatutos', 'CIF', 'IAE'],
+  licenses: ['Licencia de Apertura', 'Licencia de Actividad'],
+};
+
+const REQUIRED_DOC_CATEGORY_LABELS = {
+  society: 'Sociedad',
+  licenses: 'Licencias',
+};
+
+async function checkMissingRequiredDocs(ctx, documents, config) {
+  if (config.missingRequiredDocsEnabled === false) return [];
+  const existingNames = documents.map((d) => (d.name || '').toLowerCase().trim());
+  const alerts = [];
+
+  for (const [category, required] of Object.entries(REQUIRED_DOCS_BY_CATEGORY)) {
+    for (const reqName of required) {
+      if (existingNames.includes(reqName.toLowerCase())) continue;
+      alerts.push(await emit({
+        ...ctx,
+        dedupKey: `missreq-${category}-${reqName.toLowerCase().replace(/\s+/g, '-')}`,
+        level: 'info',
+        category: 'document_missing_required',
+        source: 'documentacion',
+        title: 'Documento obligatorio faltante',
+        message: `Falta "${reqName}" en ${REQUIRED_DOC_CATEGORY_LABELS[category] || category}.`,
+        entityType: 'document',
+        route: `/saas/documents?tab=${category}`,
+        metadata: { requiredName: reqName, docCategory: category },
       }));
     }
   }
@@ -1430,7 +1468,7 @@ async function checkWeeklyPurchaseMissing(userId, purchaseOrders, catalogItems, 
     title: 'Sin compras esta semana',
     message: `No se ha creado ningún pedido de compra en los últimos 7 días y hay ${lowStockCount} producto(s) con stock bajo.`,
     entityType: 'purchase_order',
-    route: '/saas/purchase-orders',
+    route: '/saas/suppliers/ordenes-compra',
     metadata: { lowStockCount },
   });
   return alert ? [alert] : [];
@@ -1462,7 +1500,7 @@ async function checkSupplierNotDelivering(userId, purchaseOrders, config) {
       message: `El pedido ${order.orderNumber} a ${order.supplierName || 'proveedor'} debió llegar hace ${daysLate} día(s) y no se ha registrado recepción.`,
       entityId: order._id,
       entityType: 'purchase_order',
-      route: '/saas/purchase-orders',
+      route: '/saas/suppliers/ordenes-compra',
       metadata: { orderNumber: order.orderNumber, supplierName: order.supplierName, daysLate },
     }));
   }
@@ -1495,7 +1533,7 @@ async function checkPendingReception(userId, purchaseOrders, config) {
     title: 'Pedidos pendientes de recibir',
     message: `Hay ${pending.length} pedido(s) enviado(s) pendientes de confirmar recepción (${totalValue.toFixed(2)} €).`,
     entityType: 'purchase_order',
-    route: '/saas/purchase-orders',
+    route: '/saas/suppliers/ordenes-compra',
     metadata: { count: pending.length, totalValue },
   });
   return alert ? [alert] : [];
@@ -1529,7 +1567,7 @@ async function checkCriticalProductNotOrdered(userId, catalogItems, purchaseOrde
       message: `"${item.name}" tiene stock bajo (${Number(item.stockQuantity || 0)} ${item.unit || 'ud'}, mín: ${item.minStock}) y no hay pedido en curso.`,
       entityId: item._id,
       entityType: 'catalog_item',
-      route: '/saas/purchase-orders',
+      route: '/saas/suppliers/ordenes-compra',
       metadata: { name: item.name, sku: item.sku, stockQuantity: Number(item.stockQuantity || 0), minStock: item.minStock },
     }));
   }
@@ -1660,6 +1698,7 @@ async function runAlertsForBusiness(business) {
   // Documentación compraventa
   const userDocs = await fetchAllDocsOfType(getDocumentsDbName(), 'document').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []);
   const sigReqs = await fetchAllDocsOfType(getDocumentsDbName(), 'signature_request').then((d) => d.filter((i) => i.user_id === ownerId)).catch(() => []);
+  results.push(...await checkMissingRequiredDocs(ctx, userDocs, config));
   if (canEmitDocumentsAlerts({ documents: userDocs, signatureRequests: sigReqs })) {
     results.push(...await checkDocumentExpiry(ctx, userDocs, config));
     results.push(...await checkMissingVehicleDocs(ctx, userDocs, config));

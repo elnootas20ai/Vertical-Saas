@@ -1,28 +1,40 @@
 import { useState, useEffect, useRef } from 'react';
-import { listWorkCenters, type WorkCenter } from '../lib/workCentersApi';
+import { listWorkCentersForDelivery, type WorkCenter } from '../lib/workCentersApi';
 import { useAuth } from '../context/AuthContext';
+import { useBusiness } from '../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 
 let cachedCenters: WorkCenter[] | null = null;
-let cacheUserId: string | null = null;
+let cacheKey: string | null = null;
 let pendingPromise: Promise<WorkCenter[]> | null = null;
+
+function buildCacheKey(dataUserId: string, businessId: string | undefined): string {
+  return `${dataUserId}::${businessId || ''}`;
+}
 
 export function useWorkCenters() {
   const { user } = useAuth();
-  const userId = user?.id ?? '';
+  const { currentBusiness } = useBusiness();
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+  const businessId = currentBusiness?.business_id;
+  const cacheId = buildCacheKey(dataUserId, businessId);
+
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>(
-    cacheUserId === userId && cachedCenters ? cachedCenters : [],
+    cacheKey === cacheId && cachedCenters ? cachedCenters : [],
   );
-  const [loading, setLoading] = useState(!cachedCenters || cacheUserId !== userId);
+  const [loading, setLoading] = useState(!cachedCenters || cacheKey !== cacheId);
   const mounted = useRef(true);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
 
   useEffect(() => {
-    if (!userId) return;
-    if (cacheUserId === userId && cachedCenters) {
+    if (!dataUserId) return;
+    if (cacheKey === cacheId && cachedCenters) {
       setWorkCenters(cachedCenters);
       setLoading(false);
       return;
@@ -32,11 +44,11 @@ export function useWorkCenters() {
       setLoading(true);
       try {
         if (!pendingPromise) {
-          pendingPromise = listWorkCenters(userId);
+          pendingPromise = listWorkCentersForDelivery(dataUserId, currentBusiness);
         }
         const result = await pendingPromise;
         cachedCenters = result;
-        cacheUserId = userId;
+        cacheKey = cacheId;
         if (mounted.current) setWorkCenters(result);
       } catch {
         if (mounted.current) setWorkCenters([]);
@@ -46,8 +58,8 @@ export function useWorkCenters() {
       }
     }
 
-    load();
-  }, [userId]);
+    void load();
+  }, [dataUserId, cacheId, currentBusiness]);
 
   const activeWorkCenters = workCenters.filter((wc) => wc.active);
 
@@ -60,7 +72,7 @@ export function useWorkCenters() {
 
   function invalidateCache() {
     cachedCenters = null;
-    cacheUserId = null;
+    cacheKey = null;
   }
 
   return {

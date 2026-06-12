@@ -1,19 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
+import { DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import {
   listCatalogItemsRequest,
-  createCatalogItemRequest,
-  updateCatalogItemRequest,
-  deleteCatalogItemRequest,
   listSuppliersRequest,
-  createSupplierRequest,
-  updateSupplierRequest,
-  deleteSupplierRequest,
   listPurchaseInvoicesRequest,
   type CatalogItem,
   type Supplier,
@@ -44,7 +39,6 @@ import {
 import {
   listStockMovementsRequest,
   getMovementsSummaryRequest,
-  createAdjustmentRequest,
   createTransferRequest,
   createInternalConsumptionRequest,
   type StockMovement,
@@ -53,26 +47,25 @@ import {
 } from '../../lib/stockMovementApi';
 import {
   Package, Warehouse as WarehouseIcon, Factory, ShoppingCart, Truck, ArrowUpDown,
-  Receipt, AlertTriangle, TrendingDown, TrendingUp, Search, Plus, X, Edit3,
+  Receipt, AlertTriangle, TrendingDown, TrendingUp, Search, Plus, X, Edit3, BookOpen,
+  ArrowRight,
   Trash2, CheckCircle2, Clock, Send, FileText, Archive, Eye, Zap,
   ChevronDown, Filter, BarChart3, DollarSign, Boxes, ArrowRightLeft,
   PackageMinus, PackagePlus, RotateCcw, CircleDot, CalendarDays, Hash,
   ShoppingBag, Download, RefreshCw,
 } from 'lucide-react';
-import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
 const TABS = [
-  { id: 'catalogo', label: 'Catálogo' },
-  { id: 'stock', label: 'Stock' },
   { id: 'almacenes', label: 'Almacenes' },
-  { id: 'proveedores', label: 'Proveedores' },
   { id: 'pedidos', label: 'Pedidos' },
   { id: 'recepciones', label: 'Recepciones' },
   { id: 'movimientos', label: 'Movimientos' },
   { id: 'facturacion', label: 'Facturación' },
 ];
+
+const TAB_IDS = new Set(TABS.map((t) => t.id));
 
 const STATUS_CONFIG: Record<PurchaseOrderStatus, { label: string; color: string; bg: string; icon: typeof Clock }> = {
   draft:     { label: 'Borrador',  color: 'text-gray-600 dark:text-gray-400',     bg: 'bg-gray-100 dark:bg-gray-700/60',           icon: FileText },
@@ -125,14 +118,41 @@ function StatusBadge({ status }: { status: PurchaseOrderStatus }) {
   );
 }
 
-/* ─── Stock Semaphore ─────────────────────────────────────────────────────── */
-
-function StockSemaphore({ qty, min, max }: { qty: number; min: number; max?: number }) {
-  if (qty < 0) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-black dark:bg-white" title="Stock negativo" />;
-  if (qty === 0) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" title="Agotado" />;
-  if (min > 0 && qty <= min) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500" title="Bajo mínimo" />;
-  if (max && max > 0 && qty > max) return <span className="inline-block w-2.5 h-2.5 rounded-full bg-purple-500" title="Sobre máximo" />;
-  return <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500" title="OK" />;
+function HubShortcutCards({ catalogCount, supplierCount }: { catalogCount: number; supplierCount: number }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+      <Link
+        to="/saas/catalog?tab=stock"
+        className="group flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
+      >
+        <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600">
+          <BookOpen className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 dark:text-white">Carta / Catálogo</p>
+          <p className="text-sm text-gray-500">{catalogCount} plato{catalogCount === 1 ? '' : 's'} activo{catalogCount === 1 ? '' : 's'}</p>
+        </div>
+        <span className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 group-hover:gap-2 transition-all">
+          Gestionar <ArrowRight className="w-4 h-4" />
+        </span>
+      </Link>
+      <Link
+        to="/saas/suppliers"
+        className="group flex items-center gap-4 p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 hover:border-amber-300 dark:hover:border-amber-700 transition-colors"
+      >
+        <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/30 text-amber-600">
+          <Factory className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 dark:text-white">Proveedores</p>
+          <p className="text-sm text-gray-500">{supplierCount} proveedor{supplierCount === 1 ? '' : 'es'} activo{supplierCount === 1 ? '' : 's'}</p>
+        </div>
+        <span className="inline-flex items-center gap-1 text-sm font-semibold text-amber-600 group-hover:gap-2 transition-all">
+          Gestionar <ArrowRight className="w-4 h-4" />
+        </span>
+      </Link>
+    </div>
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -140,12 +160,25 @@ function StockSemaphore({ qty, min, max }: { qty: number; min: number; max?: num
 export function ComprasStockPage() {
   const { user } = useAuth();
   const userId = user?.user_id || '';
-  const { config: verticalConfig, businessType } = useVerticalCatalog();
+  const { config: verticalConfig } = useVerticalCatalog();
   const itemLabel = verticalConfig.itemLabel || 'Producto';
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'catalogo';
+  const tabParam = searchParams.get('tab');
+
+  const activeTab = useMemo(() => {
+    const tab = tabParam || 'pedidos';
+    if (tab === 'catalogo' || tab === 'proveedores') return 'pedidos';
+    return TAB_IDS.has(tab) ? tab : 'pedidos';
+  }, [tabParam]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
+
+  useEffect(() => {
+    if (tabParam === 'catalogo' || tabParam === 'proveedores' || (tabParam && !TAB_IDS.has(tabParam))) {
+      setSearchParams({ tab: 'pedidos' }, { replace: true });
+    }
+  }, [tabParam, setSearchParams]);
+
 
   /* ─── Global state ──────────────────────────────────────────────────────── */
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
@@ -180,6 +213,12 @@ export function ComprasStockPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const onStoreChange = () => { void load(); };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStoreChange);
+  }, [load]);
+
   /* ─── KPI calculations ──────────────────────────────────────────────────── */
   const kpis = useMemo(() => {
     const products = catalogItems.filter((i) => i.active && !i.deletedAt);
@@ -193,25 +232,33 @@ export function ComprasStockPage() {
   }, [catalogItems, orders]);
 
   /* ─── Tab counts ────────────────────────────────────────────────────────── */
+  const shortcutCounts = useMemo(() => ({
+    catalog: catalogItems.filter((i) => i.active && !i.deletedAt && i.module === 'catalog').length,
+    suppliers: suppliers.filter((s) => s.active && !s.deletedAt).length,
+  }), [catalogItems, suppliers]);
+
   const tabsWithCounts = useMemo(() => TABS.map((t) => {
-    if (t.id === 'catalogo') return { ...t, count: catalogItems.filter((i) => i.active && i.module === 'catalog').length };
-    if (t.id === 'stock') return { ...t, count: catalogItems.filter((i) => i.active && i.itemType === 'product').length };
     if (t.id === 'almacenes') return { ...t, count: warehouses.filter((w) => w.active).length };
-    if (t.id === 'proveedores') return { ...t, count: suppliers.length };
     if (t.id === 'pedidos') return { ...t, count: orders.filter((o) => !['received', 'cancelled'].includes(o.status)).length };
     if (t.id === 'recepciones') return { ...t, count: orders.filter((o) => ['sent', 'partial'].includes(o.status)).length };
     if (t.id === 'movimientos') return { ...t, count: movements.length };
     if (t.id === 'facturacion') return { ...t, count: invoices.length };
     return t;
-  }), [catalogItems, suppliers, orders, warehouses, movements, invoices]);
+  }), [orders, warehouses, movements, invoices]);
 
   /* ─── Filtered items by search ──────────────────────────────────────────── */
   const q = search.toLowerCase().trim();
 
+  if (tabParam === 'stock') {
+    return <Navigate to="/saas/catalog?tab=stock" replace />;
+  }
+
   /* ═══════ RENDER ════════════════════════════════════════════════════════════ */
 
   return (
-    <Layout title="Compras y Stock" subtitle="Catálogo, inventario, compras y almacenes">
+    <Layout title="Compras y Stock" subtitle="Inventario, compras y almacenes">
+      <HubShortcutCards catalogCount={shortcutCounts.catalog} supplierCount={shortcutCounts.suppliers} />
+
       {/* ── KPI Bar ──────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <KpiCard icon={Package} label={`${itemLabelPlural} activos`} value={kpis.total} color="bg-blue-50 dark:bg-blue-900/20 text-blue-600" />
@@ -255,10 +302,7 @@ export function ComprasStockPage() {
           </div>
         ) : (
           <>
-            {activeTab === 'catalogo' && <CatalogoTab items={catalogItems.filter((i) => !q || i.name?.toLowerCase().includes(q) || i.sku?.toLowerCase().includes(q))} />}
-            {activeTab === 'stock' && <StockTab items={catalogItems.filter((i) => i.itemType === 'product' && (!q || i.name?.toLowerCase().includes(q) || i.sku?.toLowerCase().includes(q)))} warehouses={warehouses} userId={userId} onReload={load} />}
             {activeTab === 'almacenes' && <AlmacenesTab warehouses={warehouses.filter((w) => !q || w.name?.toLowerCase().includes(q))} userId={userId} onReload={load} />}
-            {activeTab === 'proveedores' && <ProveedoresTab suppliers={suppliers.filter((s) => !q || s.name?.toLowerCase().includes(q) || s.cif?.toLowerCase().includes(q))} catalogItems={catalogItems} />}
             {activeTab === 'pedidos' && <PedidosTab orders={orders.filter((o) => !q || o.orderNumber?.toLowerCase().includes(q) || o.supplierName?.toLowerCase().includes(q))} suppliers={suppliers} catalogItems={catalogItems} userId={userId} onReload={load} />}
             {activeTab === 'recepciones' && <RecepcionesTab orders={orders.filter((o) => ['sent', 'partial', 'pending'].includes(o.status))} userId={userId} onReload={load} />}
             {activeTab === 'movimientos' && <MovimientosTab movements={movements.filter((m) => !q || m.catalogItemName?.toLowerCase().includes(q) || m.movementType?.toLowerCase().includes(q))} summary={summary} />}
@@ -267,164 +311,6 @@ export function ComprasStockPage() {
         )}
       </div>
     </Layout>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/* ─── TAB: Catálogo ───────────────────────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════════════════════ */
-
-function CatalogoTab({ items }: { items: CatalogItem[] }) {
-  const products = items.filter((i) => i.active && !i.deletedAt);
-  const byType = { product: 0, service: 0, combo: 0 };
-  products.forEach((i) => { byType[i.itemType as keyof typeof byType] = (byType[i.itemType as keyof typeof byType] || 0) + 1; });
-
-  return (
-    <div>
-      <div className="flex gap-3 mb-4">
-        <span className="px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 text-xs font-semibold rounded-lg">{byType.product} productos</span>
-        <span className="px-3 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 text-xs font-semibold rounded-lg">{byType.service} servicios</span>
-        <span className="px-3 py-1.5 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-400 text-xs font-semibold rounded-lg">{byType.combo} combos</span>
-      </div>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 dark:bg-gray-900/40 text-left text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              <th className="px-4 py-3">Producto</th>
-              <th className="px-4 py-3">SKU</th>
-              <th className="px-4 py-3">Categoría</th>
-              <th className="px-4 py-3 text-right">PVP</th>
-              <th className="px-4 py-3 text-right">Coste</th>
-              <th className="px-4 py-3 text-right">Stock</th>
-              <th className="px-4 py-3">Proveedor</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-            {products.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">No hay productos en el catálogo</td></tr>
-            ) : products.slice(0, 100).map((item) => (
-              <tr key={item._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{item.name}</td>
-                <td className="px-4 py-3 text-gray-500 font-mono text-xs">{item.sku}</td>
-                <td className="px-4 py-3 text-gray-500">{item.category}</td>
-                <td className="px-4 py-3 text-right font-semibold">{Number(item.unitPrice).toFixed(2)} €</td>
-                <td className="px-4 py-3 text-right text-gray-500">{Number(item.costPrice).toFixed(2)} €</td>
-                <td className="px-4 py-3 text-right">
-                  <span className="inline-flex items-center gap-1.5">
-                    <StockSemaphore qty={item.stockQuantity} min={item.minStock} />
-                    <span className="font-semibold">{item.stockQuantity}</span>
-                    <span className="text-gray-400 text-xs">{item.unit}</span>
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{item.supplierName || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/* ─── TAB: Stock ──────────────────────────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════════════════════ */
-
-function StockTab({ items, warehouses, userId, onReload }: { items: CatalogItem[]; warehouses: Warehouse[]; userId: string; onReload: () => void }) {
-  const [adjustModal, setAdjustModal] = useState<CatalogItem | null>(null);
-  const [adjustQty, setAdjustQty] = useState('');
-  const [adjustType, setAdjustType] = useState<'in' | 'out'>('in');
-  const [adjustNotes, setAdjustNotes] = useState('');
-
-  const stockItems = items.filter((i) => i.active && !i.deletedAt);
-  const lowStock = stockItems.filter((i) => i.minStock > 0 && i.stockQuantity > 0 && i.stockQuantity <= i.minStock);
-  const outOfStock = stockItems.filter((i) => i.minStock > 0 && i.stockQuantity <= 0);
-  const negative = stockItems.filter((i) => i.stockQuantity < 0);
-  const ok = stockItems.filter((i) => !negative.includes(i) && !outOfStock.includes(i) && !lowStock.includes(i));
-
-  const sorted = [...negative, ...outOfStock, ...lowStock, ...ok];
-
-  const handleAdjust = async () => {
-    if (!adjustModal || !adjustQty || !adjustNotes.trim()) {
-      toast.error('Completa cantidad y notas');
-      return;
-    }
-    try {
-      await createAdjustmentRequest(userId, {
-        catalogItemId: adjustModal._id,
-        quantity: Number(adjustQty),
-        type: adjustType,
-        notes: adjustNotes,
-      });
-      toast.success('Ajuste registrado');
-      setAdjustModal(null); setAdjustQty(''); setAdjustNotes('');
-      onReload();
-    } catch (err: any) {
-      toast.error(err.message || 'Error al registrar ajuste');
-    }
-  };
-
-  return (
-    <div>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 dark:bg-gray-900/40 text-left text-xs text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3 w-8"></th>
-              <th className="px-4 py-3">Producto</th>
-              <th className="px-4 py-3">SKU</th>
-              <th className="px-4 py-3 text-right">Stock</th>
-              <th className="px-4 py-3 text-right">Mínimo</th>
-              <th className="px-4 py-3 text-right">Coste</th>
-              <th className="px-4 py-3 text-right">Valor</th>
-              <th className="px-4 py-3">Proveedor</th>
-              <th className="px-4 py-3 w-10"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-            {sorted.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">No hay productos con stock</td></tr>
-            ) : sorted.slice(0, 100).map((item) => (
-              <tr key={item._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                <td className="px-4 py-3"><StockSemaphore qty={item.stockQuantity} min={item.minStock} max={item.maxStock} /></td>
-                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{item.name}</td>
-                <td className="px-4 py-3 font-mono text-xs text-gray-500">{item.sku}</td>
-                <td className="px-4 py-3 text-right font-bold">{item.stockQuantity} <span className="text-gray-400 font-normal text-xs">{item.unit}</span></td>
-                <td className="px-4 py-3 text-right text-gray-500">{item.minStock || '—'}</td>
-                <td className="px-4 py-3 text-right text-gray-500">{Number(item.costPrice).toFixed(2)} €</td>
-                <td className="px-4 py-3 text-right font-semibold">{(item.stockQuantity * (item.costPrice || 0)).toFixed(2)} €</td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{item.supplierName || '—'}</td>
-                <td className="px-4 py-3">
-                  <button onClick={() => setAdjustModal(item)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Ajustar stock">
-                    <ArrowUpDown className="w-4 h-4 text-gray-400" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Adjust modal */}
-      {adjustModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setAdjustModal(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold mb-1">Ajustar stock</h3>
-            <p className="text-sm text-gray-500 mb-4">{adjustModal.name} — Stock actual: {adjustModal.stockQuantity} {adjustModal.unit}</p>
-            <div className="flex gap-2 mb-3">
-              <button onClick={() => setAdjustType('in')} className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${adjustType === 'in' ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-gray-200 dark:border-gray-700 text-gray-500'}`}>+ Entrada</button>
-              <button onClick={() => setAdjustType('out')} className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors ${adjustType === 'out' ? 'bg-red-50 border-red-300 text-red-700' : 'border-gray-200 dark:border-gray-700 text-gray-500'}`}>- Salida</button>
-            </div>
-            <input type="number" min="1" placeholder="Cantidad" value={adjustQty} onChange={(e) => setAdjustQty(e.target.value)} className="w-full px-4 py-2.5 mb-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500" />
-            <textarea placeholder="Motivo del ajuste (obligatorio)" value={adjustNotes} onChange={(e) => setAdjustNotes(e.target.value)} rows={2} className="w-full px-4 py-2.5 mb-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500 resize-none" />
-            <div className="flex gap-2">
-              <button onClick={() => setAdjustModal(null)} className="flex-1 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancelar</button>
-              <button onClick={handleAdjust} className="flex-1 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors">Confirmar</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -452,14 +338,14 @@ function AlmacenesTab({ warehouses, userId, onReload }: { warehouses: Warehouse[
   return (
     <div>
       <div className="flex justify-end mb-4">
-        <AddButtonDropdown
-                label="Nueva compra"
-                onQuickAdd={() => setShowCreate(true)}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
-                quickAddLabel="Alta rápida"
-                quickAddDesc="Formulario de compra"
-              />
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold"
+        >
+          <Plus className="w-4 h-4" />
+          Nuevo almacén
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -504,49 +390,6 @@ function AlmacenesTab({ warehouses, userId, onReload }: { warehouses: Warehouse[
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════ */
-/* ─── TAB: Proveedores ────────────────────────────────────────────────────── */
-/* ═══════════════════════════════════════════════════════════════════════════ */
-
-function ProveedoresTab({ suppliers, catalogItems }: { suppliers: Supplier[]; catalogItems: CatalogItem[] }) {
-  const active = suppliers.filter((s) => s.active && !s.deletedAt);
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-gray-50 dark:bg-gray-900/40 text-left text-xs text-gray-500 uppercase tracking-wider">
-            <th className="px-4 py-3">Proveedor</th>
-            <th className="px-4 py-3">CIF</th>
-            <th className="px-4 py-3">Contacto</th>
-            <th className="px-4 py-3">Email</th>
-            <th className="px-4 py-3">Teléfono</th>
-            <th className="px-4 py-3 text-right">Productos</th>
-            <th className="px-4 py-3">Condiciones</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
-          {active.length === 0 ? (
-            <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">No hay proveedores</td></tr>
-          ) : active.map((s) => {
-            const prods = catalogItems.filter((i) => i.supplierId === s._id).length;
-            return (
-              <tr key={s._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
-                <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{s.name}</td>
-                <td className="px-4 py-3 text-gray-500 font-mono text-xs">{s.cif || '—'}</td>
-                <td className="px-4 py-3 text-gray-500">{s.contactPerson || '—'}</td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{s.email || '—'}</td>
-                <td className="px-4 py-3 text-gray-500">{s.phone || '—'}</td>
-                <td className="px-4 py-3 text-right"><span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold rounded-full">{prods}</span></td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{s.paymentTerms || '—'}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

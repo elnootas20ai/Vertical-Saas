@@ -1502,13 +1502,14 @@ export function SalesPointsTab() {
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
 
   useEffect(() => {
+    if (!businessesFetchSettled) return;
     if (isDelivery && !businessScopeId) {
       setWorkCenters([]);
       setLoading(false);
       return;
     }
     setLoading(true);
-  }, [businessScopeId, isDelivery]);
+  }, [businessScopeId, isDelivery, businessesFetchSettled]);
 
   const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadDeliveryStores>>) => {
     setWorkCenters(state.workCenters);
@@ -1534,6 +1535,7 @@ export function SalesPointsTab() {
   }, []);
 
   const loadData = useCallback(async (options?: { skipPdvMerge?: boolean }) => {
+    if (!businessesFetchSettled) return;
     if (!dataUserId || !user) {
       setLoading(false);
       return;
@@ -1549,7 +1551,9 @@ export function SalesPointsTab() {
     try {
       const state = await loadDeliveryStores(user, currentBusiness, {
         skipPdvMerge,
-        accountBusinessCount: accountBusinessCount ?? (businesses.length > 0 ? businesses.length : undefined),
+        accountBusinessCount: businessesFetchSettled
+          ? (accountBusinessCount ?? businesses.length)
+          : undefined,
       });
       if (seq !== loadSeqRef.current) return;
       if (resolveBusinessScopeId(currentBusiness) !== bid) return;
@@ -1561,11 +1565,12 @@ export function SalesPointsTab() {
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, [dataUserId, user, currentBusiness, accountBusinessCount, businesses.length, isDelivery, applyDeliveryStoresState]);
+  }, [dataUserId, user, currentBusiness, accountBusinessCount, businesses.length, businessesFetchSettled, isDelivery, applyDeliveryStoresState]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (!businessesFetchSettled) return;
+    void loadData();
+  }, [businessesFetchSettled, loadData]);
 
   useEffect(() => {
     const onChanged = () => {

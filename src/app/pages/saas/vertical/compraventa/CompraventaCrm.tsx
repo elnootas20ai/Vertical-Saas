@@ -3,6 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../../../components/saas/Layout';
 import { useApp } from '../../../../context/AppContext';
 import { useAuth } from '../../../../context/AuthContext';
+import { useFinanceUserId } from '../../../../hooks/useFinanceUserId';
+import { listClientInvoicesRequest } from '../../../../lib/clientInvoicesApi';
+import { summarizeClientInvoiceCollections } from '../../../../lib/clientInvoiceFinanceSync';
 import { SalesFunnel } from '../../../../components/saas/SalesFunnel';
 import { ActivityTimeline } from '../../../../components/saas/ActivityTimeline';
 import { CrmAlertsPanel } from '../../../../components/saas/CrmAlertsPanel';
@@ -25,7 +28,7 @@ import {
   BarChart3, Users, Car, DollarSign, Clock, Target,
   Plus, Filter, LayoutGrid, List, MoreVertical, ExternalLink,
   TrendingUp, Briefcase, CalendarDays, Search, X,
-  ChevronLeft, ChevronRight, AlertTriangle, BookMarked,
+  ChevronLeft, ChevronRight, AlertTriangle, BookMarked, Receipt, Wallet,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../../../components/saas/AIAddModal';
@@ -69,6 +72,8 @@ export function CompraventaCrm() {
   const { leads, clients, vehicles, user: authContextUser } = useApp();
   const { user } = useAuth();
   const userId = user?.user_id || '';
+  const financeUserId = useFinanceUserId();
+  const [billingSummary, setBillingSummary] = useState({ pendingAmount: 0, overdueCount: 0, linkedCount: 0 });
 
   const isManager = useMemo(() => {
     const role = (user as Record<string, unknown>)?.role || (user as Record<string, unknown>)?.accountRole || '';
@@ -117,6 +122,13 @@ export function CompraventaCrm() {
     }
     setLoading(false);
   }, [userId, scope, isManager]);
+
+  useEffect(() => {
+    if (!financeUserId) return;
+    listClientInvoicesRequest(financeUserId)
+      .then((invs) => setBillingSummary(summarizeClientInvoiceCollections(invs)))
+      .catch(() => {});
+  }, [financeUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -285,6 +297,42 @@ export function CompraventaCrm() {
 
         {/* Sidebar derecho */}
         <div className="space-y-6">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Receipt className="w-4 h-4" /> Facturación y cobros
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Pendiente de cobro</span>
+                <span className="font-bold text-amber-600">{formatCurrency(billingSummary.pendingAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Facturas vencidas</span>
+                <span className={`font-bold ${billingSummary.overdueCount > 0 ? 'text-red-600' : 'text-gray-400'}`}>{billingSummary.overdueCount}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">En finanzas</span>
+                <span className="font-bold text-violet-600">{billingSummary.linkedCount}</span>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/saas/client-billing')}
+                className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition-colors"
+              >
+                Facturación clientes
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/saas/finance')}
+                className="w-full py-2 px-3 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-xs font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Wallet className="w-3.5 h-3.5" /> Visión financiera
+              </button>
+            </div>
+          </div>
+
           {/* Proximas acciones */}
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2">

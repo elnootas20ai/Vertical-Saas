@@ -2,9 +2,11 @@ import {
   getCatalogDbName,
   ensureDatabase,
   getAllDocuments,
+  getDocument,
 } from './couchdb.js';
 import { findRecipeByCatalogItem } from './recipeModel.js';
 import { recordMovement } from './stockMovementService.js';
+import { isStockInventoryItem } from './stockInventoryScope.js';
 import logger from './logger.js';
 
 export async function findActiveRecipeForItem(req, userId, catalogItemId) {
@@ -19,6 +21,9 @@ export async function deductByRecipe(req, userId, {
   referenceId = '',
   referenceType = '',
   performedBy = '',
+  parentMovementType = 'sale',
+  skipNonInventoryParent = false,
+  contextLabel = 'Venta',
 }) {
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
@@ -28,33 +33,48 @@ export async function deductByRecipe(req, userId, {
   const warnings = [];
 
   if (!recipe) {
+    const catItem = await getDocument(req, db, catalogItemId);
+    if (skipNonInventoryParent && !isStockInventoryItem(catItem)) {
+      warnings.push(
+        `"${catItem?.name || catalogItemId}" sin receta ni stock de almacén — no se descontó inventario`,
+      );
+      return { deducted, warnings, blocked: false };
+    }
     const movement = await recordMovement(req, userId, {
       catalogItemId,
-      movementType: 'sale',
+      movementType: parentMovementType,
       quantity: quantitySold,
       warehouseId,
       referenceId,
       referenceType,
       performedBy,
+      notes: `${contextLabel} sin receta — descuento directo`,
     });
     deducted.push(movement);
-    warnings.push(`Producto ${catalogItemId} vendido sin receta — descuento directo`);
-    logger.warn({ tag: 'RECIPE_STOCK', catalogItemId }, 'Producto vendido sin receta');
+    if (parentMovementType === 'sale') {
+      warnings.push(`Producto ${catalogItemId} vendido sin receta — descuento directo`);
+      logger.warn({ tag: 'RECIPE_STOCK', catalogItemId }, 'Producto vendido sin receta');
+    }
     return { deducted, warnings, blocked: false };
   }
 
-  const saleMovement = await recordMovement(req, userId, {
-    catalogItemId,
-    movementType: 'sale',
-    quantity: quantitySold,
-    warehouseId,
-    referenceId,
-    referenceType,
-    performedBy,
-    notes: `Venta con receta: ${recipe.name}`,
-    recipeId: recipe._id,
-  });
-  deducted.push(saleMovement);
+  const catItem = await getDocument(req, db, catalogItemId);
+  if (!skipNonInventoryParent || isStockInventoryItem(catItem)) {
+    const parentMovement = await recordMovement(req, userId, {
+      catalogItemId,
+      movementType: parentMovementType,
+      quantity: quantitySold,
+      warehouseId,
+      referenceId,
+      referenceType,
+      performedBy,
+      notes: `${contextLabel} con receta: ${recipe.name}`,
+      recipeId: recipe._id,
+    });
+    deducted.push(parentMovement);
+  }
+
+  const recipeNoteSuffix = referenceType === 'staff_consumption' ? ' (consumo equipo)' : '';
 
   for (const ingredient of recipe.ingredients) {
     const quantityPerUnit = ingredient.quantity / (recipe.portions || 1);
@@ -81,7 +101,7 @@ export async function deductByRecipe(req, userId, {
         parentItemId: catalogItemId,
         parentItemName: recipe.catalogItemName,
         unitCost: ingredient.costPerUnit,
-        notes: `Consumo por receta "${recipe.name}" (x${quantitySold})`,
+        notes: `Consumo por receta "${recipe.name}" (x${quantitySold})${recipeNoteSuffix}`,
       });
       deducted.push(movement);
     } catch (err) {
@@ -102,6 +122,62 @@ export async function deductByRecipe(req, userId, {
   }, 'Descuento por receta completado');
 
   return { deducted, warnings, blocked: false };
+}
+
+async function hasReferenceStockMovements(req, userId, referenceId, referenceType) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return docs.some(
+    (doc) =>
+      doc?.type === 'stock_movement' &&
+      doc?.user_id === userId &&
+      doc?.referenceId === referenceId &&
+      doc?.referenceType === referenceType,
+  );
+}
+
+/** Descuenta stock al registrar un consumo de equipo (receta → ingredientes; sin receta → artículo de almacén). */
+export async function deductStaffConsumptionStock(req, userId, {
+  catalogItemId,
+  quantity,
+  consumptionId,
+  workerId = '',
+  workerName = '',
+  itemName = '',
+  warehouseId = '',
+  performedBy = '',
+}) {
+  if (await hasReferenceStockMovements(req, userId, consumptionId, 'staff_consumption')) {
+    return { deducted: [], warnings: ['Stock ya descontado para este consumo'], blocked: false };
+  }
+
+  const actor = String(performedBy || workerId || '').trim();
+  const label = `Consumo equipo${workerName ? `: ${workerName}` : ''}${itemName ? ` · ${itemName}` : ''}`;
+
+  const result = await deductByRecipe(req, userId, {
+    catalogItemId,
+    quantitySold: quantity,
+    warehouseId,
+    referenceId: consumptionId,
+    referenceType: 'staff_consumption',
+    performedBy: actor,
+    parentMovementType: 'internal_consumption',
+    skipNonInventoryParent: true,
+    contextLabel: label,
+  });
+
+  if (result.deducted.length > 0) {
+    logger.info({
+      tag: 'STAFF_CONSUMPTION_STOCK',
+      consumptionId,
+      catalogItemId,
+      quantity,
+      movements: result.deducted.length,
+    }, 'Stock descontado por consumo de equipo');
+  }
+
+  return result;
 }
 
 export async function checkIdempotency(req, userId, referenceId, catalogItemId, movementType) {

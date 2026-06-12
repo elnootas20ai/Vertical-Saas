@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertDepartments } from '../../hooks/useAlertDepartments';
 import { AlertCenterAjustesView } from '../../components/saas/AlertCenterAjustesView';
@@ -31,6 +33,13 @@ import {
   type AlertSource,
   type ListAlertsFilters,
 } from '../../lib/alertCenterApi';
+import {
+  fetchDocumentAlertsAsRecords,
+  mergeAlertLists,
+  mergeDocumentAlertsIntoSummary,
+  shouldIncludeDocumentAlerts,
+  isSyntheticDocumentAlert,
+} from '../../lib/documentAlertsApi';
 import {
   Bell, CheckCircle, Eye, Filter, Search, RefreshCw,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Trash2, Check,
@@ -81,6 +90,8 @@ export default function AlertCenterPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = useAlertCenterBusinessId();
   const settingsBusinessId = useAlertSettingsBusinessId();
   const { departments: alertDepartments, departmentSourceFilter } = useAlertDepartments();
@@ -116,9 +127,18 @@ export default function AlertCenterPage() {
     setLoading(true);
     try {
       const summaryRes = await fetchAlertSummary(businessId);
-      setSummary(normalizeAlertSummary(summaryRes.summary));
+      const sourceFilter = departmentSourceFilter(activeDepartment);
+      const includeDocs = !isHistory && shouldIncludeDocumentAlerts(sourceFilter);
+      const docAlerts = includeDocs && dataUserId
+        ? await fetchDocumentAlertsAsRecords(dataUserId, businessId)
+        : [];
 
-      if (isSettings) return;
+      if (isSettings) {
+        setSummary(mergeDocumentAlertsIntoSummary(normalizeAlertSummary(summaryRes.summary), docAlerts));
+        return;
+      }
+
+      setSummary(mergeDocumentAlertsIntoSummary(normalizeAlertSummary(summaryRes.summary), docAlerts));
 
       if (isHistory) {
         const alertsRes = await fetchAlertHistory(businessId, {
@@ -131,20 +151,46 @@ export default function AlertCenterPage() {
         setAlerts(alertsRes.alerts);
         setPagination(alertsRes.pagination);
       } else {
-        const alertsRes = await fetchAlerts(businessId, { ...filters, search: searchTerm || undefined });
-        setAlerts(alertsRes.alerts);
-        setPagination(alertsRes.pagination);
+        const alertsRes = await fetchAlerts(businessId, {
+          ...filters,
+          search: searchTerm || undefined,
+          ...(sourceFilter ? { source: sourceFilter } : {}),
+        });
+        const merged = mergeAlertLists(alertsRes.alerts || [], docAlerts);
+        const search = searchTerm.trim().toLowerCase();
+        const filtered = search
+          ? merged.filter((a) =>
+            a.title.toLowerCase().includes(search) || a.message.toLowerCase().includes(search))
+          : merged;
+        setAlerts(filtered);
+        setPagination({
+          ...alertsRes.pagination,
+          total: filtered.length,
+          pages: Math.max(1, Math.ceil(filtered.length / (filters.limit || 25))),
+        });
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error cargando alertas');
     } finally {
       setLoading(false);
     }
-  }, [businessId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo]);
+  }, [businessId, dataUserId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo, activeDepartment, departmentSourceFilter]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
   const handleStatusChange = useCallback(async (alertId: string, status: AlertStatus) => {
+    if (isSyntheticDocumentAlert(alertId)) {
+      if (status === 'seen' || status === 'resolved') {
+        setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+        setSummary((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev, unresolved: Math.max(0, prev.unresolved - 1) };
+          next.byStatus = { ...next.byStatus, new: Math.max(0, (next.byStatus.new || 0) - 1) };
+          return next;
+        });
+      }
+      return;
+    }
     try {
       await updateAlertStatus(businessId, alertId, status);
       toast.success(`Alerta marcada como ${STATUS_LABELS[status].toLowerCase()}`);
@@ -156,8 +202,17 @@ export default function AlertCenterPage() {
 
   const handleBulkStatus = useCallback(async (status: AlertStatus) => {
     if (selectedIds.size === 0) return;
+    const realIds = [...selectedIds].filter((id) => !isSyntheticDocumentAlert(id));
+    const syntheticIds = [...selectedIds].filter((id) => isSyntheticDocumentAlert(id));
+    if (syntheticIds.length > 0 && (status === 'seen' || status === 'resolved')) {
+      setAlerts((prev) => prev.filter((a) => !syntheticIds.includes(a.id)));
+    }
+    if (realIds.length === 0) {
+      setSelectedIds(new Set());
+      return;
+    }
     try {
-      const result = await bulkUpdateAlertStatus(businessId, [...selectedIds], status);
+      const result = await bulkUpdateAlertStatus(businessId, realIds, status);
       toast.success(`${result.updated} alertas actualizadas`);
       setSelectedIds(new Set());
       loadData();
@@ -167,6 +222,10 @@ export default function AlertCenterPage() {
   }, [businessId, selectedIds, loadData]);
 
   const handleDelete = useCallback(async (alertId: string) => {
+    if (isSyntheticDocumentAlert(alertId)) {
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      return;
+    }
     try {
       await deleteAlertRequest(businessId, alertId);
       toast.success('Alerta eliminada');

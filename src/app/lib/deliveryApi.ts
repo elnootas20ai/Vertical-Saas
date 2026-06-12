@@ -469,7 +469,7 @@ export async function bulkUpdateCatalogStockRequest(
 
 export async function bulkApplyStaffPricesRequest(
   userId: string,
-  data: { discountPercent: number; categories?: string[] },
+  data: { discountPercent: number; categories?: string[]; enabled?: boolean },
 ): Promise<{ updated: number; discountPercent: number; config: DeliveryConfig }> {
   const id = normalizeUserId(userId);
   const result = await request<{
@@ -1773,14 +1773,23 @@ export async function createStaffConsumptionRequest(
     registerSessionId?: string;
     notes?: string;
   },
-): Promise<StaffConsumption> {
+): Promise<{ consumption: StaffConsumption; stockDeducted?: number; stockWarnings?: string[] }> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; consumption: StaffConsumption }>(
+  const result = await request<{
+    ok: boolean;
+    consumption: StaffConsumption;
+    stockDeducted?: number;
+    stockWarnings?: string[];
+  }>(
     `/api/delivery/staff-consumptions/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify(data) },
   );
   if (!result.consumption) throw new Error('Respuesta inválida del servidor');
-  return result.consumption;
+  return {
+    consumption: result.consumption,
+    stockDeducted: result.stockDeducted,
+    stockWarnings: result.stockWarnings,
+  };
 }
 
 // ─── Ops Center ───────────────────────────────────────────────────────────────

@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import { Layout } from '../../components/saas/Layout';
@@ -323,9 +322,8 @@ function RecipeModal({ isOpen, onClose, onSave, catalogItems, editItem }: Recipe
   );
 }
 
-export function CostingPage() {
+export function EscandalloPanel() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [recipes, setRecipes] = useState<Recipe[]>(loadRecipes);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -500,7 +498,7 @@ export function CostingPage() {
   }, [recipes]);
 
   return (
-    <Layout title="Escandallo" subtitle="Cálculo de coste de producción y food cost por receta">
+    <>
       <div className="space-y-6">
         {/* Filters & Actions */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -851,6 +849,14 @@ export function CostingPage() {
         fields={COSTING_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
+    </>
+  );
+}
+
+export function CostingPage() {
+  return (
+    <Layout title="Escandallo" subtitle="Cálculo de coste de producción y food cost por receta">
+      <EscandalloPanel />
     </Layout>
   );
 }

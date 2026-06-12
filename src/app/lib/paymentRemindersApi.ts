@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getApiBase } from './apiBase';
 import { ensureCouchDb } from './ensureCouchDb';
+import type { FinanceMovementRecord } from './financeTypes';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -175,4 +176,50 @@ export async function deletePaymentReminder(reminderId: string): Promise<void> {
     `/api/couch/doc/${encodeURIComponent(REMINDERS_DB)}/${encodeURIComponent(reminderId)}?rev=${doc._rev}`,
     { method: 'DELETE' },
   );
+}
+
+/** Crea recordatorios a partir de cobros pendientes vencidos (core finanzas → recordatorios). */
+export async function syncPaymentRemindersFromMovements(
+  userId: string,
+  movements: FinanceMovementRecord[],
+): Promise<PaymentReminder[]> {
+  if (!userId) return [];
+
+  const existing = await listPaymentReminders(userId);
+  const activeKeys = new Set(
+    existing
+      .filter((r) => r.status !== 'resolved' && r.status !== 'cancelled')
+      .map((r) => r.invoiceId),
+  );
+
+  const now = Date.now();
+
+  for (const movement of movements) {
+    if (movement.type !== 'cobro' || movement.status !== 'pending') continue;
+    if (!movement.dueDate) continue;
+
+    const dueMs = Date.parse(movement.dueDate);
+    if (Number.isNaN(dueMs) || dueMs >= now) continue;
+
+    const daysOverdue = Math.max(1, Math.floor((now - dueMs) / 86_400_000));
+    if (daysOverdue < REMINDER_LEVELS[1].daysThreshold) continue;
+    if (activeKeys.has(movement._id)) continue;
+
+    await createPaymentReminder({
+      user_id: userId,
+      invoiceId: movement._id,
+      invoiceNumber: movement.reference || movement.concept.slice(0, 40),
+      clientId: '',
+      clientName: movement.companyName || 'Cliente',
+      clientEmail: '',
+      invoiceTotal: movement.totalAmount,
+      invoiceDueDate: movement.dueDate,
+      daysOverdue,
+      level: detectReminderLevel(daysOverdue),
+      status: 'pending',
+    });
+    activeKeys.add(movement._id);
+  }
+
+  return listPaymentReminders(userId);
 }

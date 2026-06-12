@@ -426,7 +426,7 @@ export async function getDocumentAlerts(req, res) {
       if (doc.status === 'pending' && doc.createdAt) {
         const created = new Date(doc.createdAt);
         const daysPending = Math.ceil((now.getTime() - created.getTime()) / 86400000);
-        if (daysPending > PENDING_STALE_DAYS && (doc.category === 'contracts' || doc.category === 'licenses')) {
+        if (daysPending > PENDING_STALE_DAYS && (doc.docType === 'contracts' || doc.docType === 'licenses' || doc.category === 'contracts' || doc.category === 'licenses')) {
           alerts.push({
             type: 'stale_pending',
             severity: 'warning',

@@ -2,6 +2,7 @@ import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
+import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
 import { WorkerTpvWorkshop } from './WorkerTpvWorkshop';
@@ -124,6 +125,7 @@ export function WorkerTpv() {
   return (
     <>
       <TpvOfflineBanner />
+      <WorkerStockReviewBanner />
       <TpvRegisterGate>
         <Module />
       </TpvRegisterGate>

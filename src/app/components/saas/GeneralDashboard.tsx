@@ -33,6 +33,7 @@ import {
   type PortfolioBusiness,
   type PortfolioTotals,
 } from '../../hooks/usePortfolioOverview';
+import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { TeamRrhhCompactRow } from './TeamRrhhDashboardWidget';
 
 interface GeneralDashboardProps {
@@ -45,6 +46,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const { businesses, switchBusiness } = useBusiness();
 
   const { rows, totals, finance, loading, error, reload } = usePortfolioOverview(user, businesses);
+  const { canViewEbitda, isBasicPlan, planLabel } = useDashboardPlanAccess();
 
   const [businessFilter, setBusinessFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -173,19 +175,34 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             </h3>
             <button
               type="button"
-              onClick={() => navigate('/saas/finance')}
+              onClick={() => navigate('/saas/ebitda')}
               className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
             >
-              Ir a finanzas →
+              Ver EBITDA →
             </button>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <MoneyCard label="Ingresos" value={fmtEuro(finance.incomeMonth)} tone="emerald" icon={<TrendingUp className="w-4 h-4" />} />
             <MoneyCard label="Gastos" value={fmtEuro(finance.expensesMonth)} tone="rose" icon={<TrendingDown className="w-4 h-4" />} />
-            <MoneyCard label="Resultado" value={fmtEuro(finance.profitMonth)} tone={finance.profitMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
+            {canViewEbitda ? (
+              <>
+                <MoneyCard label="EBITDA mes" value={fmtEuro(finance.ebitdaMonth)} tone={finance.ebitdaMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
+                <MoneyCard label="Margen EBITDA" value={`${finance.ebitdaMarginMonth.toFixed(1)}%`} tone="blue" icon={<TrendingUp className="w-4 h-4" />} />
+              </>
+            ) : (
+              <MoneyCard label="Resultado" value={fmtEuro(finance.profitMonth)} tone={finance.profitMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
+            )}
             <MoneyCard label="Pendiente cobro" value={fmtEuro(finance.pendingAmount)} tone="amber" icon={<Receipt className="w-4 h-4" />} />
             <MoneyCard label="Saldo bancos" value={fmtEuro(finance.cashBalance)} tone="blue" icon={<Wallet className="w-4 h-4" />} />
           </div>
+          {isBasicPlan && (
+            <p className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-3">
+              Plan {planLabel}: EBITDA consolidado disponible desde Normal.{' '}
+              <button type="button" onClick={() => navigate('/saas/admin')} className="font-semibold underline">
+                Ver planes
+              </button>
+            </p>
+          )}
         </section>
 
         {/* KPIs operativos delivery + RRHH */}

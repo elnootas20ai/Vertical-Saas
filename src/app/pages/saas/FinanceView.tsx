@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { PeriodBadge } from '../../components/ui/PeriodBadge';
 import { useAuth } from '../../context/AuthContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
 import { createFinanceMovementInCouch, listFinanceMovements } from '../../lib/financeApi';
 import {
   buildFinanceReference,
@@ -57,12 +58,12 @@ import {
 import { exportAccountingToExcel } from '../../lib/accountingExport';
 import {
   buildReminderEmailBody,
-  createPaymentReminder,
   detectReminderLevel,
   listPaymentReminders,
   markReminderResolved,
   markReminderSent,
   REMINDER_LEVELS,
+  syncPaymentRemindersFromMovements,
   type PaymentReminder,
 } from '../../lib/paymentRemindersApi';
 import {
@@ -79,6 +80,7 @@ import {
   getCurrencyList,
   type CurrencyCode,
 } from '../../lib/currencyApi';
+import { syncClientInvoicePaymentReminders } from '../../lib/clientInvoiceFinanceSync';
 import BankAccountsWidget from '../../components/saas/finance/BankAccountsWidget';
 import TaxCalendarWidget from '../../components/saas/finance/TaxCalendarWidget';
 
@@ -1133,6 +1135,7 @@ function NewTransactionModal({
 export function Finance() {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const financeUserId = useFinanceUserId();
   const [activeTab, setActiveTab] = useState<FinanceTab>('overview');
   const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [showModal, setShowModal] = useState(false);
@@ -1165,7 +1168,7 @@ export function Finance() {
   useModalClose(!!selectedTx, () => setSelectedTx(null));
 
   const loadMovements = useCallback(async () => {
-    if (!user?.user_id) {
+    if (!financeUserId) {
       setMovements([]);
       setIsLoading(false);
       return;
@@ -1174,31 +1177,40 @@ export function Finance() {
     setIsLoading(true);
     setError('');
     try {
-      const nextMovements = await listFinanceMovements(user.user_id);
+      const nextMovements = await listFinanceMovements(financeUserId);
       setMovements(nextMovements);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'No se pudieron cargar los movimientos');
     } finally {
       setIsLoading(false);
     }
-  }, [user?.user_id]);
+  }, [financeUserId]);
 
   useEffect(() => {
     void loadMovements();
   }, [loadMovements]);
 
   const loadReminders = useCallback(async () => {
-    if (!user?.user_id) return;
+    if (!financeUserId) return;
     setRemindersLoading(true);
     try {
-      const data = await listPaymentReminders(user.user_id);
-      setReminders(data);
+      const currentMovements = movements.length > 0
+        ? movements
+        : await listFinanceMovements(financeUserId);
+      const data = await syncPaymentRemindersFromMovements(financeUserId, currentMovements);
+      await syncClientInvoicePaymentReminders(financeUserId).catch(() => {});
+      setReminders(await listPaymentReminders(financeUserId));
     } catch {
-      // non-critical
+      try {
+        const data = await listPaymentReminders(financeUserId);
+        setReminders(data);
+      } catch {
+        // non-critical
+      }
     } finally {
       setRemindersLoading(false);
     }
-  }, [user?.user_id]);
+  }, [financeUserId, movements]);
 
   useEffect(() => {
     if (activeTab === 'reminders') void loadReminders();
@@ -1365,17 +1377,17 @@ export function Finance() {
   }, [currentMonthMovements, monthExpense, monthIncome]);
 
   const handleAdd = async (draft: NewMovementDraft) => {
-    if (!user?.user_id) {
-      throw new Error('No hay usuario autenticado para guardar en CouchDB');
+    if (!financeUserId) {
+      throw new Error('No hay usuario autenticado para guardar el movimiento');
     }
 
     setIsSaving(true);
     setError('');
     try {
-      const created = await createFinanceMovementInCouch({
+      const created = await createFinanceMovementInCouch(financeUserId, {
         ...draft,
-        user_id: user.user_id,
-        companyName: user.companyName || '',
+        user_id: financeUserId,
+        companyName: user?.companyName || '',
       });
       setMovements((current) => [created, ...current]);
     } catch (error) {
@@ -1695,8 +1707,12 @@ export function Finance() {
             </div>
 
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <BankAccountsWidget userId={userId} />
-              <TaxCalendarWidget userId={userId} />
+              {financeUserId && (
+                <>
+                  <BankAccountsWidget userId={financeUserId} />
+                  <TaxCalendarWidget userId={financeUserId} />
+                </>
+              )}
             </div>
           </div>
         )}
@@ -2205,7 +2221,7 @@ export function Finance() {
                 <Bell className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-slate-500 font-medium">Sin recordatorios activos</p>
                 <p className="text-sm text-slate-400 mt-1">
-                  Los recordatorios se crean automáticamente al detectar facturas vencidas
+                  Se generan a partir de cobros pendientes vencidos en finanzas
                 </p>
               </div>
             ) : (

@@ -26,6 +26,7 @@ import {
   type PortfolioFinanceTotals,
   type PortfolioMetrics,
 } from '../lib/portfolioMetrics';
+import { computeEbitdaForMonth } from '../lib/ebitdaMetrics';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import type { WorkCenter } from '../lib/workCentersApi';
 import {
@@ -90,6 +91,8 @@ const EMPTY_FINANCE: PortfolioFinanceTotals = {
   incomeMonth: 0,
   expensesMonth: 0,
   profitMonth: 0,
+  ebitdaMonth: 0,
+  ebitdaMarginMonth: 0,
   pendingAmount: 0,
   cashBalance: 0,
 };
@@ -234,6 +237,9 @@ export function usePortfolioOverview(
       ]);
       const financeTotals = sumFinanceMonth(financeMovements, monthKey);
       financeTotals.cashBalance = getTotalBalance(bankAccounts);
+      const ebitdaTotals = computeEbitdaForMonth(financeMovements, monthKey, { level: 'all' });
+      financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
+      financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
 
       const ordersByUser = new Map<
         string,

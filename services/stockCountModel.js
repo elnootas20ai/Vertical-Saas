@@ -33,6 +33,7 @@ export function buildStockCountDocument(userId, data = {}, existing = null) {
         stockCategory: line.stockCategory || 'other',
         unit: String(line.unit || 'ud'),
         costPrice,
+        minStock: Number(line.minStock ?? 0),
         theoreticalStock: theoretical,
         countedStock: counted,
         difference,

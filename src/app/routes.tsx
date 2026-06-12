@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate, useParams } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { isWorkerAccount } from './lib/authApi';
 import { resolveWorkerSessionEntryPath } from './lib/workerProfileCompletion';
@@ -138,14 +138,14 @@ import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
 import { Chat } from './pages/saas/Chat';
 import { SupplierBillingPage } from './pages/saas/SupplierBillingPage';
 import { ClientBillingPage } from './pages/saas/ClientBillingPage';
-import { CostingPage } from './pages/saas/CostingPage';
 import { IncomeExpensesPage } from './pages/saas/IncomeExpensesPage';
 import { EbitdaPage } from './pages/saas/EbitdaPage';
 import { TaxesPage } from './pages/saas/TaxesPage';
 import { BankReconciliationPage } from './pages/saas/BankReconciliationPage';
 import { ArticlesPage } from './pages/saas/ArticlesPage';
 import { SuppliersPage } from './pages/saas/SuppliersPage';
-import { OrdersPage } from './pages/saas/OrdersPage';
+import { SuppliersLayout } from './pages/saas/suppliers/SuppliersLayout';
+import { SupplierDetailPage } from './pages/saas/SupplierDetailPage';
 import { PurchaseOrdersPage } from './pages/saas/PurchaseOrdersPage';
 import { ComprasStockPage } from './pages/saas/ComprasStockPage';
 import { PromotionsPage } from './pages/saas/PromotionsPage';
@@ -299,6 +299,7 @@ import {
   WorkerSecurity,
   WorkerTpv,
   WorkerConstructionReport,
+  WorkerStockReviewPage,
 } from './pages/saas/worker';
 import { UserDashboard } from './pages/saas/UserDashboard';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -545,15 +546,25 @@ export const router = createBrowserRouter([
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
           { path: 'catalog', Component: CatalogPage },
-          { path: 'articles', Component: ArticlesPage },
-          { path: 'suppliers', element: <RequireBusinessOwner><SuppliersPage /></RequireBusinessOwner> },
-          { path: 'orders', element: <RequireBusinessOwner><OrdersPage /></RequireBusinessOwner> },
-          { path: 'purchase-orders', element: <RequireBusinessOwner><PurchaseOrdersPage /></RequireBusinessOwner> },
+          { path: 'articles', element: <Navigate to="/saas/catalog?tab=stock" replace /> },
+          { path: 'suppliers', element: <RequireBusinessOwner><Outlet /></RequireBusinessOwner>, children: [
+            {
+              element: <SuppliersLayout />,
+              children: [
+                { index: true, element: <SuppliersPage /> },
+                { path: 'ordenes-compra', element: <Navigate to="/saas/catalog?tab=purchase-orders" replace /> },
+                { path: 'facturas', element: <SupplierBillingPage /> },
+              ],
+            },
+            { path: ':supplierId', element: <SupplierDetailPage /> },
+          ]},
+          { path: 'orders', element: <Navigate to="/saas/suppliers/facturas" replace /> },
+          { path: 'purchase-orders', element: <Navigate to="/saas/catalog?tab=purchase-orders" replace /> },
           { path: 'compras-stock', element: <RequireBusinessOwner><ComprasStockPage /></RequireBusinessOwner> },
-          { path: 'supplier-billing', element: <RequireBusinessOwner><SupplierBillingPage /></RequireBusinessOwner> },
+          { path: 'supplier-billing', element: <Navigate to="/saas/suppliers/facturas" replace /> },
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
-          { path: 'costing', element: <RequireBusinessOwner><CostingPage /></RequireBusinessOwner> },
+          { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },
           { path: 'delivery', element: <RequireBusinessOwner><Delivery /></RequireBusinessOwner> },
           { path: 'delivery-ops', element: <RequireBusinessOwner><DeliveryOpsCenter /></RequireBusinessOwner> },
           { path: 'delivery-reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
@@ -717,7 +728,7 @@ export const router = createBrowserRouter([
           // Spare Parts
           { path: 'spareparts-catalog', element: <Navigate to="/saas/catalog" replace /> },
           { path: 'spareparts-stock', element: <Navigate to="/saas/compras-stock" replace /> },
-          { path: 'spareparts-orders', element: <Navigate to="/saas/orders" replace /> },
+          { path: 'spareparts-orders', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
           { path: 'spareparts-suppliers', element: <Navigate to="/saas/suppliers" replace /> },
           { path: 'spareparts-compatibility', element: <RequireBusinessOwner><SparePartsCompatibility /></RequireBusinessOwner> },
           { path: 'spareparts-counter', Component: SparePartsCounter },
@@ -766,14 +777,14 @@ export const router = createBrowserRouter([
           { path: 'butcher-hub', element: <RequireBusinessOwner><ButcherHub /></RequireBusinessOwner> },
           { path: 'butcher-clients', element: <Navigate to="/saas/clients" replace /> },
           { path: 'butcher-products', element: <RequireBusinessOwner><ButcherProducts /></RequireBusinessOwner> },
-          { path: 'butcher-orders', element: <Navigate to="/saas/orders" replace /> },
+          { path: 'butcher-orders', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
           { path: 'butcher-inventory', element: <Navigate to="/saas/compras-stock" replace /> },
           { path: 'butcher-stock', element: <Navigate to="/saas/compras-stock" replace /> },
           { path: 'butcher-suppliers', element: <Navigate to="/saas/suppliers" replace /> },
           { path: 'butcher-traceability', element: <RequireBusinessOwner><ButcherTraceability /></RequireBusinessOwner> },
           { path: 'butcher-sales', element: <Navigate to="/saas/sales" replace /> },
-          { path: 'butcher-purchases', element: <Navigate to="/saas/purchase-orders" replace /> },
-          { path: 'vertical/carniceria/compras', element: <Navigate to="/saas/purchase-orders" replace /> },
+          { path: 'butcher-purchases', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
+          { path: 'vertical/carniceria/compras', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
           { path: 'butcher-waste', element: <RequireWorkerPermission permission="butcher_waste"><ButcherWaste /></RequireWorkerPermission> },
           { path: 'butcher-workers', element: <Navigate to="/saas/team" replace /> },
           { path: 'vertical/carniceria/trabajadores', element: <Navigate to="/saas/team" replace /> },
@@ -800,6 +811,7 @@ export const router = createBrowserRouter([
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
           { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpv /></RequireTpvTabletEntry> },
           { path: 'worker/tasks', Component: WorkerTasks },
+          { path: 'worker/stock-review', Component: WorkerStockReviewPage },
           { path: 'worker/calendar', Component: WorkerCalendar },
           { path: 'worker/clock', Component: WorkerClock },
           { path: 'worker/chat', Component: WorkerChat },

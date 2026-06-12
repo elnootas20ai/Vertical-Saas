@@ -1,102 +1,215 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
-import { useAuth } from '../../context/AuthContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
+import { useBusiness } from '../../context/BusinessContext';
 import { listFinanceMovements } from '../../lib/financeApi';
 import type { FinanceMovementRecord } from '../../lib/financeTypes';
+import type { EbitdaScopeFilter } from '../../lib/financeScope';
+import {
+  computeEbitdaMonthly,
+  computeEbitdaBreakdown,
+  extractYearsFromMovements,
+  getCategoryLabel,
+} from '../../lib/ebitdaMetrics';
 import {
   PiggyBank, TrendingUp, TrendingDown,
-  DollarSign, Landmark, BarChart3, Calendar,
-  Percent, Building2, Layers,
+  DollarSign, BarChart3, Calendar,
+  Percent, Building2, Layers, Store,
 } from 'lucide-react';
 
 function fmt(n: number) { return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
-interface MonthData {
-  month: string;
-  label: string;
-  income: number;
-  expenses: number;
-  opex: number;
-  depreciation: number;
-  ebitda: number;
-  ebitdaMargin: number;
-}
-
-const OPEX_CATEGORIES = new Set(['personal', 'alquiler', 'suministros', 'seguros', 'marketing', 'software', 'asesoría', 'mantenimiento', 'transporte']);
+type ScopeMode = 'all' | 'business' | 'store';
 
 export function EbitdaPage() {
-  const { user } = useAuth();
+  const financeUserId = useFinanceUserId();
+  const { businesses, currentBusiness } = useBusiness();
   const [movements, setMovements] = useState<FinanceMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const [scopeMode, setScopeMode] = useState<ScopeMode>('all');
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [selectedStoreId, setSelectedStoreId] = useState('');
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
-    try { setMovements(await listFinanceMovements(user.id)); } catch { toast.error('Error al cargar datos'); } finally { setLoading(false); }
-  }, [user?.id]);
+    if (!financeUserId) {
+      setMovements([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      setMovements(await listFinanceMovements(financeUserId));
+    } catch {
+      toast.error('Error al cargar datos');
+    } finally {
+      setLoading(false);
+    }
+  }, [financeUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const years = useMemo(() => {
-    const yrs = new Set<number>(); yrs.add(new Date().getFullYear());
-    movements.forEach(m => { const y = parseInt(m.date.slice(0, 4), 10); if (y >= 2020) yrs.add(y); });
-    return Array.from(yrs).sort((a, b) => b - a);
-  }, [movements]);
+  useEffect(() => {
+    if (scopeMode === 'business' && !selectedBusinessId && currentBusiness?.business_id) {
+      setSelectedBusinessId(currentBusiness.business_id);
+    }
+  }, [scopeMode, selectedBusinessId, currentBusiness?.business_id]);
 
-  const monthlyData: MonthData[] = useMemo(() => {
-    const yearMvs = movements.filter(m => m.date.startsWith(String(selectedYear)));
-    return Array.from({ length: 12 }, (_, i) => {
-      const month = `${selectedYear}-${String(i + 1).padStart(2, '0')}`;
-      const monthMvs = yearMvs.filter(m => m.date.startsWith(month));
-      const income = monthMvs.filter(m => m.type === 'cobro').reduce((s, m) => s + m.totalAmount, 0);
-      const expenses = monthMvs.filter(m => m.type === 'pago').reduce((s, m) => s + m.totalAmount, 0);
-      const opex = monthMvs.filter(m => m.type === 'pago' && OPEX_CATEGORIES.has(m.category)).reduce((s, m) => s + m.totalAmount, 0);
-      const depreciation = 0;
-      const ebitda = income - opex;
-      const ebitdaMargin = income > 0 ? (ebitda / income) * 100 : 0;
-      const labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-      return { month, label: labels[i], income, expenses, opex, depreciation, ebitda, ebitdaMargin };
-    });
-  }, [movements, selectedYear]);
+  const businessNameMap = useMemo(
+    () => new Map(businesses.map((b) => [b.business_id, b.name])),
+    [businesses],
+  );
 
-  const annualTotals = useMemo(() => {
-    const income = monthlyData.reduce((s, m) => s + m.income, 0);
-    const expenses = monthlyData.reduce((s, m) => s + m.expenses, 0);
-    const opex = monthlyData.reduce((s, m) => s + m.opex, 0);
-    const ebitda = income - opex;
-    const ebitdaMargin = income > 0 ? (ebitda / income) * 100 : 0;
-    const cogs = expenses - opex;
-    const grossProfit = income - cogs;
-    return { income, expenses, opex, ebitda, ebitdaMargin, cogs, grossProfit };
-  }, [monthlyData]);
+  const storeOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    const bid = scopeMode === 'store' ? selectedBusinessId : '';
+    for (const m of movements) {
+      if (bid && m.businessId && m.businessId !== bid) continue;
+      const id = String(m.workCenterId || '').trim();
+      if (!id) continue;
+      map.set(id, String(m.workCenterName || id));
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [movements, scopeMode, selectedBusinessId]);
+
+  const scopeFilter: EbitdaScopeFilter = useMemo(() => {
+    if (scopeMode === 'store' && selectedStoreId) {
+      return {
+        level: 'store',
+        workCenterId: selectedStoreId,
+        businessId: selectedBusinessId || undefined,
+      };
+    }
+    if (scopeMode === 'business' && selectedBusinessId) {
+      return { level: 'business', businessId: selectedBusinessId };
+    }
+    return { level: 'all' };
+  }, [scopeMode, selectedBusinessId, selectedStoreId]);
+
+  const scopeLabel = useMemo(() => {
+    if (scopeMode === 'all') return 'Todas las empresas (consolidado)';
+    if (scopeMode === 'business') {
+      return businessNameMap.get(selectedBusinessId) || 'Empresa';
+    }
+    const store = storeOptions.find((s) => s.id === selectedStoreId);
+    return store?.name || 'Tienda';
+  }, [scopeMode, selectedBusinessId, selectedStoreId, businessNameMap, storeOptions]);
+
+  const years = useMemo(() => extractYearsFromMovements(movements), [movements]);
+
+  const { months: monthlyData, annual: annualTotals } = useMemo(
+    () => computeEbitdaMonthly(movements, selectedYear, scopeFilter),
+    [movements, selectedYear, scopeFilter],
+  );
+
+  const businessBreakdown = useMemo(
+    () => (scopeMode === 'all' ? computeEbitdaBreakdown(movements, selectedYear, 'business', businessNameMap) : []),
+    [movements, selectedYear, scopeMode, businessNameMap],
+  );
+
+  const storeBreakdown = useMemo(() => {
+    if (scopeMode === 'store') return [];
+    const scoped =
+      scopeMode === 'business' && selectedBusinessId
+        ? movements.filter((m) => m.businessId === selectedBusinessId)
+        : movements;
+    return computeEbitdaBreakdown(scoped, selectedYear, 'store');
+  }, [movements, selectedYear, scopeMode, selectedBusinessId]);
 
   const maxBar = useMemo(() => Math.max(...monthlyData.map(m => Math.max(m.income, m.opex)), 1), [monthlyData]);
 
   const topCategories = useMemo(() => {
     const yearMvs = movements.filter(m => m.date.startsWith(String(selectedYear)) && m.type === 'pago');
     const byCategory: Record<string, number> = {};
-    yearMvs.forEach(m => { byCategory[m.category] = (byCategory[m.category] || 0) + m.totalAmount; });
+    yearMvs.forEach(m => {
+      const label = getCategoryLabel(m.category, 'pago');
+      byCategory[label] = (byCategory[label] || 0) + m.totalAmount;
+    });
     return Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 8);
   }, [movements, selectedYear]);
 
   const totalExpensesCat = topCategories.reduce((s, [, v]) => s + v, 0);
 
   return (
-    <Layout title="EBITDA" subtitle="Resultado operativo antes de intereses, impuestos, depreciación y amortización">
+    <Layout title="EBITDA" subtitle="Resultado operativo por empresa, tienda o consolidado">
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <Calendar className="w-4 h-4 text-gray-500" />
-          <select className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
-            {years.map(y => (<option key={y} value={y}>{y}</option>))}
-          </select>
+        {/* Scope + year */}
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
+          <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Ámbito</label>
+              <select
+                className="w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                value={scopeMode}
+                onChange={(e) => {
+                  const mode = e.target.value as ScopeMode;
+                  setScopeMode(mode);
+                  if (mode === 'business' && !selectedBusinessId) {
+                    setSelectedBusinessId(currentBusiness?.business_id || businesses[0]?.business_id || '');
+                  }
+                }}
+              >
+                <option value="all">Todas las empresas</option>
+                <option value="business">Una empresa</option>
+                <option value="store">Una tienda</option>
+              </select>
+            </div>
+            {(scopeMode === 'business' || scopeMode === 'store') && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Empresa</label>
+                <select
+                  className="w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800"
+                  value={selectedBusinessId}
+                  onChange={(e) => { setSelectedBusinessId(e.target.value); setSelectedStoreId(''); }}
+                >
+                  {businesses.map((b) => (
+                    <option key={b.business_id} value={b.business_id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {scopeMode === 'store' && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Tienda</label>
+                <select
+                  className="w-full px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800"
+                  value={selectedStoreId}
+                  onChange={(e) => setSelectedStoreId(e.target.value)}
+                >
+                  <option value="">Selecciona tienda…</option>
+                  {storeOptions.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-gray-500" />
+            <select className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100" value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
+              {years.map(y => (<option key={y} value={y}>{y}</option>))}
+            </select>
+          </div>
         </div>
+
+        <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+          Viendo: <span className="font-semibold text-gray-700 dark:text-gray-300">{scopeLabel}</span>
+          {scopeMode === 'store' && !selectedStoreId ? ' — elige una tienda para ver datos' : null}
+        </p>
 
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-500"><div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full mr-3" />Cargando datos...</div>
+        ) : scopeMode === 'store' && !selectedStoreId ? (
+          <div className="rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600 p-12 text-center text-gray-500">
+            <Store className="w-10 h-10 mx-auto mb-3 opacity-40" />
+            <p className="text-sm">Selecciona una tienda para ver su EBITDA.</p>
+            <p className="text-xs mt-1">Los movimientos nuevos (TPV, facturas, manual) se etiquetan automáticamente.</p>
+          </div>
         ) : (
           <>
-            {/* Annual KPIs */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
                 <div className="text-green-600 mb-2"><TrendingUp className="w-5 h-5" /></div>
@@ -120,7 +233,6 @@ export function EbitdaPage() {
               </div>
             </div>
 
-            {/* P&L Summary */}
             <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
               <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2"><Layers className="w-5 h-5 text-gray-500" /> Cuenta de resultados simplificada</h3>
               <div className="space-y-2">
@@ -132,7 +244,24 @@ export function EbitdaPage() {
               </div>
             </div>
 
-            {/* Monthly chart */}
+            {businessBreakdown.length > 1 && (
+              <BreakdownTable
+                title="EBITDA por empresa"
+                icon={<Building2 className="w-5 h-5 text-gray-500" />}
+                rows={businessBreakdown}
+                year={selectedYear}
+              />
+            )}
+
+            {storeBreakdown.length > 1 && (
+              <BreakdownTable
+                title={scopeMode === 'business' ? 'EBITDA por tienda' : 'EBITDA por tienda (todas las empresas)'}
+                icon={<Store className="w-5 h-5 text-gray-500" />}
+                rows={storeBreakdown}
+                year={selectedYear}
+              />
+            )}
+
             <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
               <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-gray-500" /> EBITDA mensual</h3>
               <div className="grid grid-cols-12 gap-1.5 items-end h-48">
@@ -151,13 +280,8 @@ export function EbitdaPage() {
                   );
                 })}
               </div>
-              <div className="flex items-center gap-4 mt-3 text-xs text-gray-500 dark:text-gray-400">
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-400 rounded" /> Ingresos</span>
-                <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-400 rounded" /> OPEX</span>
-              </div>
             </div>
 
-            {/* Monthly table */}
             <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[700px]">
@@ -190,17 +314,16 @@ export function EbitdaPage() {
               </div>
             </div>
 
-            {/* Top expense categories */}
             {topCategories.length > 0 && (
               <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2"><Building2 className="w-5 h-5 text-gray-500" /> Principales categorías de gasto</h3>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2"><DollarSign className="w-5 h-5 text-gray-500" /> Principales categorías de gasto</h3>
                 <div className="space-y-3">
                   {topCategories.map(([cat, amount]) => {
                     const pct = totalExpensesCat > 0 ? (amount / totalExpensesCat) * 100 : 0;
                     return (
                       <div key={cat}>
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300 capitalize">{cat}</span>
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{cat}</span>
                           <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{fmt(amount)}€ <span className="text-xs text-gray-400 font-normal">({pct.toFixed(0)}%)</span></span>
                         </div>
                         <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
@@ -216,5 +339,52 @@ export function EbitdaPage() {
         )}
       </div>
     </Layout>
+  );
+}
+
+function BreakdownTable({
+  title,
+  icon,
+  rows,
+  year,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  rows: ReturnType<typeof computeEbitdaBreakdown>;
+  year: number;
+}) {
+  return (
+    <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+        {icon}
+        <h3 className="font-bold text-gray-900 dark:text-gray-100">{title} — {year}</h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px]">
+          <thead>
+            <tr className="bg-gray-50 dark:bg-gray-900 text-xs uppercase text-gray-500">
+              <th className="px-4 py-2 text-left">Nombre</th>
+              <th className="px-4 py-2 text-right">Ingresos</th>
+              <th className="px-4 py-2 text-right">COGS</th>
+              <th className="px-4 py-2 text-right">OPEX</th>
+              <th className="px-4 py-2 text-right">EBITDA</th>
+              <th className="px-4 py-2 text-right">Margen</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+            {rows.map((row) => (
+              <tr key={row.id} className="text-sm">
+                <td className="px-4 py-2.5 font-medium text-gray-900 dark:text-gray-100">{row.label}</td>
+                <td className="px-4 py-2.5 text-right text-green-700 dark:text-green-400">{fmt(row.income)}€</td>
+                <td className="px-4 py-2.5 text-right text-red-600">{fmt(row.cogs)}€</td>
+                <td className="px-4 py-2.5 text-right text-red-600">{fmt(row.opex)}€</td>
+                <td className={`px-4 py-2.5 text-right font-bold ${row.ebitda >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-600'}`}>{fmt(row.ebitda)}€</td>
+                <td className="px-4 py-2.5 text-right text-purple-700 dark:text-purple-400">{row.ebitdaMargin.toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

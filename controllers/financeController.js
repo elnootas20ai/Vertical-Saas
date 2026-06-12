@@ -13,12 +13,51 @@ import {
   putDocument,
   softDeleteDocument,
   findAccountByUserId,
+  resolveDataOwnerUserId,
   logAccountActivity,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function normalizeUserIdParam(userId) {
+  const value = String(userId || '').trim();
+  return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
+async function resolveFinanceDataUserId(req, rawUserId) {
+  const normalized = normalizeUserIdParam(rawUserId);
+  if (!normalized) return '';
+  const { ownerUserId } = await resolveDataOwnerUserId(req, normalized);
+  return ownerUserId || normalized;
+}
+
+async function assertFinanceAccess(req, dataUserId) {
+  const authUserId = normalizeUserIdParam(req.authUser?.userId || req.authUser?.user_id);
+  if (!authUserId) return false;
+  if (authUserId === dataUserId) return true;
+
+  const authRes = await resolveDataOwnerUserId(req, authUserId);
+  const authOwner = authRes.ownerUserId || authUserId;
+  if (authOwner === dataUserId) return true;
+
+  const authAccount = authRes.account || (await findAccountByUserId(req, authUserId));
+  if (authAccount && normalizeUserIdParam(authAccount.invitedBy) === dataUserId) return true;
+
+  return false;
+}
+
+function financeScopeFromEntity(entity = {}) {
+  return {
+    businessId: String(entity.businessId || entity.business_id || '').trim(),
+    businessName: String(entity.businessName || entity.business_name || '').trim(),
+    workCenterId: String(entity.workCenterId || entity.costCenterId || '').trim(),
+    workCenterName: String(entity.workCenterName || entity.costCenterName || '').trim(),
+    pointOfSaleId: String(entity.pointOfSaleId || '').trim(),
+    pointOfSaleName: String(entity.pointOfSaleName || '').trim(),
+  };
 }
 
 async function ensureFinanceOwner(req, userId, movementId) {
@@ -33,13 +72,14 @@ async function ensureFinanceOwner(req, userId, movementId) {
 
 export async function listFinanceMovements(req, res) {
   try {
-    const { userId } = req.params;
-    if (!userId) return badRequest(res, 'Falta userId');
+    const dataUserId = await resolveFinanceDataUserId(req, req.params.userId);
+    if (!dataUserId) return badRequest(res, 'Falta userId');
 
-    const account = await findAccountByUserId(req, userId);
-    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    if (!(await assertFinanceAccess(req, dataUserId))) {
+      return res.status(403).json({ ok: false, error: 'No autorizado' });
+    }
 
-    const raw = await listFinanceByUser(req, userId);
+    const raw = await listFinanceByUser(req, dataUserId);
     const { items, meta } = applyQueryOptions(raw.map(sanitizeFinance), req.query);
     return res.json({ ok: true, movements: items, meta });
   } catch (error) {
@@ -224,7 +264,7 @@ export async function createMovementFromInvoice(req, res) {
       type: isCobro ? 'cobro' : 'pago',
       concept: `Factura ${invoice.invoiceNumber || invoice.number || invoiceId} — ${isCobro ? (invoice.clientName || '') : (invoice.supplierName || '')}`.trim(),
       reference: invoice.invoiceNumber || invoice.number || '',
-      category: isCobro ? 'ventas' : 'materiales',
+      category: isCobro ? 'ventas' : 'compras_stock',
       amountBase: Number(invoice.subtotal || invoice.amountBase || 0),
       taxRate: Number(invoice.taxRate || 21),
       date: invoice.date || new Date().toISOString().slice(0, 10),
@@ -237,6 +277,7 @@ export async function createMovementFromInvoice(req, res) {
       source: 'invoice',
       sourceRef: invoiceId,
       linkedDocuments: [{ id: invoiceId, type: invoiceType, name: invoice.invoiceNumber || invoice.number || invoiceId, url: '' }],
+      ...financeScopeFromEntity(invoice),
     };
 
     const doc = buildFinanceDocument(userId, movementData);
@@ -295,7 +336,7 @@ export async function createMovementFromSale(req, res) {
       type: 'cobro',
       concept: `Venta ${sale.vehicleName || ''} ${sale.vehiclePlate || ''}`.trim() || `Venta #${saleId}`,
       reference: saleId,
-      category: 'ventas',
+      category: 'venta_vehiculo',
       amountBase: Number(sale.totalPrice || 0),
       taxRate: 0,
       date: sale.deliveredAt?.slice(0, 10) || sale.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
@@ -307,6 +348,7 @@ export async function createMovementFromSale(req, res) {
       source: 'sale',
       sourceRef: saleId,
       linkedDocuments: [{ id: saleId, type: 'file', name: `Venta ${sale.vehicleName || saleId}`, url: '' }],
+      ...financeScopeFromEntity(sale),
     };
 
     const doc = buildFinanceDocument(userId, movementData);

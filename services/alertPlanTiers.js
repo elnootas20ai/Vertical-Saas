@@ -66,6 +66,7 @@ export const DELIVERY_PRO_ALERT_RULE_IDS = new Set([
   'document_expired',
   'document_expiring',
   'document_expiring_soon',
+  'document_missing_required',
   'fleet_itv_expiring',
   'fleet_insurance_expiring',
   'itv_expired',

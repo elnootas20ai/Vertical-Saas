@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
-import { useAuth } from '../../context/AuthContext';
+import { useFinanceUserId } from '../../hooks/useFinanceUserId';
 import { listFinanceMovements } from '../../lib/financeApi';
 import type { FinanceMovementRecord } from '../../lib/financeTypes';
 import {
@@ -18,7 +18,7 @@ import {
 function fmt(n: number) { return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 export function TaxesPage() {
-  const { user } = useAuth();
+  const financeUserId = useFinanceUserId();
   const [movements, setMovements] = useState<FinanceMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
@@ -26,9 +26,9 @@ export function TaxesPage() {
   const [expandedQuarter, setExpandedQuarter] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
-    try { setMovements(await listFinanceMovements(user.id)); } catch { toast.error('Error al cargar datos fiscales'); } finally { setLoading(false); }
-  }, [user?.id]);
+    if (!financeUserId) return;
+    try { setMovements(await listFinanceMovements(financeUserId)); } catch { toast.error('Error al cargar datos fiscales'); } finally { setLoading(false); }
+  }, [financeUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

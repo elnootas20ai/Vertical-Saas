@@ -44,8 +44,18 @@ if (!user || !host) {
 
 const buildEnv = mergedEnvForChild(process.env, values);
 
-console.log('[deploy:frontend] npm run build (con vars desde deploy/local-values.env para VITE_*)');
-const build = spawnSync('npm', ['run', 'build'], {
+const hasSmokeCreds = Boolean(
+  String(buildEnv.SAAS_LOGIN_EMAIL || '').trim() &&
+    String(buildEnv.SAAS_LOGIN_PASSWORD || '').trim(),
+);
+
+console.log(
+  hasSmokeCreds
+    ? '[deploy:frontend] npm run check:saas (build + smoke contra API)'
+    : '[deploy:frontend] npm run build (sin SAAS_LOGIN_* — smoke omitido)',
+);
+const buildArgs = hasSmokeCreds ? ['run', 'check:saas'] : ['run', 'build'];
+const build = spawnSync('npm', buildArgs, {
   cwd: REPO_ROOT,
   env: buildEnv,
   stdio: 'inherit',

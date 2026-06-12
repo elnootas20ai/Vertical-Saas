@@ -33,28 +33,24 @@ import {
 import { es } from 'date-fns/locale';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import FinanceReportsPanel from '../../components/saas/finance/FinanceReportsPanel';
+import { useReportPlanAccess } from '../../hooks/useReportPlanAccess';
+import {
+  REPORT_CATALOG,
+  requiredPlanLabel,
+  type ReportId,
+} from '../../lib/reportPlanCatalog';
+import { Lock, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-type ReportTab =
-  | 'ventas'
-  | 'inventario'
-  | 'crm'
-  | 'financiero'
-  | 'margen'
-  | 'comerciales'
-  | 'proveedores'
-  | 'comparativa'
-  | 'rentabilidad'
-  | 'forecast'
-  | 'rotacion'
-  | 'grupo'
-  | 'rgpd'
-  | 'heatmap';
+type ReportTab = ReportId;
 
-const SENSITIVE_TABS: ReportTab[] = ['rentabilidad', 'margen', 'financiero', 'grupo'];
+const SENSITIVE_TABS: ReportTab[] = REPORT_CATALOG
+  .filter((r) => r.requiresReportsPermission)
+  .map((r) => r.id);
 
-type DatePreset = '7d' | '30d' | '90d' | '6m' | '1y' | 'custom';
+type DatePreset = 'month' | '7d' | '30d' | '90d' | '6m' | '1y' | 'custom';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,7 +103,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function ChartCard({ title, children, action, period }: { title: string; children: React.ReactNode; action?: React.ReactNode; period?: string }) {
-  const periodLabel = period === '7d' ? '7d' : period === '30d' ? '30d' : period === '90d' ? '90d' : period === '6m' ? '6m' : period === '1y' ? '1y' : period;
+  const periodLabel = period === 'month' ? 'Mes' : period === '7d' ? '7d' : period === '30d' ? '30d' : period === '90d' ? '90d' : period === '6m' ? '6m' : period === '1y' ? '1y' : period;
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-5 relative overflow-hidden">
       <div className="flex items-center justify-between mb-4">
@@ -394,9 +390,9 @@ export function Reports() {
   const [filterSupplier, setFilterSupplier] = useState<string>('all');
   const [filterVehicleStatus, setFilterVehicleStatus] = useState<string>('all');
   const [tab, setTab] = useState<ReportTab>('ventas');
-  const [preset, setPreset] = useState<DatePreset>('30d');
-  const [dateFrom, setDateFrom] = useState(() => format(subMonths(new Date(), 1), 'yyyy-MM-dd'));
-  const [dateTo, setDateTo] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  const [preset, setPreset] = useState<DatePreset>('month');
+  const [dateFrom, setDateFrom] = useState(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [dateTo, setDateTo] = useState(() => format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [exporting, setExporting] = useState(false);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
@@ -412,11 +408,22 @@ export function Reports() {
     return perms?.reports?.view === true;
   }, [isManager, authUser]);
 
+  const {
+    planTier,
+    planLabel,
+    unlockedReports,
+    lockedReports,
+    isBasicPlan,
+    canAccessReport,
+    findReport,
+  } = useReportPlanAccess();
+
   useEffect(() => {
-    if (!canViewFullReports && SENSITIVE_TABS.includes(tab)) {
-      setTab('ventas');
+    if (!canAccessReport(tab)) {
+      const fallback = unlockedReports[0]?.id ?? 'ventas';
+      if (canAccessReport(fallback)) setTab(fallback);
     }
-  }, [canViewFullReports, tab]);
+  }, [tab, unlockedReports, canAccessReport]);
 
   // ── Listas únicas para filtros ────────────────────────────────────────────
   const uniqueBrands = useMemo(() =>
@@ -534,7 +541,10 @@ export function Reports() {
   const applyPreset = useCallback((p: DatePreset) => {
     setPreset(p);
     const now = new Date();
-    if (p === '7d') { setDateFrom(format(new Date(now.getTime() - 7 * 86400000), 'yyyy-MM-dd')); setDateTo(format(now, 'yyyy-MM-dd')); }
+    if (p === 'month') {
+      setDateFrom(format(startOfMonth(now), 'yyyy-MM-dd'));
+      setDateTo(format(endOfMonth(now), 'yyyy-MM-dd'));
+    } else if (p === '7d') { setDateFrom(format(new Date(now.getTime() - 7 * 86400000), 'yyyy-MM-dd')); setDateTo(format(now, 'yyyy-MM-dd')); }
     else if (p === '30d') { setDateFrom(format(subMonths(now, 1), 'yyyy-MM-dd')); setDateTo(format(now, 'yyyy-MM-dd')); }
     else if (p === '90d') { setDateFrom(format(subMonths(now, 3), 'yyyy-MM-dd')); setDateTo(format(now, 'yyyy-MM-dd')); }
     else if (p === '6m') { setDateFrom(format(subMonths(now, 6), 'yyyy-MM-dd')); setDateTo(format(now, 'yyyy-MM-dd')); }
@@ -1586,33 +1596,48 @@ export function Reports() {
     }
   };
 
-  const ALL_TABS: { id: ReportTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'ventas',        label: 'Ventas',        icon: <TrendingUp className="w-4 h-4" /> },
-    { id: 'inventario',    label: 'Inventario',    icon: <Car className="w-4 h-4" /> },
-    { id: 'rotacion',      label: 'Rotación',      icon: <RotateCcw className="w-4 h-4" /> },
-    { id: 'crm',           label: 'CRM',           icon: <Users className="w-4 h-4" /> },
-    { id: 'financiero',    label: 'Financiero',    icon: <Wallet className="w-4 h-4" /> },
-    { id: 'rentabilidad',  label: 'Rentabilidad',  icon: <Layers className="w-4 h-4" /> },
-    { id: 'margen',        label: 'Margen Real',   icon: <BarChart2 className="w-4 h-4" /> },
-    { id: 'comerciales',   label: 'Comerciales',   icon: <Award className="w-4 h-4" /> },
-    { id: 'proveedores',   label: 'Proveedores',   icon: <Truck className="w-4 h-4" /> },
-    { id: 'forecast',      label: 'Forecast',      icon: <Zap className="w-4 h-4" /> },
-    { id: 'comparativa',   label: 'Comparativa',   icon: <ArrowRightLeft className="w-4 h-4" /> },
-    { id: 'grupo',         label: 'Grupo',         icon: <Building2 className="w-4 h-4" /> },
-    { id: 'rgpd',          label: 'RGPD',          icon: <Shield className="w-4 h-4" /> },
-    { id: 'heatmap',       label: 'Actividad',     icon: <Grid3X3 className="w-4 h-4" /> },
-  ];
+  const REPORT_TAB_ICONS: Record<ReportTab, React.ReactNode> = {
+    ventas: <TrendingUp className="w-4 h-4" />,
+    inventario: <Car className="w-4 h-4" />,
+    rotacion: <RotateCcw className="w-4 h-4" />,
+    crm: <Users className="w-4 h-4" />,
+    financiero: <Wallet className="w-4 h-4" />,
+    rentabilidad: <Layers className="w-4 h-4" />,
+    margen: <BarChart2 className="w-4 h-4" />,
+    comerciales: <Award className="w-4 h-4" />,
+    proveedores: <Truck className="w-4 h-4" />,
+    forecast: <Zap className="w-4 h-4" />,
+    comparativa: <ArrowRightLeft className="w-4 h-4" />,
+    grupo: <Building2 className="w-4 h-4" />,
+    rgpd: <Shield className="w-4 h-4" />,
+    heatmap: <Grid3X3 className="w-4 h-4" />,
+  };
 
-  const visibleTabs = useMemo(() =>
-    ALL_TABS.filter(t => {
-      if (SENSITIVE_TABS.includes(t.id)) return canViewFullReports;
-      if (t.id === 'rgpd') return isManager;
-      return true;
-    }),
-    [canViewFullReports, isManager],
+  const visibleTabs = useMemo(
+    () =>
+      REPORT_CATALOG.map((entry) => ({
+        ...entry,
+        icon: REPORT_TAB_ICONS[entry.id],
+        unlocked: canAccessReport(entry.id),
+      })),
+    [canAccessReport],
   );
 
+  const handleTabClick = (id: ReportTab, unlocked: boolean) => {
+    if (!unlocked) {
+      const entry = findReport(id);
+      toast.info(
+        entry
+          ? `Informe «${entry.label}» disponible desde plan ${requiredPlanLabel(entry)}`
+          : 'Informe no disponible en tu plan',
+      );
+      return;
+    }
+    setTab(id);
+  };
+
   const PRESETS: { id: DatePreset; label: string }[] = [
+    { id: 'month', label: 'Mes actual' },
     { id: '7d', label: '7d' }, { id: '30d', label: '30d' },
     { id: '90d', label: '90d' }, { id: '6m', label: '6m' },
     { id: '1y', label: '1 año' }, { id: 'custom', label: 'Custom' },
@@ -1782,28 +1807,73 @@ export function Reports() {
           </div>
         )}
 
-        {/* ── Banner permisos restringidos ──────────────────────────────────── */}
-        {!canViewFullReports && (
-          <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300">
-            <Info className="w-4 h-4 flex-shrink-0" />
-            <p className="text-xs">Algunos informes están restringidos. Contacta con tu administrador para obtener acceso completo.</p>
+        {/* ── Plan / permisos ─────────────────────────────────────────────── */}
+        {isBasicPlan && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-950/40 dark:to-violet-950/30 border border-indigo-200 dark:border-indigo-800">
+            <div className="flex items-start gap-3 flex-1">
+              <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-indigo-900 dark:text-indigo-100">
+                  Plan {planLabel} — informes limitados
+                </p>
+                <p className="text-xs text-indigo-700/90 dark:text-indigo-300 mt-1">
+                  Tienes {unlockedReports.length} informe{unlockedReports.length !== 1 ? 's' : ''} de demo
+                  (Ventas e Inventario). El resto se desbloquea desde plan Normal.
+                  {lockedReports.length > 0 ? ` · ${lockedReports.length} informes bloqueados` : ''}
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/saas/admin"
+              className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shrink-0"
+            >
+              Ver planes
+            </Link>
           </div>
         )}
 
-        {/* ── Tabs ──────────────────────────────────────────────────────────── */}
+        {!canViewFullReports && !isBasicPlan && (
+          <div className="flex items-center gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300">
+            <Info className="w-4 h-4 flex-shrink-0" />
+            <p className="text-xs">Los informes financieros sensibles requieren permiso de gerente. Operativos disponibles según tu plan ({planLabel}).</p>
+          </div>
+        )}
+
+        {/* ── Tabs (todos visibles; bloqueados con candado) ───────────────── */}
         <div className="flex gap-0.5 bg-gray-100 dark:bg-gray-700 rounded-xl p-1 w-full overflow-x-auto scrollbar-none">
           {visibleTabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => handleTabClick(t.id, t.unlocked)}
+              title={t.unlocked ? t.description : `Plan ${requiredPlanLabel(t)}`}
               className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg transition-all whitespace-nowrap flex-1 justify-center ${
-                tab === t.id
+                tab === t.id && t.unlocked
                   ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}>
-              {t.icon} <span className="hidden sm:inline">{t.label}</span>
+                  : t.unlocked
+                    ? 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    : 'text-gray-400 dark:text-gray-600 opacity-60 cursor-not-allowed'
+              }`}
+            >
+              {t.icon}
+              <span className="hidden sm:inline">{t.label}</span>
+              {!t.unlocked && <Lock className="w-3 h-3" />}
             </button>
           ))}
         </div>
 
+        {!canAccessReport(tab) && (
+          <div className="rounded-2xl border-2 border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
+            <Lock className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">Informe no disponible en tu plan</p>
+            <p className="text-xs text-gray-500 mt-2 max-w-md mx-auto">
+              Sube a plan Normal o Pro para acceder a informes mensuales completos.
+            </p>
+          </div>
+        )}
+
+        {canAccessReport(tab) && (
+        <>
         {/* ══════════════════════════════════════════════════════════════════ */}
         {/* TAB: VENTAS                                                        */}
         {/* ══════════════════════════════════════════════════════════════════ */}
@@ -4089,6 +4159,9 @@ export function Reports() {
             </div>
           );
         })()}
+
+        </>
+        )}
 
       </div>
     </Layout>

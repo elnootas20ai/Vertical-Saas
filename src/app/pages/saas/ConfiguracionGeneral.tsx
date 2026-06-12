@@ -314,7 +314,7 @@ const CONNECTIONS = [
   { id: 'payroll',          label: 'Nóminas y Documentos',   icon: FileText,     path: '/saas/payroll' },
   { id: 'stock',            label: 'Compras y Stock',        icon: Truck,        path: '/saas/catalog' },
   { id: 'suppliers',        label: 'Proveedores',            icon: Briefcase,    path: '/saas/suppliers' },
-  { id: 'invoices',         label: 'Facturas Proveedor',     icon: Receipt,      path: '/saas/supplier-billing' },
+  { id: 'invoices',         label: 'Facturas Proveedor',     icon: Receipt,      path: '/saas/suppliers/facturas' },
   { id: 'finance',          label: 'Finanzas',               icon: Wallet,       path: '/saas/finance' },
   { id: 'documents',        label: 'Documentación',          icon: FolderOpen,   path: '/saas/documents' },
   { id: 'ocr',              label: 'OCR',                    icon: ScanLine,     path: '/saas/documents' },

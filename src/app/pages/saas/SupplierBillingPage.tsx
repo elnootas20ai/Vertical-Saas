@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
 import { useNotificationOpen } from '../../hooks/useNotificationOpen';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
-import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -16,10 +16,10 @@ import {
   uploadInvoicePdfRequest,
   getInvoicePdfUrl,
   listSuppliersRequest,
+  createSupplierRequest,
   listCatalogItemsRequest,
   type PurchaseInvoice,
   type PurchaseInvoiceLine,
-  type InvoiceValidationStatus,
   type OcrData,
   type Supplier,
   type CatalogItem,
@@ -39,22 +39,12 @@ import {
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
 import {
   Plus, Search, X, Trash2, Edit3, Receipt, CheckCircle2, Clock, DollarSign,
-  BarChart3, AlertTriangle, Minus, Download, Filter, TrendingUp, Calendar,
+  BarChart3, AlertTriangle, Minus, Download, TrendingUp,
   FileText, ScanLine, Upload, Eye, EyeOff, Link2, Unlink, Building2, PlusCircle,
-  ArrowRight, ArrowLeft, Loader2, AlertCircle, PackageCheck, ChevronDown,
+  ArrowRight, Loader2, AlertCircle, PackageCheck, ChevronDown,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
-import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { getApiBase } from '../../lib/apiBase';
-
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
-function getCouchHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  return headers;
-}
 
 const API = getApiBase();
 
@@ -67,10 +57,10 @@ const STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
   overdue: { label: 'Vencida', badgeClass: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800' },
 };
 
-// ─── Method Selection Step ───────────────────────────────────────────────────
+// ─── Invoice Modal ───────────────────────────────────────────────────────────
 
 type EntryMethod = 'ocr' | 'manual';
-type ModalStep = 'method' | 'ocr-upload' | 'ocr-scanning' | 'form';
+type ModalStep = 'ocr-upload' | 'ocr-scanning' | 'form';
 
 interface InvoiceModalProps {
   isOpen: boolean;
@@ -82,15 +72,18 @@ interface InvoiceModalProps {
   workCenters: WorkCenter[];
   userId: string;
   onWorkCenterCreated: (wc: WorkCenter) => void;
+  onSupplierCreated: (supplier: Supplier) => void;
   editItem?: PurchaseInvoice | null;
+  initialMode?: 'ocr' | 'manual';
 }
 
 function InvoiceModal({
   isOpen, onClose, onSave, suppliers, catalogItems,
-  purchaseOrders, workCenters, userId, onWorkCenterCreated, editItem,
+  purchaseOrders, workCenters, userId, onWorkCenterCreated, onSupplierCreated, editItem,
+  initialMode = 'ocr',
 }: InvoiceModalProps) {
-  const [step, setStep] = useState<ModalStep>('method');
-  const [entryMethod, setEntryMethod] = useState<EntryMethod | null>(null);
+  const [step, setStep] = useState<ModalStep>('ocr-upload');
+  const [entryMethod, setEntryMethod] = useState<EntryMethod>('ocr');
 
   // OCR state
   const [ocrFile, setOcrFile] = useState<File | null>(null);
@@ -144,8 +137,9 @@ function InvoiceModal({
       setCostCenterId(editItem.costCenterId || '');
       if (editItem.ocrData) setOcrResult(editItem.ocrData);
     } else {
-      setStep('method');
-      setEntryMethod(null);
+      const mode = initialMode ?? 'ocr';
+      setStep(mode === 'ocr' ? 'ocr-upload' : 'form');
+      setEntryMethod(mode);
       setForm({ invoiceNumber: '', supplierName: '', supplierId: '', date: '', dueDate: '', taxRate: '21', notes: '' });
       setLines([{ itemName: '', quantity: '', unitPrice: '' }]);
       setLinkedOrderId('');
@@ -160,7 +154,7 @@ function InvoiceModal({
       base64Ref.current = '';
       mimeRef.current = '';
     }
-  }, [editItem, isOpen]);
+  }, [editItem, isOpen, initialMode]);
 
   const supplierOrders = useMemo(() => {
     if (!form.supplierId) return purchaseOrders;
@@ -199,7 +193,7 @@ function InvoiceModal({
     try {
       const res = await authFetch(`${API}/api/ocr/scan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...getCouchHeaders() },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ imageBase64: base64Ref.current, mimeType: mimeRef.current }),
       });
       const payload = await res.json();
@@ -219,7 +213,22 @@ function InvoiceModal({
             return a === b || a.includes(b) || b.includes(a);
           })
         : null;
-      const matchedSupplier = matchByCif || matchByName;
+      let matchedSupplier = matchByCif || matchByName;
+
+      if (!matchedSupplier && (data.emitter?.trim() || emitterCif)) {
+        try {
+          const created = await createSupplierRequest(userId, {
+            name: data.emitter?.trim() || `Proveedor ${emitterCif}`,
+            cif: emitterCif || '',
+            active: true,
+          });
+          matchedSupplier = created;
+          onSupplierCreated(created);
+          toast.success(`Proveedor "${created.name}" creado automáticamente`);
+        } catch {
+          toast.error('No se pudo crear el proveedor automáticamente');
+        }
+      }
 
       const parsedDate = data.date ? parseOcrDate(data.date) : '';
 
@@ -354,7 +363,7 @@ function InvoiceModal({
       costCenterName: selectedCostCenter?.name || undefined,
       ocrData: ocrResult || undefined,
       ocrImageBase64: base64Ref.current || undefined,
-      entryMethod: entryMethod || 'manual',
+      entryMethod,
     });
   };
 
@@ -372,10 +381,9 @@ function InvoiceModal({
               {editItem ? 'Editar factura' : 'Nueva factura de proveedor'}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-              {step === 'method' && 'Elige cómo registrar la factura'}
-              {step === 'ocr-upload' && 'Sube la imagen o PDF de la factura'}
+              {step === 'ocr-upload' && 'Sube la factura: la IA extrae los datos y crea el proveedor si no existe'}
               {step === 'ocr-scanning' && 'Analizando documento...'}
-              {step === 'form' && (entryMethod === 'ocr' ? 'Revisa los datos extraídos por OCR' : 'Rellena los datos de la factura')}
+              {step === 'form' && (entryMethod === 'ocr' ? 'Revisa los datos extraídos — el proveedor ya está vinculado' : 'Rellena los datos de la factura manualmente')}
             </p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
@@ -383,41 +391,16 @@ function InvoiceModal({
           </button>
         </div>
 
-        {/* ── STEP: Method Selection ─────────────────────────────────────── */}
-        {step === 'method' && (
-          <div className="p-6 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={() => { setEntryMethod('ocr'); setStep('ocr-upload'); }}
-                className="group p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl hover:border-violet-400 dark:hover:border-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/10 transition-all text-left"
-              >
-                <div className="w-12 h-12 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center mb-4 group-hover:bg-violet-200 dark:group-hover:bg-violet-900/50 transition-colors">
-                  <ScanLine className="w-6 h-6 text-violet-600" />
-                </div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Escanear con OCR</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Sube una foto o PDF y la IA extraerá los datos automáticamente para tu revisión
-                </p>
-              </button>
-              <button
-                onClick={() => { setEntryMethod('manual'); setStep('form'); }}
-                className="group p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-all text-left"
-              >
-                <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center mb-4 group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                  <Edit3 className="w-6 h-6 text-gray-600 dark:text-gray-300" />
-                </div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Entrada manual</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Introduce los datos de la factura manualmente con el formulario
-                </p>
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* ── STEP: OCR Upload ───────────────────────────────────────────── */}
         {step === 'ocr-upload' && (
           <div className="p-6 space-y-4">
+            <div className="p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl text-sm text-violet-800 dark:text-violet-300 flex items-start gap-2">
+              <ScanLine className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                <strong>Forma rápida:</strong> sube el PDF o foto de la factura. Detectamos el proveedor por CIF o nombre
+                y, si no está en tu catálogo, lo damos de alta automáticamente.
+              </span>
+            </div>
             <div
               onDrop={handleDrop}
               onDragOver={e => e.preventDefault()}
@@ -461,10 +444,10 @@ function InvoiceModal({
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => { setStep('method'); setOcrFile(null); setOcrPreviewUrl(null); setOcrError(null); }}
+                onClick={() => { setEntryMethod('manual'); setStep('form'); setOcrFile(null); setOcrPreviewUrl(null); setOcrError(null); }}
                 className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
               >
-                <ArrowLeft className="w-4 h-4" /> Atrás
+                <Edit3 className="w-4 h-4" /> Entrada manual
               </button>
               <button
                 onClick={startOcrScan}
@@ -565,14 +548,13 @@ function InvoiceModal({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">Líneas de factura</label>
-                <AddButtonDropdown
-                label="Nueva factura"
-                onQuickAdd={addLine}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
-                quickAddLabel="Alta rápida"
-                quickAddDesc="Formulario de factura"
-              />
+                <button
+                  type="button"
+                  onClick={addLine}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Añadir línea
+                </button>
               </div>
               <div className="space-y-2">
                 {lines.map((line, idx) => (
@@ -791,13 +773,13 @@ function InvoiceModal({
 
             {/* Actions */}
             <div className="sticky bottom-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 -mx-6 px-6 -mb-6 pb-6 pt-4 flex gap-3 rounded-b-2xl">
-              {!editItem && (
+              {!editItem && entryMethod === 'ocr' && (
                 <button
                   type="button"
-                  onClick={() => { setStep('method'); setEntryMethod(null); }}
+                  onClick={() => setStep('ocr-upload')}
                   className="px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
                 >
-                  <ArrowLeft className="w-4 h-4" /> Atrás
+                  <ScanLine className="w-4 h-4" /> Volver a escanear
                 </button>
               )}
               <button type="button" onClick={onClose} className="flex-1 px-4 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Cancelar</button>
@@ -824,38 +806,13 @@ export function SupplierBillingPage() {
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [invoiceModalMode, setInvoiceModalMode] = useState<'ocr' | 'manual'>('ocr');
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
   const [filterWorkCenter, setFilterWorkCenter] = useState<string>('all');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'supplier', label: 'Proveedor' },
-    { key: 'amount', label: 'Importe' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'number', label: 'Nº factura' },
-    { key: 'concept', label: 'Concepto' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'supplier', label: 'Proveedor', example: '' },
-    { key: 'amount', label: 'Importe', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'number', label: 'Nº factura', required: true, example: '' },
-    { key: 'concept', label: 'Concepto', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} factura(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} factura(s) importado(s)`);
-  };
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -885,10 +842,16 @@ export function SupplierBillingPage() {
   useNotificationOpen(
     useCallback((entityId: string) => {
       const inv = invoices.find((i) => i._id === entityId);
-      if (inv) { setEditingInvoice(inv); setShowModal(true); }
+      if (inv) { setEditingInvoice(inv); setInvoiceModalMode('manual'); setShowModal(true); }
     }, [invoices]),
     !loading,
   );
+
+  const openInvoiceModal = (mode: 'ocr' | 'manual' = 'ocr') => {
+    setEditingInvoice(null);
+    setInvoiceModalMode(mode);
+    setShowModal(true);
+  };
 
   const handleSaveInvoice = async (data: Partial<PurchaseInvoice>) => {
     if (!user?.id) return;
@@ -1119,8 +1082,7 @@ export function SupplierBillingPage() {
   ];
 
   return (
-    <Layout title="Facturación Proveedores" subtitle="Control de facturas recibidas de proveedores">
-      <div className="space-y-6">
+    <div className="space-y-6">
         {/* Search & Actions */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="relative flex-1 min-w-0">
@@ -1132,12 +1094,31 @@ export function SupplierBillingPage() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex flex-wrap gap-2 shrink-0">
             <button onClick={handleExportCSV} className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl flex items-center gap-2 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm">
               <Download className="w-4 h-4" /> CSV
             </button>
-            <button onClick={() => { setEditingInvoice(null); setShowModal(true); }} className="px-4 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl flex items-center gap-2 font-medium transition-colors">
-              <Plus className="w-5 h-5" /> Nueva factura
+            <button
+              onClick={() => openInvoiceModal('manual')}
+              className="px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl flex items-center gap-2 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm"
+            >
+              <Edit3 className="w-4 h-4" /> Entrada manual
+            </button>
+            <AddButtonDropdown
+              label="Nuevo proveedor"
+              onQuickAdd={() => navigate(`${SUPPLIERS_HUB.directorio}?action=new`)}
+              onAIAdd={() => navigate(`${SUPPLIERS_HUB.directorio}?action=ai`)}
+              onImport={() => navigate(`${SUPPLIERS_HUB.directorio}?action=import`)}
+              quickAddLabel="Alta manual"
+              quickAddDesc="Formulario de un proveedor"
+              aiAddLabel="Crear con IA"
+              aiAddDesc="Pega una lista y la IA la organiza"
+            />
+            <button
+              onClick={() => openInvoiceModal('ocr')}
+              className="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl flex items-center gap-2 font-semibold transition-colors text-sm"
+            >
+              <ScanLine className="w-5 h-5" /> Escanear factura
             </button>
           </div>
         </div>
@@ -1457,7 +1438,6 @@ export function SupplierBillingPage() {
             </div>
           </div>
         )}
-      </div>
 
       <InvoiceModal
         isOpen={showModal}
@@ -1469,24 +1449,10 @@ export function SupplierBillingPage() {
         workCenters={workCenters}
         userId={user?.id || ''}
         onWorkCenterCreated={wc => setWorkCenters(prev => [...prev, wc])}
+        onSupplierCreated={sup => setSuppliers(prev => [...prev, sup])}
         editItem={editingInvoice}
+        initialMode={invoiceModalMode}
       />
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="supplier_billing"
-        moduleLabel="Facturación"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Facturación"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
-    </Layout>
+    </div>
   );
 }

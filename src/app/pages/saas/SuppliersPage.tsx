@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -30,7 +29,6 @@ import {
   Users,
   BookOpen,
   Boxes,
-  ShoppingBag,
   ExternalLink,
   Phone,
   Mail,
@@ -50,6 +48,7 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { SUPPLIERS_HUB } from '../../lib/suppliersHubPaths';
 
 interface CreateSupplierModalProps {
   isOpen: boolean;
@@ -148,7 +147,7 @@ type QuickFilter = 'all' | 'unvalidated' | 'overdue' | 'habitual' | 'inactive';
 export function SuppliersPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
@@ -241,6 +240,15 @@ export function SuppliersPage() {
     }
   }, [searchParams, suppliers]);
 
+  useEffect(() => {
+    const action = searchParams.get('action');
+    if (!action) return;
+    if (action === 'new') setShowCreateSupplier(true);
+    else if (action === 'import') setShowImportModal(true);
+    else if (action === 'ai') setShowAIModal(true);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const handleCreateSupplier = async (data: Partial<Supplier>) => {
     if (!user?.id) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
     try {
@@ -324,24 +332,20 @@ export function SuppliersPage() {
   }, [suppliers, searchSupplier, quickFilter, suppliersWithOverdue, orders, invoices]);
 
   return (
-    <Layout title="Proveedores" subtitle="Gestión de proveedores, productos asociados y facturación">
-      <div className="space-y-6">
+    <div className="space-y-6">
         {/* Quick nav */}
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/saas/catalog')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> Catálogo <ExternalLink className="w-3 h-3" />
           </button>
-          <button onClick={() => navigate('/saas/articles')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
-            <Boxes className="w-3.5 h-3.5" /> Artículos <ExternalLink className="w-3 h-3" />
+          <button onClick={() => navigate('/saas/catalog?tab=stock')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
+            <Boxes className="w-3.5 h-3.5" /> Stock <ExternalLink className="w-3 h-3" />
           </button>
-          <button onClick={() => navigate('/saas/orders')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
-            <ShoppingBag className="w-3.5 h-3.5" /> Pedidos <ExternalLink className="w-3 h-3" />
+          <button onClick={() => navigate(SUPPLIERS_HUB.ordenes)} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
+            <ClipboardList className="w-3.5 h-3.5" /> Órdenes de compra
           </button>
-          <button onClick={() => navigate('/saas/purchase-orders')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
-            <ClipboardList className="w-3.5 h-3.5" /> Órdenes de compra <ExternalLink className="w-3 h-3" />
-          </button>
-          <button onClick={() => navigate('/saas/supplier-billing')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
-            <Receipt className="w-3.5 h-3.5" /> Facturación proveedor <ExternalLink className="w-3 h-3" />
+          <button onClick={() => navigate(SUPPLIERS_HUB.facturas)} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
+            <Receipt className="w-3.5 h-3.5" /> Facturas
           </button>
           <button onClick={() => navigate('/saas/finance')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
             <DollarSign className="w-3.5 h-3.5" /> Finanzas <ExternalLink className="w-3 h-3" />
@@ -369,7 +373,7 @@ export function SuppliersPage() {
               <p className="font-bold text-orange-900 dark:text-orange-300">{kpis.orphanInvoices} factura{kpis.orphanInvoices > 1 ? 's' : ''} sin proveedor asociado</p>
               <p className="text-sm text-orange-700 dark:text-orange-400">Hay facturas registradas sin vinculación a un proveedor de tu lista.</p>
             </div>
-            <button onClick={() => navigate('/saas/supplier-billing')} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg transition-colors shrink-0">
+            <button onClick={() => navigate(SUPPLIERS_HUB.facturas)} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-medium rounded-lg transition-colors shrink-0">
               Ver facturas
             </button>
           </div>
@@ -455,7 +459,7 @@ export function SuppliersPage() {
             <div className="text-2xl font-bold text-red-900 dark:text-red-200">{kpis.withOverdue}</div>
             <div className="text-xs text-red-700 dark:text-red-400 mt-0.5">Con pagos vencidos</div>
           </button>
-          <button onClick={() => navigate('/saas/supplier-billing')} className="p-4 bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-xl text-left hover:border-purple-400 transition-colors">
+          <button onClick={() => navigate(SUPPLIERS_HUB.facturas)} className="p-4 bg-purple-50 dark:bg-purple-900/20 border-2 border-purple-200 dark:border-purple-800 rounded-xl text-left hover:border-purple-400 transition-colors">
             <DollarSign className="w-5 h-5 text-purple-600 mb-2" />
             <div className="text-2xl font-bold text-purple-900 dark:text-purple-200">{kpis.totalInvoiced.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</div>
             <div className="text-xs text-purple-700 dark:text-purple-400 mt-0.5">Total facturado</div>
@@ -540,7 +544,6 @@ export function SuppliersPage() {
             })}
           </div>
         )}
-      </div>
 
       <CreateSupplierModal
         isOpen={showCreateSupplier}
@@ -565,6 +568,6 @@ export function SuppliersPage() {
         fields={SUPPLIER_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
-    </Layout>
+    </div>
   );
 }

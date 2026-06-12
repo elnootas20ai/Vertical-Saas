@@ -287,3 +287,14 @@ export async function registerInvoicePayment(
   );
   return normalizeInvoiceRecord(result.invoice);
 }
+
+export async function linkClientInvoiceToFinanceRequest(
+  userId: string,
+  invoiceId: string,
+): Promise<ClientInvoiceRecord | null> {
+  const result = await request<{ ok: boolean; invoice: unknown }>(
+    `/api/invoices/${encodeURIComponent(userId)}/${encodeURIComponent(invoiceId)}/link-finance`,
+    { method: 'POST' },
+  );
+  return normalizeInvoiceRecord(result.invoice);
+}

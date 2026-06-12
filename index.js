@@ -153,7 +153,16 @@ import { sendAdminAlert } from './services/adminAlerts.js';
 import { closeAllSSEClients } from './services/sseService.js';
 
 const _5xxTimes = [];
+const _5xxAlertSkipPaths = [
+  '/health',
+  '/api/push/vapid-public-key',
+];
+function shouldSkip5xxAlert(url) {
+  const path = String(url || '').split('?')[0];
+  return _5xxAlertSkipPaths.some((p) => path === p || path.endsWith(p));
+}
 function track5xxAndMaybeAlert(url) {
+  if (shouldSkip5xxAlert(url)) return;
   const now = Date.now();
   const windowMs = Number(process.env.ALERT_5XX_WINDOW_MS || 60_000);
   const threshold = Number(process.env.ALERT_5XX_THRESHOLD || 10);

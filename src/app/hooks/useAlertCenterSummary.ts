@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchAlertSummary, normalizeAlertSummary, type AlertSummary } from '../lib/alertCenterApi';
+import {
+  fetchDocumentAlertsAsRecords,
+  mergeDocumentAlertsIntoSummary,
+} from '../lib/documentAlertsApi';
 
-export function useAlertCenterSummary(businessId: string | undefined, options?: { pollMs?: number }) {
+export function useAlertCenterSummary(
+  businessId: string | undefined,
+  options?: { pollMs?: number; dataUserId?: string },
+) {
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(Boolean(businessId));
 
@@ -12,14 +19,20 @@ export function useAlertCenterSummary(businessId: string | undefined, options?: 
       return;
     }
     try {
-      const res = await fetchAlertSummary(businessId);
-      setSummary(normalizeAlertSummary(res.summary));
+      const [res, docAlerts] = await Promise.all([
+        fetchAlertSummary(businessId),
+        options?.dataUserId
+          ? fetchDocumentAlertsAsRecords(options.dataUserId, businessId)
+          : Promise.resolve([]),
+      ]);
+      const base = normalizeAlertSummary(res.summary);
+      setSummary(docAlerts.length > 0 ? mergeDocumentAlertsIntoSummary(base, docAlerts) : base);
     } catch {
       /* silent */
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, options?.dataUserId]);
 
   useEffect(() => {
     setLoading(Boolean(businessId));

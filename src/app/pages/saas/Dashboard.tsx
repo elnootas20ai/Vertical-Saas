@@ -51,8 +51,13 @@ import {
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
   LayoutGrid,
 } from 'lucide-react';
-import { DocumentAlertsWidget } from '../../components/saas/DocumentAlertsWidget';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { listFinanceMovements } from '../../lib/financeApi';
+import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
+import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
+import { Sparkles } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 // ─── Widget personalización ────────────────────────────────────────────────────
 
@@ -536,6 +541,40 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
 
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
+  const {
+    planLabel,
+    isBasicPlan,
+    canShowWidget,
+    canViewEbitda,
+    canViewFinanceWidget,
+    lockedWidgets,
+  } = useDashboardPlanAccess();
+
+  const financeUserId = resolveBusinessDataUserId(authUser, currentBusiness);
+  const [ebitdaMonth, setEbitdaMonth] = useState<{ value: number; margin: number } | null>(null);
+
+  useEffect(() => {
+    if (!financeUserId || !businessId || !canViewEbitda) {
+      setEbitdaMonth(null);
+      return;
+    }
+    let cancelled = false;
+    const monthKey = new Date().toISOString().slice(0, 7);
+    void listFinanceMovements(financeUserId)
+      .then((movs) => {
+        if (cancelled) return;
+        const hasTagged = movs.some((m) => String(m.businessId || '').trim() === businessId);
+        const scope = hasTagged
+          ? { level: 'business' as const, businessId }
+          : { level: 'all' as const };
+        const totals = computeEbitdaForMonth(movs, monthKey, scope);
+        setEbitdaMonth({ value: totals.ebitda, margin: totals.ebitdaMargin });
+      })
+      .catch(() => {
+        if (!cancelled) setEbitdaMonth(null);
+      });
+    return () => { cancelled = true; };
+  }, [financeUserId, businessId, canViewEbitda]);
   const teamMembers = useMemo(
     () => (currentBusiness?.members || []).map((m) => ({ user_id: m.user_id, fullName: m.fullName })),
     [currentBusiness?.members],
@@ -560,9 +599,10 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
     setWidgetConfig(loadWidgetConfig(dashboardConfigScope));
   }, [dashboardConfigScope]);
 
-  const isVisible = useCallback((id: WidgetId) =>
-    widgetConfig.find(w => w.id === id)?.visible ?? true,
-  [widgetConfig]);
+  const isVisible = useCallback((id: WidgetId) => {
+    if (!canShowWidget(id)) return false;
+    return widgetConfig.find(w => w.id === id)?.visible ?? true;
+  }, [widgetConfig, canShowWidget]);
 
   const widgetOrderMap = useMemo(
     () => new Map(widgetConfig.map((widget, idx) => [widget.id, idx])),
@@ -927,6 +967,29 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
           </button>
         </div>
 
+        {isBasicPlan && (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-indigo-50 dark:from-slate-900/60 dark:to-indigo-950/30 border border-slate-200 dark:border-slate-700">
+            <div className="flex items-start gap-3 flex-1">
+              <Sparkles className="w-5 h-5 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                  Dashboard plan {planLabel}
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                  Operativa básica activa. Finanzas, EBITDA, gráficas avanzadas e informes completos desde plan Normal.
+                  {lockedWidgets.length > 0 ? ` · ${lockedWidgets.length} bloques en tu plan` : ''}
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/saas/admin"
+              className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold shrink-0"
+            >
+              Ver planes
+            </Link>
+          </div>
+        )}
+
         {/* ═══ KPIs PRINCIPALES — 8 tarjetas ═══ */}
         {isVisible('kpis_main') && (
           <div style={{ order: getWidgetOrder('kpis_main') }}>
@@ -967,14 +1030,28 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                   loading={serverLoading}
                 />
                 <KPICard
-                  title="Beneficio est."
-                  value={salesMonth > 0 ? formatEur(estimatedProfit) : '—'}
-                  sub={quickFinance ? `Margen ${quickFinance.marginPct}%` : 'Ingresos - gastos'}
+                  title={canViewEbitda ? 'EBITDA mes' : 'Beneficio est.'}
+                  value={
+                    canViewEbitda && ebitdaMonth
+                      ? formatEur(ebitdaMonth.value)
+                      : (salesMonth > 0 ? formatEur(estimatedProfit) : '—')
+                  }
+                  sub={
+                    canViewEbitda && ebitdaMonth
+                      ? `Margen ${ebitdaMonth.margin.toFixed(1)}% · ${currentBusiness?.name || 'empresa'}`
+                      : isBasicPlan
+                        ? 'Sube a Normal para EBITDA'
+                        : (quickFinance ? `Margen ${quickFinance.marginPct}%` : 'Empresa activa')
+                  }
                   icon={<PieChart className="w-4 h-4" />}
-                  iconBg={estimatedProfit >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40'}
-                  iconColor={estimatedProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}
-                  trend={salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined}
-                  onClick={() => navigate('/saas/ebitda')}
+                  iconBg={(canViewEbitda && ebitdaMonth ? ebitdaMonth.value : estimatedProfit) >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40'}
+                  iconColor={(canViewEbitda && ebitdaMonth ? ebitdaMonth.value : estimatedProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}
+                  trend={
+                    canViewEbitda && ebitdaMonth
+                      ? { value: `${ebitdaMonth.margin.toFixed(1)}%`, up: ebitdaMonth.value > 0 ? true : ebitdaMonth.value < 0 ? false : null }
+                      : (salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined)
+                  }
+                  onClick={() => navigate(canViewEbitda ? '/saas/ebitda' : '/saas/admin')}
                   loading={serverLoading}
                 />
                 <KPICard
@@ -1070,9 +1147,6 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
             </DraggableWidget>
           </div>
         )}
-
-        {/* ═══ ALERTAS DOCUMENTACIÓN COMPRAVENTA ═══ */}
-        <DocumentAlertsWidget />
 
         {/* ═══ GRÁFICAS PRINCIPALES ═══ */}
         {isVisible('charts') && (
@@ -1248,9 +1322,9 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
           </div>
         )}
 
-        {authUser?.user_id && (
+        {financeUserId && canViewFinanceWidget && (
           <div style={{ order: getWidgetOrder('quick_finance') + 1 }}>
-            <DashboardFinanceWidget userId={authUser.user_id} />
+            <DashboardFinanceWidget userId={financeUserId} />
           </div>
         )}
 

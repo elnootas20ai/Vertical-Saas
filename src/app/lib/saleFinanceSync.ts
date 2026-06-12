@@ -1,5 +1,6 @@
 import { createFinanceMovementInCouch, listFinanceMovements } from './financeApi';
 import type { SaleRecord } from './salesTypes';
+import type { FinanceMovementScope } from './financeScope';
 
 function refKey(saleId: string) {
   return `VENTA-${saleId}`;
@@ -19,7 +20,11 @@ export async function hasSaleIncomeMovement(userId: string, saleId: string): Pro
   }
 }
 
-export async function ensureSaleIncomeFromClosure(userId: string, sale: SaleRecord): Promise<boolean> {
+export async function ensureSaleIncomeFromClosure(
+  userId: string,
+  sale: SaleRecord,
+  scope: FinanceMovementScope = {},
+): Promise<boolean> {
   if (!userId || sale.financeIncomeCreated) {
     if (await hasSaleIncomeMovement(userId, sale.id)) return true;
   }
@@ -42,12 +47,20 @@ export async function ensureSaleIncomeFromClosure(userId: string, sale: SaleReco
     status: 'paid',
     source: 'sale',
     sourceRef: sale.id,
+    businessId: scope.businessId,
+    businessName: scope.businessName,
+    workCenterId: scope.workCenterId || sale.workCenterId,
+    workCenterName: scope.workCenterName || sale.workCenterName,
   });
 
   return true;
 }
 
-export async function ensureCommissionExpense(userId: string, sale: SaleRecord): Promise<void> {
+export async function ensureCommissionExpense(
+  userId: string,
+  sale: SaleRecord,
+  scope: FinanceMovementScope = {},
+): Promise<void> {
   const amount = sale.closureData?.commissionAmount;
   if (!amount || amount <= 0 || !userId) return;
 
@@ -62,7 +75,7 @@ export async function ensureCommissionExpense(userId: string, sale: SaleRecord):
     user_id: userId,
     concept: `Comisión venta — ${sale.vehicleName} → ${sale.closureData?.commissionAgent || '—'}`,
     reference: ref,
-    category: 'comisiones',
+    category: 'comisiones_gasto',
     amountBase: amount,
     taxRate: 0,
     date: dateStr,
@@ -71,5 +84,9 @@ export async function ensureCommissionExpense(userId: string, sale: SaleRecord):
     status: 'paid',
     source: 'sale',
     sourceRef: sale.id,
+    businessId: scope.businessId,
+    businessName: scope.businessName,
+    workCenterId: scope.workCenterId || sale.workCenterId,
+    workCenterName: scope.workCenterName || sale.workCenterName,
   });
 }

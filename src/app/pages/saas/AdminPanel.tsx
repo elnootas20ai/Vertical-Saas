@@ -95,6 +95,8 @@ import { getApiBase } from '../../lib/apiBase';
 import {
   listAffiliates,
   updateAffiliateStatus,
+  deleteAffiliate,
+  clearAffiliateRequests,
   type Affiliate,
   type AffiliateStatus,
 } from '../../lib/affiliatesApi';
@@ -2711,6 +2713,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AffiliateStatus | 'all'>('pending');
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState('');
 
   const load = useCallback(async () => {
@@ -2758,6 +2761,36 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
       console.error('Error updating status:', err);
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!window.confirm(`¿Eliminar la solicitud de "${name}"?`)) return;
+    setProcessingId(id);
+    try {
+      await deleteAffiliate(userId, id);
+      await load();
+    } catch (err) {
+      console.error('Error deleting affiliate request:', err);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    const removable = requests.filter((r) => r.status === 'pending' || r.status === 'rejected').length;
+    if (removable === 0) return;
+    if (!window.confirm(`¿Eliminar ${removable} solicitud(es) pendiente(s) y rechazada(s)? Los afiliados aceptados se mantienen.`)) return;
+    setClearing(true);
+    try {
+      const { removed } = await clearAffiliateRequests(userId, ['pending', 'rejected']);
+      await load();
+      window.alert(removed > 0 ? `Se eliminaron ${removed} solicitud(es).` : 'No había solicitudes que eliminar.');
+    } catch (err) {
+      console.error('Error clearing affiliate history:', err);
+      window.alert('No se pudo limpiar el historial.');
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -2812,6 +2845,17 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
         <button onClick={() => load()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Recargar">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
+        {(counts.pending + counts.rejected) > 0 && (
+          <button
+            type="button"
+            onClick={() => void handleClearHistory()}
+            disabled={clearing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {clearing ? 'Eliminando…' : 'Vaciar historial'}
+          </button>
+        )}
       </div>
 
       {/* List */}
@@ -2943,6 +2987,15 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         </button>
                       )}
                       {isProcessing && <LoaderCircle className="w-4 h-4 text-gray-400 animate-spin" />}
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(id, req.name)}
+                        disabled={isProcessing || clearing}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                        title="Eliminar solicitud"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>

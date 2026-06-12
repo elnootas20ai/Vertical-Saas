@@ -469,6 +469,49 @@ export async function deleteAffiliateAdmin(req, res) {
   }
 }
 
+export async function clearAffiliateRequestsAdmin(req, res) {
+  try {
+    const { userId } = req.params;
+    const { statuses } = req.body || {};
+    const allowed = new Set(['pending', 'rejected', 'accepted']);
+    const targetStatuses = Array.isArray(statuses) && statuses.length > 0
+      ? statuses.filter((s) => allowed.has(s))
+      : ['pending', 'rejected'];
+
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (targetStatuses.length === 0) return badRequest(res, 'Estados no válidos');
+
+    await ensureAffiliatesDb(req);
+    const all = await getAllDocuments(req, AFFILIATES_DB);
+    const now = new Date().toISOString();
+    let removed = 0;
+
+    const toRemove = all.filter(
+      (d) => d.type === 'affiliate'
+        && !d.deletedAt
+        && targetStatuses.includes(d.status)
+        && (d.user_id === userId || d.user_id === 'public_request'),
+    );
+
+    await Promise.all(toRemove.map(async (affiliate) => {
+      const related = all.filter(
+        (d) => d.affiliateId === affiliate._id && !d.deletedAt,
+      );
+      await Promise.all(
+        related.map((d) => putDocument(req, AFFILIATES_DB, d._id, { ...d, deletedAt: now })),
+      );
+      await putDocument(req, AFFILIATES_DB, affiliate._id, { ...affiliate, deletedAt: now });
+      removed += 1;
+    }));
+
+    logger.info({ tag: 'AFFILIATE_ADMIN', userId, removed, targetStatuses }, 'Historial de solicitudes de afiliados limpiado');
+    return res.json({ ok: true, removed, statuses: targetStatuses });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al limpiar solicitudes de afiliados');
+    return res.status(500).json({ ok: false, error: err.message || 'Error al limpiar solicitudes' });
+  }
+}
+
 // ── Admin: Contacts CRUD ───────────────────────────────────────────────────────
 
 export async function listContactsAdmin(req, res) {

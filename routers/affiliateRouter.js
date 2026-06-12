@@ -12,6 +12,7 @@ import {
   updateAffiliateAdmin,
   updateAffiliateStatusAdmin,
   deleteAffiliateAdmin,
+  clearAffiliateRequestsAdmin,
   listContactsAdmin,
   createContactAdmin,
   updateContactAdmin,
@@ -42,6 +43,7 @@ affiliateRouter.get('/portal/:code/referred', portalReferredAccounts);
 
 // ── Admin (requires auth) ──────────────────────────────────────────────────────
 affiliateRouter.get('/admin/:userId/affiliates', requireAuthAndEmailVerified, listAffiliatesAdmin);
+affiliateRouter.post('/admin/:userId/affiliates/clear-requests', requireAuthAndEmailVerified, clearAffiliateRequestsAdmin);
 affiliateRouter.post('/admin/:userId/affiliates', requireAuthAndEmailVerified, createAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, updateAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/status', requireAuthAndEmailVerified, updateAffiliateStatusAdmin);

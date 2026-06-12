@@ -14,3 +14,4 @@ export { WorkerNotifications } from './WorkerNotifications';
 export { WorkerSecurity } from './WorkerSecurity';
 export { WorkerTpv } from './WorkerTpv';
 export { WorkerConstructionReport } from './WorkerConstructionReport';
+export { WorkerStockReviewPage } from './WorkerStockReviewPage';

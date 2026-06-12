@@ -198,7 +198,7 @@ export async function listWorkCenters(userId: string): Promise<WorkCenter[]> {
  */
 export async function listWorkCentersForDelivery(
   dataUserId: string,
-  business?: { members?: { user_id?: string }[] } | null,
+  business?: { owner_user_id?: string; members?: { user_id?: string }[] } | null,
 ): Promise<WorkCenter[]> {
   const id = String(dataUserId || '').trim();
   if (!id) return [];
@@ -206,6 +206,7 @@ export async function listWorkCentersForDelivery(
   const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
   const allowed = new Set<string>();
   addAllowedUserId(allowed, id);
+  addAllowedUserId(allowed, String(business?.owner_user_id || '').trim());
   for (const m of business?.members || []) {
     addAllowedUserId(allowed, String(m.user_id || '').trim());
   }

@@ -159,6 +159,17 @@ export async function deleteAffiliate(userId: string, affiliateId: string): Prom
   await apiRequest(`${BASE}/admin/${userId}/affiliates/${affiliateId}`, { method: 'DELETE' });
 }
 
+export async function clearAffiliateRequests(
+  userId: string,
+  statuses: AffiliateStatus[] = ['pending', 'rejected'],
+): Promise<{ removed: number }> {
+  const data = await apiRequest<{ removed: number }>(`${BASE}/admin/${userId}/affiliates/clear-requests`, {
+    method: 'POST',
+    body: JSON.stringify({ statuses }),
+  });
+  return { removed: data.removed ?? 0 };
+}
+
 // ── Admin: Contacts ────────────────────────────────────────────────────────────
 
 export async function listContacts(userId: string): Promise<AffiliateContact[]> {

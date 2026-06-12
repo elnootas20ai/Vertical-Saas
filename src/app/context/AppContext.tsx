@@ -602,6 +602,7 @@ export interface AppContextType {
   addDocument: (document: Omit<Document, 'id' | 'createdAt'>) => Promise<void>;
   updateDocument: (id: string, updates: Partial<Document>) => Promise<void>;
   deleteDocument: (id: string) => Promise<void>;
+  refreshDocuments: () => Promise<void>;
   addLocation: (location: Omit<Location, 'id'>) => void;
   addParkingZone: (zone: CreateParkingZoneInput) => void;
   updateLocation: (id: string, updates: Partial<Location>) => void;
@@ -654,6 +655,7 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       markAllNotificationsAsRead: async () => {},
       addSale: async () => {}, updateSale: async () => {}, deleteSale: async () => {},
       addDocument: async () => {}, updateDocument: async () => {}, deleteDocument: async () => {},
+      refreshDocuments: async () => {},
       addLocation: () => {}, addParkingZone: () => {}, updateLocation: () => {}, deleteLocation: () => {},
       getStats: defaultStats,
     };
@@ -1984,6 +1986,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           relatedTo: document.relatedTo,
           relatedToId: document.relatedToId,
           templateId: document.templateId,
+          notes: document.notes,
+          expiresAt: document.expiresAt,
         });
         nextDocument = {
           id: record.id,
@@ -1995,6 +1999,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           relatedTo: record.relatedTo,
           relatedToId: record.relatedToId,
           templateId: record.templateId,
+          notes: record.notes,
+          expiresAt: record.expiresAt,
           createdAt: new Date(record.createdAt),
         };
       } catch (err) {
@@ -2037,6 +2043,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           relatedTo: nextDocument.relatedTo,
           relatedToId: nextDocument.relatedToId,
           templateId: nextDocument.templateId,
+          notes: nextDocument.notes,
+          expiresAt: nextDocument.expiresAt,
           createdAt: nextDocument.createdAt.toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -2203,6 +2211,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshDocuments = async () => {
+    if (!authUser?.user_id) return;
+    try {
+      const records = await listDocumentsRequest(authUser.user_id);
+      setDocuments(records.map((r) => ({
+        id: r.id,
+        _id: r._id,
+        _rev: r._rev,
+        name: r.name,
+        type: r.docType,
+        status: r.status,
+        relatedTo: r.relatedTo,
+        relatedToId: r.relatedToId,
+        templateId: r.templateId,
+        notes: r.notes,
+        expiresAt: r.expiresAt,
+        createdAt: new Date(r.createdAt),
+      })));
+    } catch {
+      // Silenciado: la lista actual permanece como fallback.
+    }
+  };
+
   const value: AppContextType = {
     vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
     setDevSubscriptionPlan,
@@ -2214,7 +2245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addClient, updateClient, deleteClient, refreshClients,
     createNotification, markNotificationAsRead, markAllNotificationsAsRead,
     addSale, updateSale, deleteSale,
-    addDocument, updateDocument, deleteDocument,
+    addDocument, updateDocument, deleteDocument, refreshDocuments,
     addLocation, addParkingZone, updateLocation, deleteLocation,
     getStats,
   };

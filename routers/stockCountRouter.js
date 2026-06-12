@@ -6,12 +6,16 @@ import {
   updateCountLine,
   completeStockCount,
   generateAdjustments,
+  getStockCountPurchaseList,
+  createPurchaseOrdersFromStockCount,
 } from '../controllers/stockCountController.js';
 
 const stockCountRouter = Router();
 
 stockCountRouter.get('/:userId', listStockCounts);
 stockCountRouter.post('/:userId', createStockCount);
+stockCountRouter.get('/:userId/:countId/purchase-list', getStockCountPurchaseList);
+stockCountRouter.post('/:userId/:countId/purchase-list/create-orders', createPurchaseOrdersFromStockCount);
 stockCountRouter.get('/:userId/:countId', getStockCount);
 stockCountRouter.put('/:userId/:countId/line/:lineIdx', updateCountLine);
 stockCountRouter.post('/:userId/:countId/complete', completeStockCount);

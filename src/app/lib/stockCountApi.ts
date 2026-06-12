@@ -1,6 +1,7 @@
 import { getAuthHeaders } from './authApi';
 import type { StockCategory } from './deliveryApi';
 import { getApiBase } from './apiBase';
+import type { StockPurchaseList } from './stockPurchaseListApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -46,6 +47,7 @@ export interface StockCountLine {
   stockCategory: StockCategory;
   unit: string;
   costPrice: number;
+  minStock?: number;
   theoreticalStock: number;
   countedStock: number | null;
   difference: number | null;
@@ -129,14 +131,26 @@ export async function updateCountLineRequest(
   return result.stockCount;
 }
 
-export async function completeStockCountRequest(userId: string, countId: string): Promise<StockCount> {
+export async function completeStockCountRequest(
+  userId: string,
+  countId: string,
+): Promise<{ adjustmentsCreated: number; stockCount: StockCount; purchaseList?: StockPurchaseList }> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; stockCount: StockCount }>(
+  const result = await request<{
+    ok: boolean;
+    adjustmentsCreated?: number;
+    stockCount: StockCount;
+    purchaseList?: StockPurchaseList;
+  }>(
     `/api/stock-counts/${encodeURIComponent(id)}/${encodeURIComponent(countId)}/complete`,
     { method: 'POST' },
   );
   if (!result.stockCount) throw new Error('Respuesta invalida del servidor');
-  return result.stockCount;
+  return {
+    adjustmentsCreated: result.adjustmentsCreated ?? 0,
+    stockCount: result.stockCount,
+    purchaseList: result.purchaseList,
+  };
 }
 
 export async function generateAdjustmentsRequest(
