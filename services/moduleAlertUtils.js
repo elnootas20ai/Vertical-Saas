@@ -9,6 +9,14 @@ function activeDocs(docs) {
   return (Array.isArray(docs) ? docs : []).filter((d) => d && !d.deletedAt);
 }
 
+/** Motor delivery por fases activo (vertical delivery o config en cuenta). */
+export function usesDeliveryAlertMotor(account, business = null) {
+  if (business?.businessType === 'delivery') return true;
+  const cfg = account?.alertConfig?.delivery;
+  if (cfg && typeof cfg === 'object' && cfg.enabled !== false) return true;
+  return false;
+}
+
 /** Delivery operativo: pedidos, PDV o config de delivery. */
 export function canEmitDeliveryAlerts({ deliveryOrders = [], pointsOfSale = [], deliveryConfig = null } = {}) {
   if (activeDocs(deliveryOrders).length > 0) return true;

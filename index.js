@@ -102,6 +102,7 @@ import { wasteRouter } from './routers/wasteRouter.js';
 import { stockCountRouter } from './routers/stockCountRouter.js';
 import { butcherRouter } from './routers/butcherRouter.js';
 import { deliveryAlertRouter } from './routers/deliveryAlertRouter.js';
+import { deliveryReportsRouter } from './routers/deliveryReportsRouter.js';
 import { compraventaAlertRouter } from './routers/compraventaAlertRouter.js';
 import { signatureRouter } from './routers/signatureRouter.js';
 import { scrapyardRouter } from './routers/scrapyardRouter.js';
@@ -954,6 +955,7 @@ const internalRouters = [
   ['/api/alerts',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, alertRouter],
   ['/api/butcher',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherRouter],
   ['/api/delivery/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryAlertRouter],
+  ['/api/delivery-reports', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryReportsRouter],
   ['/api/recipes',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, recipeRouter],
   ['/api/waste',           requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, wasteRouter],
   ['/api/stock-counts',    requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, stockCountRouter],

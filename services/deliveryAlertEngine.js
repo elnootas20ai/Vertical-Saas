@@ -50,15 +50,12 @@ const TAG = 'DELIVERY_ALERT_ENGINE';
 /** Barrido de seguridad (no polling operativo). Eventos + umbrales horarios primero. */
 const SAFETY_SWEEP_MS = 15 * 60_000;
 
-/** Solo alertas CEO en bandeja global. Operación (retrasos, cocina…) vive en el Centro OP. */
-const CEO_DELIVERY_ALERT_TYPES = new Set([
-  'delivery_cash_pending_close',
-  'delivery_register_not_opened',
-  'delivery_driver_mismatch',
-  'delivery_low_margin',
-  'delivery_failed_delivery',
-  'delivery_unpaid_order',
-]);
+/** Rutas del centro operativo / gestión (no legacy /saas/delivery?tab=). */
+const DELIVERY_OPS_ROUTE = '/saas/delivery-ops';
+const DELIVERY_KITCHEN_ROUTE = '/saas/delivery-kitchen';
+const DELIVERY_REPARTO_ROUTE = '/saas/delivery-reparto';
+const DELIVERY_CAJA_ROUTE = '/saas/vertical/delivery/caja';
+const DELIVERY_CATALOG_ROUTE = '/saas/catalog';
 const STARTUP_DELAY_MS = 20_000;
 const DEDUP_WINDOW_MS = 5 * 60_000;
 const MARGIN_CHECK_INTERVAL = 15;
@@ -158,7 +155,7 @@ async function emitDeliveryAlert({ userId, businessId, alertType, dedupKey, prio
     businessId, userId, source: 'delivery', ruleId: alertType, category: alertType,
     priority: finalPriority, title, message,
     entityId: data?.orderId || data?.itemId || data?.sessionId || '',
-    entityType: 'delivery_alert', route: route || '/saas/delivery',
+    entityType: 'delivery_alert', route: route || DELIVERY_OPS_ROUTE,
     metadata: { ...data, alertType, targetRoles, escalated, dedupKey }, dedupKey,
   });
   if (result && businessId) {
@@ -198,7 +195,7 @@ function checkDelayedOrders(orders, config) {
       title: `Pedido ${o.orderNumber || ''} retrasado en ${status}`,
       message: `Lleva ${Math.floor(mins)} min en ${status} (umbral: ${thr} min).`,
       data: { orderId: o._id, orderNumber: o.orderNumber, phase: status, minutesInPhase: Math.floor(mins), threshold: thr },
-      route: '/saas/delivery',
+      route: DELIVERY_OPS_ROUTE,
       targetRoles: PHASE_ROLES[phase] || ['manager', 'owner'],
     });
   }
@@ -218,12 +215,12 @@ function checkKitchenSaturation(orders, config) {
   const bd = { ordersInKitchen: cnt, capacity: cap, saturationPercent: Math.round(pct), oldestOrderMinutes: Math.floor(oldest), avgWaitMinutes: cnt > 0 ? Math.round(tw / cnt) : 0 };
   const alerts = [];
   if (pct >= config.kitchenCriticalPercent) {
-    alerts.push({ alertType: 'delivery_kitchen_saturated', dedupKey: 'kitchen-crit', priority: 'high', title: 'Cocina saturada', message: `${cnt}/${cap} pedidos (${Math.round(pct)}%). Antiguo: ${Math.floor(oldest)} min.`, data: bd, route: '/saas/delivery?tab=kitchen', targetRoles: ['manager', 'owner', 'kitchen'] });
+    alerts.push({ alertType: 'delivery_kitchen_saturated', dedupKey: 'kitchen-crit', priority: 'high', title: 'Cocina saturada', message: `${cnt}/${cap} pedidos (${Math.round(pct)}%). Antiguo: ${Math.floor(oldest)} min.`, data: bd, route: DELIVERY_KITCHEN_ROUTE, targetRoles: ['manager', 'owner', 'kitchen'] });
   } else if (pct >= config.kitchenWarningPercent) {
-    alerts.push({ alertType: 'delivery_kitchen_saturated', dedupKey: 'kitchen-warn', priority: 'medium', title: 'Cocina con carga alta', message: `${cnt}/${cap} pedidos (${Math.round(pct)}%).`, data: bd, route: '/saas/delivery?tab=kitchen', targetRoles: ['manager', 'owner', 'kitchen'] });
+    alerts.push({ alertType: 'delivery_kitchen_saturated', dedupKey: 'kitchen-warn', priority: 'medium', title: 'Cocina con carga alta', message: `${cnt}/${cap} pedidos (${Math.round(pct)}%).`, data: bd, route: DELIVERY_KITCHEN_ROUTE, targetRoles: ['manager', 'owner', 'kitchen'] });
   }
   if (cnt + inP.length > cap * 1.5) {
-    alerts.push({ alertType: 'delivery_queue_overflow', dedupKey: 'q-overflow', priority: 'high', title: 'Cola cocina desbordada', message: `${cnt + inP.length} pedidos cola+cocina (cap: ${cap}).`, data: { ...bd, ordersInPreparing: inP.length, totalQueue: cnt + inP.length }, route: '/saas/delivery?tab=kitchen', targetRoles: ['manager', 'owner', 'kitchen'] });
+    alerts.push({ alertType: 'delivery_queue_overflow', dedupKey: 'q-overflow', priority: 'high', title: 'Cola cocina desbordada', message: `${cnt + inP.length} pedidos cola+cocina (cap: ${cap}).`, data: { ...bd, ordersInPreparing: inP.length, totalQueue: cnt + inP.length }, route: DELIVERY_KITCHEN_ROUTE, targetRoles: ['manager', 'owner', 'kitchen'] });
   }
   return alerts;
 }
@@ -238,10 +235,10 @@ function checkDeliveryStock(catalogItems, activeOrders, config, catalogInfraDocs
     if (!Number.isFinite(qty) || min <= 0) continue;
     const imp = activeOrders.filter((o) => (o.items || []).some((i) => i.catalogItemId === it._id)).length;
     if (qty <= 0) {
-      alerts.push({ alertType: 'delivery_product_out_of_stock', dedupKey: `oos-${it._id}`, priority: 'high', title: `Producto agotado: ${it.name}`, message: `"${it.name}" sin stock.${imp > 0 ? ` ${imp} pedido(s) afectado(s).` : ''}`, data: { itemId: it._id, itemName: it.name, itemSku: it.sku, stockQuantity: qty, minStock: min, impactedOrders: imp }, route: `/saas/catalog/${it._id}`, targetRoles: ['manager', 'owner', 'kitchen'] });
+      alerts.push({ alertType: 'delivery_product_out_of_stock', dedupKey: `oos-${it._id}`, priority: 'high', title: `Producto agotado: ${it.name}`, message: `"${it.name}" sin stock.${imp > 0 ? ` ${imp} pedido(s) afectado(s).` : ''}`, data: { itemId: it._id, itemName: it.name, itemSku: it.sku, stockQuantity: qty, minStock: min, impactedOrders: imp }, route: `${DELIVERY_CATALOG_ROUTE}`, targetRoles: ['manager', 'owner', 'kitchen'] });
     } else if (qty > 0 && min > 0 && qty <= min) {
       const dem = activeOrders.reduce((s, o) => { const oi = (o.items || []).find((i) => i.catalogItemId === it._id); return s + (oi ? Number(oi.quantity || 0) : 0); }, 0);
-      alerts.push({ alertType: 'delivery_product_low_stock', dedupKey: `ls-${it._id}`, priority: dem > qty ? 'high' : 'medium', title: `Stock bajo: ${it.name}`, message: `${qty} ${it.unit || 'ud'} (min: ${min}). Demanda: ${dem}.`, data: { itemId: it._id, itemName: it.name, stockQuantity: qty, minStock: min, pendingDemand: dem }, route: `/saas/catalog/${it._id}`, targetRoles: ['manager', 'owner', 'kitchen'] });
+      alerts.push({ alertType: 'delivery_product_low_stock', dedupKey: `ls-${it._id}`, priority: dem > qty ? 'high' : 'medium', title: `Stock bajo: ${it.name}`, message: `${qty} ${it.unit || 'ud'} (min: ${min}). Demanda: ${dem}.`, data: { itemId: it._id, itemName: it.name, stockQuantity: qty, minStock: min, pendingDemand: dem }, route: DELIVERY_CATALOG_ROUTE, targetRoles: ['manager', 'owner', 'kitchen'] });
     }
   }
   return alerts;
@@ -254,15 +251,15 @@ function checkRiderSaturation(orders, driverSessions, config, drivers = []) {
   const inD = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'en_reparto');
   const wt = orders.filter((o) => normalizeDeliveryOrderStatus(o.status) === 'listo');
   if (ad === 0 && (inD.length > 0 || wt.length > 0)) {
-    alerts.push({ alertType: 'delivery_no_active_riders', dedupKey: 'no-riders', priority: 'high', title: 'Sin repartidores activos', message: `${inD.length + wt.length} pedido(s) esperando y 0 riders.`, data: { driversActive: 0, ordersInDelivery: inD.length, ordersWaitingPickup: wt.length }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
+    alerts.push({ alertType: 'delivery_no_active_riders', dedupKey: 'no-riders', priority: 'high', title: 'Sin repartidores activos', message: `${inD.length + wt.length} pedido(s) esperando y 0 riders.`, data: { driversActive: 0, ordersInDelivery: inD.length, ordersWaitingPickup: wt.length }, route: DELIVERY_REPARTO_ROUTE, targetRoles: ['manager', 'owner', 'driver'] });
     return alerts;
   }
   if (ad === 0) return [];
   const r = inD.length / ad;
-  if (r >= config.maxOrdersPerRider) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-sat', priority: 'high', title: 'Reparto saturado', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}, max: ${config.maxOrdersPerRider}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
-  else if (r >= config.riderWarningRatio) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-warn', priority: 'medium', title: 'Reparto carga alta', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner', 'driver'] });
+  if (r >= config.maxOrdersPerRider) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-sat', priority: 'high', title: 'Reparto saturado', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}, max: ${config.maxOrdersPerRider}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: DELIVERY_REPARTO_ROUTE, targetRoles: ['manager', 'owner', 'driver'] });
+  else if (r >= config.riderWarningRatio) alerts.push({ alertType: 'delivery_rider_saturated', dedupKey: 'rid-warn', priority: 'medium', title: 'Reparto carga alta', message: `${inD.length} pedidos / ${ad} riders (${r.toFixed(1)}).`, data: { driversActive: ad, ordersInDelivery: inD.length, ratioOrdersPerDriver: Math.round(r * 10) / 10 }, route: DELIVERY_REPARTO_ROUTE, targetRoles: ['manager', 'owner', 'driver'] });
   const un = inD.filter((o) => !o.assignedDriver && !o.driverId);
-  if (un.length > 0) alerts.push({ alertType: 'delivery_unassigned_order', dedupKey: `una-${un.length}`, priority: 'medium', title: `${un.length} pedido(s) sin repartidor`, message: `Sin asignar: ${un.map((o) => o.orderNumber).join(', ')}.`, data: { unassignedOrders: un.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber })) }, route: '/saas/delivery?tab=delivery', targetRoles: ['manager', 'owner'] });
+  if (un.length > 0) alerts.push({ alertType: 'delivery_unassigned_order', dedupKey: `una-${un.length}`, priority: 'medium', title: `${un.length} pedido(s) sin repartidor`, message: `Sin asignar: ${un.map((o) => o.orderNumber).join(', ')}.`, data: { unassignedOrders: un.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber })) }, route: DELIVERY_REPARTO_ROUTE, targetRoles: ['manager', 'owner'] });
   return alerts;
 }
 
@@ -321,7 +318,7 @@ function checkCashPendingClose(tpvSessions, driverSessions, orders, cashCfg, poi
         title: 'Caja repartidor sin actividad',
         message: `${s.driverName || 'Repartidor'} lleva ${Math.floor(hrs)}h sin pedidos activos.`,
         data: { sessionType: 'driver', sessionId: s._id, driverName: s.driverName, hoursOpen: Math.round(hrs * 10) / 10 },
-        route: '/saas/delivery?tab=driverCash', targetRoles: ['manager', 'owner', 'driver'],
+        route: DELIVERY_CAJA_ROUTE, targetRoles: ['manager', 'owner', 'driver'],
       });
     }
   }
@@ -366,7 +363,7 @@ function checkChannelHealth(orders, config, dc) {
   if (!config.channelDownEnabled || !isInActiveSlot(dc)) return [];
   const now = Date.now(), td = orders.filter((o) => isToday(o.createdAt)), alerts = [];
   for (const ch of config.monitoredChannels) { const co = td.filter((o) => o.channel === ch); if (!co.length) continue; const lt = Math.max(...co.map((o) => new Date(o.createdAt).getTime())); const si = (now - lt) / 60_000;
-    if (si >= config.channelSilenceMinutes) alerts.push({ alertType: 'delivery_channel_silent', dedupKey: `ch-${ch}`, priority: 'medium', title: `Canal ${CH_LABELS[ch] || ch} sin actividad`, message: `Sin pedidos hace ${Math.floor(si)} min.`, data: { channel: ch, channelLabel: CH_LABELS[ch] || ch, minutesSilent: Math.floor(si), threshold: config.channelSilenceMinutes }, route: '/saas/delivery', targetRoles: ['manager', 'owner'] }); }
+    if (si >= config.channelSilenceMinutes) alerts.push({ alertType: 'delivery_channel_silent', dedupKey: `ch-${ch}`, priority: 'medium', title: `Canal ${CH_LABELS[ch] || ch} sin actividad`, message: `Sin pedidos hace ${Math.floor(si)} min.`, data: { channel: ch, channelLabel: CH_LABELS[ch] || ch, minutesSilent: Math.floor(si), threshold: config.channelSilenceMinutes }, route: DELIVERY_OPS_ROUTE, targetRoles: ['manager', 'owner'] }); }
   return alerts;
 }
 
@@ -389,8 +386,8 @@ function checkFailedDeliveries(orders, config) {
   if (!config.failedDeliveryEnabled) return [];
   const fl = orders.filter((o) => (o.status === 'incident' || o.status === 'cancelled') && orderHasDeliveryPhase(o)).filter((o) => isToday(o.updatedAt || o.createdAt));
   const alerts = [];
-  if (fl.length >= config.failedDeliveryThreshold) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `fb-${fl.length}`, priority: 'high', title: `${fl.length} entregas fallidas`, message: `Umbral superado (${config.failedDeliveryThreshold}).`, data: { failedOrders: fl.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber, status: o.status })), totalFailed: fl.length, threshold: config.failedDeliveryThreshold }, route: '/saas/delivery?tab=incidents', targetRoles: ['manager', 'owner', 'driver'] });
-  else for (const o of fl) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `f-${o._id}`, priority: 'low', title: `Entrega fallida: ${o.orderNumber || ''}`, message: `Paso a ${o.status} tras reparto.`, data: { orderId: o._id, orderNumber: o.orderNumber, status: o.status }, route: '/saas/delivery?tab=incidents', targetRoles: ['manager', 'owner', 'driver'] });
+  if (fl.length >= config.failedDeliveryThreshold) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `fb-${fl.length}`, priority: 'high', title: `${fl.length} entregas fallidas`, message: `Umbral superado (${config.failedDeliveryThreshold}).`, data: { failedOrders: fl.map((o) => ({ orderId: o._id, orderNumber: o.orderNumber, status: o.status })), totalFailed: fl.length, threshold: config.failedDeliveryThreshold }, route: DELIVERY_OPS_ROUTE, targetRoles: ['manager', 'owner', 'driver'] });
+  else for (const o of fl) alerts.push({ alertType: 'delivery_failed_delivery', dedupKey: `f-${o._id}`, priority: 'low', title: `Entrega fallida: ${o.orderNumber || ''}`, message: `Paso a ${o.status} tras reparto.`, data: { orderId: o._id, orderNumber: o.orderNumber, status: o.status }, route: DELIVERY_OPS_ROUTE, targetRoles: ['manager', 'owner', 'driver'] });
   return alerts;
 }
 
@@ -400,8 +397,8 @@ function checkUnpaidOrders(orders, config) {
   const up = orders.filter((o) => isDeliveredStatus(o.status) && o.paymentStatus !== 'paid' && !o.paymentMethod && (now - new Date(o.deliveredAt || o.updatedAt || o.createdAt).getTime()) / 60_000 > config.unpaidGraceMinutes);
   if (!up.length) return [];
   const tot = up.reduce((s, o) => s + Number(o.totalAmount || 0), 0), alerts = [];
-  if (up.length >= 5) alerts.push({ alertType: 'delivery_unpaid_order', dedupKey: `ub-${up.length}`, priority: 'high', title: `${up.length} pedidos sin cobrar`, message: `Pendiente: ${tot.toFixed(2)} EUR.`, data: { totalUnpaid: up.length, totalAmount: tot }, route: '/saas/delivery?tab=cash', targetRoles: ['manager', 'owner', 'cashier'] });
-  else for (const o of up) alerts.push({ alertType: 'delivery_unpaid_order', dedupKey: `u-${o._id}`, priority: 'medium', title: `Pedido ${o.orderNumber || ''} sin cobrar`, message: `Importe: ${Number(o.totalAmount || 0).toFixed(2)} EUR.`, data: { orderId: o._id, orderNumber: o.orderNumber, total: o.totalAmount }, route: '/saas/delivery?tab=cash', targetRoles: ['manager', 'owner', 'cashier'] });
+  if (up.length >= 5) alerts.push({ alertType: 'delivery_unpaid_order', dedupKey: `ub-${up.length}`, priority: 'high', title: `${up.length} pedidos sin cobrar`, message: `Pendiente: ${tot.toFixed(2)} EUR.`, data: { totalUnpaid: up.length, totalAmount: tot }, route: DELIVERY_CAJA_ROUTE, targetRoles: ['manager', 'owner', 'cashier'] });
+  else for (const o of up) alerts.push({ alertType: 'delivery_unpaid_order', dedupKey: `u-${o._id}`, priority: 'medium', title: `Pedido ${o.orderNumber || ''} sin cobrar`, message: `Importe: ${Number(o.totalAmount || 0).toFixed(2)} EUR.`, data: { orderId: o._id, orderNumber: o.orderNumber, total: o.totalAmount }, route: DELIVERY_CAJA_ROUTE, targetRoles: ['manager', 'owner', 'cashier'] });
   return alerts;
 }
 
@@ -512,10 +509,9 @@ async function runForUser(userId) {
     active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
     includeMargin: cycleCount % MARGIN_CHECK_INTERVAL === 0,
   });
-  const ceoPending = allPending.filter((a) => CEO_DELIVERY_ALERT_TYPES.has(a.alertType));
-  const reconciled = await reconcileDeliveryAlerts(bId, userId, ceoPending);
+  const reconciled = await reconcileDeliveryAlerts(bId, userId, allPending);
   let cnt = 0;
-  for (const a of ceoPending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
+  for (const a of allPending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
   if (reconciled > 0) logger.info({ tag: TAG, userId, businessId: bId, reconciled }, 'Alertas delivery obsoletas resueltas');
   return cnt;
 }
@@ -583,57 +579,59 @@ function collectDeliveryAlerts({
   ];
 }
 
+export async function runDeliveryAlertsForUser(userId) {
+  if (!userId) return 0;
+  return runForUser(userId);
+}
+
 export async function triggerReactiveAlert(userId, eventType, payload) {
   try {
-    const account = await findAccountByUserId(fakeReq, userId); if (!account) return;
-    const bId = account.businessId || '';
-    const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
-    const config = resolveDeliveryAlertConfig(account, businessOp);
-    if (!config.enabled) return;
-    const db = getDeliveryDbName();
-    let toE = [];
-    if (eventType === 'order_status_changed' && (payload?.newStatus === 'incident' || payload?.newStatus === 'cancelled')) {
-      const all = (await fetchDocsOfType(db, 'delivery_order')).filter((o) => o.user_id === userId);
-      toE.push(...checkFailedDeliveries(all, config));
-    }
+    const reactiveTypes = new Set([
+      'order_created',
+      'order_status_changed',
+      'stock_updated',
+      'cash_session_changed',
+    ]);
+    if (!reactiveTypes.has(eventType)) return;
+
     if (eventType === 'cash_session_changed') {
-      const [ts, ds, act, pointsOfSale, drivers] = await Promise.all([
-        fetchDocsOfType(db, 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
-        fetchDocsOfType(db, 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
-        fetchDocsOfType(db, 'delivery_order').then((d) => filterActiveDeliveryOrders(d.filter((o) => o.user_id === userId))),
-        fetchPointsOfSale(userId),
-        fetchDrivers(userId),
-      ]);
-      const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
-      toE.push(...checkCashPendingClose(ts, ds, act, cashCfg, pointsOfSale, drivers));
-      if ((payload?.action === 'closed' || payload?.action === 'pending_review') && canEmitDriverCashAlerts(drivers)) {
-        const sess = ds.find(s => s._id === payload?.sessionId);
-        if (sess && Math.abs(sess.difference || 0) >= (config.driverMismatchThreshold || 5)) {
-          toE.push({
-            alertType: 'delivery_driver_mismatch', dedupKey: `drv-mismatch-${sess._id}`,
-            priority: Math.abs(sess.difference) >= (config.driverMismatchThreshold || 5) * 3 ? 'high' : 'medium',
-            title: 'Descuadre de caja repartidor',
-            message: `${sess.driverName || 'Repartidor'} cerró caja con diferencia de ${sess.difference >= 0 ? '+' : ''}${Number(sess.difference).toFixed(2)}€ (esperado: ${Number(sess.expectedCash).toFixed(2)}€, contado: ${Number(sess.actualCash).toFixed(2)}€)`,
-            data: { sessionType: 'driver', sessionId: sess._id, driverName: sess.driverName, difference: sess.difference, expectedCash: sess.expectedCash, actualCash: sess.actualCash },
-            route: '/saas/delivery?tab=driverCash',
-            targetRoles: ['manager', 'owner'],
-          });
+      const account = await findAccountByUserId(fakeReq, userId);
+      if (!account) return;
+      const bId = account.businessId || '';
+      const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+      const config = resolveDeliveryAlertConfig(account, businessOp);
+      if (!config.enabled) return;
+      const db = getDeliveryDbName();
+      if ((payload?.action === 'closed' || payload?.action === 'pending_review') && payload?.sessionType === 'driver') {
+        const drivers = await fetchDrivers(userId);
+        if (canEmitDriverCashAlerts(drivers)) {
+          const ds = await fetchDocsOfType(db, 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId));
+          const sess = ds.find((s) => s._id === payload?.sessionId);
+          if (sess && Math.abs(sess.difference || 0) >= (config.driverMismatchThreshold || 5)) {
+            await emitDeliveryAlert({
+              userId,
+              businessId: bId,
+              alertType: 'delivery_driver_mismatch',
+              dedupKey: `drv-mismatch-${sess._id}`,
+              priority: Math.abs(sess.difference) >= (config.driverMismatchThreshold || 5) * 3 ? 'high' : 'medium',
+              title: 'Descuadre de caja repartidor',
+              message: `${sess.driverName || 'Repartidor'} cerró caja con diferencia de ${sess.difference >= 0 ? '+' : ''}${Number(sess.difference).toFixed(2)}€`,
+              data: { sessionType: 'driver', sessionId: sess._id, driverName: sess.driverName, difference: sess.difference },
+              route: DELIVERY_CAJA_ROUTE,
+              targetRoles: ['manager', 'owner'],
+            });
+          }
         }
       }
     }
-    for (const a of toE.filter((x) => CEO_DELIVERY_ALERT_TYPES.has(x.alertType))) {
-      await emitDeliveryAlert({ userId, businessId: bId, ...a });
-    }
-    if (toE.length > 0) {
-      const ceoKeys = toE.filter((x) => CEO_DELIVERY_ALERT_TYPES.has(x.alertType));
-      await reconcileDeliveryAlerts(bId, userId, ceoKeys);
-    }
+
+    await runDeliveryAlertsForUser(userId);
   } catch (e) { logger.warn({ tag: TAG, userId, eventType, err: e?.message }, 'Error alerta reactiva'); }
 }
 
 let engineTimer = null;
 export function startDeliveryAlertEngine() {
-  logger.info({ tag: TAG }, `Motor alertas delivery — eventos + barrido cada ${SAFETY_SWEEP_MS / 60_000} min (solo CEO)`);
+  logger.info({ tag: TAG }, `Motor alertas delivery — eventos + barrido cada ${SAFETY_SWEEP_MS / 60_000} min`);
   setTimeout(() => { runDeliveryAlerts().catch(() => null); engineTimer = setInterval(() => runDeliveryAlerts().catch(() => null), SAFETY_SWEEP_MS); }, STARTUP_DELAY_MS);
 }
 export function stopDeliveryAlertEngine() { if (engineTimer) { clearInterval(engineTimer); engineTimer = null; } }

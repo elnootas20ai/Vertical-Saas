@@ -2,6 +2,11 @@ import { Plug, Receipt } from 'lucide-react';
 import type { AggregatorCashRow } from '../../lib/deliveryIntegrationsUi';
 import { sumAggregatorRows } from '../../lib/deliveryIntegrationsUi';
 
+function fmtMoney(value: number | undefined | null): string {
+  const n = Number(value);
+  return (Number.isFinite(n) ? n : 0).toFixed(2);
+}
+
 interface AggregatorCashSummaryProps {
   rows: AggregatorCashRow[];
   title?: string;
@@ -21,7 +26,7 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
             key={row.platform.channel}
             className={`px-2.5 py-1 rounded-lg text-xs font-medium ${row.platform.colorClass}`}
           >
-            {row.platform.label}: {row.totalSales.toFixed(2)}€ ({row.orderCount})
+            {row.platform.label}: {fmtMoney(row.totalSales)}€ ({row.orderCount})
           </span>
         ))}
       </div>
@@ -35,7 +40,7 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
           <Plug className="w-3.5 h-3.5" /> {title}
         </div>
         <span className="text-xs font-semibold text-purple-700 dark:text-purple-300 tabular-nums">
-          Total: {totals.totalSales.toFixed(2)}€ · {totals.orderCount} pedidos
+          Total: {fmtMoney(totals.totalSales)}€ · {totals.orderCount} pedidos
         </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -51,11 +56,11 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
               <Receipt className="w-3.5 h-3.5 text-gray-400" />
             </div>
             <div className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-              {row.totalSales.toFixed(2)}€
+              {fmtMoney(row.totalSales)}€
             </div>
             <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
               {row.orderCount} pedido{row.orderCount === 1 ? '' : 's'}
-              {row.orderCount > 0 ? ` · ticket ${row.avgTicket.toFixed(2)}€` : ''}
+              {row.orderCount > 0 ? ` · ticket ${fmtMoney(row.avgTicket)}€` : ''}
             </div>
           </div>
         ))}

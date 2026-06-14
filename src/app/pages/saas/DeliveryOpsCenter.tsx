@@ -15,6 +15,16 @@ import {
   notifyDeliveryActiveStoreChanged,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
+import { useLiveClock } from '../../hooks/useLiveClock';
+import {
+  computeKitchenLiveStats,
+  computeRepartoLiveStats,
+  enrichOpsAlertsLive,
+  formatElapsedFromIso,
+  formatOpsDayLabel,
+  getOrderPhaseStartIso,
+  minutesSinceIso,
+} from '../../lib/deliveryOpsLiveTimes';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { scrollToActivationField } from '../../components/saas/ActivationGuideUi';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
@@ -65,12 +75,9 @@ const CH_LABELS: Record<string, string> = {
   glovo: 'Glovo', justeat: 'Just Eat', ubereats: 'Uber Eats',
 };
 
-function ago(d: string) {
+function ago(d: string, nowMs: number) {
   if (!d) return '—';
-  const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-  if (m < 1) return 'ahora';
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
+  return formatElapsedFromIso(d, nowMs);
 }
 
 function eur(n: number) {
@@ -321,6 +328,87 @@ function opsAlertSignature(alerts: OpsAlert[]): string {
   return alerts.map((a) => a.id).sort().join('|');
 }
 
+const OPS_CASH_ALERT_TYPES = new Set<OpsAlert['type']>([
+  'cash_pending_close',
+  'cash_pending_validation',
+  'register_discrepancy',
+  'register_not_open',
+]);
+
+function opsAlertsCoverCash(alerts: OpsAlert[]): boolean {
+  return alerts.some((a) => OPS_CASH_ALERT_TYPES.has(a.type));
+}
+
+function opsAlertActionLabel(a: OpsAlert): string | null {
+  switch (a.type) {
+    case 'cash_pending_validation':
+      return 'Validar cierre';
+    case 'register_discrepancy':
+      return 'Ver cierre';
+    case 'cash_pending_close':
+    case 'register_not_open':
+      return 'Ver caja';
+    case 'kitchen_saturated':
+      return 'Ver cocina';
+    case 'delayed_order':
+      return 'Ver pedido';
+    case 'open_incident':
+      return 'Ver incidencias';
+    case 'critical_stock':
+      return 'Ver stock';
+    default:
+      return null;
+  }
+}
+
+function handleOpsAlertAction(
+  a: OpsAlert,
+  nav: ReturnType<typeof useNavigate>,
+  activeOrders: DeliveryOrder[],
+) {
+  if (a.type === 'kitchen_saturated') {
+    document.getElementById('ops-kitchen-widget')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  if (a.type === 'delayed_order') {
+    const order = activeOrders.find((o) => o._id === a.orderId);
+    const status = order?.status;
+    if (status === 'cocina') {
+      document.getElementById('ops-kitchen-widget')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (status === 'listo') {
+      nav('/saas/delivery-montaje', { state: { returnToOps: true } });
+      return;
+    }
+    if (status === 'camino' || status === 'incident') {
+      nav('/saas/delivery-reparto', { state: { returnToOps: true } });
+      return;
+    }
+    nav(a.route || '/saas/delivery-kitchen', { state: { returnToOps: true } });
+    return;
+  }
+  if (OPS_CASH_ALERT_TYPES.has(a.type)) {
+    let path = '/saas/vertical/delivery/caja';
+    if (a.type === 'cash_pending_validation') {
+      if (a.sessionId) path += `?validate=${encodeURIComponent(a.sessionId)}`;
+    } else if (a.type === 'register_discrepancy' && a.sessionId) {
+      path += `?view=${encodeURIComponent(a.sessionId)}`;
+    }
+    nav(path, { state: { returnToOps: true } });
+    return;
+  }
+  if (a.type === 'open_incident') {
+    nav('/saas/delivery-reparto', { state: { returnToOps: true } });
+    return;
+  }
+  if (a.type === 'critical_stock') {
+    nav('/saas/catalog', { state: { returnToOps: true } });
+    return;
+  }
+  if (a.route) nav(a.route, { state: { returnToOps: true } });
+}
+
 function readOpsBannerDismissed(key: string): string | null {
   try {
     return sessionStorage.getItem(key);
@@ -337,8 +425,39 @@ function writeOpsBannerDismissed(key: string, signature: string) {
   }
 }
 
-function Alerts({ alerts }: { alerts: OpsAlert[] }) {
-  const signature = useMemo(() => opsAlertSignature(alerts), [alerts]);
+function Alerts({
+  alerts,
+  nowMs,
+  opsDate,
+  activeOrders,
+  cashStatus,
+  cfg,
+}: {
+  alerts: OpsAlert[];
+  nowMs: number;
+  opsDate: string;
+  activeOrders: DeliveryOrder[];
+  cashStatus?: OpsCenterData['cashStatus'];
+  cfg: DeliveryConfig | null;
+}) {
+  const todayKey = localDateInputValue();
+  const dayLabel = formatOpsDayLabel(opsDate, todayKey);
+  const maxCashHours = 12;
+
+  const liveAlerts = useMemo(
+    () =>
+      enrichOpsAlertsLive(
+        alerts,
+        activeOrders,
+        cfg,
+        cashStatus?.openTpvSessions ?? [],
+        maxCashHours,
+        nowMs,
+      ),
+    [alerts, activeOrders, cfg, cashStatus?.openTpvSessions, maxCashHours, nowMs],
+  );
+
+  const signature = useMemo(() => opsAlertSignature(liveAlerts), [liveAlerts]);
   const [bannerDismissedSig, setBannerDismissedSig] = useState<string | null>(
     () => readOpsBannerDismissed('deliveryOps.alertsBannerDismissed'),
   );
@@ -346,7 +465,7 @@ function Alerts({ alerts }: { alerts: OpsAlert[] }) {
   const [hide, setHide] = useState<Set<string>>(new Set());
   const nav = useNavigate();
 
-  const vis = alerts.filter((a) => !hide.has(a.id));
+  const vis = liveAlerts.filter((a) => !hide.has(a.id));
   const bannerHidden = bannerDismissedSig === signature;
   if (!vis.length || bannerHidden) return null;
 
@@ -387,7 +506,7 @@ function Alerts({ alerts }: { alerts: OpsAlert[] }) {
               {vis.length} alerta{vis.length !== 1 ? 's' : ''} pendiente{vis.length !== 1 ? 's' : ''}
             </p>
             <p className={`text-xs mt-0.5 ${crit ? 'text-red-800/85 dark:text-red-200/90' : 'text-amber-900/75 dark:text-amber-200/85'}`}>
-              {exp ? 'Toca para ocultar detalle' : 'Revisa incidencias y avisos del día'}
+              {exp ? 'Toca para ocultar detalle' : `Operativa · ${dayLabel}${opsDate !== todayKey ? ' (día seleccionado)' : ''}`}
             </p>
           </div>
         </button>
@@ -421,16 +540,26 @@ function Alerts({ alerts }: { alerts: OpsAlert[] }) {
                 <I className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-500' : 'text-amber-500'}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{a.title}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{a.message}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {a.message}
+                    {a.createdAt && (
+                      <span className="text-gray-400 dark:text-gray-500">
+                        {' '}
+                        · lleva {formatElapsedFromIso(a.createdAt, nowMs)}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => nav(a.route, { state: { returnToOps: true } })}
-                    className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
-                  >
-                    Ver
-                  </button>
+                  {opsAlertActionLabel(a) && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpsAlertAction(a, nav, activeOrders)}
+                      className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+                    >
+                      {opsAlertActionLabel(a)}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setHide((p) => new Set(p).add(a.id))}
@@ -614,45 +743,54 @@ function Metrics({ kpis }: { kpis: OpsCenterData['kpis'] | null }) {
 
 /* ── Kitchen Widget ──────────────────────────────────────────────────────── */
 
-function KitchenW({ ks, orders, onAdv, brandLabels }: {
+function KitchenW({ ks, orders, onAdv, brandLabels, nowMs, cfg }: {
   ks: OpsCenterData['kitchenStatus'] | null; orders: DeliveryOrder[];
   onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
   brandLabels?: Record<string, string>;
+  nowMs: number;
+  cfg: DeliveryConfig | null;
 }) {
   if (!ks) return null;
+  const capacity = cfg?.maxKitchenCapacity ?? ks.capacity ?? 15;
+  const live = computeKitchenLiveStats(orders, capacity, nowMs);
+  const kitchenWarnMin = cfg?.defaultPrepTime ?? 20;
   const list = orders.filter(o => o.status === 'cocina').slice(0, 5);
-  const col = ks.saturationPercent < 50 ? 'bg-green-500' : ks.saturationPercent < 80 ? 'bg-amber-500' : 'bg-red-500';
+  const col = live.saturationPercent < 50 ? 'bg-green-500' : live.saturationPercent < 80 ? 'bg-amber-500' : 'bg-red-500';
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+    <div id="ops-kitchen-widget" className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ChefHat className="w-5 h-5 text-orange-600 dark:text-orange-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cocina</h3>
-          <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded-full text-xs font-bold">{ks.ordersInKitchen}/{ks.capacity}</span>
+          <span className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 rounded-full text-xs font-bold">{live.ordersInKitchen}/{live.capacity}</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span>Mayor: {Math.round(ks.oldestOrderMinutes)}m</span>
-          <span>Media: {Math.round(ks.avgWaitMinutes)}m</span>
+          <span>Mayor: {Math.round(live.oldestOrderMinutes)}m</span>
+          <span>Media: {Math.round(live.avgWaitMinutes)}m</span>
         </div>
       </div>
       <div className="px-3 pt-2 pb-1">
         <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-          <div className={`h-full ${col} rounded-full transition-all`} style={{ width: `${Math.min(100, ks.saturationPercent)}%` }} />
+          <div className={`h-full ${col} rounded-full transition-all`} style={{ width: `${Math.min(100, live.saturationPercent)}%` }} />
         </div>
-        <p className="text-[10px] text-gray-400 mt-1 text-right">{ks.saturationPercent}% capacidad</p>
+        <p className="text-[10px] text-gray-400 mt-1 text-right">{live.saturationPercent}% capacidad</p>
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
         {!list.length && <div className="px-3 py-4 text-center text-gray-400 text-xs">Sin pedidos en cocina</div>}
-        {list.map(o => (
+        {list.map(o => {
+          const phaseStart = getOrderPhaseStartIso(o);
+          const waitMin = minutesSinceIso(phaseStart, nowMs);
+          return (
           <div key={o._id} className="px-3 py-2 flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber} <span className="text-xs text-gray-500 font-normal">{o.items?.slice(0, 2).map(i => i.name).join(', ')}</span></p>
               <OrderBrandBadges order={o} brandLabels={brandLabels} />
-              <p className={`text-xs mt-0.5 ${(Date.now() - new Date(o.createdAt).getTime()) / 60000 > 25 ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{ago(o.createdAt)}</p>
+              <p className={`text-xs mt-0.5 ${waitMin > kitchenWarnMin ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{ago(phaseStart, nowMs)} en cocina</p>
             </div>
             <button onClick={() => onAdv(o, 'listo')} className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-semibold shrink-0">Listo</button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -660,10 +798,11 @@ function KitchenW({ ks, orders, onAdv, brandLabels }: {
 
 /* ── Assembly Widget ─────────────────────────────────────────────────────── */
 
-function AssemblyW({ orders, onAdv, brandLabels }: {
+function AssemblyW({ orders, onAdv, brandLabels, nowMs }: {
   orders: DeliveryOrder[];
   onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
   brandLabels?: Record<string, string>;
+  nowMs: number;
 }) {
   // En montaje: pedidos en estado 'listo' pendientes de salir hacia entrega.
   // No incluimos 'en_reparto' porque ese ya está saliendo / fuera del local.
@@ -682,7 +821,7 @@ function AssemblyW({ orders, onAdv, brandLabels }: {
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
               <OrderBrandBadges order={o} brandLabels={brandLabels} />
-              <p className="text-xs text-gray-400 mt-0.5">{o.deliveryType === 'recogida' ? 'Recogida' : 'Domicilio'} — {ago(o.createdAt)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{o.deliveryType === 'recogida' ? 'Recogida' : 'Domicilio'} — {ago(getOrderPhaseStartIso(o), nowMs)} en montaje</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shrink-0">Completado</button>
           </div>
@@ -694,12 +833,14 @@ function AssemblyW({ orders, onAdv, brandLabels }: {
 
 /* ── Delivery/Reparto Widget ─────────────────────────────────────────────── */
 
-function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
-  ds: OpsCenterData['deliveryStatus'] | null; orders: DeliveryOrder[];
+function RepartoW({ orders, cfg, onAdv, brandLabels, nowMs }: {
+  orders: DeliveryOrder[];
   cfg: DeliveryConfig | null; onAdv: (o: DeliveryOrder, s: DeliveryOrderStatus) => void;
   brandLabels?: Record<string, string>;
+  nowMs: number;
 }) {
   if (!cfg?.hasOwnDelivery && !cfg?.hasPlatformDelivery) return null;
+  const live = computeRepartoLiveStats(orders, cfg?.delayThresholdMinutes ?? 40, nowMs);
   // En reparto: pedidos ya marcados 'en_reparto' o, por compatibilidad,
   // 'listo' con repartidor asignado (flujo antiguo previo al estado intermedio).
   const list = orders.filter(o => (o.status === 'en_reparto' || (o.status === 'listo' && o.assignedDriver))).slice(0, 5);
@@ -709,12 +850,12 @@ function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
         <div className="flex items-center gap-2">
           <Truck className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
           <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Reparto</h3>
-          <span className="px-2 py-0.5 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 rounded-full text-xs font-bold">{ds?.ordersInDelivery || 0}</span>
+          <span className="px-2 py-0.5 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 rounded-full text-xs font-bold">{live.ordersInDelivery}</span>
         </div>
-        {ds && <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span><Users className="w-3 h-3 inline mr-0.5" />{ds.driversActive}</span>
-          {ds.delayedCount > 0 && <span className="text-red-500 font-semibold">{ds.delayedCount} retrasado(s)</span>}
-        </div>}
+        <div className="flex items-center gap-3 text-xs text-gray-500">
+          <span><Users className="w-3 h-3 inline mr-0.5" />{live.driversActive}</span>
+          {live.delayedCount > 0 && <span className="text-red-500 font-semibold">{live.delayedCount} retrasado(s)</span>}
+        </div>
       </div>
       <div className="divide-y divide-gray-100 dark:divide-gray-700">
         {!list.length && <div className="px-3 py-4 text-center text-gray-400 text-xs">{cfg?.hasOwnDelivery ? 'Sin pedidos en reparto' : 'Pedidos en plataformas'}</div>}
@@ -723,7 +864,7 @@ function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{o.orderNumber}</p>
               <OrderBrandBadges order={o} brandLabels={brandLabels} />
-              <p className="text-xs text-gray-400 mt-0.5">{o.assignedDriver} — {(o.customerAddress || '').slice(0, 30)}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{ago(getOrderPhaseStartIso(o), nowMs)} en ruta · {o.assignedDriver} — {(o.customerAddress || '').slice(0, 30)}</p>
             </div>
             <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-xs font-semibold shrink-0">Entregado</button>
           </div>
@@ -735,7 +876,7 @@ function RepartoW({ ds, orders, cfg, onAdv, brandLabels }: {
 
 /* ── Cash Widget ─────────────────────────────────────────────────────────── */
 
-function CashW({ cs, onNavigate, opsDate }: { cs: OpsCenterData['cashStatus'] | null; onNavigate: (path: string) => void; opsDate?: string }) {
+function CashW({ cs, onNavigate, opsDate, nowMs }: { cs: OpsCenterData['cashStatus'] | null; onNavigate: (path: string) => void; opsDate?: string; nowMs: number }) {
   if (!cs) return null;
   const tot = cs.openTpvSessions.length + cs.openDriverSessions.length;
   const movements = cs.recentCashMovements || [];
@@ -769,7 +910,7 @@ function CashW({ cs, onNavigate, opsDate }: { cs: OpsCenterData['cashStatus'] | 
         {cs.openTpvSessions.slice(0, 2).map(s => (
           <div key={s._id} className="flex items-center justify-between text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg px-3 py-2 mb-1.5">
             <span className="font-semibold text-gray-700 dark:text-gray-300 truncate">{s.terminalName || 'Terminal'} — {s.pointOfSaleName || 'PDV'}</span>
-            <span className="text-gray-500 shrink-0 ml-2">{s.workerName || '—'} · {ago(s.openedAt)}</span>
+            <span className="text-gray-500 shrink-0 ml-2">{s.workerName || '—'} · {ago(s.openedAt, nowMs)}</span>
           </div>
         ))}
         <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
@@ -1012,6 +1153,7 @@ export function DeliveryOpsCenter() {
     }
   }, []);
   const authUserId = user?.user_id || user?.id || user?.userId || user?._id || sessionUserId || null;
+  const nowMs = useLiveClock(30_000);
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
@@ -1025,6 +1167,15 @@ export function DeliveryOpsCenter() {
   const [data, setData] = useState<OpsCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.location.hash !== '#cocina') return;
+    if (opsPanel !== 'operativa') return;
+    const t = window.setTimeout(() => {
+      document.getElementById('ops-kitchen-widget')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [data, opsPanel]);
 
   useEffect(() => {
     if (activationFocus !== 'open-tpv') return;
@@ -1205,9 +1356,16 @@ export function DeliveryOpsCenter() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    if (sseOk) {
+      if (poll.current) {
+        clearInterval(poll.current);
+        poll.current = null;
+      }
+      return;
+    }
     poll.current = setInterval(load, 30000);
     return () => { if (poll.current) clearInterval(poll.current); };
-  }, [load]);
+  }, [load, sseOk]);
 
   // Al cambiar de día local, volver a hoy si el panel seguía en el día anterior.
   useEffect(() => {
@@ -1232,6 +1390,8 @@ export function DeliveryOpsCenter() {
     'delivery:order_status_changed': () => load(),
     'delivery:incident_reported': () => load(),
     'delivery:incident_resolved': () => load(),
+    tpv_session_updated: () => load(),
+    delivery_payment_registered: () => load(),
     connected: () => setSseOk(true),
     disconnected: () => setSseOk(false),
     reconnecting: () => setSseOk(false),
@@ -1392,9 +1552,20 @@ export function DeliveryOpsCenter() {
               <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
             </div>
 
-            {data?.alerts && data.alerts.length > 0 && <Alerts alerts={data.alerts} />}
+            {data?.alerts && data.alerts.length > 0 && (
+              <Alerts
+                alerts={data.alerts}
+                nowMs={nowMs}
+                opsDate={data?.date || filters.date || localDateInputValue()}
+                activeOrders={active}
+                cashStatus={data?.cashStatus}
+                cfg={cfg}
+              />
+            )}
 
-            <CashStatusBanner cashStatus={data?.cashStatus} onNavigate={quickNav} />
+            {!opsAlertsCoverCash(data?.alerts ?? []) && (
+              <CashStatusBanner cashStatus={data?.cashStatus} onNavigate={quickNav} />
+            )}
 
             {data?.kpis && <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />}
 
@@ -1422,21 +1593,23 @@ export function DeliveryOpsCenter() {
                     orders={active}
                     onAdv={advance}
                     brandLabels={data?.brandLabels}
+                    nowMs={nowMs}
+                    cfg={cfg}
                   />
                 )}
                 {cfg?.hasAssemblyStation !== false && (
-                  <AssemblyW orders={active} onAdv={advance} brandLabels={data?.brandLabels} />
+                  <AssemblyW orders={active} onAdv={advance} brandLabels={data?.brandLabels} nowMs={nowMs} />
                 )}
                 {(cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) && (
                   <RepartoW
-                    ds={data?.deliveryStatus || null}
                     orders={active}
                     cfg={cfg}
                     onAdv={advance}
                     brandLabels={data?.brandLabels}
+                    nowMs={nowMs}
                   />
                 )}
-                <CashW cs={data?.cashStatus || null} onNavigate={quickNav} opsDate={data?.date || filters.date} />
+                <CashW cs={data?.cashStatus || null} onNavigate={quickNav} opsDate={data?.date || filters.date} nowMs={nowMs} />
                 <IncidentsW orders={active} onNavigate={navFromOps} />
                 {!DELIVERY_LEGACY_SCREENS_HIDDEN && cfg?.hasPhysicalTables && cfg.tableCount > 0 && (
                   <TablesW cfg={cfg} orders={active} />

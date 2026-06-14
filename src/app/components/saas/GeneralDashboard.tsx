@@ -198,7 +198,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           {isBasicPlan && (
             <p className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-3">
               Plan {planLabel}: EBITDA consolidado disponible desde Normal.{' '}
-              <button type="button" onClick={() => navigate('/saas/admin')} className="font-semibold underline">
+              <button type="button" onClick={() => navigate('/saas/billing')} className="font-semibold underline">
                 Ver planes
               </button>
             </p>

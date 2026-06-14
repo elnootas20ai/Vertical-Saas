@@ -717,6 +717,9 @@ function SidebarInner({
       if (!deliveryNav.isDelivery || item.disabled) {
         return base;
       }
+      if (item.id === 'reports') {
+        return { ...base, path: '/saas/vertical/delivery/informes' };
+      }
       const lock = getDeliverySidebarItemLock(item.id, {
         pdvReady: deliveryNav.pdvReady,
         brandReady: deliveryNav.brandReady,

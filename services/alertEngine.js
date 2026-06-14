@@ -20,6 +20,7 @@ import {
   canEmitConstructionAlerts,
   canEmitCompraventaAlerts,
   canEmitDeliveryAlerts,
+  usesDeliveryAlertMotor,
   canEmitDocumentsAlerts,
   canEmitFinanceAlerts,
   canEmitFleetAlerts,
@@ -1627,6 +1628,7 @@ async function runAlertsForBusiness(business) {
   ]);
 
   const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders, pointsOfSale, deliveryConfig: account?.deliveryConfig });
+  const deliveryMotorActive = usesDeliveryAlertMotor(account, business);
   const financeReady = canEmitFinanceAlerts({ financeDocs, purchaseInvoices });
   const purchaseReady = canEmitPurchaseAlerts({ purchaseOrders, purchaseInvoices });
   const webReady = canEmitWebOrderAlerts({ webOrders });
@@ -1653,9 +1655,11 @@ async function runAlertsForBusiness(business) {
   // Ventas / Operaciones
   if (webReady) results.push(...await checkStaleWebOrders(ctx, webOrders, config));
   if (deliveryReady) {
-    results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
-    results.push(...await checkDeliveryUnattended(ctx, deliveryOrders, config));
-    results.push(...await checkDeliveryUnpaid(ctx, deliveryOrders, config));
+    if (!deliveryMotorActive) {
+      results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
+      results.push(...await checkDeliveryUnattended(ctx, deliveryOrders, config));
+      results.push(...await checkDeliveryUnpaid(ctx, deliveryOrders, config));
+    }
     results.push(...await checkDeliveryNoAddress(ctx, deliveryOrders, config));
     results.push(...await checkDeliveryChannelIncident(ctx, deliveryOrders, config));
   }
@@ -3084,7 +3088,9 @@ async function runAlertsForUser(userId) {
     results.push(...await checkExpenseWithoutDocument(ctx, financeDocs, config));
   }
   if (webReady) results.push(...await checkStaleWebOrders(ctx, webOrders, config));
-  if (deliveryReady) results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
+  if (deliveryReady && !usesDeliveryAlertMotor(account)) {
+    results.push(...await checkStaleDeliveryOrders(ctx, deliveryOrders, config));
+  }
   if (vehiclesReady) {
     results.push(...await checkVehicleStockAging(ctx, vehicles, config));
     results.push(...await checkLowSalesVelocity(ctx, vehicles, config));

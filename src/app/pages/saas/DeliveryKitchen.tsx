@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -682,6 +683,7 @@ export function DeliveryKitchen() {
   const { currentBusiness } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const userId = resolveBusinessDataUserId(user, currentBusiness);
+  const authUserId = user?.user_id || user?.id || user?.userId || user?._id || null;
 
   // Data state
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -775,18 +777,13 @@ export function DeliveryKitchen() {
 
   useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
 
-  useEffect(() => {
-    if (!userId) return;
-    const interval = setInterval(loadOrders, 15000);
-    const handleVisibility = () => {
-      if (!document.hidden) loadOrders();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [userId, loadOrders]);
+  useDeliveryOrdersLive({
+    authUserId,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    onRefresh: loadOrders,
+    enabled: !!authUserId && !!userId,
+    fallbackPollMs: 30_000,
+  });
 
   // Actions
   const advanceOrder = useCallback(async (order: DeliveryOrder, nextStatus: DeliveryOrderStatus) => {

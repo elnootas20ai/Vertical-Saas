@@ -1824,7 +1824,7 @@ export function Reports() {
               </div>
             </div>
             <Link
-              to="/saas/admin"
+              to="/saas/billing"
               className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shrink-0"
             >
               Ver planes

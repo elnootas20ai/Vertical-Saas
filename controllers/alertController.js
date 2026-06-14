@@ -1,5 +1,6 @@
 import { findAccountByUserId, saveAccount } from '../services/couchdb.js';
-import { getAlertSummary, runAlertEngine, getAlertConfig } from '../services/alertEngine.js';
+import { getAlertSummary, getAlertConfig } from '../services/alertEngine.js';
+import { runAllAlertMotors } from '../services/alertMotorOrchestrator.js';
 import { getButcherAlertConfig } from '../services/butcherAlertEngine.js';
 import { getDeliveryAlertConfig } from '../services/deliveryAlertEngine.js';
 import { getConstructionAlertConfig } from '../services/constructionAlertEngine.js';
@@ -28,9 +29,14 @@ export async function triggerAlertCheck(req, res) {
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
 
     const summary = await getAlertSummary(userId);
-    await runAlertEngine();
+    const motors = await runAllAlertMotors();
 
-    return res.json({ ok: true, message: 'Chequeo de alertas ejecutado', totals: summary.totals });
+    return res.json({
+      ok: true,
+      message: 'Motores de alertas ejecutados (global, delivery, limpieza, carnicería, construcción)',
+      totals: summary.totals,
+      motors,
+    });
   } catch (error) {
     return res.status(500).json({
       ok: false,

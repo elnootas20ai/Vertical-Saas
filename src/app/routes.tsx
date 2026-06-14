@@ -120,6 +120,7 @@ import { QuotePublicResponse } from './pages/public/QuotePublicResponse';
 import { WebConfig } from './pages/saas/WebConfig';
 import { WebOrders } from './pages/saas/WebOrders';
 import { DeliveryIntegrations } from './pages/saas/DeliveryIntegrations';
+import { DeliveryReports } from './pages/saas/DeliveryReports';
 import { CleaningHub } from './pages/saas/CleaningHub';
 import { CleaningWorkers } from './pages/saas/CleaningWorkers';
 import { CleaningServices } from './pages/saas/CleaningServices';
@@ -575,6 +576,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
           { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireBusinessOwner> },
           { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><DeliveryIntegrations /></RequireBusinessOwner> },
+          { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><DeliveryReports /></RequireBusinessOwner> },
           { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },

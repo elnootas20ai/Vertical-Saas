@@ -3,7 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { getAuthHeaders } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
+import { useSSE } from '../../hooks/useSSE';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useAlertCenterBusinessId, useAlertSettingsBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertDepartments } from '../../hooks/useAlertDepartments';
@@ -175,6 +177,24 @@ export default function AlertCenterPage() {
       setLoading(false);
     }
   }, [businessId, dataUserId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo, activeDepartment, departmentSourceFilter]);
+
+  const sseToken = useMemo(() => {
+    const headers = getAuthHeaders();
+    const authHeader = headers.Authorization || headers.authorization;
+    if (!authHeader) return null;
+    return authHeader.replace(/^Bearer\s+/i, '').trim() || null;
+  }, [user?.user_id]);
+
+  useSSE({
+    userId: accountUserId || null,
+    token: sseToken,
+    businessId: businessId || null,
+    enabled: !!accountUserId && !!sseToken && !!businessId && !isSettings,
+    handlers: {
+      notification: () => { void loadData(); },
+      'delivery:alert_triggered': () => { void loadData(); },
+    },
+  });
 
   useEffect(() => { void loadData(); }, [loadData]);
 

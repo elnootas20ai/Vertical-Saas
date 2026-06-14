@@ -5,6 +5,7 @@ import {
   findAccountByUserId,
   findBusinessById,
   sanitizeAccount,
+  saveAccount,
   saveSession,
 } from '../services/couchdb.js';
 import {
@@ -524,8 +525,10 @@ export async function getAlertsConfig(req, res) {
   try {
     const businessId = String(req.params.businessId || '').trim();
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
+    const business = await findBusinessById(req, businessId);
+    const vertical = business?.businessType === 'delivery' ? 'delivery' : null;
     const doc = await getSettingsDoc(req, 'alerts', businessId);
-    const rules = mergeAlertRules(doc?.rules);
+    const rules = mergeAlertRules(doc?.rules, { vertical });
     const operational = {
       cashRegister: sanitizeCashRegisterOperational(
         doc?.operational?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
@@ -606,6 +609,9 @@ export async function saveAlertsConfig(req, res) {
       if (business?.owner_user_id) {
         await syncCashRegisterAlertsToAccount(req, business.owner_user_id, sanitizedOperational.cashRegister);
         await syncDeliveryAlertsToAccount(req, business.owner_user_id, sanitizedOperational.delivery);
+        if (business.businessType === 'delivery') {
+          await syncDeliveryLegacyFlagsOff(req, business.owner_user_id);
+        }
       }
     } catch { /* sync best-effort */ }
 
@@ -613,6 +619,51 @@ export async function saveAlertsConfig(req, res) {
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
+}
+
+/** Semilla reglas y umbrales al crear negocio (solo si no existe config). */
+export async function seedAlertsConfigIfMissing(req, businessId, businessType) {
+  const id = String(businessId || '').trim();
+  if (!id) return;
+  const existing = await getSettingsDoc(req, 'alerts', id);
+  if (existing?.rules?.length) return;
+
+  const vertical = businessType === 'delivery' ? 'delivery' : null;
+  const rules = mergeAlertRules([], { vertical });
+
+  await saveSettingsDoc(req, 'alerts', id, {
+    global: DEFAULT_ALERTS_GLOBAL,
+    rules,
+    operational: {
+      cashRegister: DEFAULT_CASH_REGISTER_OPERATIONAL,
+      delivery: DEFAULT_DELIVERY_OPERATIONAL,
+    },
+  });
+
+  try {
+    const business = await findBusinessById(req, id);
+    if (business?.owner_user_id) {
+      await syncCashRegisterAlertsToAccount(req, business.owner_user_id, DEFAULT_CASH_REGISTER_OPERATIONAL);
+      await syncDeliveryAlertsToAccount(req, business.owner_user_id, DEFAULT_DELIVERY_OPERATIONAL);
+      await syncDeliveryLegacyFlagsOff(req, business.owner_user_id);
+    }
+  } catch { /* best-effort */ }
+}
+
+async function syncDeliveryLegacyFlagsOff(req, userId) {
+  const account = await findAccountByUserId(req, userId);
+  if (!account) return;
+  const updated = {
+    ...account,
+    alertConfig: {
+      ...(account.alertConfig || {}),
+      staleDeliveryEnabled: false,
+      deliveryUnpaidEnabled: false,
+      deliveryUnattendedEnabled: false,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  await saveAccount(req, updated);
 }
 
 // ─── ADM-10: Payment Gateway (Pasarela de pago) ──────────────────────────────

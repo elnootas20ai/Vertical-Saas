@@ -52,6 +52,7 @@ import {
   LayoutGrid,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
+import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listFinanceMovements } from '../../lib/financeApi';
 import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
@@ -516,16 +517,65 @@ const FUNNEL_STAGE_KEYS = [
 // MAIN EXPORT: Dashboard router
 // ═══════════════════════════════════════════════════════════
 
-export function Dashboard() {
-  useEffect(() => {
-    try {
-      localStorage.removeItem('vertial_dash_general');
-    } catch {
-      /* noop */
-    }
-  }, []);
+const DASH_GENERAL_KEY = 'vertial_dash_general';
 
-  return <UnifiedDashboard />;
+function preferGeneralDashboard(businessCount: number): boolean {
+  if (businessCount <= 1) return false;
+  try {
+    const stored = localStorage.getItem(DASH_GENERAL_KEY);
+    if (stored === '0') return false;
+    if (stored === '1') return true;
+    return true;
+  } catch {
+    return businessCount > 1;
+  }
+}
+
+export function Dashboard() {
+  const { businesses, switchBusiness, businessesFetchSettled } = useBusiness();
+  const [viewGeneral, setViewGeneral] = useState(() => preferGeneralDashboard(businesses.length));
+
+  useEffect(() => {
+    if (!businessesFetchSettled) return;
+    if (businesses.length <= 1) {
+      setViewGeneral(false);
+      return;
+    }
+    setViewGeneral(preferGeneralDashboard(businesses.length));
+  }, [businesses.length, businessesFetchSettled]);
+
+  if (viewGeneral && businesses.length > 1) {
+    return (
+      <GeneralDashboard
+        onSelectBusiness={(businessId) => {
+          void switchBusiness(businessId);
+          setViewGeneral(false);
+          try {
+            localStorage.setItem(DASH_GENERAL_KEY, '0');
+          } catch {
+            /* noop */
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <UnifiedDashboard
+      onSelectGeneral={
+        businesses.length > 1
+          ? () => {
+              setViewGeneral(true);
+              try {
+                localStorage.setItem(DASH_GENERAL_KEY, '1');
+              } catch {
+                /* noop */
+              }
+            }
+          : undefined
+      }
+    />
+  );
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -959,12 +1009,23 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
               <RefreshCw className={`w-3.5 h-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
-          <button
-            onClick={() => setShowPersonalize(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-all"
-          >
-            <Settings2 className="w-3.5 h-3.5" /> Personalizar
-          </button>
+          <div className="flex items-center gap-2">
+            {onSelectGeneral && (
+              <button
+                type="button"
+                onClick={onSelectGeneral}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-all"
+              >
+                <Building2 className="w-3.5 h-3.5" /> Centro de control
+              </button>
+            )}
+            <button
+              onClick={() => setShowPersonalize(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-all"
+            >
+              <Settings2 className="w-3.5 h-3.5" /> Personalizar
+            </button>
+          </div>
         </div>
 
         {isBasicPlan && (
@@ -982,7 +1043,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
               </div>
             </div>
             <Link
-              to="/saas/admin"
+              to="/saas/billing"
               className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold shrink-0"
             >
               Ver planes
@@ -1051,7 +1112,7 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
                       ? { value: `${ebitdaMonth.margin.toFixed(1)}%`, up: ebitdaMonth.value > 0 ? true : ebitdaMonth.value < 0 ? false : null }
                       : (salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined)
                   }
-                  onClick={() => navigate(canViewEbitda ? '/saas/ebitda' : '/saas/admin')}
+                  onClick={() => navigate(canViewEbitda ? '/saas/ebitda' : '/saas/billing')}
                   loading={serverLoading}
                 />
                 <KPICard

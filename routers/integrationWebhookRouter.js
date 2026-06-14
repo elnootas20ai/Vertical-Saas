@@ -12,7 +12,7 @@ import {
   getCouchConfig,
   buildCouchAuthHeader,
 } from '../services/couchdb.js';
-import { broadcastToUser } from '../services/sseService.js';
+import { broadcastToUser, broadcastToBusiness } from '../services/sseService.js';
 import logger from '../services/logger.js';
 
 const webhookRouter = Router();
@@ -182,6 +182,9 @@ async function handlePlatformWebhook(platform, req, res) {
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
 
     broadcastToUser(businessId, 'delivery_order_created', sanitized);
+    try {
+      broadcastToBusiness(businessId, 'delivery:order_created', { order: sanitized, userId: businessId });
+    } catch { /* ignore */ }
 
     logger.info({ platform, businessId, orderId: doc._id, orderNumber: doc.orderNumber }, 'Webhook: pedido creado');
     return res.status(201).json({ ok: true, order: sanitized });

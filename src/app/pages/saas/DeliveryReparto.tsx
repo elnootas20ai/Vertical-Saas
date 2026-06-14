@@ -14,6 +14,7 @@ import {
   type DeliveryOrder, type Driver, type DriverStats, type RepartoConfig, type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   deliveryOrderMatchesPdvFilter,
   pickDefaultActivePdvId,
@@ -56,6 +57,7 @@ export function DeliveryReparto() {
   const activeStoreScope = useActiveStoreScope();
   const nav = useNavigate();
   const uid = resolveBusinessDataUserId(user, currentBusiness);
+  const authUserId = user?.user_id || user?.id || user?.userId || user?._id || null;
   const isMgr = user?.role === 'Admin' || user?.role === 'Gerente';
 
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -102,7 +104,14 @@ export function DeliveryReparto() {
   }, [uid, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (!uid) return; const iv = setInterval(load, 30000); return () => clearInterval(iv); }, [uid, load]);
+
+  useDeliveryOrdersLive({
+    authUserId,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    onRefresh: load,
+    enabled: !!authUserId && !!uid,
+    fallbackPollMs: 30_000,
+  });
 
   useEffect(() => {
     const onStore = () => { load(); };

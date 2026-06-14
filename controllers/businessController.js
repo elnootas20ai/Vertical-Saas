@@ -11,6 +11,7 @@ import {
   verifyPassword,
   BUSINESSES_DB,
 } from '../services/couchdb.js';
+import { seedAlertsConfigIfMissing } from './settingsController.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -38,6 +39,8 @@ export async function createBusiness(req, res) {
     });
 
     const saved = await saveBusiness(req, business);
+    const businessId = saved._id?.replace(/^business:/, '') || saved._id;
+    await seedAlertsConfigIfMissing(req, businessId, saved.businessType || businessType);
     return res.status(201).json({ ok: true, business: sanitizeBusiness(saved) });
   } catch (error) {
     return res.status(500).json({

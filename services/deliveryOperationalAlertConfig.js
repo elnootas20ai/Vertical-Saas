@@ -7,11 +7,11 @@ import { findAccountByUserId, saveAccount } from './couchdb.js';
 
 export const DEFAULT_DELIVERY_OPERATIONAL = {
   delayThresholds: {
-    pending: 10,
-    preparing: 15,
-    kitchen: 20,
-    assembly: 10,
-    delivery: 40,
+    pending: 5,
+    preparing: 12,
+    kitchen: 18,
+    assembly: 8,
+    delivery: 35,
   },
   kitchenCapacity: 10,
   kitchenWarningPercent: 70,

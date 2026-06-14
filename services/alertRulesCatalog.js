@@ -53,11 +53,11 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_low_margin', 'delivery', 'delivery', 'Margen bajo en delivery', 'Margen estimado del día por debajo del umbral', { urgency: 'medium' }),
   r('delivery_failed_delivery', 'delivery', 'delivery', 'Entrega fallida', 'Pedido que falló o se canceló tras salir a reparto', { ...pushInApp, urgency: 'high' }),
   r('delivery_unpaid_order', 'delivery', 'delivery', 'Pedido sin cobrar', 'Pedido entregado con pago pendiente demasiado tiempo', { urgency: 'medium' }),
-  r('delivery_repeat_incident_client', 'delivery', 'delivery', 'Cliente reincidente en incidencias', 'Mismo cliente con varias incidencias en el periodo configurado', { urgency: 'low' }),
-  r('delivery_driver_mismatch', 'delivery', 'pdvs', 'Descuadre caja repartidor', 'Diferencia al cerrar la caja de un repartidor', { urgency: 'medium' }),
-  r('stale_delivery', 'delivery', 'delivery', 'Pedido delivery estancado', 'Pedido en curso demasiado tiempo sin avanzar', { ...pushInApp, urgency: 'high' }),
-  r('delivery_unattended', 'delivery', 'delivery', 'Pedido nuevo sin atender', 'Pedido recién entrado sin tomar en demasiado tiempo', { urgency: 'high' }),
-  r('delivery_unpaid', 'delivery', 'delivery', 'Cobro pendiente (motor general)', 'Pedido delivery con cobro pendiente', { urgency: 'medium' }),
+  r('delivery_repeat_incident_client', 'delivery', 'delivery', 'Cliente reincidente en incidencias', 'Mismo cliente con varias incidencias en el periodo configurado', { enabled: false, urgency: 'low' }),
+  r('delivery_driver_mismatch', 'delivery', 'pdvs', 'Descuadre caja repartidor', 'Diferencia al cerrar la caja de un repartidor', { enabled: false, urgency: 'medium' }),
+  r('stale_delivery', 'delivery', 'delivery', 'Pedido delivery estancado (legacy)', 'Obsoleto: usar «Pedido retrasado» (motor delivery por fase)', { enabled: false, ...pushInApp, urgency: 'high' }),
+  r('delivery_unattended', 'delivery', 'delivery', 'Pedido nuevo sin atender (legacy)', 'Obsoleto: cubierto por retraso en fase «nuevo»', { enabled: false, urgency: 'high' }),
+  r('delivery_unpaid', 'delivery', 'delivery', 'Cobro pendiente (legacy)', 'Obsoleto: usar «Pedido sin cobrar» (motor delivery)', { enabled: false, urgency: 'medium' }),
   r('delivery_no_address', 'delivery', 'delivery', 'Pedido sin dirección', 'Pedido a domicilio sin dirección de entrega', { urgency: 'medium' }),
   r('delivery_channel_incident', 'delivery', 'delivery', 'Canal con incidencias', 'Varias incidencias en un canal de pedidos', { urgency: 'high' }),
   r('register_high_return', 'delivery', 'pdvs', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { urgency: 'medium' }),
@@ -227,11 +227,50 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('system_update', 'sistema', 'sistema', 'Actualización del sistema', 'Nueva versión o mantenimiento programado', { enabled: false, urgency: 'low' }),
 ];
 
-export function mergeAlertRules(existing) {
+/** Paquete CEO delivery: 10 reglas activas al crear negocio delivery. */
+export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
+  'delivery_delayed_order',
+  'delivery_kitchen_saturated',
+  'delivery_queue_overflow',
+  'delivery_no_active_riders',
+  'delivery_unpaid_order',
+  'delivery_cash_pending_close',
+  'delivery_register_not_opened',
+  'delivery_failed_delivery',
+  'delivery_product_out_of_stock',
+  'delivery_cash_discrepancy',
+];
+
+/** Duplicados del motor general — desactivados cuando el motor delivery está activo. */
+export const DELIVERY_LEGACY_DUPLICATE_RULE_IDS = [
+  'stale_delivery',
+  'delivery_unpaid',
+  'delivery_unattended',
+];
+
+export function isDeliveryScopedRuleId(id) {
+  const s = String(id || '');
+  if (DELIVERY_LEGACY_DUPLICATE_RULE_IDS.includes(s)) return true;
+  if (s === 'register_high_return') return true;
+  return s.startsWith('delivery_');
+}
+
+function defaultEnabledForDeliveryVertical(ruleId) {
+  if (DELIVERY_LEGACY_DUPLICATE_RULE_IDS.includes(ruleId)) return false;
+  if (DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS.includes(ruleId)) return true;
+  return false;
+}
+
+export function mergeAlertRules(existing, options = {}) {
+  const vertical = options.vertical || null;
   const byId = new Map((Array.isArray(existing) ? existing : []).map((rule) => [rule.id, rule]));
   for (const def of ALL_ALERT_RULE_DEFINITIONS) {
     if (!byId.has(def.id)) {
-      byId.set(def.id, { ...def });
+      let enabled = def.enabled;
+      if (vertical === 'delivery' && isDeliveryScopedRuleId(def.id)) {
+        enabled = defaultEnabledForDeliveryVertical(def.id);
+      }
+      byId.set(def.id, { ...def, enabled });
     } else {
       const prev = byId.get(def.id);
       byId.set(def.id, {

@@ -420,7 +420,7 @@ export async function createDeliveryOrder(req, res) {
       metadata: { status: doc.status, channel: doc.channel },
     });
     const sanitized = sanitizeDeliveryOrder(savedDoc);
-    broadcastToUser(userId, 'delivery_order_created', sanitized);
+    broadcastDeliveryOrderSse(account, userId, 'created', savedDoc);
     triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
     return res.status(201).json({ ok: true, order: sanitized });
   } catch (error) {
@@ -457,7 +457,10 @@ export async function updateDeliveryOrder(req, res) {
     await maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, account.fullName, req.callerAccount || account);
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastToUser(userId, 'delivery_order_updated', sanitized);
+    broadcastDeliveryOrderSse(account, userId, 'updated', { ...doc, _rev: saved.rev }, {
+      oldStatus: existing.status,
+      updatedBy: account.fullName || userId,
+    });
     if (doc.status !== existing.status) {
       triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
     }
@@ -543,7 +546,10 @@ export async function cancelDeliveryOrder(req, res) {
       entityId: doc._id, entityLabel: doc.orderNumber, metadata: { cancelReason: trimmedReason, cancelledBy: actorName },
     });
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastToUser(userId, 'delivery_order_cancelled', { order: sanitized, reason: trimmedReason });
+    broadcastDeliveryOrderSse(account, userId, 'cancelled', { ...doc, _rev: saved.rev }, {
+      oldStatus: existing.status,
+      reason: trimmedReason,
+    });
     triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: 'cancelled', previousStatus: existing.status }).catch(() => null);
     notifyManagersOrderCancelled(req, {
       order: sanitized,
@@ -594,7 +600,9 @@ export async function reopenDeliveryOrder(req, res) {
       entityId: doc._id, entityLabel: doc.orderNumber, metadata: {},
     });
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastToUser(userId, 'delivery_order_reopened', sanitized);
+    broadcastDeliveryOrderSse(account, userId, 'reopened', { ...doc, _rev: saved.rev }, {
+      oldStatus: existing.status,
+    });
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al reabrir pedido' });
@@ -684,9 +692,9 @@ async function autoRegisterTpvSaleForOrder(req, userId, orderDoc, {
     linkedOrderIds,
   }, openSession);
   const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
-  const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
-  broadcastToUser(userId, 'tpv_session_updated', sanitized);
-  return sanitized;
+  const account = callerAccount || await findAccountByUserId(req, userId);
+  broadcastTpvSessionLive(account, userId, { ...sessionDoc, _rev: saved.rev });
+  return sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
 }
 
 async function maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, registeredBy, callerAccount) {
@@ -768,7 +776,7 @@ export async function registerPayment(req, res) {
     }
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastToUser(userId, 'delivery_payment_registered', sanitized);
+    broadcastDeliveryPaymentLive(account, userId, { ...doc, _rev: saved.rev });
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar cobro' });
@@ -1843,6 +1851,7 @@ export async function createTpvRegisterSession(req, res) {
       metadata: { workerName: doc.workerName, initialCashAmount: doc.initialCashAmount },
     });
     triggerReactiveAlert(userId, 'cash_session_changed', { sessionId: doc._id, sessionType: 'tpv', action: 'opened' }).catch(() => null);
+    broadcastTpvSessionLive(account, userId, { ...doc, _rev: saved.rev });
     return res.status(201).json({ ok: true, session: sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear sesión de caja TPV' });
@@ -1900,7 +1909,10 @@ export async function updateTpvRegisterSession(req, res) {
       }
     }
 
-    return res.json({ ok: true, session: sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev }) });
+    const sanitizedSession = sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev });
+    broadcastTpvSessionLive(account, userId, { ...doc, _rev: saved.rev });
+
+    return res.json({ ok: true, session: sanitizedSession });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar sesión de caja TPV' });
   }
@@ -2275,9 +2287,9 @@ async function registerStaffConsumptionInTpvSession(req, userId, {
     transactions: updatedTxs,
   }, openSession);
   const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
-  const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
-  broadcastToUser(userId, 'tpv_session_updated', sanitized);
-  return sanitized;
+  const account = await findAccountByUserId(req, userId);
+  broadcastTpvSessionLive(account, userId, { ...sessionDoc, _rev: saved.rev });
+  return sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
 }
 
 export async function listStaffConsumptions(req, res) {
@@ -2491,9 +2503,11 @@ function isInTimeSlot(dateStr, slot) {
   return hhmm >= slot.start && hhmm <= slot.end;
 }
 
-function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale = [], deliveryAlertCfg = null, cashCfg = null) {
+function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale = [], deliveryAlertCfg = null, cashCfg = null, targetDate = null) {
   const alerts = [];
   const now = new Date().toISOString();
+  const dayKey = String(targetDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const activeOrderStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
   const alertCfg = deliveryAlertCfg || resolveDeliveryAlertConfig({}, null);
   const cash = cashCfg || {};
   const discrepancyThreshold = Number(cash.discrepancyThreshold || config.cashRegister?.discrepancyThreshold || 20);
@@ -2502,8 +2516,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
   const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders: orders, pointsOfSale, deliveryConfig: config });
 
   if (deliveryReady) {
-    const activeStatuses = ['nuevo', 'cocina', 'listo', 'en_reparto'];
-    const activeOrders = orders.filter((o) => activeStatuses.includes(o.status));
+    const activeOrders = orders.filter((o) => activeOrderStatuses.includes(o.status));
     const nowMs = Date.now();
 
     for (const o of activeOrders) {
@@ -2520,7 +2533,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
         id: `delayed_${o._id}`, type: 'delayed_order', severity: mins >= thr * 2 ? 'critical' : 'warning',
         title: `Pedido ${o.orderNumber} retrasado`,
         message: `${Math.floor(mins)} min en ${status} (umbral CEO: ${thr} min)`,
-        orderId: o._id, route: '/saas/delivery', createdAt: now,
+        orderId: o._id, route: '/saas/delivery-kitchen', createdAt: start.toISOString(),
       });
     }
 
@@ -2532,30 +2545,29 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
         id: 'kitchen_saturated', type: 'kitchen_saturated', severity: 'critical',
         title: 'Cocina saturada',
         message: `${inKitchen}/${cap} pedidos (${Math.round(pct)}%, umbral CEO: ${alertCfg.kitchenCriticalPercent}%)`,
-        route: '/saas/delivery', createdAt: now,
+        route: '/saas/delivery-ops#cocina', createdAt: now,
       });
     } else if (pct >= (alertCfg.kitchenWarningPercent || 70)) {
       alerts.push({
         id: 'kitchen_saturated_warn', type: 'kitchen_saturated', severity: 'warning',
         title: 'Cocina con carga alta',
         message: `${inKitchen}/${cap} pedidos (${Math.round(pct)}%, aviso CEO: ${alertCfg.kitchenWarningPercent}%)`,
-        route: '/saas/delivery', createdAt: now,
+        route: '/saas/delivery-ops#cocina', createdAt: now,
       });
     }
   }
 
-  const todayStr = new Date().toISOString().slice(0, 10);
   const pdvReady = canEmitPdvCashAlerts(pointsOfSale);
 
   if (pdvReady) {
     const openTpv = tpvSessions.filter(s => s.status === 'open');
-    const hasActiveOrders = orders.some((o) => activeStatuses.includes(o.status));
+    const hasActiveOrders = orders.some((o) => activeOrderStatuses.includes(o.status));
 
     if (hasActiveOrders && openTpv.length === 0) {
       alerts.push({
         id: 'register_not_open_today', type: 'register_not_open', severity: 'warning',
         title: 'Caja sin abrir',
-        message: 'Hay pedidos activos pero ninguna caja TPV está abierta hoy.',
+        message: `Hay pedidos activos del ${dayKey} pero ninguna caja TPV está abierta.`,
         route: '/saas/vertical/delivery/caja', createdAt: now,
       });
     }
@@ -2567,7 +2579,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
           id: `cash_pending_${s._id}`, type: 'cash_pending_close', severity: hours >= maxCashHours * 1.25 ? 'critical' : 'warning',
           title: 'Caja pendiente de cierre',
           message: `${s.terminalName || 'Terminal'} — ${s.pointOfSaleName || 'PDV'} abierta ${Math.round(hours)}h (máx. CEO: ${maxCashHours}h)`,
-          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: s.openedAt || now,
         });
       }
     }
@@ -2581,12 +2593,13 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
         severity: pendingValidation.length > 2 ? 'critical' : 'warning',
         title: `${pendingValidation.length} cierre${pendingValidation.length > 1 ? 's' : ''} pendiente${pendingValidation.length > 1 ? 's' : ''} de validación`,
         message: pendingValidation.slice(0, 2).map((s) => s.pointOfSaleName || s.terminalName || 'Caja').join(', '),
+        sessionId: pendingValidation.length === 1 ? pendingValidation[0]._id : undefined,
         route: '/saas/vertical/delivery/caja', createdAt: now,
       });
     }
 
     const closedToday = tpvSessions.filter(
-      (s) => s.status === 'closed' && String(s.closedAt || '').startsWith(todayStr),
+      (s) => s.status === 'closed' && String(s.closedAt || '').startsWith(dayKey),
     );
     for (const s of closedToday) {
       const diff = Math.abs(Number(s.difference || 0));
@@ -2596,7 +2609,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
           severity: diff >= discrepancyThreshold * 3 ? 'critical' : 'warning',
           title: 'Descuadre de caja',
           message: `${s.pointOfSaleName || s.terminalName || 'Caja'}: ${Number(s.difference) >= 0 ? '+' : ''}${Number(s.difference).toFixed(2)}€`,
-          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: now,
+          sessionId: s._id, route: '/saas/vertical/delivery/caja', createdAt: s.closedAt || now,
         });
       }
     }
@@ -2622,7 +2635,7 @@ function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, 
         id: 'open_incidents', type: 'open_incident', severity: 'warning',
         title: `${incidents.length} incidencia(s) abierta(s)`,
         message: incidents.slice(0, 2).map(o => `${o.orderNumber}: ${o.incidentType || 'General'}`).join(', '),
-        route: '/saas/delivery', createdAt: now,
+        route: '/saas/delivery-reparto', createdAt: incidents[0]?.updatedAt || incidents[0]?.createdAt || now,
       });
     }
   }
@@ -2722,7 +2735,7 @@ export async function getOpsCenter(req, res) {
     let catalogItems = [];
     try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
 
-    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale, deliveryAlertCfg, cashCfg);
+    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale, deliveryAlertCfg, cashCfg, targetDate);
 
     const inKitchen = orders.filter(o => o.status === 'cocina');
     const kitchenOldest = inKitchen.reduce((max, o) => Math.max(max, minutesSince(o.createdAt)), 0);
@@ -2848,9 +2861,102 @@ export async function getOpsCenter(req, res) {
 
 // ─── SSE BROADCASTING HELPERS ────────────────────────────────────────────────
 
+function resolveAccountBusinessId(account) {
+  return String(account?.business_id || account?.businessId || '').trim();
+}
+
+function broadcastDeliveryOrderSse(account, ownerUserId, action, orderDoc, meta = {}) {
+  const sanitized = sanitizeDeliveryOrder(orderDoc);
+  const businessId = resolveAccountBusinessId(account);
+
+  if (action === 'created') {
+    broadcastToUser(ownerUserId, 'delivery_order_created', sanitized);
+    if (businessId) {
+      broadcastToBusiness(businessId, 'delivery:order_created', { order: sanitized, userId: ownerUserId });
+    }
+    return;
+  }
+
+  if (action === 'updated') {
+    broadcastToUser(ownerUserId, 'delivery_order_updated', sanitized);
+    const oldStatus = meta.oldStatus;
+    const newStatus = sanitized.status;
+    if (businessId && oldStatus && newStatus && oldStatus !== newStatus) {
+      broadcastToBusiness(businessId, 'delivery:order_status_changed', {
+        orderId: sanitized._id,
+        order: sanitized,
+        oldStatus,
+        newStatus,
+        updatedBy: meta.updatedBy || ownerUserId,
+      });
+      if (newStatus === 'incident') {
+        broadcastToBusiness(businessId, 'delivery:incident_reported', {
+          orderId: sanitized._id,
+          order: sanitized,
+          incidentType: sanitized.incidentType,
+        });
+      }
+      if (oldStatus === 'incident' && newStatus !== 'incident') {
+        broadcastToBusiness(businessId, 'delivery:incident_resolved', {
+          orderId: sanitized._id,
+          order: sanitized,
+          newStatus,
+        });
+      }
+    }
+    return;
+  }
+
+  if (action === 'cancelled') {
+    broadcastToUser(ownerUserId, 'delivery_order_cancelled', { order: sanitized, reason: meta.reason });
+    if (businessId) {
+      broadcastToBusiness(businessId, 'delivery:order_status_changed', {
+        orderId: sanitized._id,
+        order: sanitized,
+        oldStatus: meta.oldStatus,
+        newStatus: 'cancelled',
+        updatedBy: ownerUserId,
+      });
+    }
+    return;
+  }
+
+  if (action === 'reopened') {
+    broadcastToUser(ownerUserId, 'delivery_order_reopened', sanitized);
+    if (businessId) {
+      broadcastToBusiness(businessId, 'delivery:order_status_changed', {
+        orderId: sanitized._id,
+        order: sanitized,
+        oldStatus: meta.oldStatus,
+        newStatus: sanitized.status,
+        updatedBy: ownerUserId,
+      });
+    }
+  }
+}
+
 function emitDeliveryEvent(account, event, payload) {
-  if (!account?.businessId) return;
-  try { broadcastToBusiness(account.businessId, event, payload); } catch { /* ignore */ }
+  const businessId = resolveAccountBusinessId(account);
+  if (!businessId) return;
+  try { broadcastToBusiness(businessId, event, payload); } catch { /* ignore */ }
+}
+
+function broadcastTpvSessionLive(account, ownerUserId, sessionDoc) {
+  const sanitized = sanitizeTpvRegisterSession(sessionDoc);
+  broadcastToUser(ownerUserId, 'tpv_session_updated', sanitized);
+  const businessId = resolveAccountBusinessId(account);
+  if (businessId) {
+    try { broadcastToBusiness(businessId, 'tpv_session_updated', sanitized); } catch { /* ignore */ }
+  }
+}
+
+function broadcastDeliveryPaymentLive(account, ownerUserId, orderDoc) {
+  const sanitized = sanitizeDeliveryOrder(orderDoc);
+  broadcastToUser(ownerUserId, 'delivery_payment_registered', sanitized);
+  const businessId = resolveAccountBusinessId(account);
+  if (businessId) {
+    try { broadcastToBusiness(businessId, 'delivery_payment_registered', sanitized); } catch { /* ignore */ }
+  }
 }
 
 // ─── SCALE DEVICES ──────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -400,6 +400,8 @@ export function CajaPage() {
     [user, currentBusiness],
   );
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [driverSessions, setDriverSessions] = useState<DriverCashSession[]>([]);
@@ -441,6 +443,47 @@ export function CajaPage() {
   }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const validateParam = searchParams.get('validate');
+  const viewParam = searchParams.get('view');
+  const deepLinkSessionId = validateParam || viewParam;
+
+  useEffect(() => {
+    if (loading || !deepLinkSessionId) return;
+    if (sessions.length === 0 && !loading) {
+      // datos cargados pero vacíos
+    }
+    const session = sessions.find((s) => s._id === deepLinkSessionId);
+    const clearDeepLink = () => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('validate');
+        next.delete('view');
+        return next;
+      }, { replace: true });
+    };
+
+    if (!session) {
+      if (!loading) {
+        toast.error('No se encontró la sesión de caja indicada');
+        clearDeepLink();
+      }
+      return;
+    }
+
+    if (validateParam) {
+      if (session.status === 'closed' && session.closingValidationStatus === 'pending') {
+        setValidatingSession(session);
+      } else if (session.status === 'open') {
+        toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV en tienda.');
+      } else {
+        setViewingClosingSession(session);
+      }
+    } else {
+      setViewingClosingSession(session);
+    }
+    clearDeepLink();
+  }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
 
   useEffect(() => {
     if (tab !== 'estado') return undefined;
@@ -665,7 +708,10 @@ export function CajaPage() {
           <button
             type="button"
             onClick={() => {
-              // Si la ruta fue abierta "directa" (sin historial), volvemos al hub de Delivery.
+              if ((location.state as { returnToOps?: boolean } | null)?.returnToOps) {
+                navigate('/saas/delivery-ops');
+                return;
+              }
               if (typeof window !== 'undefined' && window.history.length > 1) {
                 navigate(-1);
               } else {

@@ -15,6 +15,7 @@ import {
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   deliveryOrderMatchesPdvFilter,
   pickDefaultActivePdvId,
@@ -183,6 +184,7 @@ export function DeliveryMontaje() {
   const { currentBusiness } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const userId = resolveBusinessDataUserId(user, currentBusiness);
+  const authUserId = user?.user_id || user?.id || user?.userId || user?._id || null;
 
   // Data
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -273,6 +275,14 @@ export function DeliveryMontaje() {
   }, []);
 
   useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
+
+  useDeliveryOrdersLive({
+    authUserId,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    onRefresh: loadOrders,
+    enabled: !!authUserId && !!userId,
+    fallbackPollMs: 30_000,
+  });
 
   // ─── Computed Data ───────────────────────────────────────────────────────
 
