@@ -3,6 +3,7 @@ import {
   isManagerRole,
   isWorkerProfileSubject,
   needsWorkerPayrollSetup,
+  userOwnsAnyBusiness,
 } from '../src/app/lib/workerProfileCompletion.ts';
 
 describe('workerProfileCompletion', () => {
@@ -69,5 +70,11 @@ describe('workerProfileCompletion', () => {
         employment: {},
       }),
     ).toBe(true);
+  });
+
+  it('userOwnsAnyBusiness detecta empresas creadas por el usuario', () => {
+    expect(userOwnsAnyBusiness('user-1', [{ owner_user_id: 'user-1' }])).toBe(true);
+    expect(userOwnsAnyBusiness('user-1', [{ owner_user_id: 'user-2' }])).toBe(false);
+    expect(userOwnsAnyBusiness('', [{ owner_user_id: 'user-1' }])).toBe(false);
   });
 });

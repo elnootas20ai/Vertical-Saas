@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -13,15 +13,19 @@ import {
   Loader2,
   MapPin,
   Briefcase,
+  Mail,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   searchBusinessesRequest,
   createJoinRequestRequest,
   getMyJoinRequestsRequest,
   type BusinessSearchResult,
   type JoinRequest,
+  type TeamInvitation,
 } from '../../lib/authApi';
+import { userOwnsAnyBusiness } from '../../lib/workerProfileCompletion';
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   pending: { label: 'Pendiente', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Clock },
@@ -31,15 +35,31 @@ const STATUS_LABELS: Record<string, { label: string; color: string; icon: typeof
 
 export function UserDashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, listMyInvitations } = useAuth();
+  const { businesses, currentBusiness, switchBusiness, isLoading: isLoadingBusinesses } = useBusiness();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<BusinessSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [myRequests, setMyRequests] = useState<JoinRequest[]>([]);
+  const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
+  const [loadingInvitations, setLoadingInvitations] = useState(true);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [sentSuccess, setSentSuccess] = useState<string | null>(null);
+
+  const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businesses);
+  const ownedBusinesses = useMemo(
+    () => businesses.filter((b) => b.owner_user_id === user?.user_id),
+    [businesses, user?.user_id],
+  );
+  const activeOwnedBusiness = useMemo(() => {
+    if (ownedBusinesses.length === 0) return null;
+    if (currentBusiness && ownedBusinesses.some((b) => b.business_id === currentBusiness.business_id)) {
+      return currentBusiness;
+    }
+    return ownedBusinesses[0];
+  }, [ownedBusinesses, currentBusiness]);
 
   const loadMyRequests = useCallback(async () => {
     try {
@@ -53,9 +73,33 @@ export function UserDashboard() {
     }
   }, []);
 
+  const loadTeamInvitations = useCallback(async () => {
+    try {
+      setLoadingInvitations(true);
+      const list = await listMyInvitations();
+      setTeamInvitations(list);
+    } catch {
+      setTeamInvitations([]);
+    } finally {
+      setLoadingInvitations(false);
+    }
+  }, [listMyInvitations]);
+
   useEffect(() => {
     loadMyRequests();
   }, [loadMyRequests]);
+
+  useEffect(() => {
+    loadTeamInvitations();
+  }, [loadTeamInvitations]);
+
+  useEffect(() => {
+    const handler = () => {
+      void loadTeamInvitations();
+    };
+    window.addEventListener('vertial:invitations:refresh', handler);
+    return () => window.removeEventListener('vertial:invitations:refresh', handler);
+  }, [loadTeamInvitations]);
 
   const handleSearch = useCallback(async (q: string) => {
     setSearchQuery(q);
@@ -88,11 +132,20 @@ export function UserDashboard() {
     }
   };
 
+  const handleEnterBackoffice = () => {
+    const biz = activeOwnedBusiness;
+    if (!biz) return;
+    switchBusiness(biz.business_id);
+    navigate('/saas/dashboard');
+  };
+
   const hasPendingRequestFor = (businessId: string) =>
     myRequests.some((r) => r.business_id === businessId && r.status === 'pending');
 
   const pendingRequests = myRequests.filter((r) => r.status === 'pending');
   const resolvedRequests = myRequests.filter((r) => r.status !== 'pending');
+  const hasAnyPendingSidebar =
+    pendingRequests.length > 0 || teamInvitations.length > 0;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -129,13 +182,94 @@ export function UserDashboard() {
             Bienvenido, {user?.firstName || 'Usuario'}
           </h2>
           <p className="text-blue-100 text-sm max-w-lg">
-            Tu cuenta personal está activa. Busca una empresa para unirte como miembro del equipo, o espera a que te inviten directamente.
+            {ownsBusiness
+              ? 'Tu cuenta personal y tu empresa están activas. Puedes entrar al back office o unirte a otra empresa como trabajador.'
+              : 'Tu cuenta personal está activa. Busca una empresa para unirte como miembro del equipo, o espera a que te inviten directamente.'}
           </p>
+          {ownsBusiness && activeOwnedBusiness && (
+            <button
+              type="button"
+              onClick={handleEnterBackoffice}
+              disabled={isLoadingBusinesses}
+              className="mt-4 inline-flex items-center gap-2 px-5 py-2.5 bg-white text-blue-700 hover:bg-blue-50 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60"
+            >
+              {isLoadingBusinesses ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ArrowRight className="w-4 h-4" />
+              )}
+              Ir al back office
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main column */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Owned business */}
+            {ownsBusiness && activeOwnedBusiness && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-amber-50 dark:bg-amber-900/30 rounded-xl flex items-center justify-center">
+                    <Building2 className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">Tu empresa</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Empresa que has creado en Vertial</p>
+                  </div>
+                </div>
+                <div className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-800/70">
+                  <div className="flex items-start gap-3">
+                    <div className="w-12 h-12 bg-gray-900 dark:bg-gray-700 rounded-xl flex items-center justify-center shrink-0 overflow-hidden">
+                      {activeOwnedBusiness.logo ? (
+                        <img src={activeOwnedBusiness.logo} alt="" className="w-12 h-12 object-cover" />
+                      ) : (
+                        <Building2 className="w-6 h-6 text-white" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate">
+                          {activeOwnedBusiness.name}
+                        </h4>
+                        <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 text-xs font-medium rounded-full">
+                          Empresa activa
+                        </span>
+                      </div>
+                      {activeOwnedBusiness.taxId ? (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                          CIF: {activeOwnedBusiness.taxId}
+                        </p>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full mt-1">
+                          CIF pendiente
+                        </span>
+                      )}
+                      {activeOwnedBusiness.city && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {activeOwnedBusiness.city}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEnterBackoffice}
+                    disabled={isLoadingBusinesses}
+                    className="w-full mt-4 inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                  >
+                    {isLoadingBusinesses ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ArrowRight className="w-4 h-4" />
+                    )}
+                    Entrar al panel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Search businesses */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center gap-3 mb-4">
@@ -280,15 +414,37 @@ export function UserDashboard() {
 
           {/* Right sidebar */}
           <div className="space-y-6">
-            {/* Pending requests */}
+            {/* Pending invitations & join requests */}
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
               <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Solicitudes pendientes</h3>
-              {loadingRequests ? (
+              {loadingInvitations || loadingRequests ? (
                 <div className="flex justify-center py-6">
                   <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                 </div>
-              ) : pendingRequests.length > 0 ? (
+              ) : hasAnyPendingSidebar ? (
                 <div className="space-y-3">
+                  {teamInvitations.map((inv) => (
+                    <button
+                      key={inv.invitationId}
+                      type="button"
+                      onClick={() => navigate('/saas/invitations')}
+                      className="w-full text-left p-3 rounded-xl bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800/40 hover:bg-violet-100/80 dark:hover:bg-violet-900/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <Mail className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
+                        <p className="text-sm font-medium text-violet-800 dark:text-violet-200 truncate">
+                          {inv.businessName || 'Invitación de equipo'}
+                        </p>
+                      </div>
+                      <p className="text-xs text-violet-600 dark:text-violet-400">
+                        Te invitan como {inv.role || 'Usuario'}
+                        {inv.invitedByName ? ` · ${inv.invitedByName}` : ''}
+                      </p>
+                      <p className="text-xs text-violet-500 dark:text-violet-400 mt-1 font-medium">
+                        Toca para ver y aceptar
+                      </p>
+                    </button>
+                  ))}
                   {pendingRequests.map((req) => (
                     <div key={req.request_id} className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40">
                       <div className="flex items-center gap-2 mb-1">
@@ -298,7 +454,7 @@ export function UserDashboard() {
                         </p>
                       </div>
                       <p className="text-xs text-amber-600 dark:text-amber-400">
-                        Enviada el {new Date(req.createdAt).toLocaleDateString('es-ES')}
+                        Solicitud de unión · enviada el {new Date(req.createdAt).toLocaleDateString('es-ES')}
                       </p>
                     </div>
                   ))}
@@ -307,6 +463,13 @@ export function UserDashboard() {
                 <div className="text-center py-4">
                   <CheckCircle className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
                   <p className="text-sm text-gray-500 dark:text-gray-400">Sin solicitudes pendientes</p>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/saas/invitations')}
+                    className="mt-3 text-xs font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                  >
+                    Ver mis invitaciones
+                  </button>
                 </div>
               )}
             </div>
@@ -321,7 +484,7 @@ export function UserDashboard() {
                 </li>
                 <li className="flex gap-3">
                   <span className="w-6 h-6 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center text-xs font-bold shrink-0">2</span>
-                  Envía tu solicitud de unión
+                  Envía tu solicitud de unión o acepta una invitación
                 </li>
                 <li className="flex gap-3">
                   <span className="w-6 h-6 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center text-xs font-bold shrink-0">3</span>

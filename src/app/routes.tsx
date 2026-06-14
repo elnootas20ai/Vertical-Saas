@@ -1,7 +1,8 @@
 import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { useBusinessOptional } from './context/BusinessContext';
 import { isWorkerAccount } from './lib/authApi';
-import { resolveWorkerSessionEntryPath } from './lib/workerProfileCompletion';
+import { resolveWorkerSessionEntryPath, userOwnsAnyBusiness } from './lib/workerProfileCompletion';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
 import { Entry } from './pages/auth/Entry';
@@ -325,13 +326,15 @@ function CatchAll() {
 /** /saas y /saas/ no tenían hijo index → Outlet vacío (pantalla en blanco). */
 function SaasIndexRedirect() {
   const { user } = useAuth();
+  const businessCtx = useBusinessOptional();
   if (!user) {
     return <Navigate to="/auth/login" replace />;
   }
-  if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim()) {
+  const ownsBusiness = userOwnsAnyBusiness(user.user_id, businessCtx?.businesses);
+  if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim() && !ownsBusiness) {
     return <Navigate to="/saas/user-dashboard" replace />;
   }
-  if (isWorkerAccount(user)) {
+  if (isWorkerAccount(user) && !ownsBusiness) {
     return <Navigate to={resolveWorkerSessionEntryPath(user)} replace />;
   }
   return <Navigate to="/saas/dashboard" replace />;

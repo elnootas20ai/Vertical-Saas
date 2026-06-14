@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
+import { useBusinessOptional } from '../../context/BusinessContext';
+import { userOwnsAnyBusiness, WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
 /**
  * Restringe el acceso a páginas "de negocio" (Centro Operativo, listas
@@ -14,21 +15,23 @@ import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
  */
 export function RequireBusinessOwner({ children }: { children: React.ReactNode }) {
   const { user, isInitializing } = useAuth();
+  const businessCtx = useBusinessOptional();
   const navigate = useNavigate();
 
   const isWorker = Boolean(
     user && (user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy),
   );
+  const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businessCtx?.businesses);
 
   useEffect(() => {
     if (isInitializing) return;
     if (!user) return;
-    if (isWorker) {
+    if (isWorker && !ownsBusiness) {
       navigate(WORKER_DEFAULT_LANDING_PATH, { replace: true });
     }
-  }, [isInitializing, user, isWorker, navigate]);
+  }, [isInitializing, user, isWorker, ownsBusiness, navigate]);
 
   if (isInitializing) return null;
-  if (isWorker) return null;
+  if (isWorker && !ownsBusiness) return null;
   return <>{children}</>;
 }

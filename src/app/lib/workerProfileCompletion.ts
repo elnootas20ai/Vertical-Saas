@@ -204,6 +204,15 @@ export const WORKER_BUSINESS_REQUIRED_ITEM_IDS = new Set([
   'worker-position',
 ]);
 
+export function userOwnsAnyBusiness(
+  userId?: string | null,
+  businesses?: ReadonlyArray<{ owner_user_id?: string | null }> | null,
+): boolean {
+  const uid = String(userId || '').trim();
+  if (!uid || !businesses?.length) return false;
+  return businesses.some((b) => String(b.owner_user_id || '').trim() === uid);
+}
+
 export function workerNeedsBusinessLink(
   user?: Pick<AuthUser, 'accountType' | 'invitedBy' | 'linkedBusinessId'> | null,
 ): boolean {

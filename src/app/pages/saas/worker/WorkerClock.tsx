@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Play,
@@ -14,103 +14,19 @@ import {
   MapPinOff,
   ChevronLeft,
   ChevronRight,
-  Download,
-  Hourglass,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import {
   type ClockinRecord,
-  type ClockinEventType,
-  type GeoLocation,
-  getTodayClockin,
   listClockins,
-  clockIn,
-  clockOut,
-  startBreak,
-  endBreak,
   formatMinutes,
   getDisplayTime,
-  notifyClockinEvent,
 } from '../../../lib/clockinsApi';
-import { useGeolocation, isMobileDevice } from '../../../hooks/useGeolocation';
-
-const MAX_CONTINUOUS_MS = 4 * 60 * 60 * 1000;
-
-function parseSchedMs(dateStr: string, timeHHMM: string): number {
-  const [h, m] = timeHHMM.split(':').map(Number);
-  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
-}
-
-function computeLiveSeconds(record: ClockinRecord | null): { worked: number; breakSec: number } {
-  if (!record) return { worked: 0, breakSec: 0 };
-  const entries = record.entries;
-  const clockInEntry = entries.find((e) => e.type === 'clock_in');
-  if (!clockInEntry) return { worked: 0, breakSec: 0 };
-
-  const clockOutEntry = entries.find((e) => e.type === 'clock_out');
-  const now = Date.now();
-
-  let startMs = new Date(clockInEntry.time).getTime();
-  let endMs = clockOutEntry ? new Date(clockOutEntry.time).getTime() : now;
-
-  if (record.date && record.scheduled_start) {
-    const schedStartMs = parseSchedMs(record.date, record.scheduled_start);
-    if (startMs < schedStartMs) startMs = schedStartMs;
-  }
-  if (record.date && record.scheduled_end) {
-    const schedEndMs = parseSchedMs(record.date, record.scheduled_end);
-    if (endMs > schedEndMs) endMs = schedEndMs;
-  }
-
-  const totalMs = Math.max(0, endMs - startMs);
-
-  let breakMs = 0;
-  let breakStart: number | null = null;
-  for (const e of entries) {
-    if (e.type === 'break_start') breakStart = new Date(e.time).getTime();
-    if (e.type === 'break_end' && breakStart !== null) {
-      const bStart = Math.max(breakStart, startMs);
-      const bEnd = Math.min(new Date(e.time).getTime(), endMs);
-      if (bEnd > bStart) breakMs += bEnd - bStart;
-      breakStart = null;
-    }
-  }
-  if (breakStart !== null) {
-    const bStart = Math.max(breakStart, startMs);
-    const bEnd = Math.min(clockOutEntry ? new Date(clockOutEntry.time).getTime() : now, endMs);
-    if (bEnd > bStart) breakMs += bEnd - bStart;
-  }
-
-  const workedMs = Math.max(0, totalMs - breakMs);
-  return { worked: Math.floor(workedMs / 1000), breakSec: Math.floor(breakMs / 1000) };
-}
-
-function getClockInTime(record: ClockinRecord | null): Date | null {
-  if (!record) return null;
-  const entry = record.entries.find((e) => e.type === 'clock_in');
-  return entry ? new Date(entry.time) : null;
-}
-
-function getContinuousMs(record: ClockinRecord | null): number {
-  if (!record || record.status === 'completed') return 0;
-  const entries = record.entries;
-  let lastResume: number | null = null;
-  for (const e of entries) {
-    if (e.type === 'clock_in' || e.type === 'break_end') lastResume = new Date(e.time).getTime();
-    if (e.type === 'break_start' || e.type === 'clock_out') lastResume = null;
-  }
-  if (lastResume === null) return 0;
-  return Date.now() - lastResume;
-}
-
-const formatTimer = (seconds: number) => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-};
+import { useWorkerClockIn, formatClockTimer } from '../../../hooks/useWorkerClockIn';
+import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
+import { WorkerStoreScheduleCard } from '../../../components/saas/worker/WorkerStoreScheduleCard';
 
 export function WorkerClock() {
   const { t } = useTranslation();
@@ -119,185 +35,45 @@ export function WorkerClock() {
   const businessId = currentBusiness?.business_id || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
+  const { isDelivery, workCenter, storeLabel } = useWorkerAssignedStore();
 
-  /**
-   * Notifica al equipo de gestión un evento de fichaje. Es fire-and-forget:
-   * si falla la red la UI ya muestra el cambio de estado y el documento de
-   * fichaje ya se ha persistido en CouchDB. El backend resuelve los
-   * destinatarios (Admin/Gerente + owner) y emite SSE + push.
-   */
-  const fireClockinNotification = useCallback(
-    (eventType: ClockinEventType, record: ClockinRecord | null, hasGeo: boolean) => {
-      if (!businessId || !memberId) return;
-      const lateMinutes = (() => {
-        if (eventType !== 'clock_in' || !record?.scheduled_start) return 0;
-        const entry = record.entries.find((e) => e.type === 'clock_in');
-        if (!entry) return 0;
-        const [h, m] = record.scheduled_start.split(':').map(Number);
-        const scheduled = new Date(`${record.date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
-        const actual = new Date(entry.time).getTime();
-        return Math.max(0, Math.round((actual - scheduled) / 60000));
-      })();
-      // Duración del descanso recién cerrado (último break_start → break_end actual)
-      const breakMinutes = (() => {
-        if (eventType !== 'break_end' || !record?.entries?.length) return 0;
-        const entries = record.entries;
-        const lastEndIdx = entries.map((e) => e.type).lastIndexOf('break_end');
-        const lastStartIdx = entries.map((e) => e.type).lastIndexOf('break_start');
-        if (lastStartIdx < 0 || lastEndIdx < 0 || lastStartIdx > lastEndIdx) return 0;
-        const start = new Date(entries[lastStartIdx].time).getTime();
-        const end = new Date(entries[lastEndIdx].time).getTime();
-        return Math.max(0, Math.round((end - start) / 60000));
-      })();
-      void notifyClockinEvent(businessId, {
-        memberId,
-        memberName,
-        eventType,
-        time: new Date().toISOString(),
-        device: isMobileDevice() ? 'mobile' : 'desktop',
-        lateMinutes,
-        workedMinutes: eventType === 'clock_out' ? record?.totalMinutes || 0 : 0,
-        breakMinutes,
-        hasGeo,
-      }).catch((err) => {
-        console.error('Error notificando fichaje:', err);
-      });
-    },
-    [businessId, memberId, memberName],
-  );
+  const {
+    record,
+    loading,
+    acting,
+    error,
+    isClockedIn,
+    isOnBreak,
+    elapsedSeconds,
+    breakSeconds,
+    remainingMinutes,
+    geoLocation,
+    geoStatus,
+    handleClockIn,
+    handleClockOut: baseClockOut,
+    handleBreakToggle,
+  } = useWorkerClockIn(businessId, memberId, memberName);
 
-  const [record, setRecord] = useState<ClockinRecord | null>(null);
   const [history, setHistory] = useState<ClockinRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(false);
-  const [error, setError] = useState('');
-  const [, setTick] = useState(0);
 
-  const isMobile = isMobileDevice();
-  const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
-  const autoClockOutTriggered = useRef(false);
-
-  const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await requestLocationForClock();
-    return loc || undefined;
-  }, [requestLocationForClock]);
-
-  const isClockedIn = record?.status === 'active' || record?.status === 'break';
-  const isOnBreak = record?.status === 'break';
-  const clockInTime = getClockInTime(record);
-  const { worked: elapsedSeconds, breakSec: breakSeconds } = computeLiveSeconds(record);
-  const continuousMs = getContinuousMs(record);
-
-  const loadData = useCallback(async () => {
-    if (!businessId || !memberId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError('');
+  const loadHistory = useCallback(async () => {
+    if (!businessId || !memberId) return;
     try {
-      const today = await getTodayClockin(businessId, memberId);
-
-      if (today && today.status !== 'completed') {
-        const contMs = getContinuousMs(today);
-        if (contMs >= MAX_CONTINUOUS_MS) {
-          try {
-            const stopped = await clockOut(today);
-            setRecord(stopped);
-          } catch {
-            setRecord(today);
-          }
-        } else {
-          setRecord(today);
-        }
-      } else {
-        setRecord(today);
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error cargando fichajes');
-    } finally {
-      setLoading(false);
+      const all = await listClockins(businessId, { memberId });
+      setHistory(all.filter((r) => r.status === 'completed'));
+    } catch {
+      /* historial opcional */
     }
-
-    // Historial en segundo plano: no bloquear la pantalla de fichar.
-    void listClockins(businessId, { memberId })
-      .then((all) => setHistory(all.filter((r) => r.status === 'completed')))
-      .catch(() => {
-        /* historial opcional */
-      });
   }, [businessId, memberId]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    if (!isClockedIn) return;
-    const interval = setInterval(() => setTick((v) => v + 1), 1000);
-    return () => clearInterval(interval);
-  }, [isClockedIn]);
+    void loadHistory();
+  }, [loadHistory]);
 
   const handleClockOut = useCallback(async () => {
-    if (acting || !record) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = await clockOut(record, geo);
-      setRecord(rec);
-      setHistory((prev) => [rec, ...prev].slice(0, 10));
-      fireClockinNotification('clock_out', rec, Boolean(geo));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al fichar salida');
-    } finally {
-      setActing(false);
-    }
-  }, [acting, record, getGeoForAction, fireClockinNotification]);
-
-  useEffect(() => {
-    if (!isClockedIn || !record || acting) return;
-    if (record.status === 'break') return;
-    if (continuousMs < MAX_CONTINUOUS_MS) return;
-    if (autoClockOutTriggered.current) return;
-    autoClockOutTriggered.current = true;
-    void handleClockOut();
-  }, [continuousMs, isClockedIn, record, acting, handleClockOut]);
-
-  const handleClockIn = async () => {
-    if (acting || !businessId || !memberId) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = await clockIn(businessId, memberId, memberName, {
-        geo,
-        device_type: isMobile ? 'mobile' : 'desktop',
-      });
-      setRecord(rec);
-      fireClockinNotification('clock_in', rec, Boolean(geo));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al fichar entrada');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleBreakToggle = async () => {
-    if (acting || !record) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const wasOnBreak = isOnBreak;
-      const rec = wasOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
-      setRecord(rec);
-      fireClockinNotification(wasOnBreak ? 'break_end' : 'break_start', rec, Boolean(geo));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al gestionar descanso');
-    } finally {
-      setActing(false);
-    }
-  };
+    const rec = await baseClockOut();
+    if (rec) setHistory((prev) => [rec, ...prev].slice(0, 50));
+  }, [baseClockOut]);
 
   const weekRecords = history.filter((r) => {
     const d = new Date(r.date);
@@ -308,8 +84,6 @@ export function WorkerClock() {
   const weekMinutes = weekRecords.reduce((sum, r) => sum + r.totalMinutes, 0);
   const weekHours = weekMinutes / 60;
   const avgDaily = weekRecords.length > 0 ? weekHours / weekRecords.length : 0;
-  const remainingAutoStop = Math.max(0, MAX_CONTINUOUS_MS - continuousMs);
-  const remainingMinutes = Math.floor(remainingAutoStop / 60000);
 
   if (loading) {
     return (
@@ -340,6 +114,10 @@ export function WorkerClock() {
           </div>
         )}
 
+        {isDelivery ? (
+          <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} />
+        ) : null}
+
         {/* Main Clock Card */}
         <div className={`relative overflow-hidden rounded-2xl p-8 text-center transition-all duration-700 ${
           isClockedIn
@@ -361,7 +139,7 @@ export function WorkerClock() {
             </p>
 
             <div className="text-6xl sm:text-7xl font-bold text-white font-mono tracking-wider mb-2">
-              {formatTimer(elapsedSeconds)}
+              {formatClockTimer(elapsedSeconds)}
             </div>
 
             {isClockedIn && record && record.entries.find(e => e.type === 'clock_in') && (
@@ -373,7 +151,7 @@ export function WorkerClock() {
             {breakSeconds > 0 && (
               <p className="text-white/50 text-xs">
                 <Coffee className="w-3 h-3 inline mr-1" />
-                {t('worker.clock.breakTime', 'Descanso')}: {formatTimer(breakSeconds)}
+                {t('worker.clock.breakTime', 'Descanso')}: {formatClockTimer(breakSeconds)}
               </p>
             )}
 
@@ -387,7 +165,7 @@ export function WorkerClock() {
             <div className="flex items-center justify-center gap-3 mt-6">
               {!isClockedIn ? (
                 <button
-                  onClick={handleClockIn}
+                  onClick={() => void handleClockIn()}
                   disabled={acting || (record?.status === 'completed')}
                   className="flex items-center gap-3 px-8 py-4 bg-white text-emerald-600 rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
                 >
@@ -397,7 +175,7 @@ export function WorkerClock() {
               ) : (
                 <>
                   <button
-                    onClick={handleBreakToggle}
+                    onClick={() => void handleBreakToggle()}
                     disabled={acting}
                     className={`flex items-center gap-2 px-5 py-3 rounded-xl font-semibold shadow-lg transition-all disabled:opacity-50 ${
                       isOnBreak
@@ -409,7 +187,7 @@ export function WorkerClock() {
                     {isOnBreak ? t('worker.clock.endBreak', 'Fin descanso') : t('worker.clock.startBreak', 'Descanso')}
                   </button>
                   <button
-                    onClick={handleClockOut}
+                    onClick={() => void handleClockOut()}
                     disabled={acting}
                     className="flex items-center gap-2 px-5 py-3 bg-white text-red-600 rounded-xl font-semibold shadow-lg hover:bg-red-50 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
                   >
