@@ -1,11 +1,11 @@
 import { Store, Clock, MapPin } from 'lucide-react';
-import type { WorkCenter } from '../../lib/workCentersApi';
+import type { WorkCenter } from '../../../lib/workCentersApi';
 import {
   formatStoreHoursToday,
   getScheduleDayKeyForDate,
   listStoreHoursWeek,
-} from '../../lib/workerStoreHours';
-import { SCHEDULE_DAY_LABELS_ES } from '../../lib/businessHoursUtils';
+} from '../../../lib/workerStoreHours';
+import { SCHEDULE_DAY_LABELS_ES } from '../../../lib/businessHoursUtils';
 
 interface WorkerStoreScheduleCardProps {
   workCenter: WorkCenter | null;
