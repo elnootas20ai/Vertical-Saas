@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -15,10 +16,16 @@ import {
   Timer,
   AlertCircle,
   Loader2,
+  Building2,
+  ArrowRight,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
+import {
+  workerNeedsBusinessLink,
+  WORKER_UNLINKED_HOME_PATH,
+} from '../../../lib/workerProfileCompletion';
 import {
   type WorkerTask,
   type TaskPriority,
@@ -44,10 +51,12 @@ const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string; icon
 
 export function WorkerTasks() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
   const memberId = user?.user_id || '';
+  const needsCompany = workerNeedsBusinessLink(user);
 
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
   const [filter, setFilter] = useState<'all' | TaskStatus>('all');
@@ -194,6 +203,35 @@ export function WorkerTasks() {
   };
 
   const totalWorkedToday = tasks.reduce((sum, t) => sum + getLiveSeconds(t), 0);
+
+  if (needsCompany || !businessId) {
+    return (
+      <Layout title={t('worker.tasks.title')} subtitle={t('worker.tasks.subtitle')}>
+        <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-5">
+            <Building2 className="w-8 h-8 text-blue-600 dark:text-blue-400" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            {t('worker.tasks.needsCompanyTitle', 'Aún no tienes empresa asignada')}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mb-6">
+            {t(
+              'worker.tasks.needsCompanyBody',
+              'Para usar Mi trabajo necesitas unirte a una empresa. Busca la tuya o acepta una invitación de tu gerente.',
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(WORKER_UNLINKED_HOME_PATH)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors"
+          >
+            {t('nav.workerClaimCompany', 'Unirse a una empresa')}
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </Layout>
+    );
+  }
 
   if (loading) {
     return (

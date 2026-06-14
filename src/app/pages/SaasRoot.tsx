@@ -29,9 +29,12 @@ import {
   clearWorkerPayrollBypass,
   hasSkippedWorkerProfileGates,
   hasWorkerPayrollBypass,
+  isWorkerUnlinkedAllowedPath,
   needsWorkerPayrollSetup,
+  workerNeedsBusinessLink,
   WORKER_IDENTITY_SETUP_PATH,
   WORKER_PAYROLL_SETUP_PATH,
+  WORKER_UNLINKED_HOME_PATH,
 } from '../lib/workerProfileCompletion';
 
 
@@ -153,8 +156,23 @@ function SaasContent() {
   const isLinkedWorker = Boolean(
     isWorkerAccount(user) && String(user?.linkedBusinessId || '').trim(),
   );
+  const unlinkedWorkerNeedsCompany = workerNeedsBusinessLink(user);
 
-
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (!unlinkedWorkerNeedsCompany) return;
+    if (isWorkerUnlinkedAllowedPath(location.pathname)) return;
+    if (location.pathname.startsWith('/saas/worker')) {
+      navigate(WORKER_UNLINKED_HOME_PATH, { replace: true });
+    }
+  }, [
+    isInitializing,
+    isAuthenticated,
+    user,
+    unlinkedWorkerNeedsCompany,
+    location.pathname,
+    navigate,
+  ]);
 
   useEffect(() => {
 
@@ -332,6 +350,8 @@ function SaasContent() {
     location.pathname === WORKER_IDENTITY_SETUP_PATH
     || location.pathname === WORKER_PAYROLL_SETUP_PATH
     || location.pathname === '/saas/user-dashboard'
+    || location.pathname === '/saas/invitations'
+    || (unlinkedWorkerNeedsCompany && isWorkerUnlinkedAllowedPath(location.pathname))
     || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
 
   useEffect(() => {

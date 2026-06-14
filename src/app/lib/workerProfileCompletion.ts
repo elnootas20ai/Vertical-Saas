@@ -112,11 +112,32 @@ export function getHrOwnedLabels(): string[] {
   return HR_OWNED_FIELD_DEFS.map((f) => f.label);
 }
 
+/** Roles que gestionan el equipo desde back office; no pasan por el gate de ficha trabajador. */
+export const MANAGER_ROLES = new Set([
+  'Admin',
+  'Gerente',
+  'Administrador',
+  'Encargado',
+  'Superadmin',
+  'owner',
+  'admin',
+  'manager',
+  'gerente',
+]);
+
+export function isManagerRole(role?: string | null): boolean {
+  const normalized = String(role || '').trim();
+  if (!normalized) return false;
+  return MANAGER_ROLES.has(normalized) || MANAGER_ROLES.has(normalized.toLowerCase());
+}
+
 export function isWorkerProfileSubject(user?: Pick<AuthUser, 'accountType' | 'invitedBy' | 'linkedBusinessId' | 'role'> | null): boolean {
   if (!user) return false;
+  if (user.accountType === 'company') return false;
+  if (isManagerRole(user.role)) return false;
   if (user.accountType === 'user') return true;
   if (String(user.invitedBy || '').trim()) return true;
-  if (user.linkedBusinessId && user.role && user.role !== 'Admin' && user.role !== 'Gerente') return true;
+  if (user.linkedBusinessId && user.role) return true;
   return false;
 }
 
@@ -155,6 +176,49 @@ export const WORKER_PAYROLL_SETUP_PATH = '/saas/worker/complete-payroll';
 /** Antigua home «Mi Espacio» — redirigida a Mi trabajo. */
 export const WORKER_LEGACY_HOME_PATH = '/saas/worker';
 export const WORKER_DEFAULT_LANDING_PATH = '/saas/worker/tasks';
+export const WORKER_UNLINKED_HOME_PATH = '/saas/user-dashboard';
+
+/** Rutas accesibles para trabajador sin empresa vinculada. */
+export const WORKER_UNLINKED_ALLOWED_PATHS = [
+  WORKER_UNLINKED_HOME_PATH,
+  '/saas/invitations',
+  '/saas/worker/profile',
+  '/saas/worker/security',
+  '/saas/worker/notifications',
+  WORKER_IDENTITY_SETUP_PATH,
+  WORKER_PAYROLL_SETUP_PATH,
+] as const;
+
+/** Ítems de sidebar trabajador que requieren empresa vinculada. */
+export const WORKER_BUSINESS_REQUIRED_ITEM_IDS = new Set([
+  'worker-tpv',
+  'worker-tasks',
+  'worker-stock-review',
+  'worker-calendar',
+  'worker-clock',
+  'worker-chat',
+  'worker-docs',
+  'worker-butcher-orders',
+  'worker-onboarding',
+  'worker-contract-info',
+  'worker-position',
+]);
+
+export function workerNeedsBusinessLink(
+  user?: Pick<AuthUser, 'accountType' | 'invitedBy' | 'linkedBusinessId'> | null,
+): boolean {
+  if (!user) return false;
+  const isWorker = user.accountType === 'user' || Boolean(String(user.invitedBy || '').trim());
+  if (!isWorker) return false;
+  return !String(user.linkedBusinessId || '').trim();
+}
+
+export function isWorkerUnlinkedAllowedPath(pathname: string): boolean {
+  const path = String(pathname || '').trim();
+  return WORKER_UNLINKED_ALLOWED_PATHS.some(
+    (allowed) => path === allowed || path.startsWith(`${allowed}/`),
+  );
+}
 
 /** Rutas de onboarding puntual: no deben persistirse como landing tras login. */
 export function isEphemeralWorkerSetupPath(path?: string | null): boolean {

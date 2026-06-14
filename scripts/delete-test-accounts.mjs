@@ -4,9 +4,11 @@
  * Uso (en el VPS con .env del proyecto):
  *   node scripts/delete-test-accounts.mjs email1@test.com email2@test.com
  *   node scripts/delete-test-accounts.mjs --list
+ *   node scripts/delete-test-accounts.mjs --list-duplicates
  *   node scripts/delete-test-accounts.mjs --purge-unverified
  *
  * --list: muestra cuentas email (no borradas), marca verificadas
+ * --list-duplicates: emails con más de una cuenta activa
  * --purge-unverified: borra TODAS las cuentas con emailVerified=false (excepto protegidas)
  */
 import '../config/env.js';
@@ -107,6 +109,7 @@ async function main() {
     console.log(`Uso:
   node scripts/delete-test-accounts.mjs correo1@ejemplo.com [correo2 ...]
   node scripts/delete-test-accounts.mjs --list
+  node scripts/delete-test-accounts.mjs --list-duplicates
   node scripts/delete-test-accounts.mjs --purge-unverified`);
     process.exit(0);
   }
@@ -118,6 +121,36 @@ async function main() {
       console.log(`${verified} ${a.email}  (${a.fullName || '—'})  ${a.createdAt?.slice(0, 10) || ''}`);
     }
     console.log(`\nTotal: ${accounts.length}`);
+    return;
+  }
+
+  if (args[0] === '--list-duplicates') {
+    const accounts = await listAccounts();
+    const byEmail = new Map();
+    for (const account of accounts) {
+      const email = norm(account.email);
+      if (!email) continue;
+      if (!byEmail.has(email)) byEmail.set(email, []);
+      byEmail.get(email).push(account);
+    }
+
+    let duplicateEmails = 0;
+    for (const [email, group] of [...byEmail.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (group.length < 2) continue;
+      duplicateEmails += 1;
+      console.log(`\n${email} (${group.length} cuentas)`);
+      for (const account of group.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
+        console.log(
+          `  · ${account.user_id}  ${account.fullName || '—'}  role=${account.role || '—'}  ${account.createdAt?.slice(0, 10) || ''}`,
+        );
+      }
+    }
+
+    if (!duplicateEmails) {
+      console.log('No hay emails duplicados.');
+    } else {
+      console.log(`\nTotal emails duplicados: ${duplicateEmails}`);
+    }
     return;
   }
 

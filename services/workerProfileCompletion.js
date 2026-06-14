@@ -175,13 +175,31 @@ export function computeWorkerProfileCompletion(account) {
   };
 }
 
+export const MANAGER_ROLES = new Set([
+  'Admin',
+  'Gerente',
+  'Administrador',
+  'Encargado',
+  'Superadmin',
+  'owner',
+  'admin',
+  'manager',
+  'gerente',
+]);
+
+export function isManagerRole(role) {
+  const normalized = String(role || '').trim();
+  if (!normalized) return false;
+  return MANAGER_ROLES.has(normalized) || MANAGER_ROLES.has(normalized.toLowerCase());
+}
+
 export function isWorkerProfileSubject(account) {
   if (!account) return false;
+  if (account.accountType === 'company') return false;
+  if (isManagerRole(account.role)) return false;
   if (account.accountType === 'user') return true;
   if (String(account.invitedBy || '').trim()) return true;
-  if (String(account.linkedBusinessId || '').trim() && account.role && account.role !== 'Admin' && account.role !== 'Gerente') {
-    return true;
-  }
+  if (String(account.linkedBusinessId || '').trim() && account.role) return true;
   return false;
 }
 

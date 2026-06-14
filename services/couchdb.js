@@ -4,6 +4,11 @@ import * as cacheService from './cache.js';
 import { createInitialAlertHistory, deriveAlertTimeline, alertHistorySortKey } from './alertHistory.js';
 import { computeSetupSteps } from '../models/setupSteps.js';
 import { buildDefaultPersonalData, computeWorkerProfileCompletion, hasMinimumWorkerIdentity, WORKER_DEFAULT_LANDING_PATH } from './workerProfileCompletion.js';
+import {
+  assertAccountEmailUnique,
+  findDuplicateEmailAccounts,
+  pickPrimaryAccountByEmail,
+} from './accountEmailRules.js';
 
 export const ACCOUNTS_DB = 'accounts';
 export const BUSINESSES_DB = 'businesses';
@@ -1742,18 +1747,25 @@ export function sanitizeSession(session, currentSessionId) {
   };
 }
 
-export async function findAccountByEmail(req, email) {
+export async function findAllAccountsByEmail(req, email) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) {
-    return null;
+    return [];
   }
 
   await ensureDatabase(req, ACCOUNTS_DB);
   const docs = await getAllDocuments(req, ACCOUNTS_DB);
+  return findDuplicateEmailAccounts(docs, normalizedEmail);
+}
 
-  return (
-    docs.find((doc) => doc?.type === 'account' && !doc?.deletedAt && normalizeEmail(doc.email) === normalizedEmail) || null
-  );
+export async function findAccountByEmail(req, email) {
+  const matches = await findAllAccountsByEmail(req, email);
+  if (matches.length > 1) {
+    console.warn(
+      `[ACCOUNTS] Email duplicado detectado (${normalizeEmail(email)}): ${matches.length} cuentas — usando la canónica`,
+    );
+  }
+  return pickPrimaryAccountByEmail(matches);
 }
 
 export async function findAccountByUserId(req, userId) {
@@ -1805,6 +1817,9 @@ export async function saveAccount(req, account) {
   }
 
   await ensureDatabase(req, ACCOUNTS_DB);
+  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+  assertAccountEmailUnique(docs, account.email, account.user_id);
+
   const result = await putDocument(req, ACCOUNTS_DB, account._id, account);
   return { ...account, _rev: result.rev };
 }

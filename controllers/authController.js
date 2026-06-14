@@ -380,6 +380,9 @@ export async function register(req, res) {
       verificationEmailSent,
     });
   } catch (error) {
+    if (error?.code === 'ACCOUNT_EMAIL_CONFLICT') {
+      return res.status(409).json({ ok: false, error: 'Este email ya está registrado' });
+    }
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al registrar la cuenta',
@@ -954,6 +957,13 @@ export async function updateProfile(req, res) {
       user: sanitizeAccount(persistedAccount),
     });
   } catch (error) {
+    if (error?.code === 'ACCOUNT_EMAIL_CONFLICT') {
+      return res.status(409).json({
+        ok: false,
+        code: 'EMAIL_TAKEN',
+        error: 'Ya existe otra cuenta con ese email.',
+      });
+    }
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al actualizar el perfil',

@@ -30,6 +30,7 @@
     "create-admin": "node scripts/create-admin.js",
     "accounts:delete": "node scripts/delete-test-accounts.mjs",
     "accounts:list": "node scripts/delete-test-accounts.mjs --list",
+    "accounts:list-duplicates": "node scripts/delete-test-accounts.mjs --list-duplicates",
     "deploy:frontend": "node scripts/deploy-frontend.mjs",
     "deploy:backend": "node scripts/deploy-backend.mjs",
     "deploy:diagnose": "node scripts/remote-diagnose.mjs",

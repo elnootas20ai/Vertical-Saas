@@ -123,10 +123,15 @@ import {
   CirclePlus,
   FileCheck,
   Plug,
+  Mail,
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import {
+  workerNeedsBusinessLink,
+  WORKER_UNLINKED_HOME_PATH,
+} from '../../lib/workerProfileCompletion';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
 import { getEffectivePointOfSaleLimit } from '../../lib/pointOfSaleLimits';
 import { useBusiness } from '../../context/BusinessContext';
@@ -563,8 +568,9 @@ function SidebarInner({
     !isWorker ? alertCenterBusinessId : undefined,
   );
   /** Trabajador con empresa asignada (invitación aceptada / miembro en el negocio). */
+  const unlinkedWorkerNeedsCompany = workerNeedsBusinessLink(user);
   const workerHasLinkedCompany = Boolean(
-    isWorker && currentBusiness?.business_id && currentBusiness.businessType,
+    isWorker && String(user?.linkedBusinessId || '').trim() && currentBusiness?.business_id,
   );
 
   const vertical: BusinessType | null = currentBusiness?.businessType
@@ -1101,6 +1107,23 @@ function SidebarInner({
   const workerById = new Map(workerMenuItems.map((item) => [item.id, item]));
   const ADMIN_ONLY_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
   const WORKER_HIDDEN_ITEM_IDS = BUSINESS_OWNER_ONLY_IDS;
+  const WORKER_UNLINKED_CONFIG_ITEM_IDS = new Set(['worker-profile', 'worker-notifications', 'worker-security']);
+  const workerUnlinkedMenuItems: SidebarItem[] = [
+    {
+      id: 'worker-claim-company',
+      navKey: 'workerClaimCompany',
+      icon: <Building2 className="w-5 h-5" />,
+      path: WORKER_UNLINKED_HOME_PATH,
+      label: t('nav.workerClaimCompany', 'Unirse a una empresa'),
+    },
+    {
+      id: 'worker-invitations',
+      navKey: 'workerInvitations',
+      icon: <Mail className="w-5 h-5" />,
+      path: '/saas/invitations',
+      label: t('nav.workerInvitations', 'Mis invitaciones'),
+    },
+  ];
   const verticalGroupsForWorker = workerHasLinkedCompany
     ? sidebarGroups
         .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
@@ -1117,7 +1140,28 @@ function SidebarInner({
         }))
         .filter((group) => group.items.length > 0)
     : [];
-  const workerGroupedItems = [
+  const workerGroupedItems = unlinkedWorkerNeedsCompany
+    ? [
+        {
+          id: 'worker-unlinked-main',
+          label: t('sidebar.groups.workerUnlinked', 'Sin empresa'),
+          icon: <Building2 className="w-4 h-4 shrink-0" />,
+          itemIds: workerUnlinkedMenuItems.map((item) => item.id),
+          items: workerUnlinkedMenuItems,
+        },
+        ...workerGroups
+          .map((g) => ({
+            ...g,
+            items: g.itemIds
+              .map((id) => workerById.get(id))
+              .filter(
+                (item): item is SidebarItem =>
+                  Boolean(item) && WORKER_UNLINKED_CONFIG_ITEM_IDS.has(item.id),
+              ),
+          }))
+          .filter((g) => g.items.length > 0),
+      ]
+    : [
     {
       ...workerHomeGroup,
       items: workerHomeGroup.itemIds
@@ -1198,7 +1242,10 @@ function SidebarInner({
               {(isMobile || !collapsed) && (
                 <>
                   <span className="font-medium text-gray-900 dark:text-gray-100 flex-1 text-left truncate">
-                    {currentBusiness?.name || user?.companyName || user?.firstName || t('topbar.myCompany')}
+                    {currentBusiness?.name
+                      || (unlinkedWorkerNeedsCompany
+                        ? t('topbar.noCompanyAssigned', 'Sin empresa asignada')
+                        : user?.companyName || user?.firstName || t('topbar.myCompany'))}
                   </span>
                   <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
                 </>
