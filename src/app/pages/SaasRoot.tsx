@@ -75,7 +75,7 @@ function SaasContent() {
 
   const { subscription } = useApp();
 
-  const { isAuthenticated, isInitializing, user, refreshCurrentUser } = useAuth();
+  const { isAuthenticated, isInitializing, user, refreshCurrentUser, sessionSyncedWithServer } = useAuth();
 
   const businessCtx = useBusinessOptional();
   const businesses = businessCtx?.businesses ?? [];
@@ -317,24 +317,17 @@ function SaasContent() {
 
 
   useEffect(() => {
-
+    if (!sessionSyncedWithServer) return;
+    if (subscription.status !== 'suspended') return;
     if (
-
-      subscription.status === 'suspended' &&
-
-      location.pathname !== '/saas/suspended' &&
-
-      location.pathname !== '/saas/billing' &&
-
-      location.pathname !== '/saas/help'
-
+      location.pathname === '/saas/suspended' ||
+      location.pathname === '/saas/billing' ||
+      location.pathname === '/saas/help'
     ) {
-
-      navigate('/saas/suspended', { replace: true });
-
+      return;
     }
-
-  }, [subscription.status, location.pathname, navigate]);
+    navigate('/saas/suspended', { replace: true });
+  }, [subscription.status, sessionSyncedWithServer, location.pathname, navigate]);
 
 
 

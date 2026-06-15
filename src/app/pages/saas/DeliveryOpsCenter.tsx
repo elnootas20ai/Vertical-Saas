@@ -1402,7 +1402,7 @@ export function DeliveryOpsCenter() {
     token: sseToken,
     businessId: currentBusiness?.business_id || currentBusiness?.id || null,
     handlers,
-    enabled: !!authUserId && !!sseToken,
+    enabled: !!authUserId,
   });
 
   const advance = useCallback(async (order: DeliveryOrder, s: DeliveryOrderStatus) => {
@@ -1432,8 +1432,10 @@ export function DeliveryOpsCenter() {
   const connectionText = sseOk
     ? 'En vivo'
     : isPollingFresh
-      ? 'Conexion inestable (actualizando cada 30s)'
-      : 'Sin conexion (reintentando)';
+      ? 'Actualizando cada 30s'
+      : loading
+        ? 'Conectando…'
+        : 'Sin conexion (reintentando)';
   const connectionDotClass = sseOk
     ? 'bg-green-500'
     : isPollingFresh

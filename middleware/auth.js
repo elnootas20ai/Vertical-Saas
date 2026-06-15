@@ -19,6 +19,24 @@ function parseDurationMs(duration) {
 const ACCESS_TOKEN_MS = parseDurationMs(JWT_EXPIRES_IN);
 const REFRESH_TOKEN_MS = parseDurationMs(JWT_REFRESH_EXPIRES_IN);
 
+/** Dominio compartido apex + www en producción (p. ej. `.vertialapp.com`). */
+function resolveAuthCookieDomain() {
+  const explicit = String(process.env.COOKIE_DOMAIN || '').trim();
+  if (explicit) return explicit;
+  if (process.env.NODE_ENV !== 'production') return undefined;
+  try {
+    const raw = String(process.env.APP_URL || '').trim();
+    if (!raw) return undefined;
+    const host = new URL(raw).hostname.replace(/^www\./i, '');
+    if (!host || host === 'localhost' || host.endsWith('.local')) return undefined;
+    return host.startsWith('.') ? host : `.${host}`;
+  } catch {
+    return undefined;
+  }
+}
+
+const AUTH_COOKIE_DOMAIN = resolveAuthCookieDomain();
+
 // S-01: Opciones base para cookies seguras
 // En desarrollo se usa sameSite:'lax' para evitar problemas con IP/cross-port.
 // En producción se mantiene 'strict' para máxima seguridad.
@@ -27,6 +45,7 @@ export const AUTH_COOKIE_OPTS = {
   secure: process.env.NODE_ENV === 'production',
   sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
   path: '/',
+  ...(AUTH_COOKIE_DOMAIN ? { domain: AUTH_COOKIE_DOMAIN } : {}),
 };
 
 export function setAuthCookies(res, accessToken, refreshToken) {
@@ -37,6 +56,10 @@ export function setAuthCookies(res, accessToken, refreshToken) {
 export function clearAuthCookies(res) {
   res.clearCookie('access_token', AUTH_COOKIE_OPTS);
   res.clearCookie('refresh_token', AUTH_COOKIE_OPTS);
+  if (AUTH_COOKIE_DOMAIN) {
+    res.clearCookie('access_token', { ...AUTH_COOKIE_OPTS, domain: AUTH_COOKIE_DOMAIN });
+    res.clearCookie('refresh_token', { ...AUTH_COOKIE_OPTS, domain: AUTH_COOKIE_DOMAIN });
+  }
 }
 
 export function signAccessToken(payload) {

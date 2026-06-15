@@ -300,6 +300,8 @@ import {
   WorkerNotifications,
   WorkerSecurity,
   WorkerTpv,
+  WorkerTpvEntry,
+  WorkerTpvDeliveryRoute,
   WorkerConstructionReport,
   WorkerStockReviewPage,
 } from './pages/saas/worker';
@@ -819,7 +821,8 @@ export const router = createBrowserRouter([
           { path: 'worker/setup-profile', Component: WorkerIdentitySetup },
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
-          { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpv /></RequireTpvTabletEntry> },
+          { path: 'worker/tpv/delivery', element: <RequireTpvTabletEntry requireForAll><WorkerTpvDeliveryRoute /></RequireTpvTabletEntry> },
+          { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpvEntry /></RequireTpvTabletEntry> },
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/stock-review', Component: WorkerStockReviewPage },
           { path: 'worker/calendar', Component: WorkerCalendar },

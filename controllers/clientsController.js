@@ -7,6 +7,7 @@ import {
   ensureDatabase,
   getDocument,
   putDocument,
+  bulkPutDocuments,
   softDeleteDocument,
   findAccountByUserId,
   logAccountActivity,
@@ -21,6 +22,7 @@ import {
   listClientPromotionsByClient,
   searchClientsByPhone,
 } from '../services/couchdb.js';
+import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 
 function badRequest(res, error) {
@@ -746,6 +748,11 @@ export async function bulkCreateClients(req, res) {
       return badRequest(res, 'Se esperaba un array de clientes en clients[]');
     }
 
+    const { batchSize, maxDocs } = resolveBulkImportLimits();
+    if (clients.length > maxDocs) {
+      return badRequest(res, `Máximo ${maxDocs} clientes por importación`);
+    }
+
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
@@ -754,18 +761,38 @@ export async function bulkCreateClients(req, res) {
 
     const created = [];
     const errors = [];
+    const pending = [];
 
     for (const client of clients) {
+      if (!client.name?.trim() || !client.phone?.trim()) {
+        errors.push({ client, error: 'Nombre y teléfono son obligatorios' });
+        continue;
+      }
+      pending.push({
+        doc: buildClientDocument(userId, client),
+        sourceClient: client,
+      });
+    }
+
+    for (const chunk of chunkDocs(pending, batchSize)) {
+      const docs = chunk.map((item) => item.doc);
       try {
-        if (!client.name?.trim() || !client.phone?.trim()) {
-          errors.push({ client, error: 'Nombre y teléfono son obligatorios' });
-          continue;
-        }
-        const doc = buildClientDocument(userId, client);
-        const saved = await putDocument(req, db, doc._id, doc);
-        created.push(sanitizeClient({ ...doc, _rev: saved.rev }));
+        const results = await bulkPutDocuments(req, db, docs);
+        results.forEach((result, idx) => {
+          const { doc, sourceClient } = chunk[idx];
+          if (result?.ok) {
+            created.push(sanitizeClient({ ...doc, _rev: result.rev }));
+          } else {
+            errors.push({
+              client: sourceClient,
+              error: result?.error || result?.reason || 'Error en importación masiva',
+            });
+          }
+        });
       } catch (err) {
-        errors.push({ client, error: err.message });
+        for (const { sourceClient } of chunk) {
+          errors.push({ client: sourceClient, error: err.message });
+        }
       }
     }
 
@@ -777,7 +804,7 @@ export async function bulkCreateClients(req, res) {
       action: `Importación masiva: ${created.length} clientes creados`,
       entityId: userId,
       entityLabel: 'Importación masiva',
-      metadata: { created: created.length, errors: errors.length },
+      metadata: { created: created.length, errors: errors.length, requested: clients.length },
     });
 
     return res.status(201).json({ ok: true, clients: created, errors, total: created.length });

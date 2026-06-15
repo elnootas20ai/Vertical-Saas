@@ -95,6 +95,29 @@ export function isDeliveryAccountFromSources(
   return isDeliveryBusinessType(resolveDeliveryBusinessType(sources));
 }
 
+/**
+ * ¿Cargar tiendas/PDV delivery? Sí si la cuenta es delivery o hay tablet TPV vinculada a esta empresa.
+ * Evita que un businessType mal puesto (p. ej. events) oculte códigos tablet y el TPV operativo.
+ */
+export function shouldUseDeliveryStores(
+  sources?: {
+    business?: Business | null;
+    businesses?: Business[];
+    userOnboarding?: { businessType?: string } | null;
+  },
+  options?: {
+    tabletBusinessId?: string | null;
+    hasDeliveryPdvs?: boolean;
+  },
+): boolean {
+  if (isDeliveryAccountFromSources(sources)) return true;
+  if (options?.hasDeliveryPdvs) return true;
+  const bizId = resolveBusinessScopeId(sources?.business);
+  const tabletBid = normalizeBusinessScopeId(options?.tabletBusinessId);
+  if (bizId && tabletBid && bizId === tabletBid) return true;
+  return false;
+}
+
 /** Tras registro/onboarding: mismo destino que el resto de verticales. */
 export function getPostAuthSaasEntryPath(_businessType?: string | null, _hasPdv = false): string {
   return '/saas/dashboard';

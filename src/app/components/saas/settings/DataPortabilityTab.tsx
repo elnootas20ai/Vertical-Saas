@@ -26,7 +26,7 @@ const EXPORT_COLLECTIONS = [
 
 interface ImportResult {
   totalImported: number;
-  results: Record<string, { imported: number; total: number; error?: string }>;
+  results: Record<string, { imported: number; total: number; skipped?: number; error?: string }>;
 }
 
 export function DataPortabilityTab({ userId }: Props) {
@@ -158,7 +158,7 @@ export function DataPortabilityTab({ userId }: Props) {
 
         <div className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-200 mb-4">
           <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-          <p className="text-xs text-red-700"><strong>Atención:</strong> La importación añade documentos nuevos. No elimina datos existentes. Máximo 5.000 documentos por colección.</p>
+          <p className="text-xs text-red-700"><strong>Atención:</strong> La importación añade documentos nuevos. No elimina datos existentes. Hasta 100.000 documentos por colección, procesados en lotes.</p>
         </div>
 
         <div
@@ -209,6 +209,7 @@ export function DataPortabilityTab({ userId }: Props) {
                 <div key={col} className="flex items-center gap-2 text-xs">
                   <span className="w-24 font-medium text-gray-700 dark:text-gray-300 capitalize">{col}:</span>
                   <span className="text-green-700">{r.imported} importados</span>
+                  {r.skipped ? <span className="text-amber-600">— {r.skipped} omitidos (límite)</span> : null}
                   {r.error && <span className="text-red-600">— {r.error}</span>}
                 </div>
               ))}

@@ -241,16 +241,30 @@ function normalizeClientRecord(value: unknown): Client | null {
 // ─── LEADS ────────────────────────────────────────────────────────────────────
 
 export async function bulkCreateClientsRequest(userId: string, clients: Client[]): Promise<Client[]> {
-  const result = await request<{ ok: boolean; clients: unknown[]; errors: unknown[] }>(
-    `/api/clients/${encodeURIComponent(userId)}/bulk`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ clients }),
-    },
-  );
-  return (result.clients || [])
-    .map(normalizeClientRecord)
-    .filter((c): c is Client => Boolean(c));
+  const result = await bulkCreateClientsV2Request(userId, clients);
+  return result.created;
+}
+
+const CRM_BULK_CHUNK_SIZE = 250;
+
+export async function bulkCreateClientsInChunks(
+  userId: string,
+  clients: Client[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ created: Client[]; errors: unknown[] }> {
+  const created: Client[] = [];
+  const errors: unknown[] = [];
+  const total = clients.length;
+
+  for (let i = 0; i < clients.length; i += CRM_BULK_CHUNK_SIZE) {
+    const chunk = clients.slice(i, i + CRM_BULK_CHUNK_SIZE);
+    const result = await bulkCreateClientsV2Request(userId, chunk);
+    created.push(...result.created);
+    errors.push(...result.errors);
+    onProgress?.(Math.min(i + chunk.length, total), total);
+  }
+
+  return { created, errors };
 }
 
 export async function bulkCreateLeadsRequest(userId: string, leads: Lead[]): Promise<Lead[]> {

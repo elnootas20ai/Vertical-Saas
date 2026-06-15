@@ -2,12 +2,14 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   couchRequest,
   ensureDatabase,
+  bulkPutDocuments,
   findAccountByUserId,
   findBusinessById,
   sanitizeAccount,
   saveAccount,
   saveSession,
 } from '../services/couchdb.js';
+import { capDocsForImport, chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import {
   DEFAULT_CASH_REGISTER_OPERATIONAL,
   sanitizeCashRegisterOperational,
@@ -418,6 +420,8 @@ export async function importTenantData(req, res) {
     const dbName = String(process.env.VITE_COUCHDB_DB || 'vertial');
     const userDbName = `${dbName}-${userId.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
 
+    const { batchSize, maxDocs } = resolveBulkImportLimits();
+
     const results = {};
     let totalImported = 0;
 
@@ -426,28 +430,36 @@ export async function importTenantData(req, res) {
       const colDb = `${userDbName}-${col}`;
       await ensureDatabase(req, colDb);
 
-      const toImport = docs.slice(0, 5000).map((doc) => {
-        const d = { ...doc };
-        delete d._rev;
-        d._id = d._id || uuidv4();
-        d.importedAt = new Date().toISOString();
-        d.importedByUserId = userId;
-        return d;
-      });
+      const { capped, total, skipped } = capDocsForImport(docs, maxDocs);
+      let imported = 0;
+      let batchError = '';
 
-      const bulkRes = await couchRequest(req, `/${encodeURIComponent(colDb)}/_bulk_docs`, {
-        method: 'POST',
-        body: JSON.stringify({ docs: toImport }),
-      });
+      for (const batch of chunkDocs(capped, batchSize)) {
+        const toImport = batch.map((doc) => {
+          const d = { ...doc };
+          delete d._rev;
+          d._id = d._id || uuidv4();
+          d.importedAt = new Date().toISOString();
+          d.importedByUserId = userId;
+          return d;
+        });
 
-      if (bulkRes.ok) {
-        const bulkData = await bulkRes.json();
-        const imported = Array.isArray(bulkData) ? bulkData.filter((r) => !r.error).length : 0;
-        results[col] = { imported, total: toImport.length };
-        totalImported += imported;
-      } else {
-        results[col] = { imported: 0, total: toImport.length, error: 'Error en bulk import' };
+        try {
+          const bulkData = await bulkPutDocuments(req, colDb, toImport);
+          imported += bulkData.filter((r) => r?.ok).length;
+        } catch (err) {
+          batchError = err.message || 'Error en bulk import';
+          break;
+        }
       }
+
+      results[col] = {
+        imported,
+        total,
+        skipped,
+        error: batchError || undefined,
+      };
+      totalImported += imported;
     }
 
     return res.json({ ok: true, totalImported, results });

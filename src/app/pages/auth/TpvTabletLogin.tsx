@@ -67,6 +67,7 @@ export function TpvTabletLogin() {
         workCenterId: terminalBinding.workCenterId,
         businessId: terminalBinding.businessId,
         dataUserId: terminalBinding.dataUserId,
+        tpvVertical: terminalBinding.tpvVertical || 'delivery',
         pdvName: pdv?.name,
         businessName: business?.name,
       });
@@ -91,7 +92,7 @@ export function TpvTabletLogin() {
       );
     }
 
-    navigate(result.redirectTo || '/saas/worker/tpv');
+    navigate(result.redirectTo || '/saas/worker/tpv/delivery');
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

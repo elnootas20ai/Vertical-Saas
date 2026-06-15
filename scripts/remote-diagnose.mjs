@@ -14,7 +14,7 @@ if (!values) {
 
 const user = values.DEPLOY_USER || values.SSH_USER;
 const host = values.DEPLOY_HOST || values.VPS_IP;
-const dist = values.DEPLOY_DIST_PATH || '/var/www/vertial/dist';
+const dist = values.DEPLOY_DIST_PATH || '/opt/vertial/Vertical-Saas/dist';
 const identity = values.SSH_IDENTITY_FILE?.trim();
 
 if (!user || !host) {

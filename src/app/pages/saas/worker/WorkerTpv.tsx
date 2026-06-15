@@ -1,8 +1,10 @@
+import { Navigate } from 'react-router-dom';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
+import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
 import { WorkerTpvWorkshop } from './WorkerTpvWorkshop';
@@ -96,6 +98,26 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
   taxi: { label: 'Taxi', icon: <CarTaxiFront className="w-6 h-6" /> },
   butcherShop: { label: 'Carnicería', icon: <Beef className="w-6 h-6" /> },
 };
+
+export function WorkerTpvDeliveryRoute() {
+  return (
+    <>
+      <TpvOfflineBanner />
+      <WorkerStockReviewBanner />
+      <TpvRegisterGate>
+        <WorkerTpvDelivery />
+      </TpvRegisterGate>
+    </>
+  );
+}
+
+/** Si hay tablet vinculada, ir al TPV fijado por el código (delivery). */
+export function WorkerTpvEntry() {
+  if (isTpvTabletBound()) {
+    return <Navigate to={resolveTpvTabletWorkerPath()} replace />;
+  }
+  return <WorkerTpv />;
+}
 
 export function WorkerTpv() {
   const { currentBusiness } = useBusiness();

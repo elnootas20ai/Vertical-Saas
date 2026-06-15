@@ -1,14 +1,7 @@
 import { getApiBase } from './apiBase';
+import { authFetch } from './authApi';
 import { ensureCouchDb } from './ensureCouchDb';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
-
-
-function getHeaders(): Record<string, string> {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('vertial_access_token') : null;
-  const h: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  return h;
-}
 
 const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-clockins';
 const REQ_TIMEOUT_MS = 20_000;
@@ -17,9 +10,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQ_TIMEOUT_MS);
   try {
-    const res = await fetch(`${getApiBase()}${path}`, {
-      headers: { ...getHeaders(), ...(init?.headers || {}) },
+    const res = await authFetch(`${getApiBase()}${path}`, {
       ...init,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
       signal: controller.signal,
     });
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
@@ -151,13 +148,22 @@ function todayStr() {
 
 export async function listClockins(
   businessId: string,
-  filters?: { date?: string; memberId?: string; salesPointId?: string },
+  filters?: {
+    date?: string;
+    memberId?: string;
+    salesPointId?: string;
+    workCenterId?: string;
+    /** TPV: ver fichajes del PDV/tienda para operar caja (sin filtrar por rol). */
+    storeScope?: boolean;
+  },
 ): Promise<ClockinRecord[]> {
   try {
     const params = new URLSearchParams();
     if (filters?.date) params.set('date', filters.date);
     if (filters?.memberId) params.set('memberId', filters.memberId);
     if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
+    if (filters?.workCenterId) params.set('workCenterId', filters.workCenterId);
+    if (filters?.storeScope) params.set('storeScope', '1');
     params.set('recordsOnly', '1');
     const qs = params.toString() ? `?${params}` : '';
     const data = await req<{ clockins: ClockinRecord[] }>(
@@ -202,7 +208,7 @@ export async function clockIn(
   memberName: string,
   options?: ClockInOptions,
 ): Promise<ClockinRecord> {
-  const data = await req<{ clockin: ClockinRecord }>(
+  const data = await req<{ clockin: ClockinRecord; alreadyActive?: boolean }>(
     `/api/clockins/${encodeURIComponent(businessId)}/check-in`,
     {
       method: 'POST',
@@ -216,7 +222,11 @@ export async function clockIn(
       }),
     },
   );
-  return data.clockin;
+  const rec = data.clockin;
+  if (data.alreadyActive) {
+    (rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive = true;
+  }
+  return rec;
 }
 
 export async function addEntry(record: ClockinRecord, entryType: ClockEntry['type'], geo?: GeoLocation): Promise<ClockinRecord> {
@@ -714,7 +724,7 @@ export async function exportClockinsCsv(
   if (filters?.to) params.set('to', filters.to);
   if (filters?.memberId) params.set('memberId', filters.memberId);
   const url = `${getApiBase()}/api/clockins/${encodeURIComponent(businessId)}/export?${params}`;
-  const res = await fetch(url, { headers: getHeaders() });
+  const res = await authFetch(url, { credentials: 'include' });
   if (!res.ok) throw new Error('Error al exportar');
   const blob = await res.blob();
   const a = document.createElement('a');

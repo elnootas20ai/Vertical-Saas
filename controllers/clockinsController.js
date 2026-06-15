@@ -288,15 +288,31 @@ export async function listClockins(req, res) {
     }
 
     const salesPointFilter = req.query.salesPointId ? String(req.query.salesPointId).trim() : null;
-    if (salesPointFilter) {
+    const workCenterFilter = req.query.workCenterId ? String(req.query.workCenterId).trim() : null;
+    const storeScope = String(req.query.storeScope || '') === '1';
+
+    if (storeScope && (salesPointFilter || workCenterFilter)) {
+      const memberIds = allBusinessMemberIds(business);
+      if (!memberIds.includes(requesterId)) {
+        return res.status(403).json({ ok: false, error: 'No autorizado para fichajes de tienda' });
+      }
+    }
+
+    if (salesPointFilter || workCenterFilter) {
       records = records.filter((r) => {
         const sp = String(r.sales_point_id || '').trim();
-        if (!sp) return true;
-        return sp === salesPointFilter || sp === `wc:${salesPointFilter}`;
+        // TPV: fichajes del día sin tienda etiquetada siguen contando en la tienda activa.
+        if (!sp) return Boolean(storeScope);
+        if (salesPointFilter && (sp === salesPointFilter || sp === `wc:${salesPointFilter}`)) return true;
+        if (workCenterFilter && (sp === workCenterFilter || sp === `wc:${workCenterFilter}`)) return true;
+        return false;
       });
     }
 
-    records = records.filter((r) => visibleIds.includes(r.member_id));
+    // TPV en tienda: con storeScope cualquier miembro del negocio ve fichajes de ese PDV.
+    if (!storeScope || (!salesPointFilter && !workCenterFilter)) {
+      records = records.filter((r) => visibleIds.includes(r.member_id));
+    }
     records = dedupeClockinsByMemberDate(records);
 
     const memberMap = await enrichMemberMap(req, business);
@@ -736,7 +752,31 @@ export async function checkInMember(req, res) {
       return status !== 'completed';
     });
     if (activeToday) {
-      return res.status(409).json({ ok: false, error: 'Ya tienes un fichaje activo hoy' });
+      const sp = String(salesPointId || '').trim();
+      const spName = String(salesPointName || '').trim();
+      const existingSp = String(activeToday.sales_point_id || '').trim();
+      let doc = activeToday;
+      if (sp && !existingSp) {
+        doc = {
+          ...activeToday,
+          sales_point_id: sp,
+          sales_point_name: spName || activeToday.sales_point_name,
+          updatedAt: now,
+        };
+        await putDocument(req, clockinsDb, activeToday._id, doc);
+      } else if (
+        sp
+        && existingSp
+        && existingSp !== sp
+        && existingSp !== `wc:${sp}`
+        && sp !== `wc:${existingSp}`
+      ) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Ya tienes un fichaje activo hoy en otra tienda',
+        });
+      }
+      return res.json({ ok: true, clockin: doc, alreadyActive: true });
     }
 
     const id = `clockin:${businessId}:${targetMemberId}:${date}:${Date.now()}`;

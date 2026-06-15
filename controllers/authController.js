@@ -3190,10 +3190,11 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
       workCenterId: pdv.workCenterId || '',
       businessId: business.business_id,
       dataUserId: pdv.user_id,
+      tpvVertical: 'delivery',
     },
     accessToken,
     refreshToken,
-    redirectTo: '/saas/worker/tpv',
+    redirectTo: '/saas/worker/tpv/delivery',
     needsClockIn: true,
   });
 }

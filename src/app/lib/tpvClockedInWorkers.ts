@@ -1,7 +1,5 @@
-import { getApiBase } from './apiBase';
-import { getAuthHeaders, type AuthUser } from './authApi';
+import { listUsersRequest, type AuthUser } from './authApi';
 import { listClockins } from './clockinsApi';
-
 export interface TpvClockedInWorker {
   id: string;
   name: string;
@@ -27,50 +25,69 @@ export function isMemberAssignedToStore(
   return ref === pdvId || ref === workCenterId || ref === `wc:${workCenterId}`;
 }
 
-async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
-  const res = await fetch(
-    `${getApiBase()}/api/auth/users?businessId=${encodeURIComponent(businessId)}`,
-    { headers: getAuthHeaders() },
-  );
-  const data = (await res.json().catch(() => ({}))) as { users?: AuthUser[]; error?: string };
-  if (!res.ok) throw new Error(data.error || 'No se pudo cargar el equipo');
-  return data.users || [];
+/** Equipo visible para fichar en TPV tablet / gerente en tienda (sin exigir asignación previa). */
+export function filterUsersForStoreClockin(
+  users: AuthUser[],
+  ownerUserId: string,
+  pdvId: string,
+  workCenterId: string,
+  relaxStoreAssignment: boolean,
+): AuthUser[] {
+  return users.filter((u) => {
+    if (u.status === 'inactive') return false;
+    if (relaxStoreAssignment) return true;
+    return isMemberAssignedToStore(u, ownerUserId, pdvId, workCenterId);
+  });
 }
 
+export function clockinRecordMatchesStore(
+  record: { sales_point_id?: string },
+  pdvId: string,
+  workCenterId: string,
+): boolean {
+  const storedPdv = String(record.sales_point_id || '').trim();
+  if (!storedPdv) return true;
+  return (
+    storedPdv === pdvId
+    || storedPdv === workCenterId
+    || storedPdv === `wc:${workCenterId}`
+    || (workCenterId && storedPdv === `wc:${pdvId}`)
+  );
+}
+
+async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
+  const data = await listUsersRequest(businessId);
+  return data.users || [];
+}
 /** Trabajadores fichados hoy en la tienda (activos o en descanso). */
 export async function loadClockedInStoreWorkers(
   businessId: string,
   ownerUserId: string,
   pdvId: string,
   workCenterId: string,
+  options?: { relaxStoreAssignment?: boolean },
 ): Promise<TpvClockedInWorker[]> {
   if (!businessId || !pdvId) return [];
   const today = new Date().toISOString().slice(0, 10);
+  const relax = options?.relaxStoreAssignment ?? false;
   const [users, records] = await Promise.all([
     fetchBusinessUsers(businessId),
-    listClockins(businessId, { date: today, salesPointId: pdvId }),
+    listClockins(businessId, {
+      date: today,
+      salesPointId: pdvId,
+      workCenterId: workCenterId || undefined,
+      storeScope: true,
+    }),
   ]);
   const teamIds = new Set(
-    users
-      .filter(
-        (u) =>
-          u.status !== 'inactive' &&
-          isMemberAssignedToStore(u, ownerUserId, pdvId, workCenterId),
-      )
+    filterUsersForStoreClockin(users, ownerUserId, pdvId, workCenterId, relax)
       .map((u) => u.user_id),
   );
   const byId = new Map<string, TpvClockedInWorker>();
   for (const r of records) {
     if (!teamIds.has(r.member_id)) continue;
     if (r.status !== 'active' && r.status !== 'break') continue;
-    const storedPdv = String(r.sales_point_id || '').trim();
-    if (storedPdv) {
-      const atStore =
-        storedPdv === pdvId ||
-        storedPdv === workCenterId ||
-        storedPdv === `wc:${workCenterId}`;
-      if (!atStore) continue;
-    }
+    if (!clockinRecordMatchesStore(r, pdvId, workCenterId)) continue;
     byId.set(r.member_id, {
       id: r.member_id,
       name: r.member_name || 'Trabajador',

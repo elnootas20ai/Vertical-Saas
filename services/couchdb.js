@@ -2210,8 +2210,13 @@ export async function listClockinsByBusiness(req, businessId) {
   const db = getClockinsDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
+  const bareId = String(businessId || '').replace(/^business:/, '').trim();
   return docs
-    .filter((doc) => doc?.type === 'clockin' && !doc?.deletedAt && doc?.business_id === businessId)
+    .filter((doc) => {
+      if (doc?.type !== 'clockin' || doc?.deletedAt) return false;
+      const docBid = String(doc.business_id || '').replace(/^business:/, '').trim();
+      return docBid === bareId;
+    })
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 
@@ -4812,8 +4817,10 @@ export async function saveBusiness(req, business) {
 
 export async function findBusinessById(req, businessId) {
   if (!businessId) return null;
+  const bareId = String(businessId).replace(/^business:/, '').trim();
+  if (!bareId) return null;
   await ensureDatabase(req, BUSINESSES_DB);
-  return getDocument(req, BUSINESSES_DB, `business:${businessId}`);
+  return getDocument(req, BUSINESSES_DB, `business:${bareId}`);
 }
 
 // ─── WORKSHOP (TALLER) ────────────────────────────────────────────────────────

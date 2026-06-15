@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { getApiBase } from '../lib/apiBase';
+import { resolveSseAccessToken } from '../lib/sseToken';
 
 export type SSEEventHandler = (data: unknown) => void;
 export type SSEEventMap = Record<string, SSEEventHandler>;
@@ -7,8 +8,8 @@ export type SSEEventMap = Record<string, SSEEventHandler>;
 interface UseSSEOptions {
   /** userId del usuario autenticado */
   userId: string | null;
-  /** JWT access token */
-  token: string | null;
+  /** JWT access token (opcional; se resuelve vía cookie si falta) */
+  token?: string | null;
   /** businessId para recibir eventos del equipo */
   businessId?: string | null;
   /** Mapa de nombre de evento → función manejadora */
@@ -20,11 +21,13 @@ interface UseSSEOptions {
 const RECONNECT_INITIAL_MS = 3_000;
 const RECONNECT_MAX_MS = 60_000;
 
-function getSseUrl(token: string, businessId?: string | null): string {
+function buildSseUrl(token: string | null, businessId?: string | null): string {
   const base = getApiBase();
-  const params = new URLSearchParams({ token });
+  const params = new URLSearchParams();
+  if (token) params.set('token', token);
   if (businessId) params.set('businessId', businessId);
-  return `${base}/api/sse?${params.toString()}`;
+  const qs = params.toString();
+  return `${base}/api/sse${qs ? `?${qs}` : ''}`;
 }
 
 /**
@@ -36,11 +39,29 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(RECONNECT_INITIAL_MS);
   const handlersRef = useRef(handlers);
+  const [resolvedToken, setResolvedToken] = useState<string | null>(token ?? null);
 
-  // Mantener la referencia actualizada sin re-crear la conexión
   useEffect(() => {
     handlersRef.current = handlers;
   }, [handlers]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!enabled || !userId) {
+      setResolvedToken(null);
+      return;
+    }
+    if (token) {
+      setResolvedToken(token);
+      return;
+    }
+    void resolveSseAccessToken().then((t) => {
+      if (!cancelled) setResolvedToken(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, token, enabled]);
 
   const disconnect = useCallback(() => {
     if (reconnectTimeout.current) {
@@ -53,19 +74,27 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
     }
   }, []);
 
-  const connect = useCallback(() => {
-    if (!userId || !token || !enabled) return;
+  const connect = useCallback(async () => {
+    if (!userId || !enabled) return;
     disconnect();
 
-    const url = getSseUrl(token, businessId);
-    const es = new EventSource(url);
+    let activeToken = token || resolvedToken;
+    if (!activeToken) {
+      activeToken = await resolveSseAccessToken();
+      if (activeToken) setResolvedToken(activeToken);
+    }
+    if (!activeToken && getApiBase() !== '') {
+      return;
+    }
+
+    const url = buildSseUrl(activeToken, businessId);
+    const es = new EventSource(url, { withCredentials: true });
     esRef.current = es;
 
     es.addEventListener('connected', () => {
       reconnectDelay.current = RECONNECT_INITIAL_MS;
     });
 
-    // Registrar todos los handlers proporcionados
     for (const [eventName, handler] of Object.entries(handlersRef.current)) {
       es.addEventListener(eventName, (e: MessageEvent) => {
         try {
@@ -89,20 +118,19 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
       es.close();
       esRef.current = null;
 
-      // Backoff exponencial hasta RECONNECT_MAX_MS
       reconnectTimeout.current = setTimeout(() => {
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, RECONNECT_MAX_MS);
-        connect();
+        void connect();
       }, reconnectDelay.current);
     };
-  }, [userId, token, businessId, enabled, disconnect]);
+  }, [userId, token, resolvedToken, businessId, enabled, disconnect]);
 
   useEffect(() => {
-    if (enabled && userId && token) {
-      connect();
-    } else {
+    if (enabled && userId && (token || resolvedToken || getApiBase() === '')) {
+      void connect();
+    } else if (!enabled) {
       disconnect();
     }
     return disconnect;
-  }, [userId, token, businessId, enabled, connect, disconnect]);
+  }, [userId, token, resolvedToken, businessId, enabled, connect, disconnect]);
 }

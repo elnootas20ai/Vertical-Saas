@@ -21,11 +21,13 @@ import {
 } from '../lib/deliveryOpsPdvSelection';
 import { dedupePointsOfSale, pointOfSaleDisplayLabel, type PointOfSale } from '../lib/deliveryApi';
 import {
-  isDeliveryBusinessType,
+  isDeliveryAccountFromSources,
+  shouldUseDeliveryStores,
   loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
   resolveBusinessScopeId,
 } from '../lib/deliverySetup';
+import { readTpvTabletBinding } from '../lib/tpvTabletSession';
 import { filterStoresForWorkerAssignment, isInvitedWorkerUser } from '../lib/pdvScope';
 import type { AuthUser } from '../lib/authApi';
 import {
@@ -190,7 +192,10 @@ function ActiveStoreScopeProviderImpl({
         return;
       }
 
-      if (!isDeliveryBusinessType(biz?.businessType)) {
+      if (!shouldUseDeliveryStores(
+        { business: biz },
+        { tabletBusinessId: readTpvTabletBinding()?.businessId ?? null },
+      )) {
         setPointsOfSale([]);
         setAllPointsOfSale([]);
         setRetailWorkCenters([]);

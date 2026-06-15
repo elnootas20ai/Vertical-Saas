@@ -17,16 +17,22 @@ export function evaluateTpvClockInGate(params: {
   const { loading, clockedInWorkers, selectedOrderTakerId, currentUserId, isWorkerUser } = params;
   if (loading) return { allowed: false, reason: 'loading' };
 
+  const presentWorkers = clockedInWorkers.filter((w) => w.status === 'active' || w.status === 'break');
   const activeWorkers = clockedInWorkers.filter((w) => w.status === 'active');
-  if (activeWorkers.length === 0) {
+  if (presentWorkers.length === 0) {
     return { allowed: false, reason: 'none_active' };
   }
 
   if (isWorkerUser) {
+    const selfPresent = presentWorkers.some((w) => w.id === currentUserId);
     const selfActive = activeWorkers.some((w) => w.id === currentUserId);
-    return selfActive
-      ? { allowed: true, reason: 'ok' }
-      : { allowed: false, reason: 'worker_not_clocked' };
+    if (!selfPresent) {
+      return { allowed: false, reason: 'worker_not_clocked' };
+    }
+    if (!selfActive) {
+      return { allowed: false, reason: 'taker_not_active' };
+    }
+    return { allowed: true, reason: 'ok' };
   }
 
   const takerId = selectedOrderTakerId || activeWorkers[0]?.id || null;
@@ -46,7 +52,9 @@ export function tpvClockInBlockMessage(reason: TpvClockInBlockReason, isWorkerUs
     case 'worker_not_clocked':
       return 'Debes fichar tu entrada en esta tienda para operar el TPV.';
     case 'taker_not_active':
-      return 'Selecciona quién atiende: debe estar fichado y fuera de descanso.';
+      return isWorkerUser
+        ? 'Estás en descanso. Finaliza el descanso para operar el TPV.'
+        : 'Selecciona quién atiende: debe estar fichado y fuera de descanso.';
     default:
       return isWorkerUser
         ? 'Ficha tu entrada para continuar.'

@@ -1,22 +1,43 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { addSSEClient, removeSSEClient } from '../services/sseService.js';
+import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 
 const sseRouter = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'vertial-dev-secret-change-in-production';
+
+function resolveSseToken(req) {
+  const queryToken = String(req.query.token || '').trim();
+  if (queryToken) return queryToken;
+  return String(req.cookies?.access_token || '').trim();
+}
+
+/**
+ * GET /api/sse/token
+ * Devuelve un JWT corto para EventSource cuando la sesión va solo por cookie httpOnly.
+ */
+sseRouter.get('/token', requireAuthAndEmailVerified, (req, res) => {
+  const userId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'No autenticado' });
+  }
+  const token = jwt.sign({ userId, purpose: 'sse' }, JWT_SECRET, { expiresIn: '15m' });
+  return res.json({ ok: true, token });
+});
 
 /**
  * GET /api/sse
  *
  * Endpoint Server-Sent Events. El cliente envía el JWT como query param
  * porque EventSource no admite cabeceras personalizadas.
+ * Si no hay query token, se usa la cookie httpOnly `access_token`.
  *
  * Query params:
- *   - token     : JWT access token (obligatorio)
+ *   - token     : JWT access token (opcional si hay cookie de sesión)
  *   - businessId: ID del negocio al que pertenece el usuario (opcional)
  */
 sseRouter.get('/', (req, res) => {
-  const token = req.query.token;
+  const token = resolveSseToken(req);
   if (!token) {
     return res.status(401).json({ ok: false, error: 'Token requerido' });
   }
@@ -28,7 +49,10 @@ sseRouter.get('/', (req, res) => {
     return res.status(401).json({ ok: false, error: 'Token inválido o expirado' });
   }
 
-  const userId = payload.userId;
+  const userId = payload.userId || payload.user_id;
+  if (!userId) {
+    return res.status(401).json({ ok: false, error: 'Token inválido' });
+  }
   const businessId = req.query.businessId || null;
 
   // Cabeceras SSE — deshabilitar buffering en proxies

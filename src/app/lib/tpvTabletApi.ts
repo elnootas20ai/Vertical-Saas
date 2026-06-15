@@ -26,6 +26,8 @@ export interface TpvTabletBindingPayload {
   workCenterId: string;
   businessId: string;
   dataUserId: string;
+  /** Vertical del TPV fijado por el código (no depende del businessType). */
+  tpvVertical?: 'delivery';
 }
 
 export interface TpvTabletLoginResult extends ApiEnvelope<AuthUser> {

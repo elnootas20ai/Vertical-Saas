@@ -89,6 +89,8 @@ export interface AuthContextType {
   verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
   /** Sincroniza usuario con /api/auth/me (p. ej. verificación hecha en otra pestaña). */
   refreshCurrentUser: () => Promise<{ ok: boolean; emailVerified: boolean; sessionInvalid?: boolean }>;
+  /** true tras confirmar el perfil con el servidor (evita redirigir por caché local antigua). */
+  sessionSyncedWithServer: boolean;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string; info?: string }>;
   googleLogin: (credential: string) => Promise<{
     success: boolean;
@@ -191,6 +193,7 @@ export interface AuthContextType {
       workCenterId: string;
       businessId: string;
       dataUserId: string;
+      tpvVertical?: 'delivery';
     };
     needsClockIn?: boolean;
   }>;
@@ -210,6 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [sessionSyncedWithServer, setSessionSyncedWithServer] = useState(false);
 
   const setSessionUser = useCallback((nextUser: User) => {
     setUser(nextUser);
@@ -232,6 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const sessionUser = localStorage.getItem(SESSION_USER_STORAGE_KEY);
     if (!sessionUser) {
+      setSessionSyncedWithServer(true);
       setIsInitializing(false);
       return () => {
         cancelled = true;
@@ -253,25 +258,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     void (async () => {
-      try {
+      const hydrate = async (): Promise<boolean> => {
         const response = await fetchCurrentUserRequest();
-        if (cancelled) return;
         if (response.user) {
-          // La cookie httpOnly manda: corrige mezcla gerente/trabajador en el mismo navegador.
           setSessionUser(response.user);
-          return;
+          setSessionSyncedWithServer(true);
+          return true;
         }
-        const authOutOfSync = response.ok === false && Boolean(parsedFromStorage);
-        if (authOutOfSync) {
+        if (response.ok === false && Boolean(parsedFromStorage)) {
           persistSession(null);
           setUser(null);
           setIsAuthenticated(false);
           clearAuthTokens();
+          setSessionSyncedWithServer(true);
+          return true;
+        }
+        return false;
+      };
+
+      try {
+        for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
+          try {
+            if (await hydrate()) return;
+          } catch {
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+            }
+          }
         }
       } catch {
-        // Sin red: se mantiene el usuario leído de localStorage hasta que vuelva /me.
+        /* fallthrough */
       } finally {
-        if (!cancelled) setIsInitializing(false);
+        if (!cancelled) {
+          setIsInitializing(false);
+        }
       }
     })();
 
@@ -852,6 +872,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         persistSession(next);
         return next;
       });
+      setSessionSyncedWithServer(true);
       setIsAuthenticated(true);
       return { ok: true, emailVerified: Boolean(next.emailVerified) };
     } catch {
@@ -950,6 +971,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       workCenterId: string;
       businessId: string;
       dataUserId: string;
+      tpvVertical?: 'delivery';
     };
     needsClockIn?: boolean;
   }> => {
@@ -1010,6 +1032,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateOnboardingData,
         verifyEmail,
         refreshCurrentUser,
+        sessionSyncedWithServer,
         resendVerificationEmail,
         googleLogin,
         updateProfile,

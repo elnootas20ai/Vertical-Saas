@@ -10,7 +10,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
 import type { Lead, Client } from '../../context/AppContext';
-import { bulkCreateLeadsRequest, bulkCreateClientsRequest } from '../../lib/crmApi';
+import { bulkCreateLeadsRequest, bulkCreateClientsInChunks } from '../../lib/crmApi';
 import { useAuth } from '../../context/AuthContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -156,6 +156,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
   const [errors, setErrors] = useState<ImportError[]>([]);
   const [fileName, setFileName] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null);
 
   useEffect(() => {
@@ -354,10 +355,15 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           }));
 
         if (user?.user_id) {
-          const result = await bulkCreateClientsRequest(user.user_id, clientsToCreate);
-          created = result.length;
+          setImportProgress({ done: 0, total: clientsToCreate.length });
+          const result = await bulkCreateClientsInChunks(
+            user.user_id,
+            clientsToCreate,
+            (done, total) => setImportProgress({ done, total }),
+          );
+          created = result.created.length;
           failed = clientsToCreate.length - created;
-          // Refrescar el store global para que la lista de clientes incluya los nuevos sin recargar.
+          setImportProgress(null);
           await refreshClients();
         } else {
           for (const c of clientsToCreate) {
@@ -372,6 +378,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
     }
 
     setImporting(false);
+    setImportProgress(null);
     setImportResult({ created, failed });
   };
 
@@ -383,6 +390,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
     setMapping({});
     setErrors([]);
     setFileName('');
+    setImportProgress(null);
     setImportResult(null);
   };
 
@@ -546,7 +554,21 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           {/* ── PASO 3: Revisión + resultado ──────────────────────────────── */}
           {step === 3 && (
             <div className="space-y-4">
-              {importResult ? (
+              {importing && importProgress ? (
+                <div className="text-center py-12">
+                  <LoaderCircle className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Importando clientes...</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {importProgress.done} / {importProgress.total}
+                  </p>
+                  <div className="max-w-sm mx-auto mt-4 h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 transition-all duration-300"
+                      style={{ width: `${Math.round((importProgress.done / Math.max(importProgress.total, 1)) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : importResult ? (
                 <div className="text-center py-10">
                   <div className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center mb-4 ${importResult.failed === 0 ? 'bg-emerald-100' : 'bg-amber-100'}`}>
                     {importResult.failed === 0

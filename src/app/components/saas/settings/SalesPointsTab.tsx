@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
-  isDeliveryBusinessType,
+  isDeliveryAccountFromSources,
   bootstrapRetailStoreAfterCreate,
   loadDeliveryStores,
   clearDeliveryStoresSessionCache,
@@ -1472,7 +1472,6 @@ export function SalesPointsTab() {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const hasProAccess = useHasProAccess();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1496,6 +1495,12 @@ export function SalesPointsTab() {
   const [deliveryPdvsByWorkCenter, setDeliveryPdvsByWorkCenter] = useState<
     Record<string, Pick<PointOfSale, '_id' | '_rev' | 'code' | 'name' | 'address' | 'workCenterId' | 'terminalCode'>>
   >({});
+  const isDeliveryAccount = isDeliveryAccountFromSources({
+    business: currentBusiness,
+    businesses,
+  });
+  const hasDeliveryPdvs = Object.keys(deliveryPdvsByWorkCenter).length > 0;
+  const isDelivery = isDeliveryAccount || hasDeliveryPdvs;
   const [regeneratingTerminal, setRegeneratingTerminal] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
   const loadSeqRef = useRef(0);
@@ -2395,7 +2400,7 @@ export function SalesPointsTab() {
                     <span>{wc.phone}</span>
                   </div>
                 )}
-                {isDelivery && wc.centerType === 'punto_de_venta' && !deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
+                {wc.centerType === 'punto_de_venta' && !deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
                   <div className="rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 space-y-1.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
                       Sin código de tablet
@@ -2421,7 +2426,7 @@ export function SalesPointsTab() {
                     </button>
                   </div>
                 )}
-                {isDelivery && wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
+                {wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
                   <div className="rounded-lg border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-950/30 px-2.5 py-2 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
