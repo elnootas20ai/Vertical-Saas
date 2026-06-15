@@ -95,6 +95,7 @@ import {
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
+import { applySuperAdminSubscriptionActivation } from '../services/subscriptionAdminActivation.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
@@ -819,7 +820,7 @@ export async function updateProfile(req, res) {
 
     let nextSubscription = account.subscription || null;
     if (subscription !== undefined) {
-      const merged = { ...(account.subscription || {}), ...subscription };
+      let merged = { ...(account.subscription || {}), ...subscription };
       const actorEmail = req.authUser?.email || '';
       if (isVertialSuperAdminEmail(actorEmail)) {
         if (Object.prototype.hasOwnProperty.call(subscription, 'extraPointOfSaleSlots')) {
@@ -836,6 +837,7 @@ export async function updateProfile(req, res) {
         if (Object.prototype.hasOwnProperty.call(subscription, 'billingExempt')) {
           merged.billingExempt = Boolean(subscription.billingExempt);
         }
+        merged = applySuperAdminSubscriptionActivation(merged, account.subscription);
       } else {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
         merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;

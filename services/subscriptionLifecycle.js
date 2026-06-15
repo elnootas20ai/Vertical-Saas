@@ -180,6 +180,7 @@ export async function runSubscriptionLifecycle() {
       const sub = account.subscription;
       if (!sub) continue;
       if (sub.billingExempt) continue;
+      if (sub.status === 'subscription_active') continue;
       processed++;
 
       const status = sub.status;

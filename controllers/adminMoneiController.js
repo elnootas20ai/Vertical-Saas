@@ -19,6 +19,7 @@ import {
   saveAccount,
   writeChangelog,
 } from '../services/couchdb.js';
+import { applySuperAdminSubscriptionActivation } from '../services/subscriptionAdminActivation.js';
 import logger from '../services/logger.js';
 
 const MONEI_COMMISSION_PERCENT = 0.8;
@@ -365,13 +366,17 @@ export async function adminReactivateAccount(req, res) {
 
     const updatedAccount = await saveAccount(req, {
       ...account,
-      subscription: {
-        ...sub,
-        status: 'subscription_active',
-        billingExempt: Boolean(billingExempt),
-        currentPeriodEnd: periodEnd.toISOString(),
-        gracePeriodEndsAt: graceEnd.toISOString(),
-      },
+      subscription: applySuperAdminSubscriptionActivation(
+        {
+          ...sub,
+          status: 'subscription_active',
+          billingExempt: true,
+          currentPeriodEnd: periodEnd.toISOString(),
+          gracePeriodEndsAt: graceEnd.toISOString(),
+          cancelAtPeriodEnd: false,
+        },
+        sub,
+      ),
       updatedAt: now.toISOString(),
     });
 
@@ -384,7 +389,7 @@ export async function adminReactivateAccount(req, res) {
       actorName: req.authUser?.fullName || 'Admin',
       changes: {
         status: { before: previousStatus, after: 'subscription_active' },
-        billingExempt: { before: Boolean(sub.billingExempt), after: Boolean(billingExempt) },
+        billingExempt: { before: Boolean(sub.billingExempt), after: true },
       },
     });
 

@@ -341,6 +341,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     setSaving(true);
     setSaveError('');
     setSaveSuccess(false);
+    const activating = subscriptionStatus === 'subscription_active' || subscriptionStatus === 'trial_active';
+    const wasBlocked = ['suspended', 'grace_period', 'payment_failed', 'trial_expired'].includes(
+      account.subscription?.status || '',
+    );
+    const effectiveBillingExempt = billingExempt || (activating && wasBlocked);
     const result = await updateUser(account.user_id, {
       companyName,
       email,
@@ -350,14 +355,14 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
         planName,
         selectedPlanId,
         status: subscriptionStatus as AuthUser['subscription'] extends { status: infer S } ? S : never,
-        cancelAtPeriodEnd: account.subscription?.cancelAtPeriodEnd ?? false,
+        cancelAtPeriodEnd: activating ? false : (account.subscription?.cancelAtPeriodEnd ?? false),
         extraPointOfSaleSlots: Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0))),
         extraCommercialBrandSlots: Math.max(
           0,
           Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)),
         ),
         adminProAccess,
-        billingExempt,
+        billingExempt: effectiveBillingExempt,
       },
     });
     setSaving(false);

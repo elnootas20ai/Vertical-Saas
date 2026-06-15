@@ -843,7 +843,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (
           prev?.user_id === next.user_id &&
           prev.emailVerified === next.emailVerified &&
-          prev.updatedAt === next.updatedAt
+          prev.updatedAt === next.updatedAt &&
+          prev.subscription?.status === next.subscription?.status &&
+          Boolean(prev.subscription?.billingExempt) === Boolean(next.subscription?.billingExempt)
         ) {
           return prev;
         }

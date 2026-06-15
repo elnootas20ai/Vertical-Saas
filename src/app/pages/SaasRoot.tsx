@@ -75,7 +75,7 @@ function SaasContent() {
 
   const { subscription } = useApp();
 
-  const { isAuthenticated, isInitializing, user } = useAuth();
+  const { isAuthenticated, isInitializing, user, refreshCurrentUser } = useAuth();
 
   const businessCtx = useBusinessOptional();
   const businesses = businessCtx?.businesses ?? [];
@@ -103,7 +103,19 @@ function SaasContent() {
 
   }, [isAuthenticated, isInitializing, navigate]);
 
-
+  useEffect(() => {
+    if (!isAuthenticated || isInitializing) return;
+    const syncSubscription = () => {
+      void refreshCurrentUser();
+    };
+    syncSubscription();
+    window.addEventListener('focus', syncSubscription);
+    const interval = window.setInterval(syncSubscription, 5 * 60 * 1000);
+    return () => {
+      window.removeEventListener('focus', syncSubscription);
+      window.clearInterval(interval);
+    };
+  }, [isAuthenticated, isInitializing, refreshCurrentUser]);
 
   useEffect(() => {
 
