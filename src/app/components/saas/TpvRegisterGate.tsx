@@ -1312,25 +1312,32 @@ function ClockInModal({
 
   const handleClockIn = async (member: AuthUser) => {
     setActingId(member.user_id);
+    let already = false;
     try {
       const rec = await clockIn(businessId, member.user_id, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
         sales_point_id: pdvId || undefined,
         sales_point_name: storeLabel || undefined,
+        work_center_id: workCenterId || undefined,
       });
-      const already = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
-      toast.success(
-        already
-          ? `${member.fullName || 'Trabajador'} — ya estaba fichado`
-          : `${member.fullName || 'Trabajador'} — fichaje de entrada`,
-      );
-      await load();
-      onChanged?.();
+      already = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo fichar');
-    } finally {
       setActingId(null);
+      return;
     }
+    toast.success(
+      already
+        ? `${member.fullName || 'Trabajador'} — ya estaba fichado`
+        : `${member.fullName || 'Trabajador'} — fichaje de entrada`,
+    );
+    try {
+      await load();
+    } catch {
+      // El fichaje ya se guardó; no mostrar error si solo falla el refresco del listado.
+    }
+    onChanged?.();
+    setActingId(null);
   };
 
   const handleBreak = async (member: AuthUser) => {
@@ -2629,7 +2636,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     const openingRestrictedPdvId = tabletRestrictedPdvId
       || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
 
-    return wrapShell(
+    const openingScreen = (
       <OpeningScreen
         onOpen={handleOpen}
         loading={loading}
@@ -2651,8 +2658,25 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
               }
             : undefined
         }
-      />,
+      />
     );
+
+    if (isTabletSession) {
+      return wrapShell(
+        <>
+          <div className="flex flex-col min-h-screen">
+            <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
+          </div>
+          <TpvGatePortal>
+            <div className="fixed inset-0 z-[60] bg-gray-50 dark:bg-gray-900 overflow-y-auto">
+              {openingScreen}
+            </div>
+          </TpvGatePortal>
+        </>,
+      );
+    }
+
+    return wrapShell(openingScreen);
   }
 
   return wrapShell(

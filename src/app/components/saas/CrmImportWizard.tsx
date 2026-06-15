@@ -4,7 +4,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { toast } from 'sonner';
 import {
   X, Upload, FileText, CheckCircle, AlertCircle, ArrowRight,
-  ArrowLeft, Download, LoaderCircle, Users, User,
+  ArrowLeft, LoaderCircle, Users, User,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -12,23 +12,21 @@ import { useApp } from '../../context/AppContext';
 import type { Lead, Client } from '../../context/AppContext';
 import { bulkCreateLeadsRequest, bulkCreateClientsInChunks } from '../../lib/crmApi';
 import { useAuth } from '../../context/AuthContext';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type ImportMode = 'leads' | 'clients';
-
-type LeadField =
-  | 'name' | 'phone' | 'email' | 'source' | 'status'
-  | 'vehicleInterest' | 'budget' | 'notes' | 'responsible' | 'tags' | 'ignore';
-
-type ClientField =
-  | 'name' | 'phone' | 'email' | 'dni' | 'address' | 'city'
-  | 'postalCode' | 'notes' | 'responsible' | 'tags' | 'ignore';
-
-type ImportField = LeadField | ClientField;
-type MappedData = Partial<Record<string, string>>;
+import {
+  autoDetectImportField,
+  CLIENT_REQUIRED_FIELDS,
+  LEAD_REQUIRED_FIELDS,
+  normalizeParsedTable,
+  REQUIRED_FIELD_LABELS,
+  type ClientField,
+  type ImportField,
+  type ImportMode,
+  type LeadField,
+} from '../../lib/crmImportParse';
 
 interface ImportError { row: number; field: string; message: string; value: unknown; }
+
+type MappedData = Partial<Record<string, string>>;
 
 interface CrmImportWizardProps {
   isOpen: boolean;
@@ -55,7 +53,7 @@ const LEAD_FIELDS: { value: LeadField; label: string; required?: boolean }[] = [
 const CLIENT_FIELDS: { value: ClientField; label: string; required?: boolean }[] = [
   { value: 'name',        label: 'Nombre *',       required: true },
   { value: 'phone',       label: 'Teléfono *',     required: true },
-  { value: 'email',       label: 'Email *',        required: true },
+  { value: 'email',       label: 'Email' },
   { value: 'dni',         label: 'DNI / CIF' },
   { value: 'address',     label: 'Dirección' },
   { value: 'city',        label: 'Ciudad' },
@@ -65,80 +63,6 @@ const CLIENT_FIELDS: { value: ClientField; label: string; required?: boolean }[]
   { value: 'tags',        label: 'Etiquetas' },
   { value: 'ignore',      label: '(Ignorar columna)' },
 ];
-
-const LEAD_REQUIRED: LeadField[] = ['name', 'phone'];
-const CLIENT_REQUIRED: ClientField[] = ['name', 'phone', 'email'];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function normalizeHeader(h: string) {
-  return String(h || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    // Quitar ruido típico de plantillas: asteriscos, paréntesis, etc.
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
-const LEAD_ALIASES: Record<string, LeadField> = {
-  nombre: 'name', name: 'name',
-  telefono: 'phone', phone: 'phone', movil: 'phone', tel: 'phone',
-  email: 'email', correo: 'email',
-  fuente: 'source', source: 'source', origen: 'source',
-  estado: 'status', status: 'status',
-  vehiculo: 'vehicleInterest', 'vehiculo de interes': 'vehicleInterest', interes: 'vehicleInterest',
-  presupuesto: 'budget', budget: 'budget',
-  notas: 'notes', notes: 'notes', observaciones: 'notes',
-  responsable: 'responsible', assigned: 'responsible', comercial: 'responsible',
-  etiquetas: 'tags', tags: 'tags', labels: 'tags',
-};
-
-const CLIENT_ALIASES: Record<string, ClientField> = {
-  nombre: 'name', name: 'name',
-  telefono: 'phone', phone: 'phone', movil: 'phone', tel: 'phone',
-  email: 'email', correo: 'email',
-  dni: 'dni', nif: 'dni', cif: 'dni',
-  direccion: 'address', address: 'address', calle: 'address',
-  ciudad: 'city', city: 'city', poblacion: 'city',
-  'codigo postal': 'postalCode', cp: 'postalCode', postalcode: 'postalCode',
-  notas: 'notes', notes: 'notes', observaciones: 'notes',
-  responsable: 'responsible', comercial: 'responsible',
-  etiquetas: 'tags', tags: 'tags', labels: 'tags',
-};
-
-function autoDetect(header: string, mode: ImportMode): ImportField {
-  const norm = normalizeHeader(header);
-  const aliases = mode === 'leads' ? LEAD_ALIASES : CLIENT_ALIASES;
-  return aliases[norm] || 'ignore';
-}
-
-function generateLeadTemplate() {
-  const ws = XLSX.utils.aoa_to_sheet([[
-    'Nombre', 'Teléfono', 'Email', 'Fuente', 'Estado', 'Vehículo de interés',
-    'Presupuesto', 'Notas', 'Responsable', 'Etiquetas',
-  ], [
-    'Carlos Ruiz', '612345678', 'carlos@email.com', 'Web', 'new',
-    'BMW Serie 3 2020', '25000', 'Interesado en financiación', 'Juan García', 'VIP,Financiación',
-  ]]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Leads');
-  XLSX.writeFile(wb, 'plantilla_leads.xlsx');
-}
-
-function generateClientTemplate() {
-  const ws = XLSX.utils.aoa_to_sheet([[
-    'Nombre', 'Teléfono', 'Email', 'DNI', 'Dirección', 'Ciudad',
-    'Código postal', 'Notas', 'Responsable', 'Etiquetas',
-  ], [
-    'Ana López', '623456789', 'ana@email.com', '12345678A', 'Calle Mayor 10',
-    'Madrid', '28013', 'Cliente premium', 'María García', 'Premium,Madrid',
-  ]]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
-  XLSX.writeFile(wb, 'plantilla_clientes.xlsx');
-}
 
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 
@@ -158,17 +82,33 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null);
+  const [parsingFile, setParsingFile] = useState(false);
 
   useEffect(() => {
     if (initialMode) setMode(initialMode);
   }, [initialMode]);
 
   const activeFields = mode === 'leads' ? LEAD_FIELDS : CLIENT_FIELDS;
-  const requiredFields: ImportField[] = mode === 'leads' ? LEAD_REQUIRED : CLIENT_REQUIRED;
+  const requiredFields: ImportField[] = mode === 'leads' ? LEAD_REQUIRED_FIELDS : CLIENT_REQUIRED_FIELDS;
   const missingRequiredMapped = useMemo(() => {
     const mappedFields = Object.values(mapping);
     return requiredFields.filter((f) => !mappedFields.includes(f));
   }, [mapping, requiredFields]);
+
+  const applyParsedTable = (headers: string[], body: string[][]) => {
+    const normalized = normalizeParsedTable([headers, ...body]);
+    if (!normalized) {
+      toast.error('No se detectaron filas de datos. Revisa que el CSV tenga cabecera y al menos una fila.');
+      return false;
+    }
+    setHeaders(normalized.headers);
+    setRows(normalized.rows);
+    const auto: Record<number, ImportField> = {};
+    normalized.headers.forEach((h, i) => { auto[i] = autoDetectImportField(h, mode); });
+    setMapping(auto);
+    setStep(2);
+    return true;
+  };
 
   const mappedRows = useMemo((): MappedData[] => {
     return rows.map((row) => {
@@ -188,12 +128,18 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
 
   const handleFile = (file: File) => {
     setFileName(file.name);
+    setParsingFile(true);
     const ext = file.name.split('.').pop()?.toLowerCase();
+    const isCsvLike = ext === 'csv' || ext === 'tsv' || ext === 'txt' || file.type.includes('csv') || file.type.includes('text');
 
-    if (ext === 'csv') {
+    if (isCsvLike) {
       Papa.parse(file, {
         skipEmptyLines: true,
+        delimiter: '',
+        delimitersToGuess: [';', ',', '\t', '|'],
+        encoding: 'UTF-8',
         complete: (result) => {
+          setParsingFile(false);
           const data = result.data as string[][];
           if (!data.length) {
             toast.error('El archivo está vacío o no se pudo leer');
@@ -201,81 +147,80 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
           }
           const hdrs = data[0].map(String);
           const body = data.slice(1);
-          if (!hdrs.length || body.length === 0) {
-            toast.error('No se detectaron filas de datos en el archivo');
-            return;
-          }
-          setHeaders(hdrs);
-          setRows(body);
-          const auto: Record<number, ImportField> = {};
-          hdrs.forEach((h, i) => { auto[i] = autoDetect(h, mode); });
-          setMapping(auto);
-          setStep(2);
+          applyParsedTable(hdrs, body);
         },
-        error: () => toast.error('No se pudo leer el CSV'),
+        error: () => {
+          setParsingFile(false);
+          toast.error('No se pudo leer el CSV. Prueba guardarlo como UTF-8 o descarga la plantilla.');
+        },
       });
-    } else {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const raw = e.target?.result;
-          if (!raw) {
-            toast.error('No se pudo leer el archivo');
-            return;
-          }
-          // Usamos ArrayBuffer (más compatible que readAsBinaryString)
-          const wb = XLSX.read(raw, { type: 'array' });
-          const sheetName = wb.SheetNames?.[0];
-          const ws = sheetName ? wb.Sheets[sheetName] : null;
-          if (!ws) {
-            toast.error('No se encontró ninguna hoja en el Excel');
-            return;
-          }
-          const data = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false }) as unknown[][];
-          if (!data.length) {
-            toast.error('El Excel está vacío');
-            return;
-          }
-          const hdrs = (data[0] as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean);
-          const body = (data.slice(1) as unknown[][])
-            .map((row) => row.map((x) => String(x ?? '').trim()))
-            .filter((row) => row.some((v) => String(v || '').trim() !== ''));
-
-          if (!hdrs.length || body.length === 0) {
-            toast.error('No se detectaron filas de datos en el Excel');
-            return;
-          }
-          setHeaders(hdrs);
-          setRows(body);
-          const auto: Record<number, ImportField> = {};
-          hdrs.forEach((h, i) => { auto[i] = autoDetect(h, mode); });
-          setMapping(auto);
-          setStep(2);
-        } catch (err) {
-          console.error('CRM import Excel parse error', err);
-          toast.error('Error leyendo el Excel. Prueba a guardarlo como XLSX o CSV');
-        }
-      };
-      reader.onerror = () => toast.error('No se pudo leer el archivo');
-      reader.readAsArrayBuffer(file);
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setParsingFile(false);
+      try {
+        const raw = e.target?.result;
+        if (!raw) {
+          toast.error('No se pudo leer el archivo');
+          return;
+        }
+        const wb = XLSX.read(raw, { type: 'array' });
+        const sheetName = wb.SheetNames?.[0];
+        const ws = sheetName ? wb.Sheets[sheetName] : null;
+        if (!ws) {
+          toast.error('No se encontró ninguna hoja en el Excel');
+          return;
+        }
+        const data = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false }) as unknown[][];
+        if (!data.length) {
+          toast.error('El Excel está vacío');
+          return;
+        }
+        const hdrs = (data[0] as unknown[]).map((x) => String(x ?? '').trim());
+        const body = (data.slice(1) as unknown[][])
+          .map((row) => row.map((x) => String(x ?? '').trim()));
+
+        applyParsedTable(hdrs, body);
+      } catch (err) {
+        console.error('CRM import Excel parse error', err);
+        toast.error('Error leyendo el Excel. Prueba a guardarlo como XLSX o CSV');
+      }
+    };
+    reader.onerror = () => {
+      setParsingFile(false);
+      toast.error('No se pudo leer el archivo');
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const validateRows = (): ImportError[] => {
     const errs: ImportError[] = [];
     mappedRows.forEach((row, idx) => {
-      requiredFields.forEach((field) => {
+      for (const field of requiredFields) {
         if (!row[field]?.trim()) {
-          errs.push({ row: idx + 2, field, message: `Campo obligatorio vacío: ${field}`, value: '' });
+          errs.push({
+            row: idx + 2,
+            field,
+            message: `Campo obligatorio vacío: ${REQUIRED_FIELD_LABELS[field] || field}`,
+            value: '',
+          });
         }
-      });
+      }
     });
     return errs;
   };
 
   const handleValidate = () => {
     if (missingRequiredMapped.length > 0) {
-      toast.error(`Debes mapear los campos obligatorios: ${missingRequiredMapped.join(', ')}`);
+      const labels = missingRequiredMapped.map((f) => REQUIRED_FIELD_LABELS[f] || f).join(', ');
+      toast.error(`Asigna estas columnas obligatorias: ${labels}`);
+      return;
+    }
+    const validCount = mappedRows.filter((r) => r.name?.trim() && r.phone?.trim()).length;
+    if (validCount === 0) {
+      toast.error('No hay filas con Nombre y Teléfono. Revisa el mapeo o el contenido del CSV.');
       return;
     }
     const errs = validateRows();
@@ -460,27 +405,12 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
                 </div>
               )}
 
-              {/* Plantilla */}
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">¿Necesitas una plantilla?</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Descarga el Excel de ejemplo para {mode === 'leads' ? 'leads' : 'clientes'}</p>
-                  </div>
-                  <button
-                    onClick={mode === 'leads' ? generateLeadTemplate : generateClientTemplate}
-                    className="flex items-center gap-2 px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg border border-blue-200 transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    Descargar plantilla
-                  </button>
-                </div>
-              </div>
-
               {/* Drop zone */}
               <div
-                className="border-2 border-dashed border-gray-300 hover:border-blue-400 rounded-xl p-10 text-center cursor-pointer transition-colors group"
-                onClick={() => fileRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors group ${
+                  parsingFile ? 'border-blue-300 bg-blue-50/50' : 'border-gray-300 hover:border-blue-400'
+                }`}
+                onClick={() => !parsingFile && fileRef.current?.click()}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
@@ -489,11 +419,21 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
                 }}
               >
                 <Upload className="w-10 h-10 text-gray-300 group-hover:text-blue-400 mx-auto mb-3 transition-colors" />
-                <p className="text-gray-700 dark:text-gray-300 font-medium">Arrastra tu archivo aquí</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">o haz clic para seleccionar</p>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">Formatos: CSV, XLSX, XLS</p>
+                {parsingFile ? (
+                  <>
+                    <LoaderCircle className="w-6 h-6 text-blue-600 animate-spin mx-auto mb-2" />
+                    <p className="text-gray-700 dark:text-gray-300 font-medium">Leyendo archivo...</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium">Arrastra tu archivo aquí</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">o haz clic para seleccionar</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">Formatos: CSV (coma o punto y coma), TSV, XLSX, XLS</p>
+                    {fileName ? <p className="text-xs text-blue-600 mt-2 font-medium">{fileName}</p> : null}
+                  </>
+                )}
               </div>
-              <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
             </div>
           )}
 
@@ -508,8 +448,11 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
               </div>
               {missingRequiredMapped.length > 0 && (
                 <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-xs font-semibold">
-                  Falta mapear campos obligatorios para continuar: {missingRequiredMapped.join(', ')}.
-                  <span className="font-medium"> Asegúrate de haber subido la plantilla correcta (Clientes) y asigna cada columna.</span>
+                  Para continuar, asigna estas columnas obligatorias:{' '}
+                  {missingRequiredMapped.map((f) => REQUIRED_FIELD_LABELS[f] || f).join(', ')}.
+                  <span className="font-medium block mt-1">
+                    Si tu CSV viene de Excel en español, usa cabeceras como «Nombre» y «Teléfono» (o mapéalas manualmente en el desplegable).
+                  </span>
                 </div>
               )}
               <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
@@ -605,7 +548,8 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
                     <div>
                       <p className="text-sm font-semibold text-blue-800">Resumen de importación</p>
                       <p className="text-sm text-blue-700 mt-0.5">
-                        {mappedRows.filter((r) => r.name && r.phone).length} registros válidos de {rows.length} filas totales
+                        {mappedRows.filter((r) => r.name && r.phone).length} registros válidos (nombre + teléfono) de {rows.length} filas
+                        {mode === 'clients' ? ' · el email es opcional' : ''}
                       </p>
                     </div>
                   </div>

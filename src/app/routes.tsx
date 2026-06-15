@@ -111,6 +111,7 @@ import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
+import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
@@ -547,9 +548,9 @@ export const router = createBrowserRouter([
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
           { path: 'sala', Component: SalaPage },
-          { path: 'tpv/locales', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
-          { path: 'tpv', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
-          { path: 'tpv-mode', element: <Navigate to="/saas/vertical/delivery/tpv" replace /> },
+          { path: 'tpv/locales', element: <RedirectLegacyDeliveryTpv /> },
+          { path: 'tpv', element: <RedirectLegacyDeliveryTpv /> },
+          { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
           { path: 'tpv/punto/:salesPointId', Component: SalesPointTpvPage },
           { path: 'clock-kiosk', Component: ClockKiosk },
           { path: 'income-expenses', element: <RequireBusinessOwner><IncomeExpensesPage /></RequireBusinessOwner> },

@@ -200,6 +200,7 @@ export interface ClockInOptions {
   device_type?: ClockinDeviceType;
   sales_point_id?: string;
   sales_point_name?: string;
+  work_center_id?: string;
 }
 
 export async function clockIn(
@@ -217,6 +218,7 @@ export async function clockIn(
         memberName,
         sales_point_id: options?.sales_point_id,
         sales_point_name: options?.sales_point_name,
+        work_center_id: options?.work_center_id,
         device_type: options?.device_type,
         geo: options?.geo,
       }),

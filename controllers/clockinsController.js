@@ -21,6 +21,7 @@ import {
   canMutateClockinForMember,
   computeClockinMinutes,
   deriveClockinStatus,
+  salesPointRefsSameStore,
 } from '../services/clockinsAccess.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -729,6 +730,7 @@ export async function checkInMember(req, res) {
       memberName,
       sales_point_id: salesPointId,
       sales_point_name: salesPointName,
+      work_center_id: workCenterId,
       device_type: deviceType,
       geo,
     } = req.body || {};
@@ -754,6 +756,7 @@ export async function checkInMember(req, res) {
     if (activeToday) {
       const sp = String(salesPointId || '').trim();
       const spName = String(salesPointName || '').trim();
+      const wc = String(workCenterId || '').trim();
       const existingSp = String(activeToday.sales_point_id || '').trim();
       let doc = activeToday;
       if (sp && !existingSp) {
@@ -764,17 +767,19 @@ export async function checkInMember(req, res) {
           updatedAt: now,
         };
         await putDocument(req, clockinsDb, activeToday._id, doc);
-      } else if (
-        sp
-        && existingSp
-        && existingSp !== sp
-        && existingSp !== `wc:${sp}`
-        && sp !== `wc:${existingSp}`
-      ) {
+      } else if (sp && existingSp && !salesPointRefsSameStore(existingSp, sp, wc)) {
         return res.status(409).json({
           ok: false,
           error: 'Ya tienes un fichaje activo hoy en otra tienda',
         });
+      } else if (sp && existingSp && sp !== existingSp && salesPointRefsSameStore(existingSp, sp, wc)) {
+        doc = {
+          ...activeToday,
+          sales_point_id: sp,
+          sales_point_name: spName || activeToday.sales_point_name,
+          updatedAt: now,
+        };
+        await putDocument(req, clockinsDb, activeToday._id, doc);
       }
       return res.json({ ok: true, clockin: doc, alreadyActive: true });
     }

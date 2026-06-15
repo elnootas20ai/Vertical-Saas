@@ -9,7 +9,12 @@ import { useBusiness } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
-import { readTpvTabletBinding, writeTpvTabletBinding, clearTpvTabletBinding } from '../../lib/tpvTabletSession';
+import {
+  readTpvTabletBinding,
+  writeTpvTabletBinding,
+  clearTpvTabletBinding,
+  TPV_TABLET_DELIVERY_PATH,
+} from '../../lib/tpvTabletSession';
 
 export function TpvTabletLogin() {
   const navigate = useNavigate();
@@ -92,7 +97,7 @@ export function TpvTabletLogin() {
       );
     }
 
-    navigate(result.redirectTo || '/saas/worker/tpv/delivery');
+    navigate(TPV_TABLET_DELIVERY_PATH, { replace: true });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

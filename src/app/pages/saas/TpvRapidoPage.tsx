@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -34,6 +34,8 @@ import {
   parseTpvSectionId,
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
+import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
+import { shouldUseDeliveryStores } from '../../lib/deliverySetup';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import {
   ArrowLeft,
@@ -152,6 +154,9 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
 }
 
 export function TpvRapidoPage() {
+  if (isTpvTabletBound()) {
+    return <Navigate to={TPV_TABLET_DELIVERY_PATH} replace />;
+  }
   return (
     <TpvRegisterGate>
       <TpvRapidoOrderFlow />
@@ -183,7 +188,14 @@ export function TpvRapidoOrderFlow({
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
   const userId = resolveBusinessDataUserId(user, currentBusiness);
-  const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
+  const isDeliveryBusiness = useMemo(
+    () => shouldUseDeliveryStores(
+      { business: currentBusiness, userOnboarding: user?.onboarding },
+      { tabletBusinessId: tabletBinding?.businessId ?? null, hasDeliveryPdvs: true },
+    ),
+    [currentBusiness, user?.onboarding, tabletBinding?.businessId],
+  );
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
@@ -748,6 +760,10 @@ export function TpvRapidoOrderFlow({
       toast.error('Completa la ciudad del cliente');
       return;
     }
+    if (!userId) {
+      toast.error('No se pudo identificar la empresa');
+      return;
+    }
     setCreatingClient(true);
     try {
       const addressId = uuidv4();
@@ -791,10 +807,21 @@ export function TpvRapidoOrderFlow({
         },
       };
       const created = await addClient(clientData);
-      if (created) {
-        toast.success('Cliente creado');
-        handleSelectClient(created);
+      if (!created) {
+        toast.error('No se pudo crear el cliente. Inténtalo de nuevo.');
+        return;
       }
+      toast.success('Cliente creado');
+      setShowCreateForm(false);
+      setNewClientName('');
+      setNewClientStreet('');
+      setNewClientCity('');
+      setNewClientNotes('');
+      setNewClientPayment('');
+      setNewClientPhone('');
+      setPhoneInput(created.phone || phoneDigits);
+      setPhonePrefix(created.phonePrefix || phonePrefix);
+      handleSelectClient(created);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear cliente');
     } finally {
@@ -1192,13 +1219,93 @@ export function TpvRapidoOrderFlow({
     </button>
   ) : null;
 
+  const footerPrimaryLabel = (() => {
+    if (currentStep === 'client' && showCreateForm) {
+      return creatingClient ? 'Guardando...' : 'Guardar cliente';
+    }
+    if (currentStep === 'client' && selectedClient) return 'Continuar';
+    if (currentStep === 'client') return 'Selecciona un cliente';
+    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return 'Continuar';
+    if (submitting) return 'Enviando...';
+    return 'Cobrar y enviar';
+  })();
+
+  const footerPrimaryDisabled = (() => {
+    if (currentStep === 'client' && showCreateForm) return creatingClient;
+    if (currentStep === 'client' && selectedClient) return false;
+    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return false;
+    return !canSubmit || submitting;
+  })();
+
+  const handleFooterPrimary = () => {
+    if (currentStep === 'client' && showCreateForm) {
+      void handleCreateClient();
+      return;
+    }
+    if (currentStep === 'client' && selectedClient) {
+      completeStep('client');
+      return;
+    }
+    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) {
+      completeStep('delivery');
+      return;
+    }
+    void handleSubmitOrder(tabletMode ? 'listo' : initialStatus);
+  };
+
+  const stickyFooter = (
+    <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg">
+      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-4 py-3`}>
+        <div className="flex items-center justify-end gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
+          {cartCount > 0 && (
+            <span className="flex items-center gap-1">
+              <ShoppingCart className="w-3 h-3" />
+              {cartCount}
+            </span>
+          )}
+          {finalTotal > 0 && (
+            <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+              {formatPrice(finalTotal)}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleReset}
+            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={goToPreviousStep}
+            disabled={currentStep === 'client'}
+            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Atrás
+          </button>
+          <button
+            type="button"
+            onClick={handleFooterPrimary}
+            disabled={footerPrimaryDisabled}
+            className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {footerPrimaryLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <TpvFullscreenShell
       onBack={goBack}
       embedded
       topSlot={tpvTopActions}
+      footerSlot={stickyFooter}
     >
-      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-28 px-2 md:px-4`}>
+      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-4 px-2 md:px-4`}>
         <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
           <ClockedInWorkerBubbles
             workers={register.clockedInWorkers}
@@ -1818,47 +1925,6 @@ export function TpvRapidoOrderFlow({
           </StepContainer>
         ) : null}
       </div>
-
-      {/* ═══════════════ STICKY FOOTER ═══════════════ */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg">
-        <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-4 py-3`}>
-          <div className="flex items-center justify-end gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
-            {cartCount > 0 && (
-              <span className="flex items-center gap-1">
-                <ShoppingCart className="w-3 h-3" />
-                {cartCount}
-              </span>
-            )}
-            {finalTotal > 0 && (
-              <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
-                {formatPrice(finalTotal)}
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleReset}
-              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={goToPreviousStep}
-              disabled={currentStep === 'client'}
-              className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Atrás
-            </button>
-            <button
-              onClick={() => handleSubmitOrder(tabletMode ? 'listo' : initialStatus)}
-              disabled={!canSubmit || submitting}
-              className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {submitting ? 'Enviando...' : 'Cobrar y enviar'}
-            </button>
-          </div>
-        </div>
-      </div>
     </TpvFullscreenShell>
   );
 }
@@ -1881,11 +1947,13 @@ function TpvFullscreenShell({
   children,
   onBack,
   topSlot,
+  footerSlot,
   embedded = false,
 }: {
   children: ReactNode;
   onBack: () => void;
   topSlot?: ReactNode;
+  footerSlot?: ReactNode;
   /** Dentro del gate TPV (tablet): no cubrir la barra verde de caja con fixed. */
   embedded?: boolean;
 }) {
@@ -1913,14 +1981,18 @@ function TpvFullscreenShell({
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
         </div>
+        {footerSlot}
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-gray-50 dark:bg-gray-950 flex flex-col overflow-hidden">
       {header}
-      <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
+      </div>
+      {footerSlot}
     </div>
   );
 }

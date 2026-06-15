@@ -92,6 +92,23 @@ export async function loadOrgChartForAccess(req, businessId) {
   }
 }
 
+/** Mismo local aunque el id sea PDV, centro de trabajo o prefijo wc:. */
+export function salesPointRefsSameStore(existingSp, newSp, workCenterId) {
+  const a = String(existingSp || '').trim();
+  const b = String(newSp || '').trim();
+  if (!a || !b) return true;
+  if (a === b) return true;
+  if (a === `wc:${b}` || b === `wc:${a}`) return true;
+  const wc = String(workCenterId || '').trim();
+  if (!wc) return false;
+  const wcAliases = new Set([wc, `wc:${wc}`]);
+  if (wcAliases.has(a) && wcAliases.has(b)) return true;
+  // Fichaje antiguo con id de centro + tablet con PDV del mismo centro (o al revés).
+  if (wcAliases.has(a) && b && !wcAliases.has(b)) return true;
+  if (wcAliases.has(b) && a && !wcAliases.has(a)) return true;
+  return false;
+}
+
 export function deriveClockinStatus(entries) {
   const types = (entries || []).map((e) => e.type);
   if (types.includes('clock_out')) return 'completed';

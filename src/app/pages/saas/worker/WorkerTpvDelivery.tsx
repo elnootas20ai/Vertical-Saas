@@ -19,13 +19,11 @@ import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUt
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { readTpvTabletBinding } from '../../../lib/tpvTabletSession';
 import { TpvRegisterProvider, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
-import { ClockedInWorkerBubbles } from '../../../components/saas/ClockedInWorkerBubbles';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
-import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
 import {
   ChefHat,
@@ -936,7 +934,6 @@ export function WorkerTpvDelivery() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <WorkerStockReviewBanner />
       {/* Header compacto */}
       <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
         <div className="flex items-center justify-between gap-3 mb-3">
@@ -983,19 +980,6 @@ export function WorkerTpvDelivery() {
             </button>
           )}
         </div>
-
-        {register && (
-          <div className="mb-3">
-            <ClockedInWorkerBubbles
-              workers={register.clockedInWorkers}
-              selectedId={register.selectedOrderTakerId}
-              onSelect={register.setSelectedOrderTakerId}
-              loading={register.clockedInWorkersLoading}
-              label="En tienda"
-              emptyMessage="Nadie fichado — abre caja y pulsa Fichar"
-            />
-          </div>
-        )}
 
         {/* Filtro recogida / envío */}
         <div className="flex gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-gray-800">

@@ -6,7 +6,7 @@ import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
 import { isWorkerAccount, logActivityRequest } from '../lib/authApi';
-import { pruneVertialStorageIfNeeded } from '../lib/clientSessionStorage';
+import { persistVertialJsonCache, pruneVertialStorageIfNeeded } from '../lib/clientSessionStorage';
 import {
   bulkCreateVehiclesRequest,
   createVehicleRequest,
@@ -1467,9 +1467,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [authUser?.user_id, parkingZonesStorageKey]);
 
-  useEffect(() => { localStorage.setItem(vehiclesStorageKey, JSON.stringify(vehicles)); }, [vehicles, vehiclesStorageKey]);
-  useEffect(() => { localStorage.setItem(leadsStorageKey, JSON.stringify(leads)); }, [leads, leadsStorageKey]);
-  useEffect(() => { localStorage.setItem(clientsStorageKey, JSON.stringify(clients)); }, [clients, clientsStorageKey]);
+  useEffect(() => {
+    if (authUser?.user_id) return;
+    persistVertialJsonCache(vehiclesStorageKey, vehicles);
+  }, [vehicles, vehiclesStorageKey, authUser?.user_id]);
+  useEffect(() => {
+    if (authUser?.user_id) return;
+    persistVertialJsonCache(leadsStorageKey, leads);
+  }, [leads, leadsStorageKey, authUser?.user_id]);
+  useEffect(() => {
+    if (authUser?.user_id) return;
+    persistVertialJsonCache(clientsStorageKey, clients);
+  }, [clients, clientsStorageKey, authUser?.user_id]);
   useEffect(() => {
     persistNotificationsCache(notificationsStorageKey, notifications);
   }, [notifications, notificationsStorageKey]);
@@ -1775,11 +1784,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const addClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
+    const apiUserId = String(client.user_id || authUser?.user_id || '').trim();
     const nextClient: Client = {
       ...client,
       id: `client-${uuidv4()}`,
       type: 'client',
-      user_id: authUser?.user_id || '',
+      user_id: apiUserId,
       consents: client.consents || { dataProcessing: false, commercial: false, thirdParty: false },
       vehiclesPurchased: client.vehiclesPurchased || [],
       vehiclesSold: client.vehiclesSold || [],
@@ -1790,15 +1800,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updatedAt: new Date(),
     };
 
-    if (!authUser?.user_id) {
+    if (!apiUserId) {
       setClients(prev => [nextClient, ...prev]);
       return nextClient;
     }
 
-    const { client: createdClient } = await createClientRequest(authUser.user_id, nextClient);
+    const { client: createdClient } = await createClientRequest(apiUserId, nextClient);
     if (createdClient) {
       try {
-        const fresh = await listClientsRequest(authUser.user_id);
+        const fresh = await listClientsRequest(apiUserId);
         setClients(fresh);
       } catch {
         setClients((prev) => {
