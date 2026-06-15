@@ -235,6 +235,8 @@ function normalizeClientRecord(value: unknown): Client | null {
       : undefined,
     createdAt: new Date((doc.createdAt as unknown as string) || new Date().toISOString()),
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt as unknown as string) : undefined,
+    branch_id: raw.branch_id ? String(raw.branch_id) : undefined,
+    workCenterId: raw.workCenterId ? String(raw.workCenterId) : undefined,
   };
 }
 
@@ -339,15 +341,95 @@ export async function deleteLeadRequest(userId: string, lead: Lead): Promise<voi
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
 
-export async function listClientsRequest(userId: string): Promise<Client[]> {
-  const payload = await request<{ ok: boolean; clients: unknown[] }>(
-    `/api/clients/${encodeURIComponent(userId)}`,
+export interface ClientsListMeta {
+  total: number;
+  skip: number;
+  limit: number;
+  hasMore: boolean;
+  sort?: string;
+  search?: string;
+}
+
+export async function listClientsPageRequest(
+  userId: string,
+  options: {
+    limit?: number;
+    skip?: number;
+    search?: string;
+    sort?: string;
+    lite?: boolean;
+    branchId?: string;
+    workCenterId?: string;
+    signal?: AbortSignal;
+  } = {},
+): Promise<{ clients: Client[]; meta: ClientsListMeta }> {
+  const params = new URLSearchParams();
+  const limit = options.limit ?? 50;
+  const skip = options.skip ?? 0;
+  params.set('limit', String(limit));
+  params.set('skip', String(skip));
+  if (options.search?.trim()) params.set('search', options.search.trim());
+  if (options.sort) params.set('sort', options.sort);
+  if (options.lite !== false) params.set('lite', '1');
+  if (options.branchId && options.branchId !== 'all') {
+    params.set('filter[branch_id]', options.branchId);
+  }
+  if (options.workCenterId && options.workCenterId !== 'all') {
+    params.set('filter[workCenterId]', options.workCenterId);
+  }
+
+  const payload = await request<{ ok: boolean; clients: unknown[]; meta?: ClientsListMeta }>(
+    `/api/clients/${encodeURIComponent(userId)}?${params.toString()}`,
+    options.signal ? { signal: options.signal } : undefined,
   );
 
-  return (payload.clients || [])
+  const meta = payload.meta ?? { total: 0, skip, limit, hasMore: false };
+  const clients = (payload.clients || [])
     .map(normalizeClientRecord)
-    .filter((c): c is Client => Boolean(c))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    .filter((c): c is Client => Boolean(c));
+
+  return { clients, meta };
+}
+
+export async function fetchAllClientsForExport(
+  userId: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Client[]> {
+  const pageSize = 500;
+  let skip = 0;
+  let all: Client[] = [];
+  let total = 0;
+
+  while (true) {
+    const { clients, meta } = await listClientsPageRequest(userId, { limit: pageSize, skip, lite: true });
+    if (skip === 0) total = meta.total;
+    all = all.concat(clients);
+    onProgress?.(all.length, total);
+    if (!meta.hasMore || clients.length === 0) break;
+    skip += pageSize;
+  }
+
+  return all;
+}
+
+export async function getClientDetailRequest(userId: string, clientId: string): Promise<Client | null> {
+  try {
+    const result = await request<{ ok: boolean; client: unknown }>(
+      `/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}`,
+    );
+    return normalizeClientRecord(result.client);
+  } catch {
+    return null;
+  }
+}
+
+/** @deprecated Prefer listClientsPageRequest for large datasets. */
+export async function listClientsRequest(userId: string, options?: { all?: boolean }): Promise<Client[]> {
+  if (options?.all) {
+    return fetchAllClientsForExport(userId);
+  }
+  const { clients } = await listClientsPageRequest(userId, { limit: 100, skip: 0, lite: true });
+  return clients;
 }
 
 export async function createClientRequest(

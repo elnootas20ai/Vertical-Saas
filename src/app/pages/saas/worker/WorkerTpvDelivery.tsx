@@ -17,7 +17,7 @@ import {
 } from '../../../lib/deliveryApi';
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
-import { readTpvTabletBinding } from '../../../lib/tpvTabletSession';
+import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
 import { TpvRegisterProvider, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
@@ -51,6 +51,7 @@ import {
   ChevronUp,
   Globe,
   UtensilsCrossed,
+  LogOut,
 } from 'lucide-react';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
@@ -833,6 +834,10 @@ export function WorkerTpvDelivery() {
     void loadOrders({ silent: true });
   }, [loadOrders]);
 
+  const exitTabletTpv = useCallback(() => {
+    navigate(exitTpvTabletSessionPath(), { replace: true });
+  }, [navigate]);
+
   const stats = useMemo(() => {
     const montaje = orders.filter(o => MONTAGE_STATUSES.includes(o.status));
     const enReparto = orders.filter(o => o.status === 'en_reparto');
@@ -949,6 +954,17 @@ export function WorkerTpvDelivery() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {tabletBinding && (
+              <button
+                type="button"
+                onClick={exitTabletTpv}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="Salir del TPV"
+              >
+                <LogOut className="w-4 h-4" />
+                Salir
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void loadOrders()}

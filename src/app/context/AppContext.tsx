@@ -19,6 +19,7 @@ import {
   createLeadRequest,
   deleteClientRequest,
   deleteLeadRequest,
+  listClientsPageRequest,
   listClientsRequest,
   listLeadsRequest,
   updateClientRequest,
@@ -551,6 +552,8 @@ export interface AppContextType {
   vehicles: Vehicle[];
   isLoadingVehicles: boolean;
   isLoadingClients: boolean;
+  /** Total de clientes en servidor (sin cargar todos en memoria). */
+  clientsTotalCount: number;
   parkingZones: ParkingZone[];
   leads: Lead[];
   clients: Client[];
@@ -634,7 +637,7 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       vehiclesSold: 0, totalLeads: 0, activeSales: 0, pendingDocuments: 0, totalStockValue: 0,
     });
     const defaultCtx: AppContextType = {
-      vehicles: [], isLoadingVehicles: true, isLoadingClients: true, parkingZones: [], leads: [], clients: [], notifications: [], sales: [], documents: [], locations: [], user: null,
+      vehicles: [], isLoadingVehicles: true, isLoadingClients: true, clientsTotalCount: 0, parkingZones: [], leads: [], clients: [], notifications: [], sales: [], documents: [], locations: [], user: null,
       subscription: { status: 'trial_active', planName: 'Basic', cancelAtPeriodEnd: false },
       setDevSubscriptionPlan: () => {},
       enableDevUnlimitedPdv: () => {},
@@ -935,6 +938,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isLoadingVehicles, setIsLoadingVehicles] = useState(true);
   const [isLoadingClients, setIsLoadingClients] = useState(true);
+  const [clientsTotalCount, setClientsTotalCount] = useState(0);
   const [parkingZones, setParkingZones] = useState<ParkingZone[]>(() => []);
 
   const [leads, setLeads] = useState<Lead[]>(() => {
@@ -1274,7 +1278,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const saved = localStorage.getItem('vertial-clients:guest');
         if (saved) {
-          setClients(JSON.parse(saved).map(deserializeClient));
+          const guestClients = JSON.parse(saved).map(deserializeClient);
+          setClients(guestClients);
+          setClientsTotalCount(guestClients.length);
         }
       } catch (storageError) {
         console.error('Error loading guest clients:', storageError);
@@ -1286,10 +1292,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setIsLoadingClients(true);
 
-    listClientsRequest(authUser.user_id)
-      .then((items) => {
+    listClientsPageRequest(authUser.user_id, { limit: 1, skip: 0, lite: true })
+      .then(({ meta }) => {
         if (!cancelled) {
-          setClients(items);
+          setClients([]);
+          setClientsTotalCount(meta.total);
           setIsLoadingClients(false);
         }
       })
@@ -1298,7 +1305,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const saved = localStorage.getItem(`vertial-clients:${authUser.user_id}`);
           if (saved && !cancelled) {
-            setClients(JSON.parse(saved).map(deserializeClient));
+            const cached = JSON.parse(saved).map(deserializeClient);
+            setClients(cached);
+            setClientsTotalCount(cached.length);
           }
         } catch (storageError) {
           console.error('Error loading client cache:', storageError);
@@ -1807,15 +1816,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const { client: createdClient } = await createClientRequest(apiUserId, nextClient);
     if (createdClient) {
-      try {
-        const fresh = await listClientsRequest(apiUserId);
-        setClients(fresh);
-      } catch {
-        setClients((prev) => {
-          const rest = prev.filter((c) => c.id !== createdClient.id);
-          return [createdClient, ...rest];
-        });
-      }
+      setClients((prev) => [createdClient, ...prev].slice(0, 50));
+      setClientsTotalCount((n) => n + 1);
       trackActivity({
         type: 'client',
         action: `Añadió cliente ${createdClient.name}`,
@@ -1883,6 +1885,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     await deleteClientRequest(authUser.user_id, currentClient);
     setClients(prev => prev.filter(c => c.id !== id));
+    setClientsTotalCount((n) => Math.max(0, n - 1));
     trackActivity({
       type: 'client',
       action: `Eliminó cliente ${currentClient.name}`,
@@ -2204,10 +2207,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshClients = async () => {
     if (!authUser?.user_id) return;
     try {
-      const fresh = await listClientsRequest(authUser.user_id);
-      setClients(fresh);
+      const { meta } = await listClientsPageRequest(authUser.user_id, { limit: 1, skip: 0, lite: true });
+      setClientsTotalCount(meta.total);
     } catch {
-      // Silenciado: la lista actual permanece como fallback.
+      // Silenciado: el total actual permanece como fallback.
     }
   };
 
@@ -2245,7 +2248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const value: AppContextType = {
-    vehicles, isLoadingVehicles, isLoadingClients, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
+    vehicles, isLoadingVehicles, isLoadingClients, clientsTotalCount, parkingZones, leads, clients, notifications, sales, documents, locations, user, subscription,
     setDevSubscriptionPlan,
     enableDevUnlimitedPdv,
     devUnlimitedPdv,

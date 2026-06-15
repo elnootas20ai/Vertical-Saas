@@ -305,7 +305,10 @@ export function ClientBillingPage() {
   const loadData = useCallback(async () => {
     if (!financeUserId) return; setLoading(true);
     try {
-      const [invs, cls] = await Promise.all([listClientInvoicesRequest(financeUserId), listClientsRequest(financeUserId).catch(() => [])]);
+      const [invs, cls] = await Promise.all([
+        listClientInvoicesRequest(financeUserId),
+        listClientsRequest(financeUserId, { all: true }).catch(() => []),
+      ]);
       setInvoices(invs);
       setClients(cls.map((c: any) => ({ id: c.id, name: c.name || '', dni: c.dni || '', email: c.email || '', phone: c.phone || '', address: c.address, city: c.city, postalCode: c.postalCode })));
     } catch (err: any) { toast.error(err.message || 'Error cargando datos'); } finally { setLoading(false); }

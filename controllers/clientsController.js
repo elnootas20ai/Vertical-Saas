@@ -2,6 +2,7 @@ import {
   getClientsDbName,
   buildClientDocument,
   sanitizeClient,
+  sanitizeClientSummary,
   listClientsByUser,
   findDuplicateClients,
   ensureDatabase,
@@ -48,7 +49,14 @@ export async function listClients(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const raw = await listClientsByUser(req, userId);
-    const { items, meta } = applyQueryOptions(raw.map(sanitizeClient), req.query);
+    const useLite = req.query.lite === '1' || req.query.lite === 'true';
+    const sanitizer = useLite ? sanitizeClientSummary : sanitizeClient;
+    const query = { ...req.query };
+    if (useLite && query.limit === undefined && query.skip === undefined) {
+      query.limit = '50';
+      query.skip = '0';
+    }
+    const { items, meta } = applyQueryOptions(raw.map(sanitizer), query);
     return res.json({ ok: true, clients: items, meta });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar clientes' });

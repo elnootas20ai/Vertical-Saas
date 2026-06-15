@@ -3311,6 +3311,48 @@ export function sanitizeClient(client) {
     createdAt: client.createdAt || new Date().toISOString(),
     updatedAt: client.updatedAt || client.createdAt || new Date().toISOString(),
     deletedAt: client.deletedAt || null,
+    branch_id: client.branch_id || '',
+    workCenterId: client.workCenterId || '',
+  };
+}
+
+/** Versión ligera para listados paginados (sin interactions, documentsList, contacts, etc.). */
+export function sanitizeClientSummary(client) {
+  if (!client) return null;
+  const location = resolveClientLocationFields(client);
+  return {
+    _rev: client._rev,
+    type: 'client',
+    user_id: client.user_id || '',
+    id: client._id,
+    clientType: client.clientType || 'particular',
+    name: client.name || '',
+    phone: client.phone || '',
+    phonePrefix: client.phonePrefix || '+34',
+    email: client.email || '',
+    dni: client.dni || '',
+    commercialStatus: client.commercialStatus || 'active',
+    address: location.address,
+    city: location.city,
+    postalCode: location.postalCode,
+    status: normalizeClientStatus(client.status),
+    responsible: client.responsible || 'Sin asignar',
+    documentsCount: Number(client.documentsCount || 0),
+    tags: Array.isArray(client.tags) ? client.tags : [],
+    stats: {
+      totalOrders: client.stats?.totalOrders || 0,
+      lastOrderDate: client.stats?.lastOrderDate || null,
+      totalSpent: client.stats?.totalSpent || 0,
+    },
+    loyalty: {
+      enrolled: Boolean(client.loyalty?.enrolled),
+      points: client.loyalty?.points || 0,
+      level: client.loyalty?.level || 'bronze',
+    },
+    createdAt: client.createdAt || new Date().toISOString(),
+    updatedAt: client.updatedAt || client.createdAt || new Date().toISOString(),
+    branch_id: client.branch_id || '',
+    workCenterId: client.workCenterId || '',
   };
 }
 

@@ -1,4 +1,5 @@
 import type { ClockinRecord } from './clockinsApi';
+import { deriveEffectiveClockinStatus, isClockinPresent } from './clockinStatus';
 
 export function todayDateStr(): string {
   const d = new Date();
@@ -43,4 +44,38 @@ export function groupRecordsByMember(records: ClockinRecord[]): Map<string, Cloc
     map.get(key)!.push(r);
   }
   return map;
+}
+
+export function clockInTimeIso(record: Pick<ClockinRecord, 'entries' | 'createdAt'>): string {
+  return record.entries?.find((e) => e.type === 'clock_in')?.time
+    || record.createdAt
+    || '';
+}
+
+/** Orden cronológico de turnos (entrada más temprana primero). */
+export function sortClockinsByClockIn(records: ClockinRecord[]): ClockinRecord[] {
+  return [...records].sort((a, b) => clockInTimeIso(a).localeCompare(clockInTimeIso(b)));
+}
+
+/** Fichaje activo o en descanso del día; null si solo hay jornadas cerradas. */
+export function pickActiveClockinRecord(records: ClockinRecord[]): ClockinRecord | null {
+  const active = records.find((r) => isClockinPresent(deriveEffectiveClockinStatus(r)));
+  if (active) return active;
+  return null;
+}
+
+/** Para TPV/modal: turno activo > último turno del día. */
+export function pickPreferredMemberClockin(a: ClockinRecord, b: ClockinRecord): ClockinRecord {
+  const aPresent = isClockinPresent(deriveEffectiveClockinStatus(a));
+  const bPresent = isClockinPresent(deriveEffectiveClockinStatus(b));
+  if (aPresent && !bPresent) return a;
+  if (bPresent && !aPresent) return b;
+  return clockInTimeIso(b).localeCompare(clockInTimeIso(a)) > 0 ? b : a;
+}
+
+export function sessionTurnLabel(record: ClockinRecord & { session_index?: number; same_day_sessions?: number }): string | null {
+  const total = record.same_day_sessions || 0;
+  const idx = record.session_index || 0;
+  if (total <= 1 || idx <= 0) return null;
+  return `${idx}.º turno`;
 }

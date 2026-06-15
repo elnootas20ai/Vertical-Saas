@@ -4,13 +4,13 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { toast } from 'sonner';
 import {
   X, Upload, FileText, CheckCircle, AlertCircle, ArrowRight,
-  ArrowLeft, LoaderCircle, Users, User,
+  ArrowLeft, LoaderCircle, Users, User, Download, FileSpreadsheet,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
 import type { Lead, Client } from '../../context/AppContext';
-import { bulkCreateLeadsRequest, bulkCreateClientsInChunks } from '../../lib/crmApi';
+import { bulkCreateLeadsRequest, bulkCreateClientsInChunks, fetchAllClientsForExport } from '../../lib/crmApi';
 import { useAuth } from '../../context/AuthContext';
 import {
   autoDetectImportField,
@@ -23,6 +23,14 @@ import {
   type ImportMode,
   type LeadField,
 } from '../../lib/crmImportParse';
+import {
+  downloadClientImportTemplate,
+  downloadClientImportTemplateCsv,
+  downloadClientsExport,
+  downloadLeadImportTemplate,
+  downloadLeadImportTemplateCsv,
+  type ClientExportRow,
+} from '../../lib/crmImportTemplates';
 
 interface ImportError { row: number; field: string; message: string; value: unknown; }
 
@@ -32,6 +40,11 @@ interface CrmImportWizardProps {
   isOpen: boolean;
   onClose: () => void;
   initialMode?: ImportMode;
+  /** false = sin columna Responsable (p. ej. delivery) */
+  includeResponsible?: boolean;
+  /** Si se indica, exporta todos los clientes del servidor bajo demanda. */
+  exportUserId?: string;
+  clientExportRows?: ClientExportRow[];
 }
 
 // ─── Field definitions ────────────────────────────────────────────────────────
@@ -66,9 +79,16 @@ const CLIENT_FIELDS: { value: ClientField; label: string; required?: boolean }[]
 
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 
-export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizardProps) {
+export function CrmImportWizard({
+  isOpen,
+  onClose,
+  initialMode,
+  includeResponsible = true,
+  exportUserId,
+  clientExportRows = [],
+}: CrmImportWizardProps) {
   useModalClose(isOpen, onClose);
-  const { addLead, addClient, refreshClients, refreshLeads, leads: existingLeads, clients: existingClients } = useApp();
+  const { addLead, addClient, refreshClients, refreshLeads, leads: existingLeads, clientsTotalCount } = useApp();
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -83,6 +103,7 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null);
   const [parsingFile, setParsingFile] = useState(false);
+  const [exportingClients, setExportingClients] = useState(false);
 
   useEffect(() => {
     if (initialMode) setMode(initialMode);
@@ -94,6 +115,101 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
     const mappedFields = Object.values(mapping);
     return requiredFields.filter((f) => !mappedFields.includes(f));
   }, [mapping, requiredFields]);
+
+  const templateDownloads = useMemo(() => {
+    const includeResp = includeResponsible;
+    if (mode === 'clients') {
+      const exportCount = exportUserId ? clientsTotalCount : clientExportRows.length;
+      return [
+        {
+          id: 'xlsx-template',
+          label: 'Plantilla Excel',
+          description: 'Cabeceras listas para rellenar (.xlsx)',
+          icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
+          action: () => {
+            downloadClientImportTemplate({ includeResponsible: includeResp });
+            toast.success('Plantilla Excel descargada');
+          },
+        },
+        {
+          id: 'csv-template',
+          label: 'Plantilla CSV',
+          description: 'Mismo formato en CSV (punto y coma)',
+          icon: <FileText className="w-4 h-4 text-blue-600" />,
+          action: () => {
+            downloadClientImportTemplateCsv({ includeResponsible: includeResp });
+            toast.success('Plantilla CSV descargada');
+          },
+        },
+        ...(exportCount > 0 || exportUserId
+          ? [{
+              id: 'export-current',
+              label: 'Mis clientes actuales',
+              description: exportCount > 0
+                ? `Exportar ${exportCount} cliente${exportCount === 1 ? '' : 's'} a Excel`
+                : 'Exportar clientes actuales a Excel',
+              icon: <Users className="w-4 h-4 text-violet-600" />,
+              action: async () => {
+                const uid = exportUserId || user?.user_id;
+                if (exportUserId && uid) {
+                  if (exportingClients) return;
+                  setExportingClients(true);
+                  const toastId = toast.loading('Preparando exportación…');
+                  try {
+                    const all = await fetchAllClientsForExport(uid);
+                    downloadClientsExport(
+                      all.map((c) => ({
+                        name: c.name,
+                        phone: c.phone,
+                        email: c.email,
+                        dni: c.dni,
+                        address: c.address,
+                        city: c.city,
+                        postalCode: c.postalCode,
+                        status: c.status,
+                        responsible: c.responsible,
+                        tags: c.tags,
+                      })),
+                      { includeResponsible: includeResp },
+                    );
+                    toast.success(`Exportados ${all.length} clientes`, { id: toastId });
+                  } catch {
+                    toast.error('No se pudo exportar los clientes', { id: toastId });
+                  } finally {
+                    setExportingClients(false);
+                  }
+                  return;
+                }
+                downloadClientsExport(clientExportRows, { includeResponsible: includeResp });
+                toast.success(`Exportados ${clientExportRows.length} clientes`);
+              },
+            }]
+          : []),
+      ];
+    }
+    return [
+      {
+        id: 'xlsx-template',
+        label: 'Plantilla Excel',
+        description: 'Cabeceras listas para rellenar (.xlsx)',
+        icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
+        action: () => {
+          downloadLeadImportTemplate();
+          toast.success('Plantilla Excel descargada');
+        },
+      },
+      {
+        id: 'csv-template',
+        label: 'Plantilla CSV',
+        description: 'Mismo formato en CSV (punto y coma)',
+        icon: <FileText className="w-4 h-4 text-blue-600" />,
+        action: () => {
+          downloadLeadImportTemplateCsv();
+          toast.success('Plantilla CSV descargada');
+        },
+      },
+    ];
+  }, [mode, includeResponsible, clientExportRows, exportUserId, clientsTotalCount, exportingClients, user?.user_id]);
 
   const applyParsedTable = (headers: string[], body: string[][]) => {
     const normalized = normalizeParsedTable([headers, ...body]);
@@ -404,6 +520,35 @@ export function CrmImportWizard({ isOpen, onClose, initialMode }: CrmImportWizar
                   </div>
                 </div>
               )}
+
+              {/* Plantillas descargables */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Descarga una plantilla
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Elige Excel o CSV, rellénala con tus datos e impórtala abajo.
+                </p>
+                <div className={`grid gap-2 ${templateDownloads.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+                  {templateDownloads.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={opt.action}
+                      className="flex items-start gap-3 p-3.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 text-left transition-all"
+                    >
+                      <div className="mt-0.5 shrink-0">{opt.icon}</div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                          <Download className="w-3.5 h-3.5 text-gray-400" />
+                          {opt.label}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{opt.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {/* Drop zone */}
               <div

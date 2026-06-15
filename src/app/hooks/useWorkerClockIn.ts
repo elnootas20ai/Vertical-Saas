@@ -167,8 +167,8 @@ export function useWorkerClockIn(
         setRecord(today);
         return today;
       }
-      setRecord(today);
-      return today;
+      setRecord(null);
+      return null;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error cargando fichajes');
       return null;

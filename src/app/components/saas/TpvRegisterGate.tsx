@@ -40,14 +40,18 @@ import {
 } from '../../lib/pdvScope';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { loadTpvPointsOfSaleForBusiness, resolveBusinessScopeId } from '../../lib/deliverySetup';
-import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import {
   filterUsersForStoreClockin,
   loadClockedInStoreWorkers,
   pickDefaultOrderTaker,
+  buildTpvActiveStaff,
+  clockinIdsMatch,
   type TpvClockedInWorker,
 } from '../../lib/tpvClockedInWorkers';
-import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
+import { pickPreferredMemberClockin } from '../../lib/clockinHistoryUtils';
+import { deriveEffectiveClockinStatus, isClockinPresent } from '../../lib/clockinStatus';
+import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
@@ -214,8 +218,8 @@ export interface TpvRegisterContextType {
   refreshClockedInWorkers: () => Promise<void>;
 }
 
-/** undefined = fuera del gate · null = dentro pero sin caja abierta · objeto = caja activa */
-const TpvRegisterContext = createContext<TpvRegisterContextType | null | undefined>(undefined);
+/** null = sin caja abierta (o fuera del gate) · objeto = caja activa */
+const TpvRegisterContext = createContext<TpvRegisterContextType | null>(null);
 
 export function TpvRegisterProvider({
   value,
@@ -228,11 +232,7 @@ export function TpvRegisterProvider({
 }
 
 export function useTpvRegisterIfOpen(): TpvRegisterContextType | null {
-  const ctx = useContext(TpvRegisterContext);
-  if (ctx === undefined) {
-    throw new Error('useTpvRegister must be used within TpvRegisterGate');
-  }
-  return ctx;
+  return useContext(TpvRegisterContext);
 }
 
 export function useTpvRegister(): TpvRegisterContextType {
@@ -257,7 +257,7 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onRequestClockIn }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onRequestClockIn, onOpeningPdvChange }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
@@ -272,6 +272,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   isTabletMode?: boolean;
   tabletStoreLabel?: string;
   onRequestClockIn?: () => void;
+  /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
+  onOpeningPdvChange?: (pdvId: string) => void;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -361,15 +363,18 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     if (!restrictedToPdvId) return;
     setSelectedPdvId(restrictedToPdvId);
     setSelectedTerminalId('');
-  }, [restrictedToPdvId]);
+    onOpeningPdvChange?.(restrictedToPdvId);
+  }, [restrictedToPdvId, onOpeningPdvChange]);
 
   // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
   useEffect(() => {
     if (selectedPdvId) return;
     if (displayPdvs.length === 1) {
-      setSelectedPdvId(displayPdvs[0]._id);
+      const onlyId = displayPdvs[0]._id;
+      setSelectedPdvId(onlyId);
+      onOpeningPdvChange?.(onlyId);
     }
-  }, [displayPdvs, selectedPdvId]);
+  }, [displayPdvs, selectedPdvId, onOpeningPdvChange]);
 
   // Autoseleccionar el único terminal activo del PDV elegido.
   useEffect(() => {
@@ -400,6 +405,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const handleSelectPdv = (pdvId: string) => {
     setSelectedPdvId(pdvId);
     setSelectedTerminalId('');
+    onOpeningPdvChange?.(pdvId);
   };
 
   const handleSubmit = () => {
@@ -421,7 +427,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const goBack = () => {
     if (isTabletMode) {
-      navigate('/auth/tpv-tablet');
+      navigate(exitTpvTabletSessionPath(), { replace: true });
       return;
     }
     try {
@@ -696,7 +702,14 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
               {onRequestClockIn && (
                 <button
                   type="button"
-                  onClick={onRequestClockIn}
+                  onClick={() => {
+                    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+                    if (!pdvId) {
+                      toast.error('Selecciona la tienda antes de fichar');
+                      return;
+                    }
+                    onRequestClockIn();
+                  }}
                   className="w-full py-3 rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-800 dark:text-violet-200 font-semibold flex items-center justify-center gap-2 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors"
                 >
                   <LogIn className="w-4 h-4" />
@@ -1243,7 +1256,6 @@ function ClockInModal({
   ownerUserId,
   pdvId,
   workCenterId,
-  relaxStoreAssignment = false,
   onCancel,
   onChanged,
 }: {
@@ -1252,7 +1264,6 @@ function ClockInModal({
   ownerUserId: string;
   pdvId: string;
   workCenterId: string;
-  relaxStoreAssignment?: boolean;
   onCancel: () => void;
   onChanged?: () => void;
 }) {
@@ -1261,6 +1272,7 @@ function ClockInModal({
   const [team, setTeam] = useState<AuthUser[]>([]);
   const [clockins, setClockins] = useState<ClockinRecord[]>([]);
   const [error, setError] = useState('');
+  const [actionMsg, setActionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -1281,16 +1293,23 @@ function ClockInModal({
         ownerUserId,
         pdvId,
         workCenterId,
-        relaxStoreAssignment,
-      ).sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || ''), 'es'));
-      setTeam(storeTeam);
+      );
+      let teamList = storeTeam;
+      if (ownerUserId && !storeTeam.some((u) => normalizeClockinUserId(u.user_id) === normalizeClockinUserId(ownerUserId))) {
+        const ownerAccount = users.find((u) => normalizeClockinUserId(u.user_id) === normalizeClockinUserId(ownerUserId));
+        if (ownerAccount && ownerAccount.status !== 'inactive') {
+          teamList = [...storeTeam, ownerAccount];
+        }
+      }
+      teamList.sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || ''), 'es'));
+      setTeam(teamList);
       setClockins(records);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
     } finally {
       setLoading(false);
     }
-  }, [businessId, ownerUserId, pdvId, workCenterId, relaxStoreAssignment]);
+  }, [businessId, ownerUserId, pdvId, workCenterId]);
 
   useEffect(() => {
     void load();
@@ -1300,29 +1319,64 @@ function ClockInModal({
     const today = new Date().toISOString().slice(0, 10);
     const map = new Map<string, ClockinRecord>();
     for (const r of clockins) {
-      if (r.date === today) map.set(r.member_id, r);
+      if (r.date !== today) continue;
+      const mid = normalizeClockinUserId(r.member_id);
+      if (!mid) continue;
+      const prev = map.get(mid);
+      map.set(mid, prev ? pickPreferredMemberClockin(prev, r) : r);
     }
     return map;
   }, [clockins]);
 
+  const memberKey = (member: AuthUser) =>
+    normalizeClockinUserId(member.user_id || member.id);
+
   const clockedInCount = team.filter((m) => {
-    const r = todayRecords.get(m.user_id);
-    return r && r.status !== 'completed';
+    const r = todayRecords.get(memberKey(m));
+    return r && isClockinPresent(deriveEffectiveClockinStatus(r));
   }).length;
 
+  const storeClockinOpts = { store_team_clockin: true as const };
+
   const handleClockIn = async (member: AuthUser) => {
+    const mid = memberKey(member);
+    if (!mid) {
+      setActionMsg({ type: 'err', text: 'No se pudo identificar al trabajador.' });
+      return;
+    }
     setActingId(member.user_id);
+    setActionMsg(null);
     let already = false;
+    const today = new Date().toISOString().slice(0, 10);
     try {
-      const rec = await clockIn(businessId, member.user_id, member.fullName || member.email || 'Trabajador', {
+      const rec = await clockIn(businessId, mid, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
         sales_point_id: pdvId || undefined,
         sales_point_name: storeLabel || undefined,
         work_center_id: workCenterId || undefined,
+        store_team_clockin: true,
       });
       already = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
+      const normalized: ClockinRecord = {
+        ...rec,
+        member_id: normalizeClockinUserId(rec.member_id) || mid,
+        status: rec.status === 'offline' || !rec.status ? 'active' : rec.status,
+      };
+      setClockins((prev) => {
+        const rest = prev.filter((r) => r._id !== normalized._id);
+        return [...rest, normalized];
+      });
+      setActionMsg({
+        type: 'ok',
+        text: already
+          ? `${member.fullName || 'Trabajador'} ya estaba fichado. Pulsa Continuar.`
+          : `${member.fullName || 'Trabajador'} fichado correctamente.`,
+      });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo fichar');
+      const msg = e instanceof Error ? e.message : 'No se pudo fichar';
+      setError(msg);
+      setActionMsg({ type: 'err', text: msg });
+      toast.error(msg);
       setActingId(null);
       return;
     }
@@ -1331,25 +1385,20 @@ function ClockInModal({
         ? `${member.fullName || 'Trabajador'} — ya estaba fichado`
         : `${member.fullName || 'Trabajador'} — fichaje de entrada`,
     );
-    try {
-      await load();
-    } catch {
-      // El fichaje ya se guardó; no mostrar error si solo falla el refresco del listado.
-    }
     onChanged?.();
     setActingId(null);
   };
 
   const handleBreak = async (member: AuthUser) => {
-    const record = todayRecords.get(member.user_id);
+    const record = todayRecords.get(memberKey(member));
     if (!record) return;
     setActingId(member.user_id);
     try {
-      if (record.status === 'break') {
-        await endBreak(record);
+      if (record.status === 'break' || deriveEffectiveClockinStatus(record) === 'break') {
+        await endBreak(record, undefined, storeClockinOpts);
         toast.success(`${member.fullName || 'Trabajador'} — descanso finalizado`);
       } else {
-        await startBreak(record);
+        await startBreak(record, undefined, storeClockinOpts);
         toast.success(`${member.fullName || 'Trabajador'} — descanso iniciado`);
       }
       await load();
@@ -1362,11 +1411,11 @@ function ClockInModal({
   };
 
   const handleFinish = async (member: AuthUser) => {
-    const record = todayRecords.get(member.user_id);
+    const record = todayRecords.get(memberKey(member));
     if (!record) return;
     setActingId(member.user_id);
     try {
-      await clockOut(record);
+      await clockOut(record, undefined, storeClockinOpts);
       toast.success(`${member.fullName || 'Trabajador'} — jornada finalizada`);
       await load();
       onChanged?.();
@@ -1387,9 +1436,9 @@ function ClockInModal({
             <LogIn className="w-5 h-5 text-violet-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">Fichaje manual</h2>
+            <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">Registro de fichaje</h2>
             <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
-              {storeLabel || 'Tienda'} · Ficha a cada persona al entrar
+              {storeLabel || 'Tienda'} · Para nómina (no bloquea el TPV)
             </p>
           </div>
           {!loading && team.length > 0 && (
@@ -1406,8 +1455,22 @@ function ClockInModal({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-3 sm:py-4 space-y-2.5">
+          {actionMsg && (
+            <div className={`p-3 rounded-xl text-sm font-medium ${
+              actionMsg.type === 'ok'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800'
+                : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+            }`}>
+              {actionMsg.text}
+            </div>
+          )}
           {error && (
             <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm">{error}</div>
+          )}
+          {!loading && team.length > 0 && clockedInCount === 0 && (
+            <div className="p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 text-violet-900 dark:text-violet-100 text-sm">
+              Pulsa <span className="font-bold">Fichar</span> en cada persona que entre a trabajar. Cuando al menos una esté activa, podrás continuar.
+            </div>
           )}
           {loading && (
             <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
@@ -1417,23 +1480,19 @@ function ClockInModal({
           )}
           {!loading && team.length === 0 && (
             <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-5 text-sm text-amber-900 dark:text-amber-100">
-              <p className="font-semibold mb-1">
-                {relaxStoreAssignment ? 'Sin trabajadores en el equipo' : 'Sin trabajadores asignados a esta tienda'}
-              </p>
+              <p className="font-semibold mb-1">Sin trabajadores asignados a esta tienda</p>
               <p className="text-amber-800 dark:text-amber-200">
-                {relaxStoreAssignment
-                  ? 'Añade miembros en Equipo para poder fichar en esta tablet.'
-                  : 'Asigna el local en Equipo → cada trabajador → Tienda / centro de trabajo, o ficha desde la tablet (todos los miembros activos).'}
+                Asigna el local en Equipo → cada trabajador → Tienda / centro de trabajo. Solo pueden fichar en su tienda.
               </p>
             </div>
           )}
           {!loading && team.map((member) => {
-            const record = todayRecords.get(member.user_id);
-            const status = record?.status;
-            const isActive = status === 'active';
-            const isOnBreak = status === 'break';
-            const isWorking = isActive || isOnBreak;
-            const isDone = status === 'completed';
+            const record = todayRecords.get(memberKey(member));
+            const effectiveStatus = deriveEffectiveClockinStatus(record);
+            const isActive = effectiveStatus === 'active';
+            const isOnBreak = effectiveStatus === 'break';
+            const isWorking = isClockinPresent(effectiveStatus);
+            const isDone = effectiveStatus === 'completed';
             const canFichar = !record || isDone;
             const canBreak = isWorking;
             const canFinish = isWorking;
@@ -1530,7 +1589,20 @@ function ClockInModal({
           })}
         </div>
 
-        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40">
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 space-y-2">
+          {clockedInCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                onChanged?.();
+                onCancel();
+              }}
+              className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Continuar ({clockedInCount} fichado{clockedInCount === 1 ? '' : 's'})
+            </button>
+          )}
           <button
             type="button"
             onClick={onCancel}
@@ -1623,7 +1695,7 @@ function RegisterStatusBar({
           loading={clockedInWorkersLoading}
           compact
           label="Quién atiende"
-          emptyMessage="Sin fichajes"
+          emptyMessage="Quién abrió caja"
         />
         <button type="button" onClick={onRequestClockIn} className="px-3 py-1.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 rounded-lg font-semibold hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors flex items-center gap-1">
           <LogIn className="w-3 h-3" /> Fichar
@@ -1873,7 +1945,7 @@ function IncidentModal({ session, onConfirm, onCancel }: {
 
 // ─── Main Gate Component ────────────────────────────────────────────────────
 
-export function TpvRegisterGate({ children }: { children: ReactNode }) {
+export function TpvRegisterGate({ children, fillParent = false }: { children: ReactNode; fillParent?: boolean }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled, isLoading: businessLoading, switchBusiness } = useBusiness();
@@ -1906,6 +1978,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
   const businessId = resolveBusinessScopeId(currentBusiness);
 
   const isTabletSession = Boolean(tabletBinding?.pdvId && tabletBinding.businessId);
+  const tpvFrameClass = fillParent ? 'flex flex-col h-full min-h-0' : 'flex flex-col min-h-screen';
 
   const tabletRestrictedPdvId = isTabletSession ? tabletBinding!.pdvId : null;
 
@@ -1992,7 +2065,15 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     tabletBinding?.workCenterId,
   ]);
 
-  const relaxStoreClockin = isTabletSession || !isWorkerUser;
+  const handleOpeningPdvChange = useCallback((pdvId: string) => {
+    const id = String(pdvId || '').trim();
+    if (!id) return;
+    setManagerPdvPickId(id);
+    const bid = resolveBusinessScopeId(currentBusiness);
+    if (bid && dataUserId) {
+      writeDeliveryOpsSelectedPdvId(bid, dataUserId, id);
+    }
+  }, [currentBusiness, dataUserId]);
 
   const refreshClockedInWorkers = useCallback(async (options?: { silent?: boolean }) => {
     if (!businessId) {
@@ -2013,19 +2094,32 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         ownerUserId,
         pdvId,
         workCenterId,
-        { relaxStoreAssignment: relaxStoreClockin },
       );
       setClockedInWorkers(workers);
       setSelectedOrderTakerId((prev) => {
-        if (prev && workers.some((w) => w.id === prev)) return prev;
-        return pickDefaultOrderTaker(workers);
+        const staff = buildTpvActiveStaff(activeSession, workers);
+        const prevNorm = normalizeClockinUserId(prev);
+        if (prevNorm && staff.some((w) => w.id === prevNorm)) return prevNorm;
+        return pickDefaultOrderTaker(staff);
       });
     } catch {
       if (!silent) setClockedInWorkers([]);
     } finally {
       if (!silent) setClockedInWorkersLoading(false);
     }
-  }, [businessId, currentBusiness?.owner_user_id, activeStoreScope, relaxStoreClockin]);
+  }, [businessId, currentBusiness?.owner_user_id, activeStoreScope, activeSession]);
+
+  useEffect(() => {
+    if (!isTpvRegisterSessionOpen(activeSession)) return;
+    const openerId = normalizeClockinUserId(activeSession.workerId);
+    if (!openerId) return;
+    setSelectedOrderTakerId((prev) => {
+      const staff = buildTpvActiveStaff(activeSession, clockedInWorkers);
+      const prevNorm = normalizeClockinUserId(prev);
+      if (prevNorm && staff.some((w) => clockinIdsMatch(w.id, prevNorm))) return prevNorm;
+      return pickDefaultOrderTaker(staff) || openerId;
+    });
+  }, [activeSession?._id, activeSession?.workerId, activeSession?.workerName, clockedInWorkers]);
 
   useEffect(() => {
     if (!activeStoreScope.pdvId) {
@@ -2355,6 +2449,11 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     }
   }, [dataUserId, activeSession]);
 
+  const activeStaff = useMemo(
+    () => buildTpvActiveStaff(activeSession, clockedInWorkers),
+    [activeSession, clockedInWorkers],
+  );
+
   const registerContextValue = useMemo((): TpvRegisterContextType | null => {
     if (!isTpvRegisterSessionOpen(activeSession)) return null;
     return {
@@ -2366,7 +2465,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
       requestCashCount: () => setShowCashCount(true),
       requestIncident: () => setShowIncident(true),
       expectedCash: calcExpectedCash(activeSession),
-      clockedInWorkers,
+      clockedInWorkers: activeStaff,
       clockedInWorkersLoading,
       selectedOrderTakerId,
       setSelectedOrderTakerId,
@@ -2377,28 +2476,11 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     addTransaction,
     performCashCount,
     addIncident,
-    clockedInWorkers,
+    activeStaff,
     clockedInWorkersLoading,
     selectedOrderTakerId,
     refreshClockedInWorkers,
   ]);
-
-  const currentUserId = useMemo(
-    () => String(user?.user_id || user?.id || '').trim(),
-    [user?.user_id, user?.id],
-  );
-
-  const tpvClockInGate = useMemo(
-    () =>
-      evaluateTpvClockInGate({
-        loading: clockedInWorkersLoading,
-        clockedInWorkers,
-        selectedOrderTakerId,
-        currentUserId,
-        isWorkerUser,
-      }),
-    [clockedInWorkersLoading, clockedInWorkers, selectedOrderTakerId, currentUserId, isWorkerUser],
-  );
 
   const wrapRegisterContext = (body: ReactNode) => (
     <TpvRegisterContext.Provider value={registerContextValue}>{body}</TpvRegisterContext.Provider>
@@ -2428,13 +2510,29 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         ownerUserId={String(currentBusiness?.owner_user_id || '')}
         pdvId={clockInStoreScope.pdvId}
         workCenterId={clockInStoreScope.workCenterId}
-        relaxStoreAssignment={relaxStoreClockin}
         onChanged={() => void refreshClockedInWorkers()}
         onCancel={() => {
           setShowClockIn(false);
           void refreshClockedInWorkers();
         }}
       />
+    </TpvGatePortal>
+  ) : showClockIn ? (
+    <TpvGatePortal>
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-sm w-full text-center shadow-xl">
+          <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+            Selecciona la tienda en la pantalla de apertura de caja antes de fichar.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowClockIn(false)}
+            className="w-full py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold text-sm"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
     </TpvGatePortal>
   ) : null;
 
@@ -2648,6 +2746,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
         tabletStoreLabel={tabletBinding?.pdvName}
         restrictedToPdvId={openingRestrictedPdvId}
         onRequestClockIn={() => setShowClockIn(true)}
+        onOpeningPdvChange={handleOpeningPdvChange}
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {
@@ -2664,7 +2763,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     if (isTabletSession) {
       return wrapShell(
         <>
-          <div className="flex flex-col min-h-screen">
+          <div className={tpvFrameClass}>
             <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
           </div>
           <TpvGatePortal>
@@ -2681,7 +2780,7 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
 
   return wrapShell(
     <>
-      <div className="flex flex-col min-h-screen">
+      <div className={tpvFrameClass}>
         <RegisterStatusBar
           session={activeSession}
           onRequestClockIn={() => setShowClockIn(true)}
@@ -2689,41 +2788,14 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
           onRequestCashOps={() => setShowCashOps(true)}
-          clockedInWorkers={clockedInWorkers}
+          clockedInWorkers={activeStaff}
           clockedInWorkersLoading={clockedInWorkersLoading}
           selectedOrderTakerId={selectedOrderTakerId}
           onSelectOrderTaker={setSelectedOrderTakerId}
         />
         <RegisterCashOpsStrip session={activeSession} />
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          {tpvClockInGate.reason === 'loading' && clockedInWorkersLoading ? (
-            <div className="flex-1 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
-              <Loader2 className="w-5 h-5 animate-spin" />
-              Comprobando fichajes…
-            </div>
-          ) : !tpvClockInGate.allowed ? (
-            <div className="flex-1 flex items-center justify-center p-6">
-              <div className="max-w-md w-full text-center rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50/80 dark:bg-violet-950/30 p-8">
-                <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
-                  <LogIn className="w-7 h-7 text-violet-600 dark:text-violet-400" />
-                </div>
-                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Fichaje obligatorio</h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                  {tpvClockInBlockMessage(tpvClockInGate.reason, isWorkerUser)}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowClockIn(true)}
-                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold flex items-center justify-center gap-2"
-                >
-                  <LogIn className="w-4 h-4" />
-                  Fichar ahora
-                </button>
-              </div>
-            </div>
-          ) : (
-            children
-          )}
+          {children}
         </div>
       </div>
       {showClosing && (

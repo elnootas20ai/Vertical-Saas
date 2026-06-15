@@ -5,6 +5,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { usePagination } from '../../hooks/usePagination';
+import { usePaginatedClients } from '../../hooks/usePaginatedClients';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import { Pagination } from '../../components/saas/Pagination';
 import { useAuth } from '../../context/AuthContext';
@@ -30,6 +31,7 @@ import { DuplicatesMergeModal } from '../../components/saas/DuplicatesMergeModal
 import { SegmentBuilder, applySegmentFilters, type FilterCondition } from '../../components/saas/SegmentBuilder';
 import { useColumnPreferences, type ColumnDef } from '../../hooks/useColumnPreferences';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
+import type { Client as AppContextClient } from '../../context/AppContext';
 import { ColumnCustomizer } from '../../components/saas/ColumnCustomizer';
 import {
   createClientInvoiceRequest,
@@ -48,6 +50,8 @@ import {
   deleteAssignmentRuleRequest,
   getSlaConfigRequest,
   saveSlaConfigRequest,
+  fetchAllClientsForExport,
+  listClientsPageRequest,
   type AssignmentRule,
   type SlaConfig,
 } from '../../lib/crmApi';
@@ -99,6 +103,7 @@ export interface Client {
   status: 'active' | 'inactive'; responsible: string; branch_id?: string; workCenterId?: string; createdAt: string;
   consents: { dataProcessing: boolean; commercial: boolean; thirdParty: boolean };
   notes?: string; vehiclesPurchased?: string[]; vehiclesSold?: string[]; documentsCount?: number;
+  tags?: string[];
 }
 interface Invoice {
   id: string; clientId?: string; number: string; clientName: string; vehicleName: string;
@@ -107,6 +112,31 @@ interface Invoice {
 }
 type SortState = { key: string; dir: 'asc' | 'desc' } | null;
 type ClientTabId = 'leads' | 'clients' | 'billing' | 'alerts';
+
+function mapContextClientToPage(c: AppContextClient, i: number): Client {
+  const location = resolveClientLocationFields(c);
+  return {
+    id: c.id,
+    name: c.name,
+    dni: c.dni || `${12000000 + i}X`,
+    phone: c.phone,
+    email: c.email,
+    address: location.address,
+    city: location.city,
+    postalCode: location.postalCode,
+    status: c.status,
+    responsible: c.responsible || 'Sin asignar',
+    branch_id: c.branch_id || '',
+    workCenterId: (c as { workCenterId?: string }).workCenterId || '',
+    createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+    consents: c.consents || { dataProcessing: false, commercial: false, thirdParty: false },
+    notes: c.notes,
+    vehiclesPurchased: c.vehiclesPurchased || [],
+    vehiclesSold: c.vehiclesSold || [],
+    documentsCount: c.documentsCount || c.documentsList?.length || 0,
+    tags: c.tags,
+  };
+}
 
 export type ClientsPageProps = {
   embedDeliveryOps?: boolean;
@@ -1461,6 +1491,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const {
     user,
     clients: contextClients,
+    clientsTotalCount,
     leads: contextLeads,
     vehicles,
     isLoadingClients,
@@ -1510,6 +1541,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [leadToConvert,           setLeadToConvert]           = useState<Lead | null>(null);
   const [selectedClient,          setSelectedClient]          = useState<Client | null>(null);
   const [searchQuery,             setSearchQuery]             = useState('');
+  const [debouncedSearch,         setDebouncedSearch]         = useState('');
   const [filterLeadTag,           setFilterLeadTag]           = useState<string>('');
   const [filterClientTag,         setFilterClientTag]         = useState<string>('');
   const [filterBranch,            setFilterBranch]            = useState<string>('all');
@@ -1527,6 +1559,36 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     }
   }, [activationFocus, clearActivationFocus]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  const useServerClients = Boolean(authUser?.user_id);
+  const useSegmentMode = useServerClients && segmentConditions.length > 0 && activeTab === 'clients';
+  const [segmentAllClients, setSegmentAllClients] = useState<AppContextClient[]>([]);
+  const [loadingSegmentClients, setLoadingSegmentClients] = useState(false);
+
+  useEffect(() => {
+    if (!useSegmentMode || !authUser?.user_id) {
+      setSegmentAllClients([]);
+      setLoadingSegmentClients(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSegmentClients(true);
+    fetchAllClientsForExport(authUser.user_id)
+      .then((all) => {
+        if (!cancelled) setSegmentAllClients(all);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSegmentClients(false);
+      });
+    return () => { cancelled = true; };
+  }, [useSegmentMode, authUser?.user_id, segmentConditions.length]);
+
+  const [invoiceClientOptions, setInvoiceClientOptions] = useState<Client[]>([]);
+
   // ── Col-filter state: Leads ────────────────────────────────────────────────
   const [lFilterName,        setLFilterName]        = useState<string[]>([]);
   const [lFilterStatus,      setLFilterStatus]      = useState<string[]>([]);
@@ -1539,6 +1601,41 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [cFilterStatus, setCFilterStatus] = useState<string[]>([]);
   const [cFilterCity,   setCFilterCity]   = useState<string[]>([]);
   const [cSort,         setCSort]         = useState<SortState>(null);
+
+  const {
+    clients: serverClients,
+    isLoading: isLoadingServerClients,
+    pagination: serverClientsPagination,
+    refresh: refreshPaginatedClients,
+  } = usePaginatedClients({
+    userId: authUser?.user_id,
+    enabled: useServerClients && activeTab === 'clients' && !useSegmentMode,
+    search: debouncedSearch,
+    sort: cSort,
+    branchId: filterBranch,
+    workCenterId: filterWorkCenter,
+    pageSize: 20,
+  });
+
+  useEffect(() => {
+    if (useServerClients && !useSegmentMode) {
+      void refreshPaginatedClients();
+    }
+  }, [clientsTotalCount, useServerClients, useSegmentMode, refreshPaginatedClients]);
+
+  useEffect(() => {
+    if (activeTab !== 'billing' || !authUser?.user_id) return;
+    let cancelled = false;
+    listClientsPageRequest(authUser.user_id, { limit: 200, skip: 0, lite: true })
+      .then(({ clients }) => {
+        if (!cancelled) {
+          setInvoiceClientOptions(clients.map((c, i) => mapContextClientToPage(c, i)));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTab, authUser?.user_id]);
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [assignmentRules, setAssignmentRules] = useState<AssignmentRule[]>([]);
   const [loadingAutomation, setLoadingAutomation] = useState(false);
@@ -1591,32 +1688,18 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   );
 
   const baseClients = useMemo<Client[]>(() => {
-    const fromCtx = (contextClients || []).map((c, i) => {
-      const location = resolveClientLocationFields(c);
-      return {
-      id: c.id,
-      name: c.name,
-      dni: c.dni || `${12000000 + i}X`,
-      phone: c.phone,
-      email: c.email,
-      address: location.address,
-      city: location.city,
-      postalCode: location.postalCode,
-      status: c.status,
-      responsible: c.responsible || 'Sin asignar',
-      branch_id: c.branch_id || '',
-      workCenterId: (c as { workCenterId?: string }).workCenterId || '',
-      createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
-      consents: c.consents || { dataProcessing: false, commercial: false, thirdParty: false },
-      notes: c.notes,
-      vehiclesPurchased: c.vehiclesPurchased || [],
-      vehiclesSold: c.vehiclesSold || [],
-      documentsCount: c.documentsCount || c.documentsList?.length || 0,
-    };
-    });
-    return fromCtx;
-  }, [contextClients]);
+    const source: AppContextClient[] = useSegmentMode
+      ? segmentAllClients
+      : useServerClients
+        ? serverClients
+        : (contextClients || []);
+    return source.map(mapContextClientToPage);
+  }, [useSegmentMode, segmentAllClients, useServerClients, serverClients, contextClients]);
   const allClients = useMemo(() => baseClients, [baseClients]);
+  const billingClients = useMemo(
+    () => (useServerClients ? invoiceClientOptions : allClients),
+    [useServerClients, invoiceClientOptions, allClients],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1749,38 +1832,55 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const filteredClients = useMemo(() => {
     let r = allClients.slice();
-    if (filterBranch !== 'all') {
-      r = r.filter(c => c.branch_id === filterBranch);
+    const clientSideOnly = useServerClients && !useSegmentMode;
+
+    if (!clientSideOnly) {
+      if (filterBranch !== 'all') {
+        r = r.filter(c => c.branch_id === filterBranch);
+      }
+      r = r.filter((c) => !(filterWorkCenter !== 'all' && (c as { workCenterId?: string }).workCenterId !== filterWorkCenter));
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        r = r.filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.phone.includes(q) || c.dni.toLowerCase().includes(q));
+      }
+      if (cSort?.key) {
+        const { key, dir } = cSort; const mul = dir === 'asc' ? 1 : -1;
+        r = [...r].sort((a, b) => {
+          if (key === 'name')   return a.name.localeCompare(b.name, 'es') * mul;
+          if (key === 'status') return a.status.localeCompare(b.status) * mul;
+          if (key === 'city')   return (a.city || '').localeCompare(b.city || '', 'es') * mul;
+          return 0;
+        });
+      }
     }
-    r = r.filter((c) => !(filterWorkCenter !== 'all' && (c as any).workCenterId !== filterWorkCenter));
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      r = r.filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.phone.includes(q) || c.dni.toLowerCase().includes(q));
-    }
+
     if (filterClientTag) {
-      r = r.filter(c => {
-        const ctxClient = contextClients?.find(cc => cc.id === c.id);
-        return ctxClient?.tags?.includes(filterClientTag);
-      });
+      r = r.filter(c => c.tags?.includes(filterClientTag));
     }
     if (cFilterName.length)   r = r.filter(c => cFilterName.includes(c.name));
     if (cFilterStatus.length) r = r.filter(c => cFilterStatus.includes(c.status === 'active' ? 'Activo' : 'Inactivo'));
     if (cFilterCity.length)   r = r.filter(c => c.city && cFilterCity.includes(c.city));
-    if (cSort?.key) {
-      const { key, dir } = cSort; const mul = dir === 'asc' ? 1 : -1;
-      r = [...r].sort((a, b) => {
-        if (key === 'name')   return a.name.localeCompare(b.name, 'es') * mul;
-        if (key === 'status') return a.status.localeCompare(b.status) * mul;
-        if (key === 'city')   return (a.city || '').localeCompare(b.city || '', 'es') * mul;
-        return 0;
-      });
-    }
+
     if (segmentConditions.length > 0 && activeTab === 'clients') {
-      const ctxMap = new Map((contextClients || []).map(c => [c.id, c]));
+      const ctxMap = new Map((useSegmentMode ? segmentAllClients : contextClients || []).map(c => [c.id, c]));
       r = applySegmentFilters(r.map(c => ({ ...c, ...ctxMap.get(c.id) } as unknown as Client)), segmentConditions) as Client[];
     }
     return r;
-  }, [allClients, filterBranch, filterWorkCenter, searchQuery, cFilterName, cFilterStatus, cFilterCity, cSort, segmentConditions, activeTab, contextClients]);
+  }, [allClients, filterBranch, filterWorkCenter, searchQuery, cFilterName, cFilterStatus, cFilterCity, cSort, segmentConditions, activeTab, contextClients, useServerClients, useSegmentMode, segmentAllClients, filterClientTag]);
+
+  const clientsListTotal = useServerClients && !useSegmentMode
+    ? serverClientsPagination.total
+    : filteredClients.length;
+
+  const { paginated: paginatedClientsLocal, pagination: clientsPaginationLocal } = usePagination(
+    useServerClients && !useSegmentMode ? [] : filteredClients,
+    20,
+  );
+  const paginatedClients = useServerClients && !useSegmentMode ? filteredClients : paginatedClientsLocal;
+  const clientsPagination = useServerClients && !useSegmentMode ? serverClientsPagination : clientsPaginationLocal;
+  const isClientsTabLoading = useServerClients
+    ? (useSegmentMode ? loadingSegmentClients : isLoadingServerClients)
+    : isLoadingClients;
 
   const filteredInvoices = useMemo(() => {
     if (!searchQuery) return allInvoices;
@@ -1789,7 +1889,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [allInvoices, searchQuery]);
 
   const { paginated: paginatedLeads, pagination: leadsPagination } = usePagination(filteredLeads, 20);
-  const { paginated: paginatedClients, pagination: clientsPagination } = usePagination(filteredClients, 20);
 
   const getTabFromParam = useCallback((rawTab: string | null): ClientTabId | null => {
     if (!rawTab) return null;
@@ -1984,7 +2083,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     if (invTotal <= 0) { setInvFormErrors({ total: 'Añade al menos un concepto con precio' }); return; }
     setInvSaving(true);
     try {
-      const client = allClients.find(c => c.id === invForm.clientId);
+      const client = billingClients.find(c => c.id === invForm.clientId);
       const updated: Invoice = {
         ...original,
         clientId: invForm.clientId,
@@ -2019,7 +2118,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     } finally {
       setInvSaving(false);
     }
-  }, [editingInvoiceId, invoices, invForm, invTotal, allClients, authUser?.user_id, resetInvForm]);
+  }, [editingInvoiceId, invoices, invForm, invTotal, billingClients, authUser?.user_id, resetInvForm]);
 
   const handleTabChange = useCallback((tab: ClientTabId) => {
     setActiveTab(tab);
@@ -2382,7 +2481,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
             entityType={activeTab === 'clients' ? 'clients' : 'leads'}
             conditions={segmentConditions}
             onChange={setSegmentConditions}
-            resultCount={activeTab === 'clients' ? filteredClients.length : filteredLeads.length}
+            resultCount={activeTab === 'clients' ? clientsListTotal : filteredLeads.length}
             onClose={() => setShowSegmentBuilder(false)}
           />
         </div>
@@ -2665,22 +2764,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
 
         <div className={`flex items-center gap-2 flex-shrink-0 ${isDeliveryBusiness ? 'ml-auto' : ''}`}>
-          <CrmDownloadDropdown
-            mode="clients"
-            isDelivery={isDeliveryBusiness}
-            clients={filteredClients.map((c) => ({
-              name: c.name,
-              phone: c.phone,
-              email: c.email,
-              dni: c.dni,
-              address: c.address,
-              city: c.city,
-              postalCode: c.postalCode,
-              status: c.status,
-              responsible: c.responsible,
-              tags: c.tags,
-            }))}
-          />
           <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
             <AddButtonDropdown
               label="Cliente"
@@ -2697,7 +2780,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       {/* Filtro por tags de clientes */}
       {(() => {
         const allClientTags = Array.from(new Set(
-          (contextClients || []).flatMap(c => c.tags || [])
+          (useServerClients ? serverClients : (contextClients || [])).flatMap(c => c.tags || [])
         )).sort();
         if (allClientTags.length === 0) return null;
         return (
@@ -2744,8 +2827,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       )}
 
       {/* Cards */}
-      {clientsView === 'cards' && (
-        filteredClients.length > 0 ? (
+      {clientsView === 'cards' && isClientsTabLoading && (
+        <div className="py-16 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</div>
+      )}
+
+      {clientsView === 'cards' && !isClientsTabLoading && (
+        clientsListTotal > 0 ? (
+          <>
           <div className="space-y-3">
             {paginatedClients.map(client => (
               <div key={client.id}
@@ -2783,6 +2871,10 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               </div>
             ))}
           </div>
+          {!isClientsTabLoading && clientsListTotal > 0 && (
+            <Pagination pagination={clientsPagination} />
+          )}
+          </>
         ) : (
           <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden">
             <EmptyState
@@ -2805,7 +2897,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{filteredClients.length}</span> cliente{filteredClients.length !== 1 ? 's' : ''}
+              <span className="font-semibold text-gray-900 dark:text-gray-100">{clientsListTotal}</span> cliente{clientsListTotal !== 1 ? 's' : ''}
             </span>
             <div className="flex items-center gap-2">
               {(cActiveFilters > 0 || cSort) && (
@@ -2849,7 +2941,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filteredClients.length === 0 ? (
+                {isClientsTabLoading ? (
+                  <tr><td colSpan={visibleClientCols.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</td></tr>
+                ) : paginatedClients.length === 0 ? (
                   <tr><td colSpan={visibleClientCols.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
                 ) : paginatedClients.map(client => (
                   <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group cursor-pointer" onClick={() => viewClientDetail(client.id)}>
@@ -2880,7 +2974,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                 ))}
               </tbody>
             </table>
-            {filteredClients.length > 0 && <Pagination pagination={clientsPagination} />}
+            {!isClientsTabLoading && clientsListTotal > 0 && <Pagination pagination={clientsPagination} />}
           </div>
         </div>
       )}
@@ -2909,7 +3003,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     if (Object.keys(e).length > 0) return;
     setInvSaving(true);
     try {
-      const client = allClients.find(c => c.id === invForm.clientId);
+      const client = billingClients.find(c => c.id === invForm.clientId);
       const inv: Invoice = {
         id: `inv-${Date.now()}`, clientId: invForm.clientId, number: invForm.invoiceNum,
         clientName: client?.name || '', vehicleName: invForm.vehicleName, vehiclePlate: invForm.vehiclePlate,
@@ -3202,8 +3296,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   <User className="w-4 h-4 text-emerald-600" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{allClients.find(c => c.id === invForm.clientId)?.name}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{allClients.find(c => c.id === invForm.clientId)?.dni}</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{billingClients.find(c => c.id === invForm.clientId)?.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-mono">{billingClients.find(c => c.id === invForm.clientId)?.dni}</p>
                 </div>
                 <button type="button" onClick={() => setInvForm(f => ({ ...f, clientId: '' }))}
                   className="p-1.5 hover:bg-emerald-200 rounded-lg transition-colors flex-shrink-0">
@@ -3214,7 +3308,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               <select value={invForm.clientId} onChange={e => setInvForm(f => ({ ...f, clientId: e.target.value }))}
                 className={invInp(invFormErrors.client) + ' bg-white dark:bg-gray-800'}>
                 <option value="">— Seleccionar cliente —</option>
-                {allClients.map(c => <option key={c.id} value={c.id}>{c.name} · {c.dni}</option>)}
+                {billingClients.map(c => <option key={c.id} value={c.id}>{c.name} · {c.dni}</option>)}
               </select>
             )}
             {invFormErrors.client && <p className="text-xs text-red-500 mt-1">{invFormErrors.client}</p>}
@@ -3699,7 +3793,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           onSubmit={(data: any) => { console.log('Contract:', data); setShowCreateContractModal(false); setSelectedClient(null); }} />
       )}
       
-      <CrmImportWizard isOpen={crmImportMode !== null} onClose={() => setCrmImportMode(null)} initialMode={crmImportMode ?? undefined} />
+      <CrmImportWizard
+        isOpen={crmImportMode !== null}
+        onClose={() => setCrmImportMode(null)}
+        initialMode={crmImportMode ?? undefined}
+        exportUserId={authUser?.user_id}
+        includeResponsible={!isDeliveryBusiness}
+      />
       <AIAddModal
         isOpen={showAIClientModal}
         onClose={() => setShowAIClientModal(false)}

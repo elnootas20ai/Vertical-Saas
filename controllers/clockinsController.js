@@ -19,9 +19,14 @@ import { broadcastToUser } from '../services/sseService.js';
 import { sendPushToUser } from '../services/pushService.js';
 import {
   canMutateClockinForMember,
+  canManageStoreClockin,
+  canAccessStoreClockins,
   computeClockinMinutes,
   deriveClockinStatus,
+  normalizeClockinUserId,
   salesPointRefsSameStore,
+  isMemberAssignedToSalesPoint,
+  memberEmploymentSalesPointRef,
 } from '../services/clockinsAccess.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -36,17 +41,20 @@ function getSchedulesDbName() {
 const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 
 function getAuthUserId(req) {
-  return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  return normalizeClockinUserId(req.authUser?.userId || req.authUser?.user_id || '');
 }
 
 function getMember(business, userId) {
   if (!business?.members) return null;
-  return business.members.find((m) => m.user_id === userId) || null;
+  const uid = normalizeClockinUserId(userId);
+  return business.members.find((m) => normalizeClockinUserId(m.user_id) === uid) || null;
 }
 
 function allBusinessMemberIds(business) {
-  const ids = new Set((business.members || []).map((m) => m.user_id).filter(Boolean));
-  const ownerId = String(business.owner_user_id || '').trim();
+  const ids = new Set(
+    (business.members || []).map((m) => normalizeClockinUserId(m.user_id)).filter(Boolean),
+  );
+  const ownerId = normalizeClockinUserId(business.owner_user_id);
   if (ownerId) ids.add(ownerId);
   return Array.from(ids);
 }
@@ -81,15 +89,16 @@ function getSubordinateIds(business, orgchart, userId) {
 }
 
 async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
-  if (!requesterId) return [];
+  const requester = normalizeClockinUserId(requesterId);
+  if (!requester) return [];
 
-  const member = getMember(business, requesterId);
-  const ownerId = String(business.owner_user_id || '').trim();
+  const member = getMember(business, requester);
+  const ownerId = normalizeClockinUserId(business.owner_user_id);
   const authRole = String(req.authUser?.role || '').trim();
   const isManager =
     (member && ADMIN_ROLES.has(member.role))
-    || ownerId === requesterId
-    || (authRole === 'Admin' && ownerId === requesterId);
+    || (ownerId && ownerId === requester)
+    || (authRole === 'Admin' && ownerId === requester);
 
   if (isManager) {
     return allBusinessMemberIds(business);
@@ -97,12 +106,12 @@ async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
 
   if (!member) return [];
 
-  const subordinateIds = getSubordinateIds(business, orgchart, requesterId);
+  const subordinateIds = getSubordinateIds(business, orgchart, requester);
   if (subordinateIds && subordinateIds.length > 0) {
-    return [requesterId, ...subordinateIds];
+    return [requester, ...subordinateIds.map((id) => normalizeClockinUserId(id)).filter(Boolean)];
   }
 
-  return [requesterId];
+  return [requester];
 }
 
 async function loadOrgChart(req, businessId) {
@@ -209,27 +218,102 @@ function listRealTeamMemberIds(business, visibleIds, memberMap) {
   return Array.from(ids);
 }
 
-function dedupeClockinsByMemberDate(records) {
-  const byKey = new Map();
-  const rank = (r) => {
-    if (r.status === 'active' || r.status === 'break') return 3;
-    if (r.status === 'completed') return 2;
-    return 1;
-  };
+function recordMatchesStoreFilter(r, salesPointFilter, workCenterFilter) {
+  const sp = String(r.sales_point_id || '').trim();
+  if (!sp) return false;
+  if (salesPointFilter && (sp === salesPointFilter || sp === `wc:${salesPointFilter}` || salesPointRefsSameStore(sp, salesPointFilter, workCenterFilter))) {
+    return true;
+  }
+  if (workCenterFilter && (sp === workCenterFilter || sp === `wc:${workCenterFilter}` || salesPointRefsSameStore(sp, workCenterFilter, workCenterFilter))) {
+    return true;
+  }
+  return false;
+}
+
+function dedupeClockinDocumentsById(records) {
+  const byId = new Map();
   for (const r of records) {
-    const key = `${r.member_id}:${r.date}`;
-    const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, r);
-      continue;
-    }
-    const rRank = rank(r);
-    const pRank = rank(prev);
-    if (rRank > pRank || (rRank === pRank && String(r.updatedAt || '') > String(prev.updatedAt || ''))) {
-      byKey.set(key, r);
+    const id = String(r._id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id);
+    if (!prev || String(r.updatedAt || '') > String(prev.updatedAt || '')) {
+      byId.set(id, r);
     }
   }
-  return Array.from(byKey.values());
+  return Array.from(byId.values());
+}
+
+function clockInSortTime(record) {
+  return record?.entries?.find((e) => e.type === 'clock_in')?.time
+    || record?.createdAt
+    || '';
+}
+
+function buildTeamDayClockins({
+  teamIds,
+  records,
+  dateFilter,
+  scheduleDocs,
+  businessId,
+  memberMap,
+  enrichRecord,
+}) {
+  const byMember = new Map();
+  for (const r of records) {
+    const mid = normalizeClockinUserId(r.member_id);
+    if (!mid) continue;
+    if (!byMember.has(mid)) byMember.set(mid, []);
+    byMember.get(mid).push(r);
+  }
+  for (const list of byMember.values()) {
+    list.sort((a, b) => clockInSortTime(a).localeCompare(clockInSortTime(b)));
+  }
+
+  const enriched = [];
+  for (const mid of teamIds) {
+    const shift = resolveMemberShiftForDate(scheduleDocs, mid, dateFilter);
+    const sessions = byMember.get(mid) || [];
+    if (sessions.length === 0) {
+      const info = memberMap[mid] || {};
+      enriched.push({
+        _id: `teamday:${dateFilter}:${mid}`,
+        type: 'clockin',
+        business_id: businessId,
+        member_id: mid,
+        member_name: resolveMemberLabel(memberMap, mid),
+        date: dateFilter,
+        entries: [],
+        totalMinutes: 0,
+        breakMinutes: 0,
+        status: 'offline',
+        notes: '',
+        scheduled_start: shift?.start,
+        scheduled_end: shift?.end,
+        member_role: info.role || 'Usuario',
+        member_email: info.email || '',
+        roster_placeholder: true,
+      });
+      continue;
+    }
+    sessions.forEach((rec, idx) => {
+      enriched.push(attachScheduleToRecord(enrichRecord({
+        ...rec,
+        session_index: idx + 1,
+        same_day_sessions: sessions.length,
+      }), shift));
+    });
+  }
+
+  enriched.sort((a, b) => {
+    if (Boolean(a.roster_placeholder) !== Boolean(b.roster_placeholder)) {
+      return a.roster_placeholder ? 1 : -1;
+    }
+    const byName = (a.member_name || '').localeCompare(b.member_name || '', 'es');
+    if (byName !== 0) return byName;
+    return (a.session_index || 1) - (b.session_index || 1);
+  });
+
+  return enriched;
 }
 
 function resolveMemberShiftForDate(scheduleDocs, memberId, dateStr) {
@@ -285,7 +369,8 @@ export async function listClockins(req, res) {
       records = records.filter((r) => r.date === dateFilter);
     }
     if (memberIdFilter) {
-      records = records.filter((r) => r.member_id === memberIdFilter);
+      const mid = normalizeClockinUserId(memberIdFilter);
+      records = records.filter((r) => normalizeClockinUserId(r.member_id) === mid);
     }
 
     const salesPointFilter = req.query.salesPointId ? String(req.query.salesPointId).trim() : null;
@@ -293,17 +378,18 @@ export async function listClockins(req, res) {
     const storeScope = String(req.query.storeScope || '') === '1';
 
     if (storeScope && (salesPointFilter || workCenterFilter)) {
-      const memberIds = allBusinessMemberIds(business);
-      if (!memberIds.includes(requesterId)) {
+      if (!canAccessStoreClockins(business, requesterId)) {
         return res.status(403).json({ ok: false, error: 'No autorizado para fichajes de tienda' });
       }
     }
 
     if (salesPointFilter || workCenterFilter) {
       records = records.filter((r) => {
+        if (storeScope) {
+          return recordMatchesStoreFilter(r, salesPointFilter, workCenterFilter);
+        }
         const sp = String(r.sales_point_id || '').trim();
-        // TPV: fichajes del día sin tienda etiquetada siguen contando en la tienda activa.
-        if (!sp) return Boolean(storeScope);
+        if (!sp) return false;
         if (salesPointFilter && (sp === salesPointFilter || sp === `wc:${salesPointFilter}`)) return true;
         if (workCenterFilter && (sp === workCenterFilter || sp === `wc:${workCenterFilter}`)) return true;
         return false;
@@ -314,7 +400,7 @@ export async function listClockins(req, res) {
     if (!storeScope || (!salesPointFilter && !workCenterFilter)) {
       records = records.filter((r) => visibleIds.includes(r.member_id));
     }
-    records = dedupeClockinsByMemberDate(records);
+    records = dedupeClockinDocumentsById(records);
 
     const memberMap = await enrichMemberMap(req, business);
     const enrichRecord = (r) => ({
@@ -326,52 +412,31 @@ export async function listClockins(req, res) {
 
     const recordsOnly = String(req.query.recordsOnly || '') === '1';
 
-    // Vista del día: una fila por miembro REAL del equipo (fichado o sin fichar).
+    // Vista del día: una fila por miembro (sin fichar) o una fila por cada turno fichado.
     if (dateFilter && !memberIdFilter && !recordsOnly) {
       const scheduleDocs = await loadScheduleDocs(req, businessId);
       const teamIds = listRealTeamMemberIds(business, visibleIds, memberMap);
-      const recordByMember = new Map(records.map((r) => [r.member_id, r]));
-      const enriched = teamIds.map((mid) => {
-        const shift = resolveMemberShiftForDate(scheduleDocs, mid, dateFilter);
-        const existing = recordByMember.get(mid);
-        if (existing) {
-          return attachScheduleToRecord(enrichRecord(existing), shift);
-        }
-        const info = memberMap[mid] || {};
-        return {
-          _id: `teamday:${dateFilter}:${mid}`,
-          type: 'clockin',
-          business_id: businessId,
-          member_id: mid,
-          member_name: resolveMemberLabel(memberMap, mid),
-          date: dateFilter,
-          entries: [],
-          totalMinutes: 0,
-          breakMinutes: 0,
-          status: 'offline',
-          notes: '',
-          scheduled_start: shift?.start,
-          scheduled_end: shift?.end,
-          member_role: info.role || 'Usuario',
-          member_email: info.email || '',
-          roster_placeholder: true,
-        };
-      });
-
-      enriched.sort((a, b) => {
-        const roleRank = (role) => (role === 'Admin' || role === 'Gerente' ? 0 : 1);
-        const byRole = roleRank(a.member_role) - roleRank(b.member_role);
-        if (byRole !== 0) return byRole;
-        return (a.member_name || '').localeCompare(b.member_name || '', 'es');
+      const enriched = buildTeamDayClockins({
+        teamIds,
+        records,
+        dateFilter,
+        scheduleDocs,
+        businessId,
+        memberMap,
+        enrichRecord,
       });
 
       return res.json({ ok: true, clockins: enriched });
     }
 
     const enriched = records.map(enrichRecord);
-    enriched.sort(
-      (a, b) => b.date.localeCompare(a.date) || (a.member_name || '').localeCompare(b.member_name || '', 'es'),
-    );
+    enriched.sort((a, b) => {
+      const dateCmp = b.date.localeCompare(a.date);
+      if (dateCmp !== 0) return dateCmp;
+      const nameCmp = (a.member_name || '').localeCompare(b.member_name || '', 'es');
+      if (nameCmp !== 0) return nameCmp;
+      return clockInSortTime(a).localeCompare(clockInSortTime(b));
+    });
 
     return res.json({ ok: true, clockins: enriched });
   } catch (error) {
@@ -714,6 +779,37 @@ export async function adjustClockinEntry(req, res) {
 
 const VALID_ENTRY_TYPES = new Set(['clock_in', 'break_start', 'break_end', 'clock_out']);
 
+async function resolveMemberStoreAssignment(req, business, memberUserId) {
+  const member = getMember(business, memberUserId);
+  let ref = memberEmploymentSalesPointRef(member, null);
+  if (!ref) {
+    try {
+      const account = await findAccountByUserId(req, memberUserId);
+      ref = memberEmploymentSalesPointRef(member, account);
+    } catch {
+      /* cuenta no encontrada */
+    }
+  }
+  return {
+    ref,
+    role: String(member?.role || '').trim(),
+  };
+}
+
+async function assertMemberCanClockAtStore(req, res, business, memberUserId, pdvId, workCenterId) {
+  const sp = String(pdvId || '').trim();
+  if (!sp) return true;
+  const { ref, role } = await resolveMemberStoreAssignment(req, business, memberUserId);
+  if (!isMemberAssignedToSalesPoint(business, memberUserId, sp, workCenterId, ref, role)) {
+    res.status(403).json({
+      ok: false,
+      error: 'Este trabajador no está asignado a esta tienda',
+    });
+    return false;
+  }
+  return true;
+}
+
 export async function checkInMember(req, res) {
   try {
     const { businessId } = req.params;
@@ -733,13 +829,25 @@ export async function checkInMember(req, res) {
       work_center_id: workCenterId,
       device_type: deviceType,
       geo,
+      store_team_clockin: storeTeamClockin,
     } = req.body || {};
 
-    const targetMemberId = String(memberId || '').trim();
+    const targetMemberId = normalizeClockinUserId(memberId);
     if (!targetMemberId) return badRequest(res, 'Falta memberId');
 
-    if (!canMutateClockinForMember(business, requesterId, targetMemberId)) {
+    const sp = String(salesPointId || '').trim();
+    const isStoreTeamClockin = storeTeamClockin === true || storeTeamClockin === 'true';
+
+    if (!canManageStoreClockin(business, requesterId, targetMemberId, {
+      storeTeamClockin: isStoreTeamClockin,
+      salesPointId: sp,
+    })) {
       return res.status(403).json({ ok: false, error: 'No puedes fichar por otro trabajador' });
+    }
+
+    const wc = String(workCenterId || '').trim();
+    if (!(await assertMemberCanClockAtStore(req, res, business, targetMemberId, sp, wc))) {
+      return;
     }
 
     const date = new Date().toISOString().slice(0, 10);
@@ -749,7 +857,7 @@ export async function checkInMember(req, res) {
 
     const existingRecords = await listClockinsByBusiness(req, businessId);
     const activeToday = existingRecords.find((r) => {
-      if (r.member_id !== targetMemberId || r.date !== date) return false;
+      if (normalizeClockinUserId(r.member_id) !== targetMemberId || r.date !== date) return false;
       const status = r.status || deriveClockinStatus(r.entries);
       return status !== 'completed';
     });
@@ -824,7 +932,7 @@ export async function appendClockinEntry(req, res) {
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
-    const { entryType, geo } = req.body || {};
+    const { entryType, geo, store_team_clockin: storeTeamClockin } = req.body || {};
     if (!VALID_ENTRY_TYPES.has(entryType) || entryType === 'clock_in') {
       return badRequest(res, 'entryType inválido');
     }
@@ -836,8 +944,18 @@ export async function appendClockinEntry(req, res) {
       return res.status(404).json({ ok: false, error: 'Fichaje no encontrado' });
     }
 
-    if (!canMutateClockinForMember(business, requesterId, doc.member_id)) {
+    const isStoreTeamClockin = storeTeamClockin === true || storeTeamClockin === 'true';
+    const sp = String(doc.sales_point_id || '').trim();
+
+    if (!canManageStoreClockin(business, requesterId, doc.member_id, {
+      storeTeamClockin: isStoreTeamClockin,
+      salesPointId: sp,
+    })) {
       return res.status(403).json({ ok: false, error: 'No puedes modificar este fichaje' });
+    }
+
+    if (sp && !(await assertMemberCanClockAtStore(req, res, business, doc.member_id, sp, ''))) {
+      return;
     }
 
     const now = new Date().toISOString();

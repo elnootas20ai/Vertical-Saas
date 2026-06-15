@@ -27,6 +27,8 @@ import {
   sumBreakMinutes,
   sumWorkedMinutes,
   todayDateStr,
+  sessionTurnLabel,
+  sortClockinsByClockIn,
 } from '../../../lib/clockinHistoryUtils';
 
 type MainTab = 'mine' | 'team';
@@ -123,10 +125,12 @@ function TeamMemberCard({
   name,
   record,
   active,
+  turnLabel,
 }: {
   name: string;
   record?: ClockinRecord | null;
   active?: ActiveMember | null;
+  turnLabel?: string | null;
 }) {
   const status = active?.status || record?.status;
   const isWorking = status === 'active';
@@ -152,7 +156,14 @@ function TeamMemberCard({
         {name.slice(0, 2).toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{name}</p>
+        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+          {name}
+          {turnLabel ? (
+            <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+              {turnLabel}
+            </span>
+          ) : null}
+        </p>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           {isWorking ? 'Trabajando ahora' : isBreak ? 'En descanso' : record?.status === 'completed' ? 'Jornada cerrada' : 'Sin fichar hoy'}
           {ciTime ? ` · entrada ${ciTime}` : ''}
@@ -198,8 +209,8 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
         ),
         fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
       ]);
-      setMyRecords(mine.filter((r) => r.status === 'completed'));
-      setTeamToday(todayAll);
+      setMyRecords(sortClockinsByClockIn(mine.filter((r) => r.status === 'completed')));
+      setTeamToday(sortClockinsByClockIn(todayAll.filter((r) => (r.entries?.length || 0) > 0)));
       setTeamWeek(weekAll);
       setActiveNow(active);
     } finally {
@@ -232,7 +243,8 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
 
   const mineStats = useMemo(
     () => ({
-      days: filteredMine.length,
+      days: new Set(filteredMine.map((r) => r.date)).size,
+      sessions: filteredMine.length,
       worked: sumWorkedMinutes(filteredMine),
       breaks: sumBreakMinutes(filteredMine),
     }),
@@ -242,30 +254,29 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
   const activeByMember = useMemo(() => new Map(activeNow.map((a) => [a.member_id, a])), [activeNow]);
 
   const teamRows = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const r of teamToday) names.set(r.member_id, r.member_name);
-    for (const a of activeNow) names.set(a.member_id, a.member_name);
-    return [...names.entries()]
-      .map(([id, name]) => ({
-        id,
-        name,
-        record: teamToday.find((r) => r.member_id === id) || null,
-        active: activeByMember.get(id) || null,
+    return teamToday
+      .map((record) => ({
+        id: record._id,
+        memberId: record.member_id,
+        name: record.member_name,
+        record,
+        active: activeByMember.get(record.member_id) || null,
+        turnLabel: sessionTurnLabel(record),
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [teamToday, activeNow, activeByMember]);
+      .sort((a, b) => a.name.localeCompare(b.name, 'es') || a.id.localeCompare(b.id));
+  }, [teamToday, activeByMember]);
 
   const teamWeekGrouped = useMemo(() => {
-    const map = new Map<string, { name: string; minutes: number; days: number }>();
+    const map = new Map<string, { name: string; minutes: number; dates: Set<string> }>();
     for (const r of teamWeek) {
       const id = r.member_id;
-      const prev = map.get(id) || { name: r.member_name, minutes: 0, days: 0 };
+      const prev = map.get(id) || { name: r.member_name, minutes: 0, dates: new Set<string>() };
       prev.minutes += r.totalMinutes || 0;
-      prev.days += 1;
+      if (r.date) prev.dates.add(r.date);
       map.set(id, prev);
     }
     return [...map.entries()]
-      .map(([id, data]) => ({ id, ...data }))
+      .map(([id, data]) => ({ id, name: data.name, minutes: data.minutes, days: data.dates.size }))
       .sort((a, b) => b.minutes - a.minutes);
   }, [teamWeek]);
 
@@ -431,13 +442,19 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
           ) : (
             <>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Estado del equipo hoy · {teamRows.length} persona{teamRows.length !== 1 ? 's' : ''}
+                Estado del equipo hoy · {teamRows.length} fichaje{teamRows.length !== 1 ? 's' : ''}
               </p>
               {teamRows.length === 0 ? (
                 <p className="py-10 text-center text-sm text-gray-400">Nadie ha fichado hoy todavía</p>
               ) : (
                 teamRows.map((row) => (
-                  <TeamMemberCard key={row.id} name={row.name} record={row.record} active={row.active} />
+                  <TeamMemberCard
+                    key={row.id}
+                    name={row.name}
+                    record={row.record}
+                    active={row.active}
+                    turnLabel={row.turnLabel}
+                  />
                 ))
               )}
             </>

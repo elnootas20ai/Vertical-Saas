@@ -1,4 +1,5 @@
 import type { TpvClockedInWorker } from './tpvClockedInWorkers';
+import { clockinIdsMatch } from './tpvClockedInWorkers';
 
 export type TpvClockInBlockReason =
   | 'loading'
@@ -24,8 +25,8 @@ export function evaluateTpvClockInGate(params: {
   }
 
   if (isWorkerUser) {
-    const selfPresent = presentWorkers.some((w) => w.id === currentUserId);
-    const selfActive = activeWorkers.some((w) => w.id === currentUserId);
+    const selfPresent = presentWorkers.some((w) => clockinIdsMatch(w.id, currentUserId));
+    const selfActive = activeWorkers.some((w) => clockinIdsMatch(w.id, currentUserId));
     if (!selfPresent) {
       return { allowed: false, reason: 'worker_not_clocked' };
     }
@@ -36,7 +37,7 @@ export function evaluateTpvClockInGate(params: {
   }
 
   const takerId = selectedOrderTakerId || activeWorkers[0]?.id || null;
-  if (!takerId || !activeWorkers.some((w) => w.id === takerId)) {
+  if (!takerId || !activeWorkers.some((w) => clockinIdsMatch(w.id, takerId))) {
     return { allowed: false, reason: 'taker_not_active' };
   }
 

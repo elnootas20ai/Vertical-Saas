@@ -1,9 +1,19 @@
 import { listUsersRequest, type AuthUser } from './authApi';
-import { listClockins } from './clockinsApi';
+import { listClockins, type ClockinRecord } from './clockinsApi';
+import { deriveEffectiveClockinStatus, isClockinPresent } from './clockinStatus';
+import { pickPreferredMemberClockin } from './clockinHistoryUtils';
+import { normalizeClockinUserId } from './clockinUserId';
+
 export interface TpvClockedInWorker {
   id: string;
   name: string;
   status: 'active' | 'break';
+}
+
+export function clockinIdsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = normalizeClockinUserId(a);
+  const right = normalizeClockinUserId(b);
+  return Boolean(left && right && left === right);
 }
 
 export function getWorkerInitials(name: string): string {
@@ -19,23 +29,23 @@ export function isMemberAssignedToStore(
   workCenterId: string,
 ): boolean {
   const ref = String(member.employment?.salesPointId || '').trim();
-  const isOwner = ownerUserId === member.user_id;
+  const isOwner = clockinIdsMatch(ownerUserId, member.user_id);
   if (isOwner && !ref) return true;
+  const role = String(member.role || '').trim();
+  if ((role === 'Admin' || role === 'Gerente') && !ref) return true;
   if (!ref) return false;
-  return ref === pdvId || ref === workCenterId || ref === `wc:${workCenterId}`;
+  return ref === pdvId || ref === workCenterId || ref === `wc:${workCenterId}` || ref === `wc:${pdvId}`;
 }
 
-/** Equipo visible para fichar en TPV tablet / gerente en tienda (sin exigir asignación previa). */
+/** Solo trabajadores asignados a este PDV/centro (y owner/admin sin tienda fija). */
 export function filterUsersForStoreClockin(
   users: AuthUser[],
   ownerUserId: string,
   pdvId: string,
   workCenterId: string,
-  relaxStoreAssignment: boolean,
 ): AuthUser[] {
   return users.filter((u) => {
     if (u.status === 'inactive') return false;
-    if (relaxStoreAssignment) return true;
     return isMemberAssignedToStore(u, ownerUserId, pdvId, workCenterId);
   });
 }
@@ -46,30 +56,48 @@ export function clockinRecordMatchesStore(
   workCenterId: string,
 ): boolean {
   const storedPdv = String(record.sales_point_id || '').trim();
-  if (!storedPdv) return true;
+  // Sin tienda explícita no cuenta en el TPV de un PDV concreto (evita mezclar fichajes).
+  if (!storedPdv) return false;
   return (
     storedPdv === pdvId
     || storedPdv === workCenterId
     || storedPdv === `wc:${workCenterId}`
-    || (workCenterId && storedPdv === `wc:${pdvId}`)
+    || storedPdv === `wc:${pdvId}`
+    || (workCenterId && storedPdv === pdvId)
   );
+}
+
+/** Equipo operativo en TPV: quien abrió caja + fichajes de ESTA tienda (sin bloquear por nómina global). */
+export function buildTpvActiveStaff(
+  session: { workerId?: string; workerName?: string } | null | undefined,
+  storeClockins: TpvClockedInWorker[],
+): TpvClockedInWorker[] {
+  const byId = new Map<string, TpvClockedInWorker>();
+  const openerId = normalizeClockinUserId(session?.workerId);
+  const openerName = String(session?.workerName || '').trim();
+  if (openerId && openerName) {
+    byId.set(openerId, { id: openerId, name: openerName, status: 'active' });
+  }
+  for (const worker of storeClockins) {
+    byId.set(worker.id, worker);
+  }
+  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
   const data = await listUsersRequest(businessId);
   return data.users || [];
 }
+
 /** Trabajadores fichados hoy en la tienda (activos o en descanso). */
 export async function loadClockedInStoreWorkers(
   businessId: string,
   ownerUserId: string,
   pdvId: string,
   workCenterId: string,
-  options?: { relaxStoreAssignment?: boolean },
 ): Promise<TpvClockedInWorker[]> {
   if (!businessId || !pdvId) return [];
   const today = new Date().toISOString().slice(0, 10);
-  const relax = options?.relaxStoreAssignment ?? false;
   const [users, records] = await Promise.all([
     fetchBusinessUsers(businessId),
     listClockins(businessId, {
@@ -80,18 +108,26 @@ export async function loadClockedInStoreWorkers(
     }),
   ]);
   const teamIds = new Set(
-    filterUsersForStoreClockin(users, ownerUserId, pdvId, workCenterId, relax)
-      .map((u) => u.user_id),
+    filterUsersForStoreClockin(users, ownerUserId, pdvId, workCenterId)
+      .map((u) => normalizeClockinUserId(u.user_id))
+      .filter(Boolean),
   );
-  const byId = new Map<string, TpvClockedInWorker>();
+  const bestRecordByMember = new Map<string, ClockinRecord>();
   for (const r of records) {
-    if (!teamIds.has(r.member_id)) continue;
-    if (r.status !== 'active' && r.status !== 'break') continue;
+    const mid = normalizeClockinUserId(r.member_id);
+    if (!mid || !teamIds.has(mid)) continue;
     if (!clockinRecordMatchesStore(r, pdvId, workCenterId)) continue;
-    byId.set(r.member_id, {
-      id: r.member_id,
+    const prev = bestRecordByMember.get(mid);
+    bestRecordByMember.set(mid, prev ? pickPreferredMemberClockin(prev, r) : r);
+  }
+  const byId = new Map<string, TpvClockedInWorker>();
+  for (const [mid, r] of bestRecordByMember) {
+    const effective = deriveEffectiveClockinStatus(r);
+    if (!isClockinPresent(effective)) continue;
+    byId.set(mid, {
+      id: mid,
       name: r.member_name || 'Trabajador',
-      status: r.status,
+      status: effective === 'break' ? 'break' : 'active',
     });
   }
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));

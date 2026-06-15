@@ -73,6 +73,12 @@ export function clearTpvTabletBinding(): void {
   }
 }
 
+/** Desvincula la tablet y devuelve la ruta de login por código. */
+export function exitTpvTabletSessionPath(): string {
+  clearTpvTabletBinding();
+  return '/auth/tpv-tablet';
+}
+
 export function isTpvTabletBound(): boolean {
   return readTpvTabletBinding() !== null;
 }

@@ -93,7 +93,8 @@ export function WorkerClock() {
 
   const weekMinutes = weekRecords.reduce((sum, r) => sum + r.totalMinutes, 0);
   const weekHours = weekMinutes / 60;
-  const avgDaily = weekRecords.length > 0 ? weekHours / weekRecords.length : 0;
+  const weekDaysWorked = new Set(weekRecords.map((r) => r.date)).size;
+  const avgDaily = weekDaysWorked > 0 ? weekHours / weekDaysWorked : 0;
 
   if (loading) {
     return (
@@ -250,7 +251,7 @@ export function WorkerClock() {
           {[
             { label: t('worker.clock.weekHours', 'Horas semana'), value: `${weekHours.toFixed(1)}h`, icon: <Clock className="w-4 h-4" />, color: 'text-blue-600 bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400' },
             { label: t('worker.clock.dailyAvg', 'Media diaria'), value: `${avgDaily.toFixed(1)}h`, icon: <TrendingUp className="w-4 h-4" />, color: 'text-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 dark:text-emerald-400' },
-            { label: t('worker.clock.daysWorked', 'Días trabajados'), value: `${weekRecords.length}`, icon: <CalendarDays className="w-4 h-4" />, color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400' },
+            { label: t('worker.clock.daysWorked', 'Días trabajados'), value: `${weekDaysWorked}`, icon: <CalendarDays className="w-4 h-4" />, color: 'text-purple-600 bg-purple-100 dark:bg-purple-900/30 dark:text-purple-400' },
             { label: t('worker.clock.extraHours', 'Horas extra'), value: weekHours > 40 ? `+${(weekHours - 40).toFixed(1)}h` : '0h', icon: <Timer className="w-4 h-4" />, color: 'text-amber-600 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-400' },
           ].map((stat) => (
             <div key={stat.label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">

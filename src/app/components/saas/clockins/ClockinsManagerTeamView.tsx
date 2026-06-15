@@ -30,6 +30,7 @@ import {
   getTimeDiffMinutes,
 } from '../../../lib/clockinsApi';
 import { resolveClockinMemberName, ROLE_BADGE, STATUS_ORDER } from '../../../lib/clockinsDisplay';
+import { sessionTurnLabel } from '../../../lib/clockinHistoryUtils';
 
 interface Props {
   businessId: string;
@@ -216,9 +217,9 @@ export function ClockinsManagerTeamView({
   );
 
   const toggleExpand = (record: EnrichedClockinRecord) => {
-    const next = expandedId === record.member_id ? null : record.member_id;
+    const next = expandedId === record._id ? null : record._id;
     setExpandedId(next);
-    if (next) loadMemberHistory(next);
+    if (next) loadMemberHistory(record.member_id);
   };
 
   const startEdit = (record: EnrichedClockinRecord, entryIdx: number) => {
@@ -389,7 +390,7 @@ export function ClockinsManagerTeamView({
             ))}
           </select>
         )}
-        <span className="text-xs text-gray-400 ml-auto">{filteredSorted.length} miembros</span>
+        <span className="text-xs text-gray-400 ml-auto">{filteredSorted.length} fichajes</span>
       </div>
 
       {/* Tabla principal */}
@@ -448,7 +449,8 @@ export function ClockinsManagerTeamView({
                   const sc = STATUS[r.status] || STATUS.offline;
                   const ciDiff = ci ? getTimeDiffMinutes(ci, r) : null;
                   const coDiff = co ? getTimeDiffMinutes(co, r) : null;
-                  const isExpanded = expandedId === r.member_id;
+                  const isExpanded = expandedId === r._id;
+                  const turnLabel = sessionTurnLabel(r);
                   const isEditingCi = editingId === r._id && editEntryIdx === ciIdx;
                   const isEditingCo = editingId === r._id && editEntryIdx === coIdx;
                   const schedule =
@@ -492,7 +494,14 @@ export function ClockinsManagerTeamView({
                               {memberLabel.charAt(0).toUpperCase()}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{memberLabel}</p>
+                              <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                {memberLabel}
+                                {turnLabel ? (
+                                  <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                                    {turnLabel}
+                                  </span>
+                                ) : null}
+                              </p>
                               <span
                                 className={`inline-flex mt-0.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${ROLE_BADGE[r.member_role || 'Usuario'] || ROLE_BADGE.Usuario}`}
                               >

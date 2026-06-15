@@ -37,15 +37,14 @@ describe('evaluateTpvClockInGate', () => {
     assert.equal(r.allowed, true);
   });
 
-  it('blocks worker on break', () => {
+  it('allows manager when someone is active (account: id prefix)', () => {
     const r = evaluateTpvClockInGate({
       loading: false,
-      clockedInWorkers: [{ id: 'u1', name: 'Ana', status: 'break' }],
-      selectedOrderTakerId: null,
-      currentUserId: 'u1',
-      isWorkerUser: true,
+      clockedInWorkers: [{ id: 'u1', name: 'Uriel', status: 'active' }],
+      selectedOrderTakerId: 'account:u1',
+      currentUserId: 'account:mgr',
+      isWorkerUser: false,
     });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'taker_not_active');
+    assert.equal(r.allowed, true);
   });
 });

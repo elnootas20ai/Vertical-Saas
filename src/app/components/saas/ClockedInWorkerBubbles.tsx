@@ -3,6 +3,7 @@ import {
   getWorkerInitials,
   type TpvClockedInWorker,
 } from '../../lib/tpvClockedInWorkers';
+import { normalizeClockinUserId } from '../../lib/clockinUserId';
 
 interface ClockedInWorkerBubblesProps {
   workers: TpvClockedInWorker[];
@@ -55,7 +56,7 @@ export function ClockedInWorkerBubbles({
       )}
       <div className="flex items-center gap-1.5 flex-wrap min-h-[2rem]">
         {workers.map((worker) => {
-          const isSelected = selectedId === worker.id;
+          const isSelected = normalizeClockinUserId(selectedId) === worker.id;
           const onBreak = worker.status === 'break';
           const initials = getWorkerInitials(worker.name);
           const firstName = worker.name.split(' ')[0] || worker.name;

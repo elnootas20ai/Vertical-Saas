@@ -114,7 +114,7 @@ function finalizeStepDefs(
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function ActivationChecklistProvider({ children }: { children: ReactNode }) {
-  const { vehicles, clients, leads, sales, documents } = useApp();
+  const { vehicles, clients, clientsTotalCount, leads, sales, documents } = useApp();
   const { user, listUsers } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const [teamCount, setTeamCount] = useState(0);
@@ -257,9 +257,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const hasAddress = Boolean(biz?.address && biz.address.trim().length > 0);
   const hasBranches = Boolean(biz?.branches && biz.branches.length > 0);
   const hasPhone = Boolean(biz?.phone && biz.phone.trim().length > 0);
-  const hasClients = clients.length > 0;
+  const hasClients = clientsTotalCount > 0 || clients.length > 0;
   const hasLeads = leads.length > 0;
-  const hasMultipleClients = clients.length >= 3;
+  const hasMultipleClients = clientsTotalCount >= 3 || clients.length >= 3;
   const hasProducts = vehicles.length > 0;
   const hasMultipleProducts = vehicles.length >= 3;
   const hasProductWithPrice = vehicles.some(v => (v.salePrice ?? 0) > 0);

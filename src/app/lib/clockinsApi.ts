@@ -1,6 +1,7 @@
 import { getApiBase } from './apiBase';
 import { authFetch } from './authApi';
 import { ensureCouchDb } from './ensureCouchDb';
+import { pickActiveClockinRecord, sortClockinsByClockIn } from './clockinHistoryUtils';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-clockins';
@@ -140,10 +141,6 @@ function deriveStatus(entries: ClockEntry[]): ClockinRecord['status'] {
   return 'active';
 }
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
 export async function listClockins(
@@ -180,19 +177,38 @@ export async function listClockins(
     if (filters?.memberId) records = records.filter(r => r.member_id === filters.memberId);
     if (filters?.salesPointId) {
       const sp = filters.salesPointId;
+      const wc = filters.workCenterId;
       records = records.filter((r) => {
         const rid = String(r.sales_point_id || '').trim();
-        if (!rid) return true;
-        return rid === sp || rid === `wc:${sp}`;
+        if (!rid) return false;
+        if (rid === sp || rid === `wc:${sp}`) return true;
+        if (wc && (rid === wc || rid === `wc:${wc}`)) return true;
+        return false;
       });
     }
     return records.sort((a, b) => b.date.localeCompare(a.date) || a.member_name.localeCompare(b.member_name));
   }
 }
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function listTodayClockinSessions(
+  businessId: string,
+  memberId: string,
+): Promise<ClockinRecord[]> {
+  const records = await listClockins(businessId, {
+    date: todayStr(),
+    memberId,
+    recordsOnly: true,
+  });
+  return sortClockinsByClockIn(records);
+}
+
 export async function getTodayClockin(businessId: string, memberId: string): Promise<ClockinRecord | null> {
-  const records = await listClockins(businessId, { date: todayStr(), memberId });
-  return records[0] || null;
+  const sessions = await listTodayClockinSessions(businessId, memberId);
+  return pickActiveClockinRecord(sessions);
 }
 
 export interface ClockInOptions {
@@ -201,6 +217,8 @@ export interface ClockInOptions {
   sales_point_id?: string;
   sales_point_name?: string;
   work_center_id?: string;
+  /** Modal TPV: fichar en nombre del equipo en esta tienda. */
+  store_team_clockin?: boolean;
 }
 
 export async function clockIn(
@@ -221,6 +239,7 @@ export async function clockIn(
         work_center_id: options?.work_center_id,
         device_type: options?.device_type,
         geo: options?.geo,
+        store_team_clockin: options?.store_team_clockin === true,
       }),
     },
   );
@@ -231,31 +250,52 @@ export async function clockIn(
   return rec;
 }
 
-export async function addEntry(record: ClockinRecord, entryType: ClockEntry['type'], geo?: GeoLocation): Promise<ClockinRecord> {
+export async function addEntry(
+  record: ClockinRecord,
+  entryType: ClockEntry['type'],
+  geo?: GeoLocation,
+  options?: { store_team_clockin?: boolean },
+): Promise<ClockinRecord> {
   const data = await req<{ clockin: ClockinRecord }>(
     `/api/clockins/${encodeURIComponent(record.business_id)}/record/${encodeURIComponent(record._id)}/entry`,
     {
       method: 'PUT',
-      body: JSON.stringify({ entryType, geo }),
+      body: JSON.stringify({
+        entryType,
+        geo,
+        store_team_clockin: options?.store_team_clockin === true,
+      }),
     },
   );
   return data.clockin;
 }
 
-export async function clockOut(record: ClockinRecord, geo?: GeoLocation): Promise<ClockinRecord> {
+export async function clockOut(
+  record: ClockinRecord,
+  geo?: GeoLocation,
+  options?: { store_team_clockin?: boolean },
+): Promise<ClockinRecord> {
   if (record.status === 'break') {
-    const afterBreak = await addEntry(record, 'break_end', geo);
-    return addEntry(afterBreak, 'clock_out', geo);
+    const afterBreak = await addEntry(record, 'break_end', geo, options);
+    return addEntry(afterBreak, 'clock_out', geo, options);
   }
-  return addEntry(record, 'clock_out', geo);
+  return addEntry(record, 'clock_out', geo, options);
 }
 
-export async function startBreak(record: ClockinRecord, geo?: GeoLocation): Promise<ClockinRecord> {
-  return addEntry(record, 'break_start', geo);
+export async function startBreak(
+  record: ClockinRecord,
+  geo?: GeoLocation,
+  options?: { store_team_clockin?: boolean },
+): Promise<ClockinRecord> {
+  return addEntry(record, 'break_start', geo, options);
 }
 
-export async function endBreak(record: ClockinRecord, geo?: GeoLocation): Promise<ClockinRecord> {
-  return addEntry(record, 'break_end', geo);
+export async function endBreak(
+  record: ClockinRecord,
+  geo?: GeoLocation,
+  options?: { store_team_clockin?: boolean },
+): Promise<ClockinRecord> {
+  return addEntry(record, 'break_end', geo, options);
 }
 
 export async function updateNotes(record: ClockinRecord, notes: string): Promise<ClockinRecord> {
@@ -377,6 +417,9 @@ export interface EnrichedClockinRecord extends ClockinRecord {
   member_role: string;
   member_email: string;
   roster_placeholder?: boolean;
+  /** Varios turnos el mismo día (vista gerente). */
+  session_index?: number;
+  same_day_sessions?: number;
 }
 
 export interface ClockinStatsSummary {

@@ -1,9 +1,10 @@
 import { Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
-import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
+import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
 import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
@@ -99,15 +100,23 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
   butcherShop: { label: 'Carnicería', icon: <Beef className="w-6 h-6" /> },
 };
 
+function WorkerTpvShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+      <TpvOfflineBanner />
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <TpvRegisterGate fillParent>{children}</TpvRegisterGate>
+      </div>
+      <WorkerTpvBottomBar />
+    </div>
+  );
+}
+
 export function WorkerTpvDeliveryRoute() {
   return (
-    <>
-      <TpvOfflineBanner />
-      <WorkerStockReviewBanner />
-      <TpvRegisterGate>
-        <WorkerTpvDelivery />
-      </TpvRegisterGate>
-    </>
+    <WorkerTpvShell>
+      <WorkerTpvDelivery />
+    </WorkerTpvShell>
   );
 }
 
@@ -145,12 +154,8 @@ export function WorkerTpv() {
   }
 
   return (
-    <>
-      <TpvOfflineBanner />
-      <WorkerStockReviewBanner />
-      <TpvRegisterGate>
-        <Module />
-      </TpvRegisterGate>
-    </>
+    <WorkerTpvShell>
+      <Module />
+    </WorkerTpvShell>
   );
 }

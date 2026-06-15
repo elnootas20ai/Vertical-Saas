@@ -6,27 +6,62 @@ import {
 
 const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 
+export function normalizeClockinUserId(id) {
+  return String(id || '').trim().replace(/^account:/, '');
+}
+
 export function getAuthUserId(req) {
-  return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  return normalizeClockinUserId(req.authUser?.userId || req.authUser?.user_id || '');
 }
 
 export function getMember(business, userId) {
   if (!business?.members) return null;
-  return business.members.find((m) => m.user_id === userId) || null;
+  const uid = normalizeClockinUserId(userId);
+  return business.members.find((m) => normalizeClockinUserId(m.user_id) === uid) || null;
 }
 
 export function canMutateClockinForMember(business, requesterId, targetMemberId) {
-  if (!requesterId || !targetMemberId) return false;
-  if (requesterId === targetMemberId) return true;
-  const ownerId = String(business?.owner_user_id || '').trim();
-  if (ownerId && ownerId === requesterId) return true;
-  const member = getMember(business, requesterId);
+  const req = normalizeClockinUserId(requesterId);
+  const tgt = normalizeClockinUserId(targetMemberId);
+  if (!req || !tgt) return false;
+  if (req === tgt) return true;
+  const ownerId = normalizeClockinUserId(business?.owner_user_id);
+  if (ownerId && ownerId === req) return true;
+  const member = getMember(business, req);
   return Boolean(member && ADMIN_ROLES.has(member.role));
 }
 
+/** TPV tablet / gerente en tienda: fichar al equipo en un PDV concreto. */
+export function canManageStoreClockin(business, requesterId, targetMemberId, options = {}) {
+  if (canMutateClockinForMember(business, requesterId, targetMemberId)) return true;
+  const storeTeam = Boolean(options.storeTeamClockin);
+  const salesPointId = String(options.salesPointId || '').trim();
+  if (!storeTeam || !salesPointId) return false;
+  return canAccessStoreClockins(business, requesterId);
+}
+
+export function canAccessStoreClockins(business, requesterId) {
+  const req = normalizeClockinUserId(requesterId);
+  if (!req) return false;
+  const ownerId = normalizeClockinUserId(business?.owner_user_id);
+  if (ownerId && ownerId === req) return true;
+  const member = getMember(business, req);
+  if (member && ADMIN_ROLES.has(member.role)) return true;
+  for (const m of business?.members || []) {
+    if (normalizeClockinUserId(m.user_id) === req && m.status !== 'inactive' && !m.deletedAt) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function allBusinessMemberIds(business) {
-  const ids = new Set((business.members || []).map((m) => m.user_id).filter(Boolean));
-  const ownerId = String(business.owner_user_id || '').trim();
+  const ids = new Set(
+    (business.members || [])
+      .map((m) => normalizeClockinUserId(m.user_id))
+      .filter(Boolean),
+  );
+  const ownerId = normalizeClockinUserId(business.owner_user_id);
   if (ownerId) ids.add(ownerId);
   return Array.from(ids);
 }
@@ -58,16 +93,17 @@ function getSubordinateIds(business, orgchart, userId) {
     .map((n) => n.data.user_id);
 }
 
-export async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
-  if (!requesterId) return [];
+export async function resolveVisibleMemberIds(expressReq, business, orgchart, requesterId) {
+  const requester = normalizeClockinUserId(requesterId);
+  if (!requester) return [];
 
-  const member = getMember(business, requesterId);
-  const ownerId = String(business.owner_user_id || '').trim();
-  const authRole = String(req.authUser?.role || '').trim();
+  const member = getMember(business, requester);
+  const ownerId = normalizeClockinUserId(business.owner_user_id);
+  const authRole = String(expressReq?.authUser?.role || '').trim();
   const isManager =
     (member && ADMIN_ROLES.has(member.role))
-    || ownerId === requesterId
-    || (authRole === 'Admin' && ownerId === requesterId);
+    || (ownerId && ownerId === requester)
+    || (authRole === 'Admin' && ownerId === requester);
 
   if (isManager) {
     return allBusinessMemberIds(business);
@@ -75,12 +111,12 @@ export async function resolveVisibleMemberIds(req, business, orgchart, requester
 
   if (!member) return [];
 
-  const subordinateIds = getSubordinateIds(business, orgchart, requesterId);
+  const subordinateIds = getSubordinateIds(business, orgchart, requester);
   if (subordinateIds && subordinateIds.length > 0) {
-    return [requesterId, ...subordinateIds];
+    return [requester, ...subordinateIds.map((id) => normalizeClockinUserId(id)).filter(Boolean)];
   }
 
-  return [requesterId];
+  return [requester];
 }
 
 export async function loadOrgChartForAccess(req, businessId) {
@@ -90,6 +126,45 @@ export async function loadOrgChartForAccess(req, businessId) {
   } catch {
     return null;
   }
+}
+
+/** ¿Puede este miembro fichar en este PDV/centro? (owner y admin sin tienda → cualquiera). */
+export function isMemberAssignedToSalesPoint(
+  business,
+  memberUserId,
+  pdvId,
+  workCenterId,
+  assignmentRef,
+  memberRole,
+) {
+  const uid = normalizeClockinUserId(memberUserId);
+  const pdv = String(pdvId || '').trim();
+  if (!uid || !pdv) return false;
+
+  const ownerId = normalizeClockinUserId(business?.owner_user_id);
+  if (ownerId && ownerId === uid) return true;
+
+  const role = String(memberRole || '').trim();
+  const ref = String(assignmentRef || '').trim();
+  if (ADMIN_ROLES.has(role) && !ref) return true;
+  if (!ref) return false;
+
+  const wc = String(workCenterId || '').trim();
+  return (
+    ref === pdv
+    || ref === wc
+    || ref === `wc:${wc}`
+    || ref === `wc:${pdv}`
+  );
+}
+
+export function memberEmploymentSalesPointRef(member, account) {
+  return String(
+    member?.employment?.salesPointId
+    || account?.employment?.salesPointId
+    || member?.salesPointId
+    || '',
+  ).trim();
 }
 
 /** Mismo local aunque el id sea PDV, centro de trabajo o prefijo wc:. */

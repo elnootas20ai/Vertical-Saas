@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { RouterProvider } from 'react-router-dom';
 import { ThemeProvider, useTheme } from 'next-themes';
+import { RouterProvider } from 'react-router-dom';
+import { Toaster } from './components/ui/sonner';
 import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 /** Antes que `./routes`: evita ciclo routes → SaasRoot → AppContext → BusinessContext. */
@@ -86,6 +87,7 @@ export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <ThemeRouteGuard />
+      <Toaster richColors closeButton position="top-center" style={{ zIndex: 99999 }} />
       <AuthProvider>
         <OnboardingProvider>
           <OnboardingUserSync />

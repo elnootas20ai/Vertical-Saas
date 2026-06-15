@@ -18,7 +18,7 @@ import {
   type DeliveryType,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { updateClientRequest } from '../../lib/crmApi';
+import { updateClientRequest, getClientDetailRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
@@ -37,6 +37,7 @@ import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvReg
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
 import { shouldUseDeliveryStores } from '../../lib/deliverySetup';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
+import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import {
   ArrowLeft,
   Search,
@@ -274,10 +275,22 @@ export function TpvRapidoOrderFlow({
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const selectedOrderTaker = useMemo(
-    () => register.clockedInWorkers.find((w) => w.id === register.selectedOrderTakerId) || null,
-    [register.clockedInWorkers, register.selectedOrderTakerId],
+  const effectiveOrderTakerId = useMemo(
+    () => normalizeClockinUserId(register.selectedOrderTakerId || register.session?.workerId),
+    [register.selectedOrderTakerId, register.session?.workerId],
   );
+
+  const selectedOrderTaker = useMemo(() => {
+    if (!effectiveOrderTakerId) return null;
+    return (
+      register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId)
+      || {
+        id: effectiveOrderTakerId,
+        name: String(register.session?.workerName || 'TPV').trim(),
+        status: 'active' as const,
+      }
+    );
+  }, [register.clockedInWorkers, effectiveOrderTakerId, register.session?.workerName]);
 
   // ─── Load catalog ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -604,7 +617,7 @@ export function TpvRapidoOrderFlow({
   );
 
   const canSubmit =
-    !!register.selectedOrderTakerId &&
+    !!effectiveOrderTakerId &&
     !!selectedClient &&
     !!deliveryType &&
     cart.length > 0 &&
@@ -734,20 +747,37 @@ export function TpvRapidoOrderFlow({
   useEffect(() => {
     if (!clientIdFromUrl || !userId) return;
     if (appliedClientIdFromUrl.current === clientIdFromUrl) return;
-    const match = clients.find((c) => c.id === clientIdFromUrl);
-    if (!match) return;
-    appliedClientIdFromUrl.current = clientIdFromUrl;
-    handleSelectClient(match);
-    setPhonePrefix(match.phonePrefix || '+34');
-    setPhoneInput(match.phone || '');
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('clientId');
-        return next;
-      },
-      { replace: true },
-    );
+
+    const applyClientFromUrl = (match: Parameters<typeof handleSelectClient>[0]) => {
+      appliedClientIdFromUrl.current = clientIdFromUrl;
+      handleSelectClient(match);
+      setPhonePrefix(match.phonePrefix || '+34');
+      setPhoneInput(match.phone || '');
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('clientId');
+          return next;
+        },
+        { replace: true },
+      );
+    };
+
+    const cached = clients.find((c) => c.id === clientIdFromUrl);
+    if (cached) {
+      applyClientFromUrl(cached);
+      return;
+    }
+
+    let cancelled = false;
+    getClientDetailRequest(userId, clientIdFromUrl)
+      .then((client) => {
+        if (cancelled || !client) return;
+        applyClientFromUrl(client);
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
   }, [clientIdFromUrl, userId, clients, handleSelectClient, setSearchParams]);
 
   const handleCreateClient = useCallback(async () => {
@@ -1020,7 +1050,7 @@ export function TpvRapidoOrderFlow({
 
         const pdvId = String(register.session?.pointOfSaleId || '').trim();
         const pdvName = String(register.session?.pointOfSaleName || '').trim();
-        const takerId = String(register.selectedOrderTakerId || '').trim();
+        const takerId = effectiveOrderTakerId;
         const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
 
         const submitStatus: DeliveryOrderStatus = tabletMode ? 'listo' : status;
@@ -1306,16 +1336,18 @@ export function TpvRapidoOrderFlow({
       footerSlot={stickyFooter}
     >
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-4 px-2 md:px-4`}>
-        <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
-          <ClockedInWorkerBubbles
-            workers={register.clockedInWorkers}
-            selectedId={register.selectedOrderTakerId}
-            onSelect={register.setSelectedOrderTakerId}
-            loading={register.clockedInWorkersLoading}
-            label="¿Quién coge el pedido?"
-            emptyMessage="Ficha al equipo antes de crear pedidos (botón Fichar arriba)"
-          />
-        </div>
+        {!tabletMode && (
+          <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+            <ClockedInWorkerBubbles
+              workers={register.clockedInWorkers}
+              selectedId={register.selectedOrderTakerId}
+              onSelect={register.setSelectedOrderTakerId}
+              loading={register.clockedInWorkersLoading}
+              label="¿Quién coge el pedido?"
+              emptyMessage="Quién abrió caja atiende"
+            />
+          </div>
+        )}
 
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
         {currentStep === 'client' ? (

@@ -20,7 +20,7 @@ const MAX_LIMIT = 500;
  * Campos en los que actúa el parámetro ?search=
  * cuando no se especifica un campo concreto.
  */
-const SEARCH_FIELDS = ['name', 'email', 'phone', 'registrationPlate', 'brand', 'model',
+const SEARCH_FIELDS = ['name', 'email', 'phone', 'dni', 'registrationPlate', 'brand', 'model',
   'clientName', 'vehicleName', 'concept', 'companyName', 'vin'];
 
 /**
