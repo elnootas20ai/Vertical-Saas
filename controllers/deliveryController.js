@@ -25,6 +25,8 @@ import {
   listTpvRegisterSessionsByUser,
   findOpenTpvRegisterSessionForPointOfSale,
   sumTpvRegisterSaleAmountForOrder,
+  sumTpvRegisterReturnAmountForOrder,
+  getNextDeliveryTicketNumber,
   autoCloseTpvRegisterSessionDocument,
   buildPointOfSaleDocument,
   sanitizePointOfSale,
@@ -406,9 +408,19 @@ export async function createDeliveryOrder(req, res) {
       }
     }
     const doc = buildDeliveryOrderDocument(userId, { ...order, ...scoped });
-    const saved = await putDocument(req, db, doc._id, doc);
-    const savedDoc = { ...doc, _rev: saved.rev };
+    const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, doc, null);
+    const docWithTicket = ticketNumber
+      ? buildDeliveryOrderDocument(userId, { ...doc, ticketNumber }, doc)
+      : doc;
+    const saved = await putDocument(req, db, docWithTicket._id, docWithTicket);
+    const savedDoc = { ...docWithTicket, _rev: saved.rev };
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
+    let cajaRegistration = { status: 'nothing_to_register' };
+    if (savedDoc.status === DELIVERED_ORDER_STATUS) {
+      cajaRegistration = await maybeRegisterDeliveryPaymentInTpvSession(
+        req, userId, savedDoc, {}, account.fullName, req.callerAccount || account,
+      );
+    }
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
@@ -422,7 +434,7 @@ export async function createDeliveryOrder(req, res) {
     const sanitized = sanitizeDeliveryOrder(savedDoc);
     broadcastDeliveryOrderSse(account, userId, 'created', savedDoc);
     triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
-    return res.status(201).json({ ok: true, order: sanitized });
+    return res.status(201).json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear pedido delivery' });
   }
@@ -439,7 +451,12 @@ export async function updateDeliveryOrder(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
-    const doc = buildDeliveryOrderDocument(userId, { ...existing, ...order }, existing);
+    const merged = { ...existing, ...order };
+    const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, merged, existing);
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...merged,
+      ...(ticketNumber ? { ticketNumber } : {}),
+    }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId,
@@ -454,7 +471,9 @@ export async function updateDeliveryOrder(req, res) {
 
     await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, existing.status);
-    await maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, account.fullName, req.callerAccount || account);
+    const cajaRegistration = await maybeRegisterDeliveryPaymentInTpvSession(
+      req, userId, doc, existing, account.fullName, req.callerAccount || account,
+    );
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryOrderSse(account, userId, 'updated', { ...doc, _rev: saved.rev }, {
@@ -464,7 +483,7 @@ export async function updateDeliveryOrder(req, res) {
     if (doc.status !== existing.status) {
       triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
     }
-    return res.json({ ok: true, order: sanitized });
+    return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar pedido delivery' });
   }
@@ -609,6 +628,103 @@ export async function reopenDeliveryOrder(req, res) {
   }
 }
 
+// ─── REFUND ORDER (devolución post-entrega) ─────────────────────────────────
+
+export async function refundDeliveryOrder(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { refundReason, refundAmount: rawRefundAmount } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
+    if (!refundReason || String(refundReason).trim().length < 10) {
+      return badRequest(res, 'El motivo de devolución es obligatorio (mínimo 10 caracteres)');
+    }
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (String(existing.status || '').toLowerCase() !== DELIVERED_ORDER_STATUS) {
+      return badRequest(res, 'Solo se pueden devolver pedidos ya entregados');
+    }
+    if (String(existing.paymentStatus || '') === 'refunded' || String(existing.status || '').toLowerCase() === 'devuelto') {
+      return badRequest(res, 'Este pedido ya fue devuelto');
+    }
+    const paidAmount = Number(existing.paidAmount || 0);
+    if (paidAmount <= 0 && String(existing.paymentStatus || '') !== 'paid') {
+      return badRequest(res, 'El pedido no tiene cobro registrado para devolver');
+    }
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const actorUserId = String(req.callerUserId || userId).trim();
+    const actorAccount = req.callerAccount || account;
+    const actorName = String(actorAccount?.fullName || account.fullName || 'Sistema').trim();
+    const now = new Date().toISOString();
+    const trimmedReason = String(refundReason).trim();
+    const maxRefundable = paidAmount > 0 ? paidAmount : Number(existing.totalAmount || 0);
+    const refundAmount = rawRefundAmount != null && rawRefundAmount !== ''
+      ? Math.min(Number(rawRefundAmount), maxRefundable)
+      : maxRefundable;
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+      return badRequest(res, 'El importe a devolver debe ser mayor que 0');
+    }
+
+    const db = getDeliveryDbName();
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...existing,
+      status: 'devuelto',
+      paymentStatus: 'refunded',
+      refundReason: trimmedReason,
+      refundedAt: now,
+      refundedBy: actorName,
+      refundAmount,
+      stageHistory: [
+        ...(existing.stageHistory || []),
+        {
+          status: 'devuelto',
+          date: now,
+          user: actorName,
+          notes: `Devolución: ${trimmedReason} · ${refundAmount.toFixed(2)}€`,
+        },
+      ],
+    }, existing);
+
+    await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
+    const saved = await putDocument(req, db, doc._id, doc);
+
+    const cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, { ...doc, _rev: saved.rev }, {
+      amount: refundAmount,
+      paymentMethod: existing.paymentMethod || 'efectivo',
+      registeredBy: actorName,
+      description: `Devolución pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
+      callerAccount: actorAccount,
+    });
+
+    await logAccountActivity(req, {
+      actorUserId,
+      actorName,
+      targetUserId: userId,
+      type: 'delivery_order',
+      action: `Devolvió pedido ${doc.orderNumber}: ${refundAmount.toFixed(2)}€`,
+      entityId: doc._id,
+      entityLabel: doc.orderNumber,
+      metadata: { refundReason: trimmedReason, refundAmount },
+    });
+
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastDeliveryOrderSse(account, userId, 'refunded', { ...doc, _rev: saved.rev }, {
+      oldStatus: existing.status,
+      reason: trimmedReason,
+      refundAmount,
+    });
+    triggerReactiveAlert(userId, 'order_status_changed', {
+      orderId: doc._id,
+      newStatus: 'devuelto',
+      previousStatus: existing.status,
+    }).catch(() => null);
+
+    return res.json({ ok: true, order: sanitized, cajaRegistration });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al devolver pedido' });
+  }
+}
+
 // ─── REGISTER PAYMENT ────────────────────────────────────────────────────────
 
 async function resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount) {
@@ -638,9 +754,102 @@ async function resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount) {
 }
 
 /**
- * Registra venta en la sesión TPV abierta del PDV del pedido.
+ * Registra venta/devolución en la sesión TPV abierta del PDV del pedido.
+ * Reintenta en conflictos CouchDB (409) y devuelve estado explícito para el cliente.
  * @param {'increment'|'targetTotal'} mode - increment: suma amount tal cual; targetTotal: hasta amount menos lo ya registrado.
  */
+async function appendTpvSessionTransaction(req, userId, orderDoc, registerTx, {
+  mode = 'increment',
+  targetAmount,
+  callerAccount,
+} = {}) {
+  const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
+  if (!orderPdvId) {
+    return { status: 'no_pdv', message: 'No se pudo identificar el punto de venta del pedido para registrar en caja.' };
+  }
+
+  const db = getDeliveryDbName();
+  const maxAttempts = 5;
+  let lastOpenSession = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
+    if (!openSession) {
+      return {
+        status: 'no_open_session',
+        message: 'No hay caja abierta en esta tienda. Abre la caja para que el cobro quede registrado.',
+      };
+    }
+    lastOpenSession = openSession;
+
+    let toRegister = Number(registerTx.amount || 0);
+    if (registerTx.type === 'sale' && mode === 'targetTotal') {
+      const target = Number(targetAmount ?? registerTx.amount ?? 0);
+      const alreadyRegistered = sumTpvRegisterSaleAmountForOrder(openSession.transactions, orderDoc._id);
+      toRegister = target - alreadyRegistered;
+    }
+    if (registerTx.type === 'return') {
+      const refundTarget = Number(targetAmount ?? registerTx.amount ?? 0);
+      const alreadyReturned = sumTpvRegisterReturnAmountForOrder(openSession.transactions, orderDoc._id);
+      toRegister = refundTarget - alreadyReturned;
+    }
+    if (!Number.isFinite(toRegister) || toRegister <= 0.001) {
+      return { status: 'already_registered', message: 'El importe ya estaba registrado en caja.' };
+    }
+
+    const now = new Date().toISOString();
+    const txId = registerTx.id || `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const finalTx = {
+      ...registerTx,
+      id: txId,
+      amount: Math.round(toRegister * 100) / 100,
+      orderId: orderDoc._id,
+      orderNumber: orderDoc.orderNumber || '',
+      channel: orderDoc.channel || registerTx.channel || '',
+      date: registerTx.date || now,
+    };
+
+    const updatedTxs = [...(openSession.transactions || []), finalTx];
+    const salesByChannel = {};
+    for (const t of updatedTxs) {
+      if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
+    }
+    const linkedOrderIds = [...(openSession.linkedOrderIds || [])];
+    if (!linkedOrderIds.includes(orderDoc._id)) linkedOrderIds.push(orderDoc._id);
+    const sessionDoc = buildTpvRegisterSessionDocument(userId, {
+      ...openSession,
+      transactions: updatedTxs,
+      salesByChannel,
+      linkedOrderIds,
+    }, openSession);
+
+    try {
+      const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
+      const account = callerAccount || await findAccountByUserId(req, userId);
+      const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
+      broadcastTpvSessionLive(account, userId, sanitized);
+      return { status: 'registered', session: sanitized };
+    } catch (err) {
+      const isConflict = /conflict|409/i.test(String(err?.message || ''));
+      if (!isConflict || attempt === maxAttempts - 1) {
+        logger.error({ tag: 'CAJA', orderId: orderDoc._id, err: err?.message, attempt }, 'Error registrando transacción en caja TPV');
+        return {
+          status: 'error',
+          message: err?.message || 'No se pudo registrar el movimiento en caja. Revisa la sesión de caja.',
+        };
+      }
+    }
+  }
+
+  return {
+    status: 'error',
+    message: lastOpenSession
+      ? 'No se pudo registrar en caja tras varios intentos. Vuelve a intentarlo.'
+      : 'No hay caja abierta en esta tienda.',
+  };
+}
+
 async function autoRegisterTpvSaleForOrder(req, userId, orderDoc, {
   amount,
   paymentMethod,
@@ -649,82 +858,70 @@ async function autoRegisterTpvSaleForOrder(req, userId, orderDoc, {
   mode = 'increment',
   callerAccount,
 }) {
-  const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
-  if (!orderPdvId) return null;
-
-  const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-  const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
-  if (!openSession) return null;
-
-  let toRegister = Number(amount || 0);
-  if (mode === 'targetTotal') {
-    const alreadyRegistered = sumTpvRegisterSaleAmountForOrder(openSession.transactions, orderDoc._id);
-    toRegister = toRegister - alreadyRegistered;
-  }
-  if (!Number.isFinite(toRegister) || toRegister <= 0.001) return null;
-
-  const now = new Date().toISOString();
-  const db = getDeliveryDbName();
-  const txId = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const registerTx = {
-    id: txId,
+  return appendTpvSessionTransaction(req, userId, orderDoc, {
     type: 'sale',
     paymentMethod: paymentMethod || 'efectivo',
-    amount: Math.round(toRegister * 100) / 100,
     description: description || `Pedido ${orderDoc.orderNumber || ''} — ${orderDoc.customerName || ''}`.trim(),
-    orderId: orderDoc._id,
-    orderNumber: orderDoc.orderNumber || '',
-    channel: orderDoc.channel || '',
-    date: now,
     registeredBy: registeredBy || 'Sistema',
-  };
-  const updatedTxs = [...(openSession.transactions || []), registerTx];
-  const salesByChannel = {};
-  for (const t of updatedTxs) {
-    if (t.type === 'sale' && t.channel) salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + t.amount;
-  }
-  const linkedOrderIds = [...(openSession.linkedOrderIds || [])];
-  if (!linkedOrderIds.includes(orderDoc._id)) linkedOrderIds.push(orderDoc._id);
-  const sessionDoc = buildTpvRegisterSessionDocument(userId, {
-    ...openSession,
-    transactions: updatedTxs,
-    salesByChannel,
-    linkedOrderIds,
-  }, openSession);
-  const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
-  const account = callerAccount || await findAccountByUserId(req, userId);
-  broadcastTpvSessionLive(account, userId, { ...sessionDoc, _rev: saved.rev });
-  return sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
+    amount: Number(amount || 0),
+  }, {
+    mode,
+    targetAmount: Number(amount || 0),
+    callerAccount,
+  });
+}
+
+async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
+  amount,
+  paymentMethod,
+  registeredBy,
+  description,
+  callerAccount,
+}) {
+  return appendTpvSessionTransaction(req, userId, orderDoc, {
+    type: 'return',
+    paymentMethod: paymentMethod || 'efectivo',
+    description: description || `Devolución ${orderDoc.orderNumber || ''} — ${orderDoc.customerName || ''}`.trim(),
+    registeredBy: registeredBy || 'Sistema',
+    amount: Number(amount || 0),
+  }, {
+    mode: 'increment',
+    targetAmount: Number(amount || 0),
+    callerAccount,
+  });
 }
 
 async function maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, registeredBy, callerAccount) {
   const isDelivered = String(doc.status || '').toLowerCase() === DELIVERED_ORDER_STATUS;
-  if (!isDelivered) return;
+  if (!isDelivered) return { status: 'nothing_to_register' };
 
   const targetPaid = Number(doc.paidAmount || 0);
   const hasPayment = Boolean(doc.paymentMethod || doc.paymentCollected || targetPaid > 0);
-  if (!hasPayment) return;
+  if (!hasPayment) return { status: 'nothing_to_register' };
 
   const becameDelivered = String(existing.status || '').toLowerCase() !== DELIVERED_ORDER_STATUS;
   const paidIncreased = targetPaid > Number(existing.paidAmount || 0);
   const collectedNow = Boolean(doc.paymentCollected && !existing.paymentCollected);
-  if (!becameDelivered && !paidIncreased && !collectedNow) return;
+  if (!becameDelivered && !paidIncreased && !collectedNow) return { status: 'nothing_to_register' };
 
   const amount = targetPaid > 0 ? targetPaid : Number(doc.totalAmount || 0);
-  if (amount <= 0) return;
+  if (amount <= 0) return { status: 'nothing_to_register' };
 
-  try {
-    await autoRegisterTpvSaleForOrder(req, userId, doc, {
-      amount,
-      paymentMethod: doc.paymentMethod || 'efectivo',
-      registeredBy: registeredBy || doc.paymentCollectedBy || 'Sistema',
-      description: `Pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
-      mode: 'targetTotal',
-      callerAccount,
-    });
-  } catch (regErr) {
-    console.error('[CAJA] Error auto-registering delivery payment in TPV session:', regErr?.message);
-  }
+  return autoRegisterTpvSaleForOrder(req, userId, doc, {
+    amount,
+    paymentMethod: doc.paymentMethod || 'efectivo',
+    registeredBy: registeredBy || doc.paymentCollectedBy || 'Sistema',
+    description: `Pedido ${doc.orderNumber || ''} — ${doc.customerName || ''}`.trim(),
+    mode: 'targetTotal',
+    callerAccount,
+  });
+}
+
+async function maybeAssignDeliveryTicketNumber(req, userId, doc, existing) {
+  if (String(existing?.ticketNumber || doc.ticketNumber || '').trim()) return doc.ticketNumber || existing?.ticketNumber || '';
+  const isPaid = String(doc.paymentStatus || '') === 'paid' && Number(doc.paidAmount || 0) > 0;
+  if (!isPaid) return '';
+  return getNextDeliveryTicketNumber(req, userId);
 }
 
 export async function registerPayment(req, res) {
@@ -743,12 +940,17 @@ export async function registerPayment(req, res) {
     const total = Number(existing.totalAmount || 0);
     const paymentStatus = newPaid >= total ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
     const db = getDeliveryDbName();
-    const doc = buildDeliveryOrderDocument(userId, {
+    const mergedForTicket = {
       ...existing,
       paymentMethod,
       paidAmount: newPaid,
       paidAt: now,
       paymentStatus,
+    };
+    const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, mergedForTicket, existing);
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...mergedForTicket,
+      ...(ticketNumber ? { ticketNumber } : {}),
       stageHistory: [
         ...(existing.stageHistory || []),
         { status: existing.status, date: now, user: account.fullName || 'Sistema', notes: `Cobro registrado: ${paymentMethod} — ${Number(paidAmount).toFixed(2)}€` },
@@ -763,21 +965,17 @@ export async function registerPayment(req, res) {
     });
 
     // CAJA-03/10: auto-register transaction on open TPV register session (misma tienda)
-    try {
-      await autoRegisterTpvSaleForOrder(req, userId, doc, {
-        amount: Number(paidAmount),
-        paymentMethod: paymentMethod || 'efectivo',
-        registeredBy: account.fullName || 'Sistema',
-        mode: 'increment',
-        callerAccount: req.callerAccount || account,
-      });
-    } catch (regErr) {
-      console.error('[CAJA] Error auto-registering in TPV session:', regErr?.message);
-    }
+    const cajaRegistration = await autoRegisterTpvSaleForOrder(req, userId, doc, {
+      amount: Number(paidAmount),
+      paymentMethod: paymentMethod || 'efectivo',
+      registeredBy: account.fullName || 'Sistema',
+      mode: 'increment',
+      callerAccount: req.callerAccount || account,
+    });
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryPaymentLive(account, userId, { ...doc, _rev: saved.rev });
-    return res.json({ ok: true, order: sanitized });
+    return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar cobro' });
   }

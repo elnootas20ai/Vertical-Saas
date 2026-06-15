@@ -82,7 +82,12 @@ export function formatClockTimer(seconds: number) {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-export function useWorkerClockIn(businessId: string, memberId: string, memberName: string) {
+export function useWorkerClockIn(
+  businessId: string,
+  memberId: string,
+  memberName: string,
+  storeContext?: { sales_point_id?: string; sales_point_name?: string },
+) {
   const isMobile = isMobileDevice();
   const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
   const autoClockOutTriggered = useRef(false);
@@ -223,6 +228,8 @@ export function useWorkerClockIn(businessId: string, memberId: string, memberNam
       const rec = await clockIn(businessId, memberId, memberName, {
         geo,
         device_type: isMobile ? 'mobile' : 'desktop',
+        sales_point_id: storeContext?.sales_point_id,
+        sales_point_name: storeContext?.sales_point_name,
       });
       setRecord(rec);
       fireClockinNotification('clock_in', rec, Boolean(geo));
@@ -233,7 +240,7 @@ export function useWorkerClockIn(businessId: string, memberId: string, memberNam
     } finally {
       setActing(false);
     }
-  }, [acting, businessId, memberId, memberName, getGeoForAction, fireClockinNotification, isMobile]);
+  }, [acting, businessId, memberId, memberName, getGeoForAction, fireClockinNotification, isMobile, storeContext?.sales_point_id, storeContext?.sales_point_name]);
 
   const handleBreakToggle = useCallback(async () => {
     if (acting || !record) return null;

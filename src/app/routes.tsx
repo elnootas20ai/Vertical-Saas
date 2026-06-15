@@ -330,6 +330,11 @@ function SaasIndexRedirect() {
   if (!user) {
     return <Navigate to="/auth/login" replace />;
   }
+  const businessesPending =
+    !businessCtx?.businessesFetchSettled || Boolean(businessCtx?.isLoading);
+  if (businessesPending) {
+    return null;
+  }
   const ownsBusiness = userOwnsAnyBusiness(user.user_id, businessCtx?.businesses);
   if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim() && !ownsBusiness) {
     return <Navigate to="/saas/user-dashboard" replace />;

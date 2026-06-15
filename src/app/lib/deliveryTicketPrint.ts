@@ -1,0 +1,20 @@
+export type {
+  DeliveryTicketBusinessInfo,
+  DeliveryOrderLike,
+  DeliveryTicketPrintOptions,
+} from './deliveryTicketTypes';
+
+export async function printDeliveryTicket(
+  options: import('./deliveryTicketTypes').DeliveryTicketPrintOptions,
+): Promise<void> {
+  const { toast } = await import('sonner');
+  try {
+    const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
+    const result = await printUnified(options);
+    if (result.method === 'bridge') {
+      toast.success('Ticket enviado a la impresora');
+    }
+  } catch {
+    toast.error('No se pudo imprimir el ticket');
+  }
+}

@@ -12,8 +12,6 @@ import {
   AlertTriangle,
   MapPin,
   MapPinOff,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
@@ -21,12 +19,12 @@ import { useBusiness } from '../../../context/BusinessContext';
 import {
   type ClockinRecord,
   listClockins,
-  formatMinutes,
   getDisplayTime,
 } from '../../../lib/clockinsApi';
 import { useWorkerClockIn, formatClockTimer } from '../../../hooks/useWorkerClockIn';
 import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
 import { WorkerStoreScheduleCard } from '../../../components/saas/worker/WorkerStoreScheduleCard';
+import { ClockinHistoryPanel } from '../../../components/saas/clockins/ClockinHistoryPanel';
 
 export function WorkerClock() {
   const { t } = useTranslation();
@@ -35,7 +33,15 @@ export function WorkerClock() {
   const businessId = currentBusiness?.business_id || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
-  const { isDelivery, workCenter, storeLabel } = useWorkerAssignedStore();
+  const { showStoreBlock, workCenter, storeLabel, assignedPdvId } = useWorkerAssignedStore();
+
+  const storeContext = useMemo(
+    () =>
+      assignedPdvId
+        ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
+        : undefined,
+    [assignedPdvId, storeLabel],
+  );
 
   const {
     record,
@@ -52,9 +58,10 @@ export function WorkerClock() {
     handleClockIn,
     handleClockOut: baseClockOut,
     handleBreakToggle,
-  } = useWorkerClockIn(businessId, memberId, memberName);
+  } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
 
   const [history, setHistory] = useState<ClockinRecord[]>([]);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
 
   const loadHistory = useCallback(async () => {
     if (!businessId || !memberId) return;
@@ -68,19 +75,22 @@ export function WorkerClock() {
 
   useEffect(() => {
     void loadHistory();
-  }, [loadHistory]);
+  }, [loadHistory, historyRefresh]);
 
   const handleClockOut = useCallback(async () => {
     const rec = await baseClockOut();
-    if (rec) setHistory((prev) => [rec, ...prev].slice(0, 50));
+    if (rec) {
+      setHistory((prev) => [rec, ...prev].slice(0, 50));
+      setHistoryRefresh((n) => n + 1);
+    }
   }, [baseClockOut]);
 
-  const weekRecords = history.filter((r) => {
-    const d = new Date(r.date);
+  const weekRecords = useMemo(() => {
     const now = new Date();
     const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return d >= weekAgo;
-  });
+    return history.filter((r) => new Date(r.date) >= weekAgo);
+  }, [history]);
+
   const weekMinutes = weekRecords.reduce((sum, r) => sum + r.totalMinutes, 0);
   const weekHours = weekMinutes / 60;
   const avgDaily = weekRecords.length > 0 ? weekHours / weekRecords.length : 0;
@@ -114,7 +124,7 @@ export function WorkerClock() {
           </div>
         )}
 
-        {isDelivery ? (
+        {showStoreBlock ? (
           <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} />
         ) : null}
 
@@ -253,106 +263,12 @@ export function WorkerClock() {
           ))}
         </div>
 
-        {/* History */}
-        <HistorySection history={history} t={t} />
+        <ClockinHistoryPanel
+          key={historyRefresh}
+          businessId={businessId}
+          memberId={memberId}
+        />
       </div>
     </Layout>
-  );
-}
-
-// ─── History Section with month navigation ────────────────────────────────────
-
-function HistorySection({ history, t }: { history: ClockinRecord[]; t: (key: string, fallback?: string) => string }) {
-  const [monthOffset, setMonthOffset] = useState(0);
-
-  const currentMonth = useMemo(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - monthOffset);
-    return d;
-  }, [monthOffset]);
-
-  const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
-  const monthLabel = currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-
-  const monthRecords = useMemo(
-    () => history.filter((r) => r.date.startsWith(monthKey)).sort((a, b) => b.date.localeCompare(a.date)),
-    [history, monthKey],
-  );
-
-  const monthTotalMinutes = monthRecords.reduce((s, r) => s + r.totalMinutes, 0);
-  const monthBreakMinutes = monthRecords.reduce((s, r) => s + r.breakMinutes, 0);
-
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
-      <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setMonthOffset((o) => o + 1)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <ChevronLeft className="w-4 h-4 text-gray-500" />
-          </button>
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 capitalize min-w-[140px] text-center">{monthLabel}</h3>
-          <button onClick={() => setMonthOffset((o) => Math.max(0, o - 1))} disabled={monthOffset === 0} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-30">
-            <ChevronRight className="w-4 h-4 text-gray-500" />
-          </button>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span>{monthRecords.length} días</span>
-          <span className="font-semibold text-gray-900 dark:text-gray-100">{formatMinutes(monthTotalMinutes)}</span>
-        </div>
-      </div>
-
-      {monthRecords.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 p-4 border-b border-gray-100 dark:border-gray-700">
-          <div className="text-center">
-            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{monthRecords.length}</p>
-            <p className="text-[10px] text-gray-500 uppercase">Días trabajados</p>
-          </div>
-          <div className="text-center">
-            <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{formatMinutes(monthTotalMinutes)}</p>
-            <p className="text-[10px] text-gray-500 uppercase">Total trabajado</p>
-          </div>
-          <div className="text-center">
-            <p className="text-lg font-bold text-amber-600 dark:text-amber-400">{formatMinutes(monthBreakMinutes)}</p>
-            <p className="text-[10px] text-gray-500 uppercase">Descansos</p>
-          </div>
-        </div>
-      )}
-
-      <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {monthRecords.length === 0 ? (
-          <div className="p-8 text-center text-gray-400 dark:text-gray-500 text-sm">
-            {t('worker.clock.noHistory', 'Sin fichajes este mes')}
-          </div>
-        ) : (
-          monthRecords.map((entry) => {
-            const ciEntry = entry.entries.find((e) => e.type === 'clock_in');
-            const coEntry = entry.entries.find((e) => e.type === 'clock_out');
-            const ciTime = ciEntry ? new Date(getDisplayTime(ciEntry, entry)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-            const coTime = coEntry ? new Date(getDisplayTime(coEntry, entry)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--';
-
-            return (
-              <div key={entry._id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-gray-500 dark:text-gray-400">
-                  <CalendarDays className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.date}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {ciTime} → {coTime} · <Coffee className="w-3 h-3 inline" /> {entry.breakMinutes} min
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                    {formatMinutes(entry.totalMinutes)}
-                  </p>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                    {t('worker.clock.complete', 'Completado')}
-                  </span>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
   );
 }

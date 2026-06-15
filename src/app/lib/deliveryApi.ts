@@ -1,5 +1,6 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
+import { toast } from 'sonner';
 import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
@@ -35,7 +36,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type DeliveryOrderStatus = 'nuevo' | 'cocina' | 'listo' | 'en_reparto' | 'entregado' | 'cancelled' | 'incident';
+export type DeliveryOrderStatus = 'nuevo' | 'cocina' | 'listo' | 'en_reparto' | 'entregado' | 'devuelto' | 'cancelled' | 'incident';
 
 export type DeliveryType = 'domicilio' | 'recogida' | 'sala';
 export type PaymentStatus = 'pending' | 'paid' | 'partial' | 'refunded';
@@ -99,6 +100,8 @@ export interface DeliveryOrder {
   paidAmount: number;
   paidAt: string;
 
+  ticketNumber?: string;
+
   assignedDriver: string;
   driverId: string;
   estimatedDelivery: string;
@@ -119,6 +122,10 @@ export interface DeliveryOrder {
   cancelReason: string;
   cancelledAt: string;
   cancelledBy: string;
+  refundReason?: string;
+  refundedAt?: string;
+  refundedBy?: string;
+  refundAmount?: number;
   reopenedAt: string;
   reopenedBy: string;
 
@@ -131,6 +138,31 @@ export interface DeliveryOrder {
   stageHistory: DeliveryStageEvent[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type CajaRegistrationStatus =
+  | 'registered'
+  | 'no_pdv'
+  | 'no_open_session'
+  | 'nothing_to_register'
+  | 'already_registered'
+  | 'error';
+
+export interface CajaRegistrationResult {
+  status: CajaRegistrationStatus;
+  message?: string;
+}
+
+export function notifyCajaRegistration(caja?: CajaRegistrationResult | null) {
+  if (!caja?.status) return;
+  if (caja.status === 'registered' || caja.status === 'nothing_to_register' || caja.status === 'already_registered') return;
+  toast.warning(caja.message || 'El cobro no quedó registrado en caja. Revisa que la caja esté abierta.');
+}
+
+function unwrapOrderResponse<T extends { order?: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(result: T): DeliveryOrder {
+  notifyCajaRegistration(result.cajaRegistration);
+  if (!result.order) throw new Error('Respuesta inválida del servidor');
+  return result.order;
 }
 
 export type CatalogItemType = 'product' | 'service' | 'combo';
@@ -342,22 +374,20 @@ export async function filterDeliveryOrdersRequest(
 
 export async function createDeliveryOrderRequest(userId: string, data: Partial<DeliveryOrder>): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+  const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
     `/api/delivery/orders/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ order: data }) },
   );
-  if (!result.order) throw new Error('Respuesta inválida del servidor');
-  return result.order;
+  return unwrapOrderResponse(result);
 }
 
 export async function updateDeliveryOrderRequest(userId: string, order: DeliveryOrder): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+  const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(order._id)}`,
     { method: 'PUT', body: JSON.stringify({ order }) },
   );
-  if (!result.order) throw new Error('Respuesta inválida del servidor');
-  return result.order;
+  return unwrapOrderResponse(result);
 }
 
 export async function deleteDeliveryOrderRequest(userId: string, orderId: string): Promise<void> {
@@ -370,12 +400,31 @@ export async function deleteDeliveryOrderRequest(userId: string, orderId: string
 
 export async function registerPaymentRequest(userId: string, orderId: string, paymentMethod: string, paidAmount: number): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+  const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment`,
     { method: 'PUT', body: JSON.stringify({ paymentMethod, paidAmount }) },
   );
-  if (!result.order) throw new Error('Respuesta inválida del servidor');
-  return result.order;
+  return unwrapOrderResponse(result);
+}
+
+export async function refundDeliveryOrderRequest(
+  userId: string,
+  orderId: string,
+  refundReason: string,
+  refundAmount?: number,
+): Promise<DeliveryOrder> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
+    `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/refund`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        refundReason: refundReason.trim(),
+        ...(refundAmount != null ? { refundAmount } : {}),
+      }),
+    },
+  );
+  return unwrapOrderResponse(result);
 }
 
 export async function cancelDeliveryOrderRequest(

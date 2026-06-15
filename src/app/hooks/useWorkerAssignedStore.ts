@@ -2,34 +2,45 @@ import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
-import { isDeliveryBusinessType } from '../lib/deliverySetup';
+import {
+  isDeliveryBusinessType,
+  resolveDeliveryBusinessType,
+} from '../lib/deliverySetup';
 import { filterStoresForWorkerAssignment } from '../lib/pdvScope';
 import { resolveWorkerWorkCenter } from '../lib/workerStoreHours';
+import { useWorkCenters } from './useWorkCenters';
 import type { WorkCenter } from '../lib/workCentersApi';
 
 export function useWorkerAssignedStore() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
-  const { retailWorkCenters, allPointsOfSale, loading, displayLabelForActive } = useActiveStoreScope();
+  const { currentBusiness, businesses } = useBusiness();
+  const {
+    retailWorkCenters: scopeCenters,
+    allPointsOfSale,
+    loading: scopeLoading,
+    displayLabelForActive,
+  } = useActiveStoreScope();
+  const { activeWorkCenters, loading: wcLoading } = useWorkCenters();
 
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const resolvedType = resolveDeliveryBusinessType({
+    business: currentBusiness,
+    businesses,
+  });
+  const isDelivery = isDeliveryBusinessType(resolvedType);
   const salesPointRef = String(user?.employment?.salesPointId || '').trim();
 
   return useMemo(() => {
-    if (!isDelivery) {
-      return {
-        isDelivery: false,
-        loading,
-        workCenter: null as WorkCenter | null,
-        storeLabel: '',
-        hasAssignment: false,
-      };
-    }
+    const loading = scopeLoading || wcLoading;
+    const pool: WorkCenter[] =
+      scopeCenters.length > 0 ? scopeCenters : activeWorkCenters;
 
-    const scoped = filterStoresForWorkerAssignment(allPointsOfSale, retailWorkCenters, salesPointRef);
+    const scoped = filterStoresForWorkerAssignment(allPointsOfSale, pool, salesPointRef);
     let workCenter = scoped.workCenters[0] || null;
     if (!workCenter && salesPointRef) {
-      workCenter = resolveWorkerWorkCenter(retailWorkCenters, salesPointRef);
+      workCenter = resolveWorkerWorkCenter(pool, salesPointRef);
+    }
+    if (!workCenter && pool.length === 1) {
+      workCenter = pool[0];
     }
 
     const storeLabel =
@@ -38,18 +49,28 @@ export function useWorkerAssignedStore() {
       displayLabelForActive ||
       '';
 
+    const assignedPdvId =
+      scoped.pointsOfSale[0]?._id ||
+      (salesPointRef && !salesPointRef.startsWith('wc:') ? salesPointRef : '') ||
+      '';
+
     return {
-      isDelivery: true,
+      isDelivery,
       loading,
       workCenter,
       storeLabel,
+      assignedPdvId,
       hasAssignment: Boolean(salesPointRef && workCenter),
+      /** Horario / tienda visible si hay centro o es delivery. */
+      showStoreBlock: isDelivery || pool.length > 0 || Boolean(salesPointRef),
     };
   }, [
     isDelivery,
-    loading,
+    scopeLoading,
+    wcLoading,
+    scopeCenters,
+    activeWorkCenters,
     allPointsOfSale,
-    retailWorkCenters,
     salesPointRef,
     displayLabelForActive,
   ]);

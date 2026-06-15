@@ -152,6 +152,12 @@ import { activityLogger } from './middleware/activityLogger.js';
 import { runHealthCheck, recordLatency } from './services/healthService.js';
 import { sendAdminAlert } from './services/adminAlerts.js';
 import { closeAllSSEClients } from './services/sseService.js';
+import {
+  isClockinsDb,
+  filterClockinsDocsForRequester,
+  assertClockinDocReadAccess,
+  validateClockinDocWrite,
+} from './middleware/couchClockinsGuard.js';
 
 const _5xxTimes = [];
 const _5xxAlertSkipPaths = [
@@ -1456,7 +1462,7 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
 
 // S-05: Bases de datos CouchDB accesibles según rol
 const COUCH_ADMIN_ROLES = new Set(['Admin', 'Gerente']);
-const COUCH_ALLOWED_DBS = new Set(['vehicles', 'notifications', 'cards', 'accounts', 'invoice', 'clockins', 'schedules', 'vacations', 'payroll', 'staff-expenses']);
+const COUCH_ALLOWED_DBS = new Set(['vehicles', 'notifications', 'cards', 'accounts', 'invoice', 'schedules', 'vacations', 'payroll', 'staff-expenses']);
 
 function requireCouchDbAccess(req, res, next) {
   const dbName = String(req.params.dbName || '').toLowerCase().trim();
@@ -1516,13 +1522,17 @@ app.get('/api/couch/docs/:dbName', requireCouchDbAccess, cacheResponse({ ttl: ca
       });
     }
     const docs = (payload.rows || []).map((row) => row.doc).filter(Boolean);
+    if (isClockinsDb(req.params.dbName)) {
+      const filtered = await filterClockinsDocsForRequester(req, docs);
+      return res.json({ docs: filtered });
+    }
     return res.json({ docs });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Error couch get docs' });
   }
 });
 
-app.get('/api/couch/doc/:dbName/:docId', cacheResponse({ ttl: cacheService.TTL_PRESETS.SINGLE_DOC, keyFn: (req) => `db:${req.params.dbName}:doc:${req.params.docId}` }), async (req, res) => {
+app.get('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, cacheResponse({ ttl: cacheService.TTL_PRESETS.SINGLE_DOC, keyFn: (req) => `db:${req.params.dbName}:doc:${req.params.docId}` }), async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const docId = encodeURIComponent(req.params.docId);
@@ -1534,6 +1544,13 @@ app.get('/api/couch/doc/:dbName/:docId', cacheResponse({ ttl: cacheService.TTL_P
         error: 'Couch get doc fallo',
         details: payload,
       });
+    }
+
+    if (isClockinsDb(req.params.dbName)) {
+      const allowed = await assertClockinDocReadAccess(req, payload);
+      if (!allowed) {
+        return res.status(403).json({ error: 'No autorizado para ver este fichaje' });
+      }
     }
 
     return res.json(payload);
@@ -1648,6 +1665,12 @@ app.post('/api/couch/doc/:dbName', requireCouchDbAccess, async (req, res) => {
 
 app.put('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, async (req, res) => {
   try {
+    if (isClockinsDb(req.params.dbName)) {
+      const validation = await validateClockinDocWrite(req, req.body, req.params.docId);
+      if (!validation.ok) {
+        return res.status(validation.status).json({ error: validation.error });
+      }
+    }
     const dbName = encodeURIComponent(req.params.dbName);
     const docId = encodeURIComponent(req.params.docId);
     const response = await couchRequest(req, `/${dbName}/${docId}`, {

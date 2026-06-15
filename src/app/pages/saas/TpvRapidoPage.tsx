@@ -22,6 +22,7 @@ import { updateClientRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
+import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
@@ -52,6 +53,7 @@ import {
   Wallet,
   ShoppingCart,
   CheckCircle2,
+  Printer,
   Home,
   Briefcase,
   Loader2,
@@ -1111,8 +1113,31 @@ export function TpvRapidoOrderFlow({
                 {createdOrder.items.length} producto{createdOrder.items.length !== 1 ? 's' : ''} ·{' '}
                 {createdOrder.deliveryType === 'domicilio' ? 'Envío a domicilio' : 'Recogida en local'}
               </p>
+              {createdOrder.ticketNumber && (
+                <p className="text-sm font-mono text-gray-500 mt-2">Ticket {createdOrder.ticketNumber}</p>
+              )}
             </div>
-            <div className="flex gap-3 mt-4">
+            <div className="flex flex-wrap gap-3 mt-4 justify-center">
+              {createdOrder.paymentStatus === 'paid' && currentBusiness && (
+                <button
+                  onClick={() => printDeliveryTicket({
+                    order: createdOrder,
+                    business: {
+                      name: currentBusiness.name,
+                      legalName: currentBusiness.legalName,
+                      taxId: currentBusiness.taxId,
+                      address: currentBusiness.address,
+                      city: currentBusiness.city,
+                      phone: currentBusiness.phone,
+                    },
+                    salesPointName: createdOrder.salesPointName || register.session?.pointOfSaleName,
+                    cashierName: createdOrder.takenByName,
+                  })}
+                  className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors inline-flex items-center gap-2"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir ticket
+                </button>
+              )}
               <button
                 onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery'))}
                 className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"

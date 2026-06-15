@@ -5032,7 +5032,7 @@ const DELIVERY_STATUS_MIGRATION = {
 function normalizeDeliveryOrderStatus(value) {
   const v = String(value || '');
   if (DELIVERY_STATUS_MIGRATION[v]) return DELIVERY_STATUS_MIGRATION[v];
-  const allowed = ['nuevo', 'cocina', 'listo', 'en_reparto', 'entregado', 'cancelled', 'incident'];
+  const allowed = ['nuevo', 'cocina', 'listo', 'en_reparto', 'entregado', 'devuelto', 'cancelled', 'incident'];
   return allowed.includes(v) ? v : 'nuevo';
 }
 
@@ -5168,9 +5168,15 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     assemblyStartedAt,
     assemblyCompletedAt,
 
+    ticketNumber: String(data.ticketNumber || existing?.ticketNumber || ''),
+
     cancelReason: String(data.cancelReason || existing?.cancelReason || ''),
     cancelledAt: String(data.cancelledAt || existing?.cancelledAt || ''),
     cancelledBy: String(data.cancelledBy || existing?.cancelledBy || ''),
+    refundReason: String(data.refundReason || existing?.refundReason || ''),
+    refundedAt: String(data.refundedAt || existing?.refundedAt || ''),
+    refundedBy: String(data.refundedBy || existing?.refundedBy || ''),
+    refundAmount: Number(data.refundAmount ?? existing?.refundAmount ?? 0),
     reopenedAt: String(data.reopenedAt || existing?.reopenedAt || ''),
     reopenedBy: String(data.reopenedBy || existing?.reopenedBy || ''),
 
@@ -5225,6 +5231,19 @@ export function sanitizeDeliveryOrder(doc) {
     paymentStatus: normalizePaymentStatus(doc.paymentStatus),
     paidAmount: Number(doc.paidAmount || 0),
     paidAt: doc.paidAt || '',
+    paymentCollected: Boolean(doc.paymentCollected),
+    paymentCollectedAt: doc.paymentCollectedAt || '',
+    paymentCollectedBy: doc.paymentCollectedBy || '',
+
+    ticketNumber: doc.ticketNumber || '',
+
+    cancelReason: doc.cancelReason || '',
+    cancelledAt: doc.cancelledAt || '',
+    cancelledBy: doc.cancelledBy || '',
+    refundReason: doc.refundReason || '',
+    refundedAt: doc.refundedAt || '',
+    refundedBy: doc.refundedBy || '',
+    refundAmount: Number(doc.refundAmount || 0),
 
     assignedDriver: doc.assignedDriver || '',
     driverId: doc.driverId || '',
@@ -5964,6 +5983,25 @@ export function sumTpvRegisterSaleAmountForOrder(transactions, orderId) {
   return (Array.isArray(transactions) ? transactions : [])
     .filter((t) => t && t.type === 'sale' && String(t.orderId || '').trim() === oid)
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
+/** Suma devoluciones en caja ya registradas para un pedido (evita doble conteo). */
+export function sumTpvRegisterReturnAmountForOrder(transactions, orderId) {
+  const oid = String(orderId || '').trim();
+  if (!oid) return 0;
+  return (Array.isArray(transactions) ? transactions : [])
+    .filter((t) => t && t.type === 'return' && String(t.orderId || '').trim() === oid)
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
+export async function getNextDeliveryTicketNumber(req, userId) {
+  const orders = await listDeliveryOrdersByUser(req, userId);
+  const maxNum = (Array.isArray(orders) ? orders : []).reduce((max, o) => {
+    const m = String(o?.ticketNumber || '').match(/^T-(\d+)$/i);
+    const n = m ? parseInt(m[1], 10) : 0;
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 0);
+  return `T-${String(maxNum + 1).padStart(6, '0')}`;
 }
 
 /** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */

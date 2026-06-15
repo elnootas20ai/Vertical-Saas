@@ -44,11 +44,11 @@ export async function loadClockedInStoreWorkers(
   pdvId: string,
   workCenterId: string,
 ): Promise<TpvClockedInWorker[]> {
-  if (!businessId) return [];
+  if (!businessId || !pdvId) return [];
   const today = new Date().toISOString().slice(0, 10);
   const [users, records] = await Promise.all([
     fetchBusinessUsers(businessId),
-    listClockins(businessId, { date: today }),
+    listClockins(businessId, { date: today, salesPointId: pdvId }),
   ]);
   const teamIds = new Set(
     users
@@ -63,6 +63,14 @@ export async function loadClockedInStoreWorkers(
   for (const r of records) {
     if (!teamIds.has(r.member_id)) continue;
     if (r.status !== 'active' && r.status !== 'break') continue;
+    const storedPdv = String(r.sales_point_id || '').trim();
+    if (storedPdv) {
+      const atStore =
+        storedPdv === pdvId ||
+        storedPdv === workCenterId ||
+        storedPdv === `wc:${workCenterId}`;
+      if (!atStore) continue;
+    }
     byId.set(r.member_id, {
       id: r.member_id,
       name: r.member_name || 'Trabajador',

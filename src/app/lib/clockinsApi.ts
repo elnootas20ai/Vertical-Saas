@@ -72,6 +72,9 @@ export interface ClockinRecord {
   scheduled_end?: string;
   device_type?: ClockinDeviceType;
   geo?: GeoLocation;
+  /** PDV / tienda donde se fichó (delivery TPV). */
+  sales_point_id?: string;
+  sales_point_name?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -146,15 +149,39 @@ function todayStr() {
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
-export async function listClockins(businessId: string, filters?: { date?: string; memberId?: string }): Promise<ClockinRecord[]> {
-  await ensureDb();
-  const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(DB)}`);
-  let records = ((payload.docs || []) as ClockinRecord[]).filter(
-    d => d?.type === 'clockin' && d?.business_id === businessId && !((d as any).deletedAt),
-  );
-  if (filters?.date) records = records.filter(r => r.date === filters.date);
-  if (filters?.memberId) records = records.filter(r => r.member_id === filters.memberId);
-  return records.sort((a, b) => b.date.localeCompare(a.date) || a.member_name.localeCompare(b.member_name));
+export async function listClockins(
+  businessId: string,
+  filters?: { date?: string; memberId?: string; salesPointId?: string },
+): Promise<ClockinRecord[]> {
+  try {
+    const params = new URLSearchParams();
+    if (filters?.date) params.set('date', filters.date);
+    if (filters?.memberId) params.set('memberId', filters.memberId);
+    if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
+    params.set('recordsOnly', '1');
+    const qs = params.toString() ? `?${params}` : '';
+    const data = await req<{ clockins: ClockinRecord[] }>(
+      `/api/clockins/${encodeURIComponent(businessId)}${qs}`,
+    );
+    return (data.clockins || []).filter((d) => d?.type === 'clockin' && !((d as { deletedAt?: string }).deletedAt));
+  } catch {
+    await ensureDb();
+    const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(DB)}`);
+    let records = ((payload.docs || []) as ClockinRecord[]).filter(
+      d => d?.type === 'clockin' && d?.business_id === businessId && !((d as any).deletedAt),
+    );
+    if (filters?.date) records = records.filter(r => r.date === filters.date);
+    if (filters?.memberId) records = records.filter(r => r.member_id === filters.memberId);
+    if (filters?.salesPointId) {
+      const sp = filters.salesPointId;
+      records = records.filter((r) => {
+        const rid = String(r.sales_point_id || '').trim();
+        if (!rid) return true;
+        return rid === sp || rid === `wc:${sp}`;
+      });
+    }
+    return records.sort((a, b) => b.date.localeCompare(a.date) || a.member_name.localeCompare(b.member_name));
+  }
 }
 
 export async function getTodayClockin(businessId: string, memberId: string): Promise<ClockinRecord | null> {
@@ -165,6 +192,8 @@ export async function getTodayClockin(businessId: string, memberId: string): Pro
 export interface ClockInOptions {
   geo?: GeoLocation;
   device_type?: ClockinDeviceType;
+  sales_point_id?: string;
+  sales_point_name?: string;
 }
 
 export async function clockIn(
@@ -173,80 +202,32 @@ export async function clockIn(
   memberName: string,
   options?: ClockInOptions,
 ): Promise<ClockinRecord> {
-  await ensureDb();
-  const date = todayStr();
-  const now = new Date().toISOString();
-  const existing = await getTodayClockin(businessId, memberId);
-  if (existing && existing.status !== 'completed') {
-    throw new Error('Ya tienes un fichaje activo hoy');
-  }
-
-  let scheduled_start: string | undefined;
-  let scheduled_end: string | undefined;
-  try {
-    const scheduleLookup = (async () => {
-      const { getSchedule, getScheduleForDate } = await import('./schedulesApi');
-      const schedule = await getSchedule(businessId, memberId);
-      if (!schedule) return;
-      const shift = getScheduleForDate(schedule, new Date());
-      if (shift) {
-        scheduled_start = shift.start;
-        scheduled_end = shift.end;
-      }
-    })();
-    await Promise.race([
-      scheduleLookup,
-      new Promise<void>((resolve) => setTimeout(resolve, 2500)),
-    ]);
-  } catch {
-    /* horario no disponible: el fichaje sigue sin bloquear */
-  }
-
-  const id = `clockin:${businessId}:${memberId}:${date}:${Date.now()}`;
-  const entry: ClockEntry = { type: 'clock_in', time: now, geo: options?.geo };
-  const doc: ClockinRecord = {
-    _id: id,
-    type: 'clockin',
-    business_id: businessId,
-    member_id: memberId,
-    member_name: memberName,
-    date,
-    entries: [entry],
-    totalMinutes: 0,
-    breakMinutes: 0,
-    status: 'active',
-    notes: '',
-    scheduled_start,
-    scheduled_end,
-    device_type: options?.device_type,
-    geo: options?.geo,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const result = await req<{ rev: string }>(
-    `/api/couch/doc/${encodeURIComponent(DB)}/${encodeURIComponent(id)}`,
-    { method: 'PUT', body: JSON.stringify(doc) },
+  const data = await req<{ clockin: ClockinRecord }>(
+    `/api/clockins/${encodeURIComponent(businessId)}/check-in`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        memberId,
+        memberName,
+        sales_point_id: options?.sales_point_id,
+        sales_point_name: options?.sales_point_name,
+        device_type: options?.device_type,
+        geo: options?.geo,
+      }),
+    },
   );
-  return { ...doc, _rev: result.rev };
+  return data.clockin;
 }
 
 export async function addEntry(record: ClockinRecord, entryType: ClockEntry['type'], geo?: GeoLocation): Promise<ClockinRecord> {
-  const now = new Date().toISOString();
-  const entries = [...record.entries, { type: entryType, time: now, geo }];
-  const { totalMinutes, breakMinutes } = computeMinutes(entries, record.scheduled_start, record.scheduled_end, record.date);
-  const updated: ClockinRecord = {
-    ...record,
-    entries,
-    totalMinutes,
-    breakMinutes,
-    status: deriveStatus(entries),
-    updatedAt: now,
-  };
-  const result = await req<{ rev: string }>(
-    `/api/couch/doc/${encodeURIComponent(DB)}/${encodeURIComponent(record._id)}`,
-    { method: 'PUT', body: JSON.stringify(updated) },
+  const data = await req<{ clockin: ClockinRecord }>(
+    `/api/clockins/${encodeURIComponent(record.business_id)}/record/${encodeURIComponent(record._id)}/entry`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ entryType, geo }),
+    },
   );
-  return { ...updated, _rev: result.rev };
+  return data.clockin;
 }
 
 export async function clockOut(record: ClockinRecord, geo?: GeoLocation): Promise<ClockinRecord> {
@@ -481,12 +462,13 @@ export interface OrgClockEdge {
 
 export async function fetchClockins(
   businessId: string,
-  filters?: { date?: string; memberId?: string; recordsOnly?: boolean },
+  filters?: { date?: string; memberId?: string; recordsOnly?: boolean; salesPointId?: string },
 ): Promise<EnrichedClockinRecord[]> {
   const params = new URLSearchParams();
   if (filters?.date) params.set('date', filters.date);
   if (filters?.memberId) params.set('memberId', filters.memberId);
   if (filters?.recordsOnly) params.set('recordsOnly', '1');
+  if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
   const qs = params.toString() ? `?${params}` : '';
   const data = await req<{ clockins: EnrichedClockinRecord[] }>(
     `/api/clockins/${encodeURIComponent(businessId)}${qs}`,

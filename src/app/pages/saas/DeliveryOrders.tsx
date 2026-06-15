@@ -19,6 +19,7 @@ import {
   updateDeliveryOrderRequest,
   cancelDeliveryOrderRequest,
   reopenDeliveryOrderRequest,
+  refundDeliveryOrderRequest,
   registerPaymentRequest,
   listCatalogItemsRequest,
   pointOfSaleDisplayLabel,
@@ -31,13 +32,15 @@ import {
 } from '../../lib/deliveryApi';
 import { OrderDetailDrawer } from '../../components/delivery/OrderDetailDrawer';
 import { CancelOrderModal } from '../../components/delivery/CancelOrderModal';
+import { RefundOrderModal } from '../../components/delivery/RefundOrderModal';
 import { ReopenOrderModal } from '../../components/delivery/ReopenOrderModal';
+import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { CreateOrderWizard } from '../../components/delivery/CreateOrderWizard';
 import { DeliveryAlertsBar, type DeliveryAlert } from '../../components/delivery/DeliveryAlertsBar';
 import {
   Plus, Search, X, Clock, ChefHat, Package, CheckCircle2, AlertTriangle,
   Phone, MapPin, ArrowRight, Filter, RefreshCw, Truck, ShoppingBag,
-  Store, CreditCard, Banknote, XCircle,
+  Store, CreditCard, Banknote, XCircle, RotateCcw,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -51,6 +54,7 @@ const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; badge: string;
   listo:      { label: 'Montaje',    badge: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
   en_reparto: { label: 'En reparto', badge: 'bg-cyan-100 text-cyan-700 border-cyan-200',       icon: Truck },
   entregado:  { label: 'Entregado',  badge: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
+  devuelto:   { label: 'Devuelto',   badge: 'bg-amber-100 text-amber-800 border-amber-200',   icon: RotateCcw },
   cancelled:  { label: 'Cancelado',  badge: 'bg-gray-100 text-gray-500 border-gray-200 dark:bg-gray-700 dark:text-gray-400', icon: XCircle },
   incident:   { label: 'Incidencia', badge: 'bg-red-100 text-red-700 border-red-200',         icon: AlertTriangle },
 };
@@ -135,6 +139,7 @@ export function DeliveryOrders() {
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [cancelOrder, setCancelOrder] = useState<DeliveryOrder | null>(null);
   const [reopenOrder, setReopenOrder] = useState<DeliveryOrder | null>(null);
+  const [refundOrder, setRefundOrder] = useState<DeliveryOrder | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<DeliveryOrder | null>(null);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
@@ -317,6 +322,57 @@ export function DeliveryOrders() {
       setActionLoading(false);
     }
   };
+
+  const handleRefund = async (reason: string, refundAmount: number) => {
+    if (!userId || !refundOrder) return;
+    setActionLoading(true);
+    try {
+      const updated = await refundDeliveryOrderRequest(userId, refundOrder._id, reason, refundAmount);
+      setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
+      setRefundOrder(null);
+      if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
+      toast.success('Devolución registrada');
+      if (currentBusiness) {
+        printDeliveryTicket({
+          order: updated,
+          business: {
+            name: currentBusiness.name,
+            legalName: currentBusiness.legalName,
+            taxId: currentBusiness.taxId,
+            address: currentBusiness.address,
+            city: currentBusiness.city,
+            phone: currentBusiness.phone,
+          },
+          salesPointName: updated.salesPointName,
+          isRefund: true,
+        });
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al devolver pedido');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handlePrintTicket = useCallback((order: DeliveryOrder, isRefund = false) => {
+    if (!currentBusiness) {
+      toast.error('No hay datos del negocio para imprimir el ticket');
+      return;
+    }
+    printDeliveryTicket({
+      order,
+      business: {
+        name: currentBusiness.name,
+        legalName: currentBusiness.legalName,
+        taxId: currentBusiness.taxId,
+        address: currentBusiness.address,
+        city: currentBusiness.city,
+        phone: currentBusiness.phone,
+      },
+      salesPointName: order.salesPointName,
+      isRefund,
+    });
+  }, [currentBusiness]);
 
   // ─── Filtered + sorted orders ────────────────────────────────────────────
 
@@ -684,10 +740,22 @@ export function DeliveryOrders() {
           onCancel={(o) => { setCancelOrder(o); }}
           onReopen={(o) => { setReopenOrder(o); }}
           onRegisterPayment={(o) => { setPaymentOrder(o); }}
+          onRefund={(o) => { setRefundOrder(o); }}
+          onPrintTicket={handlePrintTicket}
           canCancel={canCancel}
           canReopen={canReopen}
+          canRefund={canOperate}
           canOperate={canOperate}
           canPayment={canPayment}
+        />
+      )}
+
+      {refundOrder && (
+        <RefundOrderModal
+          order={refundOrder}
+          onConfirm={handleRefund}
+          onClose={() => setRefundOrder(null)}
+          loading={actionLoading}
         />
       )}
 

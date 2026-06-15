@@ -1,0 +1,44 @@
+export type VertialPrinterConnectionType = 'network' | 'system' | 'browser';
+
+export interface VertialPrinterConfig {
+  connectionType: VertialPrinterConnectionType;
+  networkHost: string;
+  networkPort: number;
+  systemPrinterName: string;
+  paperWidthMm: 58 | 80;
+  preferBridge: boolean;
+}
+
+export const VERTIAL_PRINT_BRIDGE_PORT = 39201;
+export const VERTIAL_PRINT_BRIDGE_URL = `http://127.0.0.1:${VERTIAL_PRINT_BRIDGE_PORT}`;
+
+const STORAGE_KEY = 'vertial_printer_config_v1';
+
+export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
+  connectionType: 'browser',
+  networkHost: '',
+  networkPort: 9100,
+  systemPrinterName: '',
+  paperWidthMm: 80,
+  preferBridge: true,
+};
+
+export function loadPrinterConfig(): VertialPrinterConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_PRINTER_CONFIG };
+    const parsed = JSON.parse(raw) as Partial<VertialPrinterConfig>;
+    return {
+      ...DEFAULT_PRINTER_CONFIG,
+      ...parsed,
+      networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
+      paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
+    };
+  } catch {
+    return { ...DEFAULT_PRINTER_CONFIG };
+  }
+}
+
+export function savePrinterConfig(config: VertialPrinterConfig): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+}

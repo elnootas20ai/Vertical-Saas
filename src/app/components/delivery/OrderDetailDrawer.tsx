@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   X, Phone, MapPin, User, Clock, ChefHat, Package, Truck,
   CheckCircle2, AlertTriangle, CreditCard, History, Edit3,
-  ExternalLink, Banknote, ArrowRight,
+  ExternalLink, Banknote, ArrowRight, Printer, RotateCcw,
 } from 'lucide-react';
 import type { DeliveryOrder, DeliveryOrderStatus } from '../../lib/deliveryApi';
 
@@ -12,6 +12,7 @@ const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string;
   listo:      { label: 'Montaje',    color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: Package },
   en_reparto: { label: 'En reparto', color: 'bg-cyan-100 text-cyan-700 border-cyan-200',       icon: Truck },
   entregado:  { label: 'Entregado',  color: 'bg-green-100 text-green-700 border-green-200',   icon: CheckCircle2 },
+  devuelto:   { label: 'Devuelto',   color: 'bg-amber-100 text-amber-800 border-amber-200', icon: RotateCcw },
   cancelled:  { label: 'Cancelado',  color: 'bg-gray-100 text-gray-500 border-gray-200',      icon: X },
   incident:   { label: 'Incidencia', color: 'bg-red-100 text-red-700 border-red-200',         icon: AlertTriangle },
 };
@@ -66,15 +67,18 @@ interface Props {
   onCancel: (order: DeliveryOrder) => void;
   onReopen: (order: DeliveryOrder) => void;
   onRegisterPayment: (order: DeliveryOrder) => void;
+  onRefund?: (order: DeliveryOrder) => void;
+  onPrintTicket?: (order: DeliveryOrder, isRefund?: boolean) => void;
   canCancel: boolean;
   canReopen: boolean;
+  canRefund?: boolean;
   canOperate: boolean;
   canPayment: boolean;
 }
 
 export function OrderDetailDrawer({
   order, onClose, onAdvanceStatus, onCancel, onReopen, onRegisterPayment,
-  canCancel, canReopen, canOperate, canPayment,
+  onRefund, onPrintTicket, canCancel, canReopen, canRefund, canOperate, canPayment,
 }: Props) {
   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
   const channelCfg = CHANNEL_CONFIG[order.channel] || CHANNEL_CONFIG.direct;
@@ -201,7 +205,20 @@ export function OrderDetailDrawer({
                 <span className="ml-auto text-sm font-semibold text-gray-900 dark:text-gray-100">{order.paidAmount.toFixed(2)}€ / {order.totalAmount.toFixed(2)}€</span>
               )}
             </div>
+            {order.ticketNumber && (
+              <p className="text-xs text-gray-500 mt-2 font-mono">Ticket: {order.ticketNumber}</p>
+            )}
           </section>
+
+          {order.status === 'devuelto' && order.refundReason && (
+            <section className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-xl">
+              <h4 className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">Devolución</h4>
+              <p className="text-sm text-amber-800 dark:text-amber-300">{order.refundReason}</p>
+              <p className="text-xs text-amber-600 mt-1">
+                {Number(order.refundAmount || 0).toFixed(2)}€ · Por {order.refundedBy} — {formatDate(order.refundedAt || '')}
+              </p>
+            </section>
+          )}
 
           {/* Cancelación */}
           {order.status === 'cancelled' && order.cancelReason && (
@@ -249,19 +266,37 @@ export function OrderDetailDrawer({
               <ArrowRight className="w-4 h-4" /> {NEXT_LABEL[order.status]}
             </button>
           )}
-          {canPayment && order.paymentStatus !== 'paid' && order.status !== 'cancelled' && (
+          {canPayment && order.paymentStatus !== 'paid' && !['cancelled', 'devuelto'].includes(order.status) && (
             <button onClick={() => onRegisterPayment(order)}
               className="py-2.5 px-4 bg-emerald-600 text-white rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors flex items-center gap-2">
               <Banknote className="w-4 h-4" /> Cobrar
             </button>
           )}
-          {canCancel && !['cancelled', 'entregado'].includes(order.status) && (
+          {onPrintTicket && order.paymentStatus === 'paid' && order.status !== 'devuelto' && (
+            <button onClick={() => onPrintTicket(order)}
+              className="py-2.5 px-4 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2">
+              <Printer className="w-4 h-4" /> Ticket
+            </button>
+          )}
+          {canRefund && order.status === 'entregado' && order.paymentStatus === 'paid' && onRefund && (
+            <button onClick={() => onRefund(order)}
+              className="py-2.5 px-4 bg-amber-600 text-white rounded-xl font-semibold text-sm hover:bg-amber-700 transition-colors flex items-center gap-2">
+              <RotateCcw className="w-4 h-4" /> Devolver
+            </button>
+          )}
+          {onPrintTicket && order.status === 'devuelto' && (
+            <button onClick={() => onPrintTicket(order, true)}
+              className="py-2.5 px-4 border-2 border-amber-200 text-amber-700 rounded-xl text-sm font-medium hover:bg-amber-50 transition-colors flex items-center gap-2">
+              <Printer className="w-4 h-4" /> Ticket devolución
+            </button>
+          )}
+          {canCancel && !['cancelled', 'entregado', 'devuelto'].includes(order.status) && (
             <button onClick={() => onCancel(order)}
               className="py-2.5 px-4 border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl text-sm font-medium transition-colors">
               Cancelar
             </button>
           )}
-          {canReopen && ['cancelled', 'entregado'].includes(order.status) && (
+          {canReopen && ['cancelled', 'entregado'].includes(order.status) && order.status !== 'devuelto' && (
             <button onClick={() => onReopen(order)}
               className="py-2.5 px-4 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition-colors flex items-center gap-2">
               <Edit3 className="w-4 h-4" /> Reabrir

@@ -22,6 +22,7 @@
     "cap:add:ios": "npx cap add ios",
     "cap:update": "npx cap update",
     "monitor": "node scripts/monitor.mjs",
+    "print-bridge": "node scripts/vertial-print-bridge.mjs",
     "couch:check": "node scripts/verify-couch.mjs",
     "couch:up": "docker compose -f deploy/docker-compose.couch-local.yml --env-file .env up -d",
     "couch:recover-admin": "node scripts/create-admin.js",

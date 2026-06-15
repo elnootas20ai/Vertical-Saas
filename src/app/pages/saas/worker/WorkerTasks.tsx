@@ -61,7 +61,7 @@ export function WorkerTasks() {
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
   const needsCompany = workerNeedsBusinessLink(user);
-  const { isDelivery, workCenter, storeLabel } = useWorkerAssignedStore();
+  const { showStoreBlock, workCenter, storeLabel } = useWorkerAssignedStore();
 
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
   const [filter, setFilter] = useState<'all' | TaskStatus>('all');
@@ -251,17 +251,17 @@ export function WorkerTasks() {
   return (
     <Layout title={t('worker.tasks.title')} subtitle={t('worker.tasks.subtitle')}>
       <div className="space-y-5">
-        {isDelivery ? (
-          <div className="space-y-4">
-            <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} />
-            <WorkerClockInCard
-              businessId={businessId}
-              memberId={memberId}
-              memberName={memberName}
-              compact
-            />
-          </div>
-        ) : null}
+        <div className="space-y-4">
+          {showStoreBlock ? (
+            <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} compact />
+          ) : null}
+          <WorkerClockInCard
+            businessId={businessId}
+            memberId={memberId}
+            memberName={memberName}
+            compact
+          />
+        </div>
 
         {/* Total Time Today */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">

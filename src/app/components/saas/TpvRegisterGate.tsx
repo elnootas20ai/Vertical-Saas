@@ -47,6 +47,7 @@ import {
   pickDefaultOrderTaker,
   type TpvClockedInWorker,
 } from '../../lib/tpvClockedInWorkers';
+import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
@@ -1262,7 +1263,7 @@ function ClockInModal({
     try {
       const [users, records] = await Promise.all([
         fetchBusinessUsers(businessId),
-        listClockins(businessId),
+        listClockins(businessId, { date: new Date().toISOString().slice(0, 10), salesPointId: pdvId || undefined }),
       ]);
       const storeTeam = users
         .filter((u) => u.status !== 'inactive' && isMemberAssignedToStore(u, ownerUserId, pdvId, workCenterId))
@@ -1299,6 +1300,8 @@ function ClockInModal({
     try {
       await clockIn(businessId, member.user_id, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
+        sales_point_id: pdvId || undefined,
+        sales_point_name: storeLabel || undefined,
       });
       toast.success(`${member.fullName || 'Trabajador'} — fichaje de entrada`);
       await load();
@@ -2335,6 +2338,23 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
     refreshClockedInWorkers,
   ]);
 
+  const currentUserId = useMemo(
+    () => String(user?.user_id || user?.id || '').trim(),
+    [user?.user_id, user?.id],
+  );
+
+  const tpvClockInGate = useMemo(
+    () =>
+      evaluateTpvClockInGate({
+        loading: clockedInWorkersLoading,
+        clockedInWorkers,
+        selectedOrderTakerId,
+        currentUserId,
+        isWorkerUser,
+      }),
+    [clockedInWorkersLoading, clockedInWorkers, selectedOrderTakerId, currentUserId, isWorkerUser],
+  );
+
   const wrapRegisterContext = (body: ReactNode) => (
     <TpvRegisterContext.Provider value={registerContextValue}>{body}</TpvRegisterContext.Provider>
   );
@@ -2571,7 +2591,36 @@ export function TpvRegisterGate({ children }: { children: ReactNode }) {
           onSelectOrderTaker={setSelectedOrderTakerId}
         />
         <RegisterCashOpsStrip session={activeSession} />
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">{children}</div>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {tpvClockInGate.reason === 'loading' && clockedInWorkersLoading ? (
+            <div className="flex-1 flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Comprobando fichajes…
+            </div>
+          ) : !tpvClockInGate.allowed ? (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="max-w-md w-full text-center rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50/80 dark:bg-violet-950/30 p-8">
+                <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center">
+                  <LogIn className="w-7 h-7 text-violet-600 dark:text-violet-400" />
+                </div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Fichaje obligatorio</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                  {tpvClockInBlockMessage(tpvClockInGate.reason, isWorkerUser)}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowClockIn(true)}
+                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Fichar ahora
+                </button>
+              </div>
+            </div>
+          ) : (
+            children
+          )}
+        </div>
       </div>
       {showClosing && (
         <TpvGatePortal>

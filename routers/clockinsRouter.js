@@ -6,6 +6,8 @@ import {
   getPerformance,
   getOrgClockStatus,
   adjustClockinEntry,
+  checkInMember,
+  appendClockinEntry,
   getAbsenteeism,
   getOvertime,
   getPayrollSummary,
@@ -28,6 +30,8 @@ clockinsRouter.get('/:businessId/payroll-summary', getPayrollSummary);
 clockinsRouter.get('/:businessId/export', exportClockins);
 clockinsRouter.get('/:businessId/cross-check', crossCheck);
 clockinsRouter.put('/:businessId/adjust', adjustClockinEntry);
+clockinsRouter.post('/:businessId/check-in', checkInMember);
+clockinsRouter.put('/:businessId/record/:recordId/entry', appendClockinEntry);
 // El propio trabajador notifica al equipo de gestión cuando ficha (entrada,
 // salida, descanso). El backend resuelve a quién avisar y emite SSE + push.
 clockinsRouter.post('/:businessId/notify', notifyClockinEvent);

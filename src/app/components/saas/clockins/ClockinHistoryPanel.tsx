@@ -3,7 +3,6 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
-  Coffee,
   Loader2,
   MapPin,
   Users,
@@ -25,7 +24,6 @@ import {
   filterRecordsInMonth,
   filterRecordsSince,
   formatHoursShort,
-  groupRecordsByMember,
   sumBreakMinutes,
   sumWorkedMinutes,
   todayDateStr,
@@ -33,6 +31,7 @@ import {
 
 type MainTab = 'mine' | 'team';
 type RangeTab = 'week' | 'month' | 'all';
+type TeamRangeTab = 'today' | 'week';
 
 const ENTRY_LABELS: Record<string, string> = {
   clock_in: 'Entrada',
@@ -173,11 +172,13 @@ function TeamMemberCard({
 }
 
 export function ClockinHistoryPanel({ businessId, memberId, managerView = false }: ClockinHistoryPanelProps) {
-  const [mainTab, setMainTab] = useState<MainTab>('mine');
+  const [mainTab, setMainTab] = useState<MainTab>(managerView ? 'team' : 'mine');
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
+  const [teamRangeTab, setTeamRangeTab] = useState<TeamRangeTab>('today');
   const [monthOffset, setMonthOffset] = useState(0);
   const [myRecords, setMyRecords] = useState<ClockinRecord[]>([]);
   const [teamToday, setTeamToday] = useState<ClockinRecord[]>([]);
+  const [teamWeek, setTeamWeek] = useState<ClockinRecord[]>([]);
   const [activeNow, setActiveNow] = useState<ActiveMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -186,13 +187,20 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
     if (!businessId) return;
     setLoading(true);
     try {
-      const [mine, todayAll, active] = await Promise.all([
+      const [mine, todayAll, weekAll, active] = await Promise.all([
         memberId ? listClockins(businessId, { memberId }) : Promise.resolve([]),
         listClockins(businessId, { date: todayDateStr() }),
+        listClockins(businessId).then((all) =>
+          filterRecordsSince(
+            all.filter((r) => r.status === 'completed'),
+            dateDaysAgo(7),
+          ),
+        ),
         fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
       ]);
       setMyRecords(mine.filter((r) => r.status === 'completed'));
       setTeamToday(todayAll);
+      setTeamWeek(weekAll);
       setActiveNow(active);
     } finally {
       setLoading(false);
@@ -231,7 +239,6 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
     [filteredMine],
   );
 
-  const teamGrouped = useMemo(() => groupRecordsByMember(teamToday), [teamToday]);
   const activeByMember = useMemo(() => new Map(activeNow.map((a) => [a.member_id, a])), [activeNow]);
 
   const teamRows = useMemo(() => {
@@ -247,6 +254,20 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [teamToday, activeNow, activeByMember]);
+
+  const teamWeekGrouped = useMemo(() => {
+    const map = new Map<string, { name: string; minutes: number; days: number }>();
+    for (const r of teamWeek) {
+      const id = r.member_id;
+      const prev = map.get(id) || { name: r.member_name, minutes: 0, days: 0 };
+      prev.minutes += r.totalMinutes || 0;
+      prev.days += 1;
+      map.set(id, prev);
+    }
+    return [...map.entries()]
+      .map(([id, data]) => ({ id, ...data }))
+      .sort((a, b) => b.minutes - a.minutes);
+  }, [teamWeek]);
 
   const monthLabel = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
 
@@ -362,21 +383,65 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
         </>
       ) : (
         <div className="p-4 space-y-3">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Estado del equipo hoy · {teamRows.length} persona{teamRows.length !== 1 ? 's' : ''}
-          </p>
-          {teamRows.length === 0 ? (
-            <p className="py-10 text-center text-sm text-gray-400">Nadie ha fichado hoy todavía</p>
-          ) : (
-            teamRows.map((row) => (
-              <TeamMemberCard key={row.id} name={row.name} record={row.record} active={row.active} />
-            ))
-          )}
-          {managerView && teamGrouped.size > 0 ? (
-            <p className="text-[11px] text-gray-400 pt-2 border-t border-gray-100 dark:border-gray-700">
-              Vista gerente: entra en Equipo → Fichajes para editar horarios y ver alertas.
-            </p>
+          {managerView ? (
+            <div className="flex gap-2">
+              {(['today', 'week'] as TeamRangeTab[]).map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTeamRangeTab(id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    teamRangeTab === id
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  {id === 'today' ? 'Hoy' : 'Esta semana'}
+                </button>
+              ))}
+            </div>
           ) : null}
+
+          {teamRangeTab === 'week' && managerView ? (
+            <>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Horas del equipo · últimos 7 días · {teamWeekGrouped.length} persona
+                {teamWeekGrouped.length !== 1 ? 's' : ''}
+              </p>
+              {teamWeekGrouped.length === 0 ? (
+                <p className="py-10 text-center text-sm text-gray-400">Sin fichajes esta semana</p>
+              ) : (
+                teamWeekGrouped.map((row) => (
+                  <div
+                    key={row.id}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-sm font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                      {row.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{row.name}</p>
+                      <p className="text-xs text-gray-500">{row.days} día{row.days !== 1 ? 's' : ''} fichados</p>
+                    </div>
+                    <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatHoursShort(row.minutes)}</span>
+                  </div>
+                ))
+              )}
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Estado del equipo hoy · {teamRows.length} persona{teamRows.length !== 1 ? 's' : ''}
+              </p>
+              {teamRows.length === 0 ? (
+                <p className="py-10 text-center text-sm text-gray-400">Nadie ha fichado hoy todavía</p>
+              ) : (
+                teamRows.map((row) => (
+                  <TeamMemberCard key={row.id} name={row.name} record={row.record} active={row.active} />
+                ))
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

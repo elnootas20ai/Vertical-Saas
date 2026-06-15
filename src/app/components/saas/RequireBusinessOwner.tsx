@@ -21,17 +21,20 @@ export function RequireBusinessOwner({ children }: { children: React.ReactNode }
   const isWorker = Boolean(
     user && (user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy),
   );
+  const businessesPending =
+    !businessCtx?.businessesFetchSettled || Boolean(businessCtx?.isLoading);
   const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businessCtx?.businesses);
 
   useEffect(() => {
     if (isInitializing) return;
     if (!user) return;
+    if (businessesPending) return;
     if (isWorker && !ownsBusiness) {
       navigate(WORKER_DEFAULT_LANDING_PATH, { replace: true });
     }
-  }, [isInitializing, user, isWorker, ownsBusiness, navigate]);
+  }, [isInitializing, user, isWorker, ownsBusiness, businessesPending, navigate]);
 
-  if (isInitializing) return null;
+  if (isInitializing || businessesPending) return null;
   if (isWorker && !ownsBusiness) return null;
   return <>{children}</>;
 }

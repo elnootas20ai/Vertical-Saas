@@ -22,6 +22,7 @@ import { TpvRegisterProvider, useTpvRegisterIfOpen } from '../../../components/s
 import { ClockedInWorkerBubbles } from '../../../components/saas/ClockedInWorkerBubbles';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
+import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { WorkerStockReviewBanner } from '../../../components/saas/WorkerStockReviewBanner';
@@ -773,6 +774,21 @@ export function WorkerTpvDelivery() {
         toast.success(
           `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[paymentMethod!]}`,
         );
+        if (updated.paymentStatus === 'paid' && currentBusiness) {
+          printDeliveryTicket({
+            order: updated,
+            business: {
+              name: currentBusiness.name,
+              legalName: currentBusiness.legalName,
+              taxId: currentBusiness.taxId,
+              address: currentBusiness.address,
+              city: currentBusiness.city,
+              phone: currentBusiness.phone,
+            },
+            salesPointName: updated.salesPointName,
+            cashierName: user?.fullName,
+          });
+        }
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
@@ -783,7 +799,7 @@ export function WorkerTpvDelivery() {
     } finally {
       setAdvancingId(null);
     }
-  }, [userId, selectedOrder, user?.fullName, user?.user_id, user?.id]);
+  }, [userId, selectedOrder, user?.fullName, user?.user_id, user?.id, currentBusiness]);
 
   const confirmCompleteDelivery = useCallback(
     (method: DeliveryPaymentMethod) => {

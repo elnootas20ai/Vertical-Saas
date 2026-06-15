@@ -92,6 +92,7 @@ import {
 } from '../../lib/clockinAlertsApi';
 import { listVacations, type VacationRequest } from '../../lib/vacationsApi';
 import { ClockinsManagerTeamView } from '../../components/saas/clockins/ClockinsManagerTeamView';
+import { ClockinHistoryPanel } from '../../components/saas/clockins/ClockinHistoryPanel';
 import { resolveClockinMemberName } from '../../lib/clockinsDisplay';
 
 // ── Pestañas (3 nivel superior) + sub-pestañas dentro de Análisis ───────────
@@ -732,37 +733,44 @@ export function Clockins() {
 
         {/* ─── Equipo ─── */}
         {tab === 'team' && isAdmin ? (
-          <ClockinsManagerTeamView
-            businessId={businessId}
-            records={filteredTeamRecords}
-            selectedDate={selectedDate}
-            todayStr={todayStr}
-            activeMembers={filteredActiveNow}
-            totalHours={todayTotalHours}
-            dailySummary={dailySummary}
-            dailySummaryLoading={dailySummaryLoading}
-            fmtTime={fmtTime}
-            isAdmin={isAdmin}
-            searchText={searchText}
-            onSearchChange={setSearchText}
-            filterRole={filterRole}
-            onFilterRoleChange={setFilterRole}
-            availableRoles={availableRoles}
-            onShiftDate={shiftDate}
-            onDateChange={setSelectedDate}
-            onRecordsUpdate={() => { loadTeamRecords(); loadDailySummary(); loadActiveNow(); }}
-            onOpenManualClockin={() => setManualClockOpen(true)}
-            onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
-            onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
-            businessMembers={(currentBusiness?.members || []).filter((m) => {
-              const email = String(m.email || '').toLowerCase();
-              const name = String(m.fullName || '').trim();
-              if (email.endsWith('@test.local')) return false;
-              if (/^demo(\s|$)/i.test(name)) return false;
-              return true;
-            })}
-            STATUS={STATUS}
-          />
+          <div className="space-y-6">
+            <ClockinsManagerTeamView
+              businessId={businessId}
+              records={filteredTeamRecords}
+              selectedDate={selectedDate}
+              todayStr={todayStr}
+              activeMembers={filteredActiveNow}
+              totalHours={todayTotalHours}
+              dailySummary={dailySummary}
+              dailySummaryLoading={dailySummaryLoading}
+              fmtTime={fmtTime}
+              isAdmin={isAdmin}
+              searchText={searchText}
+              onSearchChange={setSearchText}
+              filterRole={filterRole}
+              onFilterRoleChange={setFilterRole}
+              availableRoles={availableRoles}
+              onShiftDate={shiftDate}
+              onDateChange={setSelectedDate}
+              onRecordsUpdate={() => { loadTeamRecords(); loadDailySummary(); loadActiveNow(); }}
+              onOpenManualClockin={() => setManualClockOpen(true)}
+              onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
+              onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
+              businessMembers={(currentBusiness?.members || []).filter((m) => {
+                const email = String(m.email || '').toLowerCase();
+                const name = String(m.fullName || '').trim();
+                if (email.endsWith('@test.local')) return false;
+                if (/^demo(\s|$)/i.test(name)) return false;
+                return true;
+              })}
+              STATUS={STATUS}
+            />
+            <ClockinHistoryPanel
+              businessId={businessId}
+              memberId={user?.user_id || ''}
+              managerView
+            />
+          </div>
         ) : tab === 'team' ? (
           <TeamPanel
             records={filteredTeamRecords}

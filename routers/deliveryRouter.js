@@ -8,6 +8,7 @@ import {
   removeDeliveryOrder,
   cancelDeliveryOrder,
   reopenDeliveryOrder,
+  refundDeliveryOrder,
   registerPayment,
   filterDeliveryOrders,
   clientOrderHistory,
@@ -127,6 +128,7 @@ deliveryRouter.post('/orders/:userId', createDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId', updateDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/cancel', cancelDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/reopen', reopenDeliveryOrder);
+deliveryRouter.put('/orders/:userId/:orderId/refund', refundDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/payment', registerPayment);
 deliveryRouter.delete('/orders/:userId/:orderId', removeDeliveryOrder);
 

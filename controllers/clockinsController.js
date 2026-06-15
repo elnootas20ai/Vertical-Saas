@@ -17,6 +17,11 @@ import {
 } from '../services/couchdb.js';
 import { broadcastToUser } from '../services/sseService.js';
 import { sendPushToUser } from '../services/pushService.js';
+import {
+  canMutateClockinForMember,
+  computeClockinMinutes,
+  deriveClockinStatus,
+} from '../services/clockinsAccess.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -280,6 +285,15 @@ export async function listClockins(req, res) {
     }
     if (memberIdFilter) {
       records = records.filter((r) => r.member_id === memberIdFilter);
+    }
+
+    const salesPointFilter = req.query.salesPointId ? String(req.query.salesPointId).trim() : null;
+    if (salesPointFilter) {
+      records = records.filter((r) => {
+        const sp = String(r.sales_point_id || '').trim();
+        if (!sp) return true;
+        return sp === salesPointFilter || sp === `wc:${salesPointFilter}`;
+      });
     }
 
     records = records.filter((r) => visibleIds.includes(r.member_id));
@@ -676,6 +690,132 @@ export async function adjustClockinEntry(req, res) {
     return res.json({ ok: true, clockin: doc });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al ajustar fichaje' });
+  }
+}
+
+// ─── Check-in / entries (API segura, sustituye escritura directa Couch) ───────
+
+const VALID_ENTRY_TYPES = new Set(['clock_in', 'break_start', 'break_end', 'clock_out']);
+
+export async function checkInMember(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const requesterId = getAuthUserId(req);
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const {
+      memberId,
+      memberName,
+      sales_point_id: salesPointId,
+      sales_point_name: salesPointName,
+      device_type: deviceType,
+      geo,
+    } = req.body || {};
+
+    const targetMemberId = String(memberId || '').trim();
+    if (!targetMemberId) return badRequest(res, 'Falta memberId');
+
+    if (!canMutateClockinForMember(business, requesterId, targetMemberId)) {
+      return res.status(403).json({ ok: false, error: 'No puedes fichar por otro trabajador' });
+    }
+
+    const date = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
+    const clockinsDb = getClockinsDbName();
+    await ensureDatabase(req, clockinsDb);
+
+    const existingRecords = await listClockinsByBusiness(req, businessId);
+    const activeToday = existingRecords.find((r) => {
+      if (r.member_id !== targetMemberId || r.date !== date) return false;
+      const status = r.status || deriveClockinStatus(r.entries);
+      return status !== 'completed';
+    });
+    if (activeToday) {
+      return res.status(409).json({ ok: false, error: 'Ya tienes un fichaje activo hoy' });
+    }
+
+    const id = `clockin:${businessId}:${targetMemberId}:${date}:${Date.now()}`;
+    const entry = { type: 'clock_in', time: now, geo: geo || undefined };
+    const doc = {
+      _id: id,
+      type: 'clockin',
+      business_id: businessId,
+      member_id: targetMemberId,
+      member_name: String(memberName || '').trim() || 'Trabajador',
+      date,
+      entries: [entry],
+      totalMinutes: 0,
+      breakMinutes: 0,
+      status: 'active',
+      notes: '',
+      device_type: deviceType || undefined,
+      geo: geo || undefined,
+      sales_point_id: salesPointId ? String(salesPointId).trim() : undefined,
+      sales_point_name: salesPointName ? String(salesPointName).trim() : undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await putDocument(req, clockinsDb, id, doc);
+    return res.status(201).json({ ok: true, clockin: doc });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al fichar entrada' });
+  }
+}
+
+export async function appendClockinEntry(req, res) {
+  try {
+    const { businessId, recordId } = req.params;
+    if (!businessId || !recordId) return badRequest(res, 'Faltan parámetros');
+
+    const requesterId = getAuthUserId(req);
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const { entryType, geo } = req.body || {};
+    if (!VALID_ENTRY_TYPES.has(entryType) || entryType === 'clock_in') {
+      return badRequest(res, 'entryType inválido');
+    }
+
+    const clockinsDb = getClockinsDbName();
+    await ensureDatabase(req, clockinsDb);
+    const doc = await getDocument(req, clockinsDb, recordId);
+    if (!doc || doc.business_id !== businessId) {
+      return res.status(404).json({ ok: false, error: 'Fichaje no encontrado' });
+    }
+
+    if (!canMutateClockinForMember(business, requesterId, doc.member_id)) {
+      return res.status(403).json({ ok: false, error: 'No puedes modificar este fichaje' });
+    }
+
+    const now = new Date().toISOString();
+    const entries = [...(doc.entries || []), { type: entryType, time: now, geo: geo || undefined }];
+    const { totalMinutes, breakMinutes } = computeClockinMinutes(
+      entries,
+      doc.scheduled_start,
+      doc.scheduled_end,
+      doc.date,
+    );
+    const updated = {
+      ...doc,
+      entries,
+      totalMinutes,
+      breakMinutes,
+      status: deriveClockinStatus(entries),
+      updatedAt: now,
+    };
+
+    await putDocument(req, clockinsDb, recordId, updated);
+    return res.json({ ok: true, clockin: updated });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al registrar fichaje' });
   }
 }
 

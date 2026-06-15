@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sumTpvRegisterSaleAmountForOrder } from '../services/couchdb.js';
+import { sumTpvRegisterSaleAmountForOrder, sumTpvRegisterReturnAmountForOrder } from '../services/couchdb.js';
 
 describe('sumTpvRegisterSaleAmountForOrder', () => {
   it('sums sale transactions for the same order id', () => {
@@ -43,5 +43,16 @@ describe('delivery payment → caja (targetTotal delta)', () => {
     const already = sumTpvRegisterSaleAmountForOrder(txs, 'ord-partial');
     const toRegister = orderTotal - already;
     expect(toRegister).toBe(20);
+  });
+});
+
+describe('sumTpvRegisterReturnAmountForOrder', () => {
+  it('sums return transactions for the same order id', () => {
+    const txs = [
+      { type: 'return', orderId: 'order-1', amount: 5 },
+      { type: 'return', orderId: 'order-1', amount: 3 },
+      { type: 'sale', orderId: 'order-1', amount: 20 },
+    ];
+    expect(sumTpvRegisterReturnAmountForOrder(txs, 'order-1')).toBe(8);
   });
 });

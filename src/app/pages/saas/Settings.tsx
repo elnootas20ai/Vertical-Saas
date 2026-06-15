@@ -80,6 +80,7 @@ import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
 import { CompanyMarcaSettings } from '../../components/saas/settings/CompanyMarcaSettings';
 import { BrandingTab, type BrandingTabHandle } from '../../components/saas/settings/BrandingTab';
 import { CompanyTiendaSettings } from '../../components/saas/settings/CompanyTiendaSettings';
+import { TpvPrinterSettingsTab } from '../../components/saas/settings/TpvPrinterSettingsTab';
 import { PipelineConfigTab } from '../../components/saas/settings/PipelineConfigTab';
 import { EmailTemplatesTab } from '../../components/saas/settings/EmailTemplatesTab';
 import { BusinessHoursTab } from '../../components/saas/settings/BusinessHoursTab';
@@ -170,7 +171,8 @@ type TabId =
   | 'alertas'
   | 'misNotificaciones'
   | 'apariencia'
-  | 'salesPoints';
+  | 'salesPoints'
+  | 'tpvPrinter';
 
 const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] = [
   { id: 'users', slug: 'usuarios', i18nKey: 'settings.tabs.users' },
@@ -192,6 +194,7 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'misNotificaciones', slug: 'mis-notificaciones', label: 'Mis notificaciones' },
   { id: 'apariencia', slug: 'apariencia', label: 'Apariencia' },
   { id: 'salesPoints', slug: 'tienda', label: 'Tienda' },
+  { id: 'tpvPrinter', slug: 'impresion-tpv', label: 'Tickets' },
 ];
 
 const SLUG_TO_TAB: Record<string, TabId> = {
@@ -199,6 +202,8 @@ const SLUG_TO_TAB: Record<string, TabId> = {
   'puntos-de-venta': 'salesPoints',
   'centros-de-trabajo': 'salesPoints',
   tiendas: 'salesPoints',
+  'impresora-tpv': 'tpvPrinter',
+  'tpv-impresion': 'tpvPrinter',
   empresas: 'businesses',
   resumen: 'businesses',
   identidad: 'brands',
@@ -222,7 +227,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
     id: 'company',
     label: 'Empresa',
     icon: Building2,
-    tabs: ['businesses', 'brands', 'salesPoints'],
+    tabs: ['businesses', 'brands', 'salesPoints', 'tpvPrinter'],
   },
   { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
   { id: 'config', label: 'Configuración', icon: SettingsIcon, tabs: ['templates', 'integrations', 'pipeline', 'emails', 'datos'] },
@@ -4560,6 +4565,8 @@ export function Settings() {
         {activeTab === 'apariencia' && <TabApariencia />}
 
         {activeTab === 'salesPoints' && <CompanyTiendaSettings />}
+
+        {activeTab === 'tpvPrinter' && <TpvPrinterSettingsTab />}
       </div>
 
       <CreateRoleModal
