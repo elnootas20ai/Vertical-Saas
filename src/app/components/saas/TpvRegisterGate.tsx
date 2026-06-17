@@ -33,6 +33,7 @@ import {
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorClosingEditor } from './AggregatorClosingEditor';
+import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import {
   filterStoresForWorkerAssignment,
@@ -1192,6 +1193,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
   const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
+  const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
   const [manualInitialized, setManualInitialized] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
@@ -1223,7 +1225,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
   }, []);
 
   useEffect(() => {
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      setShiftOrdersLoading(false);
+      return;
+    }
+    setShiftOrdersLoading(true);
     void filterDeliveryOrdersRequest(dataUserId, {
       salesPointId: session.pointOfSaleId,
       dateFrom: session.openedAt,
@@ -1231,7 +1237,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
       limit: 500,
     })
       .then((res) => setShiftOrders(res.orders || []))
-      .catch(() => setShiftOrders([]));
+      .catch(() => setShiftOrders([]))
+      .finally(() => setShiftOrdersLoading(false));
   }, [dataUserId, session.pointOfSaleId, session.openedAt]);
 
   return (
@@ -1276,6 +1283,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
             {summary.salesByMethod.online > 0 && <span className="px-2.5 py-1 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 rounded-lg font-medium flex items-center gap-1"><Wifi className="w-3 h-3" /> Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
             <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium flex items-center gap-1"><Receipt className="w-3 h-3" /> {summary.totalTransactions} operaciones</span>
           </div>
+
+          <RegisterShiftSalesBreakdown
+            session={session}
+            orders={shiftOrders}
+            loading={shiftOrdersLoading}
+          />
 
           {/* Cash flow summary */}
           <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">

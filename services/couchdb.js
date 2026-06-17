@@ -5189,7 +5189,26 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     outOfStock: Boolean(i.outOfStock),
     outOfStockAt: i.outOfStockAt || '',
   })) : (existing?.items || []);
-  const totalAmount = items.reduce((s, i) => s + Number(i.total || 0), 0);
+  const itemsSubtotal = items.reduce((s, i) => s + Number(i.total || 0), 0);
+  const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
+  const explicitTotal = data.totalAmount != null && data.totalAmount !== ''
+    ? Number(data.totalAmount)
+    : NaN;
+  const preservedTotal = existing?.totalAmount != null ? Number(existing.totalAmount) : NaN;
+  let totalAmount;
+  if (Number.isFinite(explicitTotal) && explicitTotal >= 0) {
+    totalAmount = roundMoney(Math.min(explicitTotal, itemsSubtotal));
+  } else if (existing && Number.isFinite(preservedTotal)) {
+    totalAmount = roundMoney(preservedTotal);
+  } else {
+    totalAmount = roundMoney(itemsSubtotal);
+  }
+  const explicitDiscount = data.discountAmount != null && data.discountAmount !== ''
+    ? Number(data.discountAmount)
+    : NaN;
+  const discountAmount = Number.isFinite(explicitDiscount) && explicitDiscount >= 0
+    ? roundMoney(Math.min(explicitDiscount, itemsSubtotal))
+    : roundMoney(Math.max(0, itemsSubtotal - totalAmount));
 
   const newStatus = normalizeDeliveryOrderStatus(data.status);
   const oldStatus = existing ? normalizeDeliveryOrderStatus(existing.status) : null;
@@ -5265,6 +5284,8 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     takenAt: String(data.takenAt || existing?.takenAt || ''),
 
     items,
+    itemsSubtotal: roundMoney(itemsSubtotal),
+    discountAmount,
     totalAmount,
     notes: String(data.notes || ''),
     observations: String(data.observations || existing?.observations || ''),
@@ -5343,6 +5364,8 @@ export function sanitizeDeliveryOrder(doc) {
     takenAt: doc.takenAt || '',
 
     items: Array.isArray(doc.items) ? doc.items : [],
+    itemsSubtotal: Number(doc.itemsSubtotal ?? doc.totalAmount ?? 0),
+    discountAmount: Number(doc.discountAmount || 0),
     totalAmount: Number(doc.totalAmount || 0),
     notes: doc.notes || '',
     observations: doc.observations || '',
@@ -5433,6 +5456,167 @@ const DEFAULT_DELIVERY_CONFIG = {
   },
 };
 
+export function sanitizeStoreIngredients(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  raw.forEach((entry, idx) => {
+    if (!entry || typeof entry !== 'object') return;
+    const name = String(entry.name || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const role = ['escandallo', 'base', 'extra'].includes(String(entry.role || ''))
+      ? String(entry.role)
+      : entry.escandalloOnly
+        ? 'escandallo'
+        : 'base';
+    const extraPrices =
+      entry.extraPrices && typeof entry.extraPrices === 'object'
+        ? Object.fromEntries(
+            Object.entries(entry.extraPrices)
+              .map(([brandId, price]) => {
+                const p = Number(price);
+                const id = String(brandId || '').trim();
+                if (!id || !Number.isFinite(p) || p < 0) return null;
+                return [id, Math.round(p * 100) / 100];
+              })
+              .filter(Boolean),
+          )
+        : {};
+    const brandIds = Array.isArray(entry.brandIds)
+      ? [...new Set(entry.brandIds.map((x) => String(x || '').trim()).filter(Boolean))]
+      : [];
+    const productParts = Array.isArray(entry.productParts)
+      ? [...new Set(entry.productParts.filter((p) => p === 'pizzas' || p === 'hamburguesas'))]
+      : [];
+    out.push({
+      id: String(entry.id || `ing-${idx}-${key.replace(/\s+/g, '-')}`),
+      name,
+      role,
+      escandalloOnly: role === 'escandallo',
+      ...(brandIds.length > 0 ? { brandIds } : {}),
+      ...(productParts.length > 0 ? { productParts } : {}),
+      ...(role === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),
+    });
+  });
+  return out;
+}
+
+export function sanitizeTpvCategoryTemplates(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const key of ['pizzas', 'hamburguesas']) {
+    const entry = raw[key];
+    if (!entry || typeof entry !== 'object') continue;
+    const ingredients = String(entry.ingredients || '').trim();
+    const supplements = Array.isArray(entry.supplements)
+      ? entry.supplements
+          .map((row, idx) => {
+            if (!row || typeof row !== 'object') return null;
+            const name = String(row.name || '').trim();
+            if (!name) return null;
+            const price = Number(row.price || 0);
+            return {
+              id: String(row.id || `sup-${idx}`),
+              name,
+              price: Number.isFinite(price) ? Math.round(price * 100) / 100 : 0,
+            };
+          })
+          .filter(Boolean)
+      : [];
+    out[key] = { ingredients, supplements };
+  }
+  return out;
+}
+
+export function sanitizeTpvBrandIngredients(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [brandId, value] of Object.entries(raw)) {
+    const id = String(brandId || '').trim();
+    if (!id || !Array.isArray(value)) continue;
+    const ids = [...new Set(value.map((x) => String(x || '').trim()).filter(Boolean))];
+    if (ids.length > 0) out[id] = ids;
+  }
+  return out;
+}
+
+export function sanitizeTpvBrandSupplementsFlat(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [brandId, value] of Object.entries(raw)) {
+    const id = String(brandId || '').trim();
+    if (!id || !Array.isArray(value)) continue;
+    const supplements = value
+      .map((row, idx) => {
+        if (!row || typeof row !== 'object') return null;
+        const name = String(row.name || '').trim();
+        if (!name) return null;
+        const price = Number(row.price || 0);
+        return {
+          id: String(row.id || `sup-${idx}`),
+          name,
+          price: Number.isFinite(price) ? Math.round(price * 100) / 100 : 0,
+        };
+      })
+      .filter(Boolean);
+    if (supplements.length > 0) out[id] = supplements;
+  }
+  return out;
+}
+
+export function sanitizeTpvBrandCategoryIngredients(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [brandId, entry] of Object.entries(raw)) {
+    const id = String(brandId || '').trim();
+    if (!id || !entry || typeof entry !== 'object') continue;
+    const brandOut = {};
+    for (const key of ['pizzas', 'hamburguesas']) {
+      const cat = entry[key];
+      if (!cat || typeof cat !== 'object') continue;
+      const ingredients = sanitizeStoreIngredients(cat.ingredients);
+      if (ingredients.length > 0) brandOut[key] = { ingredients };
+    }
+    if (Object.keys(brandOut).length > 0) out[id] = brandOut;
+  }
+  return out;
+}
+
+export function sanitizeTpvBrandCategorySupplements(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [brandId, entry] of Object.entries(raw)) {
+    const id = String(brandId || '').trim();
+    if (!id || !entry || typeof entry !== 'object') continue;
+    const brandOut = {};
+    for (const key of ['pizzas', 'hamburguesas']) {
+      const cat = entry[key];
+      if (!cat || typeof cat !== 'object') continue;
+      const supplements = Array.isArray(cat.supplements)
+        ? cat.supplements
+            .map((row, idx) => {
+              if (!row || typeof row !== 'object') return null;
+              const name = String(row.name || '').trim();
+              if (!name) return null;
+              const price = Number(row.price || 0);
+              return {
+                id: String(row.id || `sup-${idx}`),
+                name,
+                price: Number.isFinite(price) ? Math.round(price * 100) / 100 : 0,
+              };
+            })
+            .filter(Boolean)
+        : [];
+      if (supplements.length > 0) brandOut[key] = { supplements };
+    }
+    if (Object.keys(brandOut).length > 0) out[id] = brandOut;
+  }
+  return out;
+}
+
 export function buildDeliveryConfigDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `dlvconf-${userId}`;
@@ -5454,6 +5638,19 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
     activeChannels: Array.isArray(base.activeChannels) ? base.activeChannels : ['direct'],
     activeTimeSlots: Array.isArray(base.activeTimeSlots) ? base.activeTimeSlots : [],
     staffConsumption: sanitizeStaffConsumptionConfig(base.staffConsumption ?? existing?.staffConsumption),
+    storeIngredients: sanitizeStoreIngredients(base.storeIngredients ?? existing?.storeIngredients),
+    tpvDefaultExtraPrice: (() => {
+      const raw = base.tpvDefaultExtraPrice ?? existing?.tpvDefaultExtraPrice;
+      const p = Number(raw);
+      return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
+    })(),
+    tpvBrandIngredients: sanitizeTpvBrandIngredients(
+      base.tpvBrandIngredients ?? existing?.tpvBrandIngredients,
+    ),
+    tpvBrandSupplements: sanitizeTpvBrandSupplementsFlat(
+      base.tpvBrandSupplements ?? existing?.tpvBrandSupplements,
+    ),
+    tpvCategoryTemplates: sanitizeTpvCategoryTemplates(base.tpvCategoryTemplates ?? existing?.tpvCategoryTemplates),
     createdAt: existing?.createdAt || now, updatedAt: now,
   };
 }
@@ -5506,6 +5703,14 @@ export function sanitizeDeliveryConfig(doc) {
     activeChannels: Array.isArray(doc.activeChannels) ? doc.activeChannels : ['direct'],
     activeTimeSlots: Array.isArray(doc.activeTimeSlots) ? doc.activeTimeSlots : [],
     staffConsumption: sanitizeStaffConsumptionConfig(doc.staffConsumption),
+    storeIngredients: sanitizeStoreIngredients(doc.storeIngredients),
+    tpvDefaultExtraPrice: (() => {
+      const p = Number(doc.tpvDefaultExtraPrice);
+      return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
+    })(),
+    tpvBrandIngredients: sanitizeTpvBrandIngredients(doc.tpvBrandIngredients),
+    tpvBrandSupplements: sanitizeTpvBrandSupplementsFlat(doc.tpvBrandSupplements),
+    tpvCategoryTemplates: sanitizeTpvCategoryTemplates(doc.tpvCategoryTemplates),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
   };
@@ -8841,6 +9046,14 @@ export function sanitizeCatalogItem(doc) {
 /** Catálogo mínimo para TPV: sin imágenes ni campos pesados (carga y búsqueda más rápida). */
 export function sanitizeCatalogItemForTpv(doc) {
   if (!doc) return null;
+  const rawCf = doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {};
+  const customFields = {};
+  if (typeof rawCf.ingredients === 'string' && rawCf.ingredients.trim()) {
+    customFields.ingredients = rawCf.ingredients.trim();
+  }
+  if (Array.isArray(rawCf.supplements) && rawCf.supplements.length > 0) {
+    customFields.supplements = rawCf.supplements;
+  }
   return {
     _id: doc._id,
     type: 'catalog_item',
@@ -8881,7 +9094,7 @@ export function sanitizeCatalogItemForTpv(doc) {
     maxStock: 0,
     lastPurchasePrice: 0,
     lastPurchaseDate: '',
-    customFields: {},
+    customFields,
     vertical: doc.vertical || '',
     staffPrice: null,
     createdAt: doc.createdAt || new Date().toISOString(),

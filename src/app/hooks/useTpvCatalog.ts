@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import type { CatalogItem } from '../lib/deliveryApi';
 import type { Brand } from '../lib/brandsApi';
+import { DELIVERY_CATALOG_CHANGED } from '../lib/deliverySetup';
 import {
   fetchTpvCatalog,
   readTpvCatalogCache,
@@ -15,6 +16,28 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
   const [catalog, setCatalog] = useState<CatalogItem[]>(() => initial?.items ?? []);
   const [brands, setBrands] = useState<Brand[]>(() => initial?.brands ?? []);
   const [loadingCatalog, setLoadingCatalog] = useState(() => Boolean(userId && !initial));
+
+  const reloadCatalog = useCallback(
+    (options?: { force?: boolean; silent?: boolean }) => {
+      if (!userId) return Promise.resolve();
+      const showSpinner = !options?.silent && catalog.length === 0;
+      if (showSpinner) setLoadingCatalog(true);
+      return fetchTpvCatalog(userId, businessId, { force: options?.force })
+        .then((snapshot) => {
+          setCatalog(snapshot.items);
+          setBrands(snapshot.brands);
+        })
+        .catch(() => {
+          if (!options?.silent && catalog.length === 0) {
+            toast.error('Error al cargar el catálogo');
+          }
+        })
+        .finally(() => {
+          if (showSpinner) setLoadingCatalog(false);
+        });
+    },
+    [userId, businessId, catalog.length],
+  );
 
   useEffect(() => {
     if (!userId) {
@@ -35,8 +58,7 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
       setLoadingCatalog(true);
     }
 
-    const needsNetwork =
-      !cached || Date.now() - cached.fetchedAt > REVALIDATE_MS;
+    const needsNetwork = !cached || Date.now() - cached.fetchedAt > REVALIDATE_MS;
 
     if (!needsNetwork) {
       return () => {
@@ -64,5 +86,14 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
     };
   }, [userId, businessId]);
 
-  return { catalog, brands, loadingCatalog };
+  useEffect(() => {
+    if (!userId || typeof window === 'undefined') return;
+    const onCatalogChanged = () => {
+      void reloadCatalog({ force: true, silent: true });
+    };
+    window.addEventListener(DELIVERY_CATALOG_CHANGED, onCatalogChanged);
+    return () => window.removeEventListener(DELIVERY_CATALOG_CHANGED, onCatalogChanged);
+  }, [userId, reloadCatalog]);
+
+  return { catalog, brands, loadingCatalog, reloadCatalog };
 }

@@ -2,6 +2,7 @@ import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
 import { toast } from 'sonner';
 import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
+import type { StoreIngredient, TpvBrandIngredientSelection, TpvBrandSupplements, TpvCategoryTemplates } from './catalogCustomization';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -91,6 +92,8 @@ export interface DeliveryOrder {
   salesPointName: string;
 
   items: DeliveryOrderItem[];
+  itemsSubtotal?: number;
+  discountAmount?: number;
   totalAmount: number;
   notes: string;
   observations: string;
@@ -409,6 +412,19 @@ export async function registerPaymentRequest(userId: string, orderId: string, pa
   const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment`,
     { method: 'PUT', body: JSON.stringify({ paymentMethod, paidAmount }) },
+  );
+  return unwrapOrderResponse(result);
+}
+
+export async function correctDeliveryOrderPaymentRequest(
+  userId: string,
+  orderId: string,
+  paymentMethod: string,
+): Promise<DeliveryOrder> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+    `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment-method`,
+    { method: 'PUT', body: JSON.stringify({ paymentMethod }) },
   );
   return unwrapOrderResponse(result);
 }
@@ -1774,6 +1790,12 @@ export interface DeliveryConfig {
   activeTimeSlots: DeliveryTimeSlot[];
 
   staffConsumption?: StaffConsumptionConfig;
+  storeIngredients?: StoreIngredient[];
+  /** Precio único para todos los extras de pago en el TPV. */
+  tpvDefaultExtraPrice?: number;
+  tpvBrandIngredients?: TpvBrandIngredientSelection;
+  tpvBrandSupplements?: TpvBrandSupplements;
+  tpvCategoryTemplates?: TpvCategoryTemplates;
   cashRegisterAlerts?: {
     registerNotOpenedEnabled?: boolean;
     registerNotOpenedCheckHour?: number;

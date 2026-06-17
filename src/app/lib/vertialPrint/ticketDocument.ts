@@ -1,4 +1,5 @@
 import type { DeliveryTicketPrintOptions, DeliveryTicketVariant } from '../deliveryTicketTypes';
+import { resolveDeliveryOrderChargeTotal } from '../deliveryTicketHelpers';
 
 export interface TicketDocument {
   variant: DeliveryTicketVariant;
@@ -63,7 +64,7 @@ export function buildTicketDocument({
     : (requestedVariant || 'customer');
   const amount = isRefund
     ? Number(order.refundAmount || order.paidAmount || order.totalAmount || 0)
-    : Number(order.totalAmount || 0);
+    : resolveDeliveryOrderChargeTotal(order);
   const { base, vat } = splitTicketVat(amount, vatRate);
   const date = new Date(isRefund ? (order.refundedAt || order.updatedAt) : (order.paidAt || order.createdAt))
     .toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });

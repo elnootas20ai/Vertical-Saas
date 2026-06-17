@@ -420,7 +420,7 @@ export function TpvProductPicker({
                 {isSearchMode
                   ? 'Sin coincidencias'
                   : sections.length === 0
-                    ? 'Configura marcas y catálogo en Ajustes'
+                    ? 'Sin productos'
                     : 'Sin productos en esta sección'}
               </p>
             </div>

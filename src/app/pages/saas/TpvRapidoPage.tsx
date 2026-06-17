@@ -10,6 +10,7 @@ import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderRequest,
+  getDeliveryConfigRequest,
   type CatalogItem,
   type DeliveryOrder,
   type DeliveryOrderItem,
@@ -28,6 +29,23 @@ import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/cl
 import { useTpvCatalog } from '../../hooks/useTpvCatalog';
 import { prefetchTpvCatalog } from '../../lib/tpvCatalogCache';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
+import { TpvItemCustomizeModal } from '../../components/saas/tpv/TpvItemCustomizeModal';
+import {
+  type CartLineCustomization,
+  EMPTY_CART_CUSTOMIZATION,
+  buildOrderExtras,
+  buildOrderIngredients,
+  cartLineTotal,
+  cartLineUnitPrice,
+  customizationSignature,
+  isCustomizableCatalogItem,
+  inferTpvDefaultExtraPrice,
+  normalizeTpvCategoryTemplates,
+  normalizeStoreIngredients,
+  unifyStoreIngredientsFromConfig,
+  type StoreIngredient,
+  type TpvCategoryTemplates,
+} from '../../lib/catalogCustomization';
 import {
   buildTpvCatalogSections,
   categoriesForTpvScope,
@@ -36,7 +54,7 @@ import {
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
-import { shouldUseDeliveryStores, resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { shouldUseDeliveryStores, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
@@ -77,8 +95,10 @@ type Step = 'client' | 'delivery' | 'products' | 'payment';
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otros';
 
 interface CartItem {
+  lineId: string;
   catalogItem: CatalogItem;
   quantity: number;
+  customization: CartLineCustomization;
 }
 
 /** Pedidos recientes usados para hábitos del cliente y venta cruzada (co-compra). */
@@ -386,6 +406,15 @@ export function TpvRapidoOrderFlow({
   const brandInitRef = useRef(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
+  const [customizeTarget, setCustomizeTarget] = useState<{
+    item: CatalogItem;
+    lineId: string | null;
+    initial?: CartLineCustomization;
+  } | null>(null);
+  const [tpvCategoryTemplates, setTpvCategoryTemplates] = useState<TpvCategoryTemplates>({});
+  const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
+  const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState<number>(0);
+  const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
@@ -436,6 +465,18 @@ export function TpvRapidoOrderFlow({
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId);
 
+  const reloadDeliveryCustomization = useCallback(() => {
+    if (!userId) return;
+    getDeliveryConfigRequest(userId)
+      .then((cfg) => {
+        const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
+        setStoreIngredients(unified);
+        setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+      })
+      .catch(() => {});
+  }, [userId, brands]);
+
   const catalogSections = useMemo(
     () => buildTpvCatalogSections(brands, catalog),
     [brands, catalog],
@@ -452,7 +493,51 @@ export function TpvRapidoOrderFlow({
     setSelectedSectionId(defaultTpvSectionId(catalogSections));
   }, [catalogSections]);
 
-  const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    getDeliveryConfigRequest(userId)
+      .then((cfg) => {
+        if (cancelled) return;
+        setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
+        const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        setStoreIngredients(unified);
+        setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTpvCategoryTemplates({});
+          setStoreIngredients([]);
+          setTpvDefaultExtraPrice(0);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, brands]);
+
+  useEffect(() => {
+    if (!userId || typeof window === 'undefined') return;
+    const onConfigChanged = () => reloadDeliveryCustomization();
+    window.addEventListener(DELIVERY_CONFIG_CHANGED, onConfigChanged);
+    return () => window.removeEventListener(DELIVERY_CONFIG_CHANGED, onConfigChanged);
+  }, [userId, reloadDeliveryCustomization]);
+
+  useEffect(() => {
+    if (!userId || !customizeTarget) return;
+    let cancelled = false;
+    getDeliveryConfigRequest(userId)
+      .then((cfg) => {
+        if (cancelled) return;
+        const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        setStoreIngredients(unified);
+        setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, brands, customizeTarget?.item._id]);
 
   useEffect(() => {
     if (!userId) {
@@ -616,7 +701,10 @@ export function TpvRapidoOrderFlow({
   ]);
 
   const cartTotal = useMemo(
-    () => cart.reduce((sum, ci) => sum + ci.catalogItem.unitPrice * ci.quantity, 0),
+    () => cart.reduce(
+      (sum, ci) => sum + cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
+      0,
+    ),
     [cart],
   );
 
@@ -628,7 +716,7 @@ export function TpvRapidoOrderFlow({
   const compute2x1Discount = useCallback(() => {
     const unitPrices: number[] = [];
     for (const ci of cart) {
-      const u = Number(ci.catalogItem.unitPrice || 0);
+      const u = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
       if (!Number.isFinite(u) || u <= 0) continue;
       for (let i = 0; i < ci.quantity; i++) unitPrices.push(u);
     }
@@ -719,31 +807,94 @@ export function TpvRapidoOrderFlow({
     cart.length > 0 &&
     (deliveryType !== 'domicilio' || !!selectedAddressId);
 
-  const canSubmit =
-    orderReady && (deliveryType === 'domicilio' || !!paymentMethod);
+  const canSubmit = orderReady && !!paymentMethod;
   const isProductsFocus = currentStep === 'products' && isStepReachable('products');
 
-  // ─── Cart helpers ──────────────────────────────────────────────────────────
-  const addToCart = useCallback((item: CatalogItem) => {
+  const commitCartLine = useCallback(
+    (item: CatalogItem, customization: CartLineCustomization, editLineId: string | null) => {
+      if (!item.active) return;
+      const sig = customizationSignature(customization);
+      setCart((prev) => {
+        if (editLineId) {
+          return prev.map((ci) =>
+            ci.lineId === editLineId ? { ...ci, customization } : ci,
+          );
+        }
+        const mergeIdx = prev.findIndex(
+          (ci) =>
+            ci.catalogItem._id === item._id &&
+            customizationSignature(ci.customization) === sig,
+        );
+        if (mergeIdx >= 0) {
+          return prev.map((ci, idx) =>
+            idx === mergeIdx ? { ...ci, quantity: ci.quantity + 1 } : ci,
+          );
+        }
+        return [
+          ...prev,
+          {
+            lineId: uuidv4(),
+            catalogItem: item,
+            quantity: 1,
+            customization,
+          },
+        ];
+      });
+      setCustomizeTarget(null);
+    },
+    [],
+  );
+
+  const handleProductPick = useCallback((item: CatalogItem) => {
     if (!item.active) return;
+    setCustomizeTarget({ item, lineId: null, initial: EMPTY_CART_CUSTOMIZATION });
+  }, []);
+
+  const incrementCartLine = useCallback((lineId: string) => {
+    setCart((prev) =>
+      prev.map((ci) => (ci.lineId === lineId ? { ...ci, quantity: ci.quantity + 1 } : ci)),
+    );
+  }, []);
+
+  const decrementCartLine = useCallback((lineId: string) => {
     setCart((prev) => {
-      const existing = prev.find((ci) => ci.catalogItem._id === item._id);
-      if (existing) return prev.map((ci) => ci.catalogItem._id === item._id ? { ...ci, quantity: ci.quantity + 1 } : ci);
-      return [...prev, { catalogItem: item, quantity: 1 }];
+      const existing = prev.find((ci) => ci.lineId === lineId);
+      if (!existing) return prev;
+      if (existing.quantity <= 1) return prev.filter((ci) => ci.lineId !== lineId);
+      return prev.map((ci) =>
+        ci.lineId === lineId ? { ...ci, quantity: ci.quantity - 1 } : ci,
+      );
     });
   }, []);
 
-  const removeFromCart = useCallback((itemId: string) => {
+  const decrementCatalogInCart = useCallback((itemId: string) => {
     setCart((prev) => {
-      const existing = prev.find((ci) => ci.catalogItem._id === itemId);
-      if (!existing) return prev;
-      if (existing.quantity <= 1) return prev.filter((ci) => ci.catalogItem._id !== itemId);
-      return prev.map((ci) => ci.catalogItem._id === itemId ? { ...ci, quantity: ci.quantity - 1 } : ci);
+      const idx = [...prev].reverse().findIndex((ci) => ci.catalogItem._id === itemId);
+      if (idx < 0) return prev;
+      const realIdx = prev.length - 1 - idx;
+      const line = prev[realIdx];
+      if (line.quantity <= 1) return prev.filter((_, i) => i !== realIdx);
+      return prev.map((ci, i) =>
+        i === realIdx ? { ...ci, quantity: ci.quantity - 1 } : ci,
+      );
     });
+  }, []);
+
+  const updateCartLineNotes = useCallback((lineId: string, notes: string) => {
+    setCart((prev) =>
+      prev.map((ci) =>
+        ci.lineId === lineId
+          ? { ...ci, customization: { ...ci.customization, notes: notes.trim() } }
+          : ci,
+      ),
+    );
   }, []);
 
   const getCartQty = useCallback(
-    (itemId: string) => cart.find((ci) => ci.catalogItem._id === itemId)?.quantity || 0,
+    (itemId: string) =>
+      cart
+        .filter((ci) => ci.catalogItem._id === itemId)
+        .reduce((sum, ci) => sum + ci.quantity, 0),
     [cart],
   );
 
@@ -1120,21 +1271,33 @@ export function TpvRapidoOrderFlow({
         return;
       }
       const method = methodOverride || paymentMethod;
+      if (!method) return;
+
       const collectOnDelivery = deliveryType === 'domicilio';
-      if (!collectOnDelivery && !method) return;
 
       setSubmitting(true);
       try {
-        const items: DeliveryOrderItem[] = cart.map((ci) => ({
-          id: uuidv4(),
-          name: ci.catalogItem.name,
-          quantity: ci.quantity,
-          unitPrice: ci.catalogItem.unitPrice,
-          total: ci.catalogItem.unitPrice * ci.quantity,
-          catalogItemId: ci.catalogItem._id,
-          category: ci.catalogItem.category,
-          brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],
-        }));
+        const items: DeliveryOrderItem[] = cart.map((ci) => {
+          const unitPrice = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+          return {
+            id: ci.lineId,
+            name: ci.catalogItem.name,
+            quantity: ci.quantity,
+            unitPrice,
+            total: cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
+            notes: ci.customization.notes || undefined,
+            catalogItemId: ci.catalogItem._id,
+            category: ci.catalogItem.category,
+            brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],
+            extras: buildOrderExtras(ci.customization),
+            ingredients: buildOrderIngredients(
+              ci.catalogItem,
+              ci.customization,
+              tpvCategoryTemplates,
+              storeIngredients,
+            ),
+          };
+        });
 
         const selectedAddr = resolveClientDeliveryAddresses(selectedClient).find(
           (a) => a.id === selectedAddressId,
@@ -1177,11 +1340,16 @@ export function TpvRapidoOrderFlow({
           takenByName: takerName,
           items,
           totalAmount: finalTotal,
+          ...(discountAmount > 0 ? { discountAmount } : {}),
           notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
           observations: takerName ? `Atendido por: ${takerName}` : '',
-          paymentMethod: collectOnDelivery ? '' : (method || ''),
-          paymentStatus: collectOnDelivery ? 'pending' : method === 'efectivo' ? 'paid' : 'pending',
-          paidAmount: collectOnDelivery ? 0 : method === 'efectivo' ? finalTotal : 0,
+          paymentMethod: method,
+          paymentStatus: collectOnDelivery ? 'pending' : 'paid',
+          paidAmount: collectOnDelivery ? 0 : finalTotal,
+          paidAt: collectOnDelivery ? '' : now,
+          paymentCollected: !collectOnDelivery,
+          paymentCollectedAt: collectOnDelivery ? '' : now,
+          paymentCollectedBy: collectOnDelivery ? '' : takerName,
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
         };
@@ -1815,8 +1983,8 @@ export function TpvRapidoOrderFlow({
               habitualProducts={selectedClient ? habitualProducts : []}
               crossSellProducts={cart.length > 0 ? crossSellProducts : []}
               getCartQty={getCartQty}
-              addToCart={addToCart}
-              removeFromCart={removeFromCart}
+              addToCart={handleProductPick}
+              removeFromCart={decrementCatalogInCart}
               formatPrice={formatPrice}
               hasPricedProducts={hasPricedProducts}
               onImportCatalog={() => navigate('/saas/catalog')}
@@ -1840,26 +2008,91 @@ export function TpvRapidoOrderFlow({
                     </div>
                   ) : (
                     <>
-                      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
-                        {cart.map((ci) => (
-                          <div key={ci.catalogItem._id} className="flex items-center justify-between gap-1 text-sm">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-gray-500 dark:text-gray-400 tabular-nums text-xs shrink-0">{ci.quantity}×</span>
-                              <span className="text-gray-900 dark:text-gray-100 truncate text-xs font-medium">{ci.catalogItem.name}</span>
+                      <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-0.5">
+                        {cart.map((ci) => {
+                          const lineUnit = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+                          const lineTotal = cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization);
+                          const extras = buildOrderExtras(ci.customization);
+                          const customizable = isCustomizableCatalogItem(ci.catalogItem);
+                          return (
+                            <div
+                              key={ci.lineId}
+                              className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/50 p-2.5 space-y-1.5"
+                            >
+                              <div className="flex items-start justify-between gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCustomizeTarget({
+                                      item: ci.catalogItem,
+                                      lineId: ci.lineId,
+                                      initial: ci.customization,
+                                    });
+                                  }}
+                                  className="min-w-0 text-left hover:opacity-80"
+                                >
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-gray-500 dark:text-gray-400 tabular-nums text-xs shrink-0">
+                                      {ci.quantity}×
+                                    </span>
+                                    <span className="text-gray-900 dark:text-gray-100 text-xs font-semibold truncate">
+                                      {ci.catalogItem.name}
+                                    </span>
+                                  </div>
+                                  {extras.length > 0 && (
+                                    <div className="mt-1 space-y-0.5">
+                                      {extras.map((extra) => (
+                                        <p
+                                          key={extra}
+                                          className={`text-[10px] leading-tight pl-4 ${
+                                            extra.startsWith('-')
+                                              ? 'text-red-600 dark:text-red-400 line-through'
+                                              : 'text-emerald-700 dark:text-emerald-400'
+                                          }`}
+                                        >
+                                          {extra}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </button>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-xs">
+                                    {formatPrice(lineTotal)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => decrementCartLine(ci.lineId)}
+                                    className="text-gray-400 hover:text-red-500 transition-colors p-0.5"
+                                  >
+                                    <Minus className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => incrementCartLine(ci.lineId)}
+                                    className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors p-0.5"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="pl-4">
+                                <input
+                                  type="text"
+                                  value={ci.customization.notes}
+                                  onChange={(e) => updateCartLineNotes(ci.lineId, e.target.value)}
+                                  placeholder="Notas (sin cebolla, para llevar…)"
+                                  className="w-full px-2 py-1 text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder:text-gray-400 outline-none focus:border-gray-500"
+                                />
+                                {(customizable || lineUnit !== Number(ci.catalogItem.unitPrice || 0)) && (
+                                  <p className="text-[9px] text-gray-400 mt-0.5 tabular-nums">
+                                    {formatPrice(lineUnit)} / ud
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-xs">
-                                {formatPrice(ci.catalogItem.unitPrice * ci.quantity)}
-                              </span>
-                              <button type="button" onClick={() => removeFromCart(ci.catalogItem._id)} className="text-gray-400 hover:text-red-500 transition-colors p-0.5">
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <button type="button" onClick={() => addToCart(ci.catalogItem)} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors p-0.5">
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       <div className="shrink-0 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -1951,63 +2184,62 @@ export function TpvRapidoOrderFlow({
         {/* ═══════════════ STEP 4: PAYMENT ═══════════════ */}
         {currentStep === 'payment' && isStepReachable('payment') ? (
           <StepContainer step={4} title="Pago y finalizar" visible>
-            {deliveryType === 'domicilio' ? (
-              <div className="p-4 rounded-2xl border-2 border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 text-sm text-cyan-900 dark:text-cyan-100">
+            {deliveryType === 'domicilio' && (
+              <div className="mb-4 p-4 rounded-2xl border-2 border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 text-sm text-cyan-900 dark:text-cyan-100">
                 <p className="font-semibold">Envío a domicilio</p>
                 <p className="mt-1 text-cyan-800 dark:text-cyan-200">
-                  El cobro se confirma al entregar. El repartidor elegirá efectivo, tarjeta o bizum.
+                  Indica cómo pagará el cliente. El cobro se confirma al entregar; si cambia, prevalece lo que marques entonces.
                 </p>
                 <p className="mt-2 text-lg font-bold tabular-nums">{formatPrice(finalTotal)}</p>
               </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {([
-                    { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
-                    { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                    { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                    { key: 'otros' as const, label: 'Otros', icon: Wallet },
-                  ]).map(({ key, label, icon: Icon }) => (
-                    <button
-                      key={key}
-                      onClick={() => setPaymentMethod(key)}
-                      className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
-                        paymentMethod === key
-                          ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
-                      }`}
-                    >
-                      <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
-                    </button>
-                  ))}
-                </div>
+            )}
 
-                {paymentMethod === 'efectivo' && (
-                  <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                    <label className={LABEL_CLASS}>El cliente paga con</label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={cashGiven}
-                        onChange={(e) => setCashGiven(e.target.value)}
-                        placeholder={formatPrice(finalTotal)}
-                        className={`${INPUT_CLASS} text-lg font-medium pr-8`}
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
-                    </div>
-                    {changeAmount !== null && changeAmount >= 0 && (
-                      <div className="mt-3 flex items-center justify-between">
-                        <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
-                        <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
-                          {formatPrice(changeAmount)}
-                        </span>
-                      </div>
-                    )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {([
+                { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                { key: 'otros' as const, label: 'Otros', icon: Wallet },
+              ]).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPaymentMethod(key)}
+                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                    paymentMethod === key
+                      ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                  }`}
+                >
+                  <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            {paymentMethod === 'efectivo' && deliveryType !== 'domicilio' && (
+              <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                <label className={LABEL_CLASS}>El cliente paga con</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={cashGiven}
+                    onChange={(e) => setCashGiven(e.target.value)}
+                    placeholder={formatPrice(finalTotal)}
+                    className={`${INPUT_CLASS} text-lg font-medium pr-8`}
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                </div>
+                {changeAmount !== null && changeAmount >= 0 && (
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
+                    <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
+                      {formatPrice(changeAmount)}
+                    </span>
                   </div>
                 )}
-              </>
+              </div>
             )}
 
             <div className="mt-4">
@@ -2061,6 +2293,21 @@ export function TpvRapidoOrderFlow({
           </StepContainer>
         ) : null}
       </div>
+      {customizeTarget && (
+        <TpvItemCustomizeModal
+          item={customizeTarget.item}
+          initial={customizeTarget.initial}
+          templates={tpvCategoryTemplates}
+          storeIngredients={storeIngredients}
+          defaultExtraPrice={tpvDefaultExtraPrice}
+          brands={brands}
+          formatPrice={formatPrice}
+          onClose={() => setCustomizeTarget(null)}
+          onConfirm={(customization) =>
+            commitCartLine(customizeTarget.item, customization, customizeTarget.lineId)
+          }
+        />
+      )}
     </TpvFullscreenShell>
   );
 }

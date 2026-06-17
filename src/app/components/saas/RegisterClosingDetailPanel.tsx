@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   Banknote, CreditCard, Phone as PhoneIcon, Wifi, TrendingUp, TrendingDown,
   Clock, User, Store,
 } from 'lucide-react';
-import type { TpvRegisterSession, TpvRegisterSummary } from '../../lib/deliveryApi';
+import type { DeliveryOrder, TpvRegisterSession, TpvRegisterSummary } from '../../lib/deliveryApi';
+import { filterDeliveryOrdersRequest } from '../../lib/deliveryApi';
 import {
   aggregatorRowsFromClosingTotals,
   getClosingAggregatorPlatforms,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
+import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
   efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
@@ -98,6 +100,33 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
   const transactions = session.transactions || [];
   const cashCounts = session.cashCounts || [];
   const incidents = session.incidents || [];
+  const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+
+  useEffect(() => {
+    const userId = String(session.user_id || '').trim();
+    if (!userId || !session.openedAt) return;
+    let cancelled = false;
+    setOrdersLoading(true);
+    void filterDeliveryOrdersRequest(userId, {
+      salesPointId: session.pointOfSaleId,
+      dateFrom: session.openedAt,
+      dateTo: session.closedAt || new Date().toISOString(),
+      limit: 500,
+    })
+      .then((res) => {
+        if (!cancelled) setShiftOrders(res.orders || []);
+      })
+      .catch(() => {
+        if (!cancelled) setShiftOrders([]);
+      })
+      .finally(() => {
+        if (!cancelled) setOrdersLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.user_id, session.pointOfSaleId, session.openedAt, session.closedAt]);
 
   const aggregatorRows = useMemo(() => {
     if (aggregatorRowsProp?.length) return aggregatorRowsProp;
@@ -156,6 +185,8 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           {summary.totalTransactions} operaciones
         </span>
       </div>
+
+      <RegisterShiftSalesBreakdown session={session} orders={shiftOrders} loading={ordersLoading} />
 
       <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
         <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Arqueo de efectivo</p>

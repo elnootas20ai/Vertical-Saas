@@ -101,6 +101,12 @@ import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
+import {
+  isCustomizableCatalogItem,
+  normalizeCatalogSupplementsForSave,
+  parseCatalogSupplements,
+} from '../../lib/catalogCustomization';
+import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -202,6 +208,8 @@ function CreateCatalogItemModal({
     notes: '',
     webVisible: true,
     available: true,
+    ingredients: '',
+    supplements: [] as Array<{ id: string; name: string; price: string }>,
   });
 
   useEffect(() => {
@@ -225,6 +233,12 @@ function CreateCatalogItemModal({
         notes: editItem.notes || '',
         webVisible: editItem.webVisible ?? true,
         available: editItem.available ?? true,
+        ingredients: typeof editItem.customFields?.ingredients === 'string' ? editItem.customFields.ingredients : '',
+        supplements: parseCatalogSupplements(editItem).map((s) => ({
+          id: s.id,
+          name: s.name,
+          price: String(s.price),
+        })),
       });
     } else {
       const defaultId = defaultBrandIdForCatalog(brands);
@@ -235,6 +249,7 @@ function CreateCatalogItemModal({
         showNewBrand: false,
         unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
         image: '', allergens: [], notes: '', webVisible: true, available: true,
+        ingredients: '', supplements: [],
       });
     }
     setStep(1);
@@ -305,6 +320,16 @@ function CreateCatalogItemModal({
         shouldClearBrandForCategory(category) && form.selectedBrandIds.length === 0
           ? []
           : [...form.selectedBrandIds];
+      const customizable = isCustomizableCatalogItem({ category, name: form.name });
+      const customFields = {
+        ...(editItem?.customFields || {}),
+        ...(customizable
+          ? {
+              ingredients: form.ingredients.trim(),
+              supplements: normalizeCatalogSupplementsForSave(form.supplements),
+            }
+          : {}),
+      };
       await onCreate({
         ...editItem,
         name: form.name,
@@ -321,6 +346,7 @@ function CreateCatalogItemModal({
         image: form.image,
         allergens: form.allergens,
         notes: form.notes,
+        customFields,
         active: editItem?.active ?? true,
         webVisible: form.webVisible,
         available: form.available,
@@ -490,6 +516,104 @@ function CreateCatalogItemModal({
 
   const margin = Number(form.unitPrice) - Number(form.costPrice);
   const marginPct = Number(form.costPrice) > 0 ? ((margin / Number(form.costPrice)) * 100).toFixed(0) : '—';
+  const showCustomization = isCustomizableCatalogItem({ category: form.category, name: form.name });
+
+  const renderCustomizationSection = () => {
+    if (!showCustomization) return null;
+    return (
+      <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+            Ingredientes y suplementos (TPV)
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Opcional por producto. Si lo dejas vacío aquí, se usa la plantilla global de arriba (Pizzas / Hamburguesas).
+          </p>
+        </div>
+        <div>
+          <label className={labelClass}>Ingredientes base</label>
+          <textarea
+            rows={3}
+            className={`${inputClass} resize-none`}
+            placeholder="Tomate, Mozzarella, Albahaca (separados por comas)"
+            value={form.ingredients}
+            onChange={(e) => setForm((f) => ({ ...f, ingredients: e.target.value }))}
+          />
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className={labelClass}>Suplementos de pago</label>
+            <button
+              type="button"
+              onClick={() =>
+                setForm((f) => ({
+                  ...f,
+                  supplements: [
+                    ...f.supplements,
+                    { id: `sup-${Date.now()}`, name: '', price: '' },
+                  ],
+                }))
+              }
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
+            >
+              <Plus className="w-3 h-3" />
+              Añadir
+            </button>
+          </div>
+          {form.supplements.length === 0 ? (
+            <p className="text-xs text-gray-400">Sin suplementos. Ej: Extra queso 1,50€</p>
+          ) : (
+            <div className="space-y-2">
+              {form.supplements.map((row, idx) => (
+                <div key={row.id || idx} className="flex gap-2 items-center">
+                  <input
+                    className={`${inputClass} flex-1`}
+                    placeholder="Nombre suplemento"
+                    value={row.name}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        supplements: f.supplements.map((s, i) =>
+                          i === idx ? { ...s, name: e.target.value } : s,
+                        ),
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    className={`${inputClass} w-24`}
+                    placeholder="€"
+                    value={row.price}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        supplements: f.supplements.map((s, i) =>
+                          i === idx ? { ...s, price: e.target.value } : s,
+                        ),
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm((f) => ({
+                        ...f,
+                        supplements: f.supplements.filter((_, i) => i !== idx),
+                      }))
+                    }
+                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -604,6 +728,7 @@ function CreateCatalogItemModal({
                 </div>
                 {renderCategoryUnit()}
               </section>
+              {renderCustomizationSection()}
               <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Precios e inventario</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -754,6 +879,7 @@ function CreateCatalogItemModal({
                   </div>
                 </>
               )}
+              {renderCustomizationSection()}
             </div>
           ) : (
             <div className="space-y-5">
@@ -1490,13 +1616,14 @@ const TABS_NEED_CATALOG = new Set(['catalog', 'stock', 'staff-consumption']);
 export function CatalogPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const CATALOG_TABS = ['catalog', 'stock', 'staff-consumption', 'suppliers', 'purchase-orders', 'invoices', 'escandallo'] as const;
+  const CATALOG_TABS = ['catalog', 'stock', 'staff-consumption', 'suppliers', 'purchase-orders', 'invoices', 'ingredientes', 'escandallo'] as const;
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
-  const catalogScopeReady = businessesFetchSettled && Boolean(businessId) && Boolean(dataUserId);
+  const pageReady = businessesFetchSettled && Boolean(dataUserId);
+  const catalogDataReady = pageReady && Boolean(businessId);
   const { config: verticalConfig, businessType } = useVerticalCatalog();
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
@@ -1521,7 +1648,8 @@ export function CatalogPage() {
   const catalogLoadedRef = useRef(false);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const activeTab = useMemo(() => {
-    const tab = searchParams.get('tab') || 'catalog';
+    const raw = searchParams.get('tab') || 'catalog';
+    const tab = raw === 'tpv-templates' ? 'ingredientes' : raw;
     return (CATALOG_TABS as readonly string[]).includes(tab) ? tab : 'catalog';
   }, [searchParams]);
   const setActiveTab = useCallback((tab: string) => setSearchParams({ tab }), [setSearchParams]);
@@ -1665,7 +1793,7 @@ export function CatalogPage() {
         if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
       }
       await loadCatalog();
-      notifyDeliveryCatalogChanged();
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
       toast.success(`${result.created} producto(s) importado(s) con IA · TPV actualizado`);
     }
     if (result.errors > 0) {
@@ -1765,7 +1893,7 @@ export function CatalogPage() {
         if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
       }
       await loadCatalog();
-      notifyDeliveryCatalogChanged();
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
       toast.success(
         `${result.created} producto(s) importado(s)` +
@@ -1939,7 +2067,7 @@ export function CatalogPage() {
   }, [businessId, dataUserId]);
 
   useEffect(() => {
-    if (!catalogScopeReady) return;
+    if (!catalogDataReady) return;
     if (!TABS_NEED_CATALOG.has(activeTab)) return;
     if (catalogLoadedRef.current) return;
 
@@ -1962,7 +2090,7 @@ export function CatalogPage() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [catalogScopeReady, activeTab, dataUserId, loadCatalog]);
+  }, [catalogDataReady, activeTab, dataUserId, loadCatalog]);
 
   useEffect(() => {
     const onStoreChange = () => { void loadCatalog(); };
@@ -2003,7 +2131,7 @@ export function CatalogPage() {
       }
       setShowCreateItem(false);
       setEditingItem(null);
-      notifyDeliveryCatalogChanged();
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el artículo');
     }
@@ -2057,6 +2185,7 @@ export function CatalogPage() {
       try {
         await deleteCatalogItemRequest(user.id, item._id);
         setCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
+        notifyDeliveryCatalogChanged(dataUserId, businessId);
         toast.success('Artículo eliminado');
       } catch {
         toast.error('Error al eliminar el artículo');
@@ -2084,6 +2213,7 @@ export function CatalogPage() {
         }
       }
       await loadCatalog();
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
       if (deleted > 0) toast.success(`${deleted} artículo(s) eliminado(s)`);
       if (failed > 0) toast.error(`${failed} artículo(s) no se pudieron eliminar`);
     } finally {
@@ -2097,6 +2227,7 @@ export function CatalogPage() {
     try {
       const updated = await updateCatalogItemRequest(user.id, { ...item, [field]: !item[field] });
       setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+      notifyDeliveryCatalogChanged(dataUserId, businessId);
       const labels: Record<string, [string, string]> = {
         webVisible: ['visible en web', 'oculto de la web'],
         available: ['disponible', 'no disponible'],
@@ -2987,6 +3118,12 @@ export function CatalogPage() {
     );
   };
 
+  // ── Tab: Ingredientes ─────────────────────────────────────────────────────────
+
+  const renderIngredientesTab = () => (
+    dataUserId && businessId ? <StoreIngredientsPanel userId={dataUserId} businessId={businessId} /> : null
+  );
+
   // ── Tabs config ─────────────────────────────────────────────────────────────
 
   const tabsConfig = useMemo(() => [
@@ -2996,6 +3133,7 @@ export function CatalogPage() {
     { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
     { id: 'purchase-orders', label: 'Órdenes de compra' },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
+    { id: 'ingredientes', label: 'Ingredientes' },
     { id: 'escandallo', label: 'Escandallo' },
   ], [stockTabCount, catalogItems, supplierKpis.active, invoiceKpis.pending]);
 
@@ -3017,18 +3155,18 @@ export function CatalogPage() {
   return (
     <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
       <div className="space-y-6">
-        {!catalogScopeReady && (
+        {!pageReady && (
           <CatalogTabLoadingState phase="session" />
         )}
 
-        {catalogScopeReady && isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0 && (
+        {pageReady && isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0 && (
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
             <Loader2 className="w-4 h-4 animate-spin shrink-0" />
             Comprobando tienda y PDV… puedes seguir navegando.
           </div>
         )}
 
-        {catalogScopeReady && (
+        {pageReady && (
           <>
         {isDelivery && !pdvGate.ready && !pdvGate.loading && (
           <div className="flex flex-col gap-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/90 dark:bg-sky-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -3077,6 +3215,8 @@ export function CatalogPage() {
         {activeTab === 'catalog' && (
           catalogBusy ? <CatalogTabLoadingState phase="catalog" /> : renderCatalogTab()
         )}
+
+        {activeTab === 'ingredientes' && renderIngredientesTab()}
 
         {activeTab === 'stock' && (
           catalogBusy ? (

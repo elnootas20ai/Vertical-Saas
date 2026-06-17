@@ -9,6 +9,7 @@ import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
+  correctDeliveryOrderPaymentRequest,
   cancelDeliveryOrderRequest,
   getDeliveryConfigRequest,
   isTpvRegisterSessionOpen,
@@ -25,7 +26,7 @@ import { TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType 
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
-import { businessTicketInfoFrom } from '../../../lib/deliveryTicketHelpers';
+import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
@@ -136,6 +137,67 @@ function orderAlreadyCobrado(order: DeliveryOrder): boolean {
   if (order.paymentStatus === 'paid' || order.paymentCollected) return true;
   if (paid > 0 && total > 0 && paid >= total) return true;
   return false;
+}
+
+function orderPaymentBoardBadge(order: DeliveryOrder): {
+  method: DeliveryPaymentMethod;
+  statusLabel: string;
+  paid: boolean;
+} | null {
+  if (!order.paymentMethod) return null;
+  const method = resolveDeliveryPaymentMethod(order.paymentMethod);
+  const paid = orderAlreadyCobrado(order);
+  return {
+    method,
+    statusLabel: paid ? 'Cobrado' : 'Pago',
+    paid,
+  };
+}
+
+function PaymentMethodBoardChip({
+  method,
+  statusLabel,
+  paid,
+}: {
+  method: DeliveryPaymentMethod;
+  statusLabel: string;
+  paid: boolean;
+}) {
+  const methodLabel = PAYMENT_LABELS[method];
+  const Icon = method === 'tarjeta' ? CreditCard : method === 'bizum' ? Smartphone : Banknote;
+
+  const methodStyles: Record<DeliveryPaymentMethod, { chip: string; icon: string }> = {
+    efectivo: {
+      chip: paid
+        ? 'bg-amber-100 text-amber-950 border-amber-400 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-600'
+        : 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700',
+      icon: paid ? 'text-amber-700 dark:text-amber-300' : 'text-amber-600 dark:text-amber-400',
+    },
+    tarjeta: {
+      chip: paid
+        ? 'bg-sky-100 text-sky-950 border-sky-400 dark:bg-sky-950/50 dark:text-sky-100 dark:border-sky-600'
+        : 'bg-sky-50 text-sky-900 border-sky-300 dark:bg-sky-950/30 dark:text-sky-200 dark:border-sky-700',
+      icon: paid ? 'text-sky-700 dark:text-sky-300' : 'text-sky-600 dark:text-sky-400',
+    },
+    bizum: {
+      chip: paid
+        ? 'bg-violet-100 text-violet-950 border-violet-400 dark:bg-violet-950/50 dark:text-violet-100 dark:border-violet-600'
+        : 'bg-violet-50 text-violet-900 border-violet-300 dark:bg-violet-950/30 dark:text-violet-200 dark:border-violet-700',
+      icon: paid ? 'text-violet-700 dark:text-violet-300' : 'text-violet-600 dark:text-violet-400',
+    },
+  };
+
+  const style = methodStyles[method];
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-bold leading-none ${style.chip}`}
+    >
+      <Icon className={`w-4 h-4 shrink-0 ${style.icon}`} />
+      <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{statusLabel}</span>
+      <span className="text-sm font-extrabold">{methodLabel}</span>
+    </span>
+  );
 }
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
@@ -283,6 +345,7 @@ function OrderCard({
     .slice(0, 2)
     .map((i) => `${i.quantity}× ${i.name}`)
     .join(' · ');
+  const paymentBadge = orderPaymentBoardBadge(order);
 
   return (
     <div
@@ -356,7 +419,7 @@ function OrderCard({
           </p>
           <div className="flex items-center gap-1.5 mt-0.5 text-[11px] flex-wrap">
             <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-              {formatCurrency(order.totalAmount)}
+              {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
             </span>
             <span className="text-gray-300">·</span>
             <span className="text-gray-500">{itemCount} uds</span>
@@ -367,6 +430,15 @@ function OrderCard({
               </>
             )}
           </div>
+          {paymentBadge && (
+            <div className="mt-1.5">
+              <PaymentMethodBoardChip
+                method={paymentBadge.method}
+                statusLabel={paymentBadge.statusLabel}
+                paid={paymentBadge.paid}
+              />
+            </div>
+          )}
         </button>
 
         {/* Acción principal */}
@@ -486,13 +558,18 @@ function DeliverPaymentModal({
           <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Entregar pedido</h3>
           <p className="text-sm text-gray-500 mt-1 font-mono">#{order.orderNumber}</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
-            {formatCurrency(order.totalAmount)}
+            {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
             {orderAlreadyCobrado(order)
               ? 'Confirma la entrega (ya cobrado en caja)'
               : '¿Cómo ha pagado?'}
           </p>
+          {!orderAlreadyCobrado(order) && order.paymentMethod && (
+            <p className="text-xs text-cyan-700 dark:text-cyan-300 mt-1 font-medium">
+              Previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+            </p>
+          )}
           {orderAlreadyCobrado(order) && order.paymentMethod && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
               Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
@@ -563,12 +640,14 @@ function DeliverPaymentModal({
   );
 }
 
-function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
+function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, advancing, correctingPayment }: {
   order: DeliveryOrder;
   onClose: () => void;
   onAdvance: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
+  onCorrectPayment?: (o: DeliveryOrder, method: DeliveryPaymentMethod) => void;
   advancing: boolean;
+  correctingPayment?: boolean;
 }) {
   useModalClose(true, onClose);
   const { currentBusiness } = useBusiness();
@@ -576,6 +655,9 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
   const nextLabel = TABLET_NEXT_LABEL[order.status];
   const displayLabel = LANE_STATUS_LABEL[order.status] || cfg.label;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
+  const canCorrectPayment =
+    Boolean(onCorrectPayment) && isCompletedBoardOrder(order) && orderAlreadyCobrado(order);
+  const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -659,9 +741,26 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
           )}
 
           <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
+              {order.ticketNumber && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                  Ticket {order.ticketNumber}
+                </p>
+              )}
+              {order.paymentStatus === 'paid' && order.paymentMethod && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
+                  Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+                </p>
+              )}
+              {order.paymentStatus !== 'paid' && order.paymentMethod && (
+                <p className="text-xs text-cyan-700 dark:text-cyan-300 font-medium mt-0.5">
+                  Pago previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+                </p>
+              )}
+            </div>
             <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-              {formatCurrency(order.totalAmount)}
+              {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
             </span>
           </div>
 
@@ -675,6 +774,46 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
                 cashierName={order.takenByName}
                 layout="grid"
               />
+            </div>
+          )}
+
+          {canCorrectPayment && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                Corregir método de pago
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Si no cuadra con caja (tarjeta, efectivo…). Actualiza el pedido y el movimiento en caja.
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  { method: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                  { method: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                  { method: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                ]).map(({ method, label, icon: Icon }) => {
+                  const active = currentPayment === method;
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      disabled={correctingPayment || active}
+                      onClick={() => onCorrectPayment?.(order, method)}
+                      className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
+                        active
+                          ? 'border-gray-900 dark:border-gray-200 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      {correctingPayment ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Icon className="w-5 h-5" />
+                      )}
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -728,6 +867,7 @@ export function WorkerTpvDelivery({
   const [fulfillmentFilter, setFulfillmentFilter] = useState<FulfillmentFilter>('all');
   const [search, setSearch] = useState('');
   const [advancingId, setAdvancingId] = useState<string | null>(null);
+  const [correctingPaymentId, setCorrectingPaymentId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
@@ -883,8 +1023,12 @@ export function WorkerTpvDelivery({
 
     let resolvedPayment = paymentMethod;
     if (next === 'entregado' && !resolvedPayment) {
-      setDeliveryCompleteOrder(order);
-      return;
+      if (orderAlreadyCobrado(order)) {
+        resolvedPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
+      } else {
+        setDeliveryCompleteOrder(order);
+        return;
+      }
     }
 
     setAdvancingId(order._id);
@@ -899,13 +1043,15 @@ export function WorkerTpvDelivery({
       }
       if (next === 'entregado' && resolvedPayment) {
         extras.deliveredAt = now;
-        extras.paymentMethod = resolvedPayment;
-        extras.paymentCollected = true;
-        extras.paymentCollectedAt = now;
-        extras.paymentCollectedBy = user?.user_id || user?.id || user?.fullName || 'Tablet';
-        extras.paymentStatus = 'paid';
-        extras.paidAmount = Number(order.totalAmount || 0);
-        extras.paidAt = order.paidAt || now;
+        if (!orderAlreadyCobrado(order)) {
+          extras.paymentMethod = resolvedPayment;
+          extras.paymentCollected = true;
+          extras.paymentCollectedAt = now;
+          extras.paymentCollectedBy = user?.user_id || user?.id || user?.fullName || 'Tablet';
+          extras.paymentStatus = 'paid';
+          extras.paidAmount = resolveDeliveryOrderChargeTotal(order);
+          extras.paidAt = order.paidAt || now;
+        }
       }
       const payload: DeliveryOrder = {
         ...order,
@@ -1018,6 +1164,24 @@ export function WorkerTpvDelivery({
       setAdvancingId(null);
     }
   }, [userId, deleteOrder, selectedOrder, deliveryCompleteOrder]);
+
+  const handleCorrectPayment = useCallback(
+    async (order: DeliveryOrder, method: DeliveryPaymentMethod) => {
+      if (!userId) return;
+      setCorrectingPaymentId(order._id);
+      try {
+        const updated = await correctDeliveryOrderPaymentRequest(userId, order._id, method);
+        setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
+        setSelectedOrder((prev) => (prev?._id === updated._id ? updated : prev));
+        toast.success(`Pago actualizado: ${PAYMENT_LABELS[method]}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo corregir el pago');
+      } finally {
+        setCorrectingPaymentId(null);
+      }
+    },
+    [userId],
+  );
 
   const backToBoard = useCallback(() => {
     setView('board');
@@ -1300,7 +1464,7 @@ export function WorkerTpvDelivery({
                       <p className="text-[11px] text-gray-500 truncate">{order.customerName || 'Cliente'}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-bold tabular-nums">{formatCurrency(order.totalAmount)}</p>
+                      <p className="text-xs font-bold tabular-nums">{formatCurrency(resolveDeliveryOrderChargeTotal(order))}</p>
                       <p className={`text-[10px] font-semibold ${statusCfg.color}`}>{statusCfg.label}</p>
                     </div>
                   </button>
@@ -1384,7 +1548,9 @@ export function WorkerTpvDelivery({
           onClose={() => setSelectedOrder(null)}
           onAdvance={advanceOrder}
           onDelete={requestDeleteOrder}
+          onCorrectPayment={handleCorrectPayment}
           advancing={advancingId === selectedOrder._id}
+          correctingPayment={correctingPaymentId === selectedOrder._id}
         />
       )}
 

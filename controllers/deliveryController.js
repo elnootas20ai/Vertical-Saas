@@ -1002,6 +1002,98 @@ export async function registerPayment(req, res) {
   }
 }
 
+const ALLOWED_PAYMENT_METHODS = new Set(['efectivo', 'tarjeta', 'bizum', 'otros', 'online']);
+
+function orderIsPaidForCorrection(order) {
+  const total = Number(order?.totalAmount || 0);
+  const paid = Number(order?.paidAmount || 0);
+  if (order?.paymentStatus === 'paid' || order?.paymentCollected) return true;
+  return paid > 0 && total > 0 && paid >= total;
+}
+
+/** Corrige método de pago en pedido ya cobrado (p. ej. tarjeta → efectivo) y sincroniza caja TPV. */
+export async function correctDeliveryOrderPayment(req, res) {
+  try {
+    const { userId, orderId } = req.params;
+    const { paymentMethod } = req.body || {};
+    if (!assertUserScope(req, res, userId)) return;
+    const pm = String(paymentMethod || '').trim().toLowerCase();
+    if (!pm || !ALLOWED_PAYMENT_METHODS.has(pm)) {
+      return badRequest(res, 'Método de pago no válido');
+    }
+    const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
+    if (!orderIsPaidForCorrection(existing)) {
+      return badRequest(res, 'Solo se puede corregir el pago en pedidos ya cobrados');
+    }
+    const prev = String(existing.paymentMethod || '').trim().toLowerCase();
+    if (prev === pm) {
+      return res.json({ ok: true, order: sanitizeDeliveryOrder(existing), unchanged: true });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    const db = getDeliveryDbName();
+    const now = new Date().toISOString();
+    const actor = account.fullName || 'Sistema';
+    const doc = buildDeliveryOrderDocument(userId, {
+      ...existing,
+      paymentMethod: pm,
+      stageHistory: [
+        ...(existing.stageHistory || []),
+        {
+          status: existing.status,
+          date: now,
+          user: actor,
+          notes: `Método de pago corregido: ${prev || '—'} → ${pm}`,
+        },
+      ],
+    }, existing);
+
+    let sessionsUpdated = 0;
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    for (const sess of allSessions) {
+      let changed = false;
+      const txs = (sess.transactions || []).map((t) => {
+        const linkedId = String(t?.linkedDeliveryOrderId || t?.orderId || '').trim();
+        if (linkedId !== orderId || t?.type !== 'sale') return t;
+        if (String(t.paymentMethod || '').toLowerCase() === pm) return t;
+        changed = true;
+        return {
+          ...t,
+          paymentMethod: pm,
+          editedAt: now,
+          editedBy: actor,
+          originalPaymentMethod: t.originalPaymentMethod || t.paymentMethod,
+        };
+      });
+      if (!changed) continue;
+      const sessionDoc = buildTpvRegisterSessionDocument(userId, { ...sess, transactions: txs }, sess);
+      const savedSess = await putDocument(req, db, sessionDoc._id, sessionDoc);
+      broadcastTpvSessionLive(account, userId, { ...sessionDoc, _rev: savedSess.rev });
+      sessionsUpdated += 1;
+    }
+
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: actor,
+      targetUserId: userId,
+      type: 'delivery_order',
+      action: `Corrigió pago ${doc.orderNumber}: ${prev || '—'} → ${pm}`,
+      entityId: doc._id,
+      entityLabel: doc.orderNumber,
+      metadata: { paymentMethod: pm, previousPaymentMethod: prev, sessionsUpdated },
+    });
+
+    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+    broadcastDeliveryOrderSse(account, userId, 'updated', { ...doc, _rev: saved.rev });
+    return res.json({ ok: true, order: sanitized, sessionsUpdated });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al corregir método de pago' });
+  }
+}
+
 // ─── FILTER ORDERS ───────────────────────────────────────────────────────────
 
 export async function filterDeliveryOrders(req, res) {

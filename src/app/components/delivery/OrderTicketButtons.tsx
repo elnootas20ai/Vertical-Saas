@@ -1,4 +1,4 @@
-import { ChefHat, Printer, Truck } from 'lucide-react';
+import { ChefHat, Receipt, Truck } from 'lucide-react';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { buildOrderTicketOptions } from '../../lib/deliveryTicketHelpers';
 import type {
@@ -59,9 +59,13 @@ export function OrderTicketButtons({
           Reparto
         </button>
       )}
-      <button type="button" onClick={() => print('customer')} className={BTN}>
-        <Printer className="w-4 h-4 shrink-0" />
-        Cliente
+      <button
+        type="button"
+        onClick={() => print('customer')}
+        className={`${BTN} ${layout === 'grid' ? 'col-span-2 border-gray-900 dark:border-gray-300 font-semibold' : ''}`}
+      >
+        <Receipt className="w-4 h-4 shrink-0" />
+        Ticket
       </button>
     </div>
   );

@@ -25,6 +25,7 @@ import {
   type WorkCenter,
 } from './workCentersApi';
 import { clearRetailScopeCache } from './retailScopeCache';
+import { clearTpvCatalogCache } from './tpvCatalogCache';
 import {
   notifyDeliveryActiveStoreChanged,
   writeDeliveryOpsSelectedPdvId,
@@ -623,6 +624,7 @@ export async function bootstrapRetailStoreAfterCreate(
 
 export const DELIVERY_WORK_CENTERS_CHANGED = 'work-centers:changed';
 export const DELIVERY_CATALOG_CHANGED = 'catalog:changed';
+export const DELIVERY_CONFIG_CHANGED = 'delivery-config:changed';
 export const DELIVERY_BRANDS_CHANGED = 'brands:changed';
 
 /** Invalida caché de tiendas en sesión (sidebar / scope) tras alta o edición. */
@@ -641,10 +643,20 @@ export function notifyDeliveryWorkCentersChanged(businessId?: string): void {
   }
 }
 
-export function notifyDeliveryCatalogChanged(): void {
+export function notifyDeliveryCatalogChanged(userId?: string, businessId?: string): void {
   if (typeof window === 'undefined') return;
   try {
+    clearTpvCatalogCache(userId, businessId);
     window.dispatchEvent(new CustomEvent(DELIVERY_CATALOG_CHANGED));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function notifyDeliveryConfigChanged(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(DELIVERY_CONFIG_CHANGED));
   } catch {
     /* ignore */
   }

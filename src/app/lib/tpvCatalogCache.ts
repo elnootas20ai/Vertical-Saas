@@ -22,13 +22,21 @@ function cacheKey(userId: string, businessId: string): string {
 
 /** Sin imágenes ni campos pesados para sessionStorage (límite ~5 MB). */
 function liteCatalogItem(item: CatalogItem): CatalogItem {
+  const cf = item.customFields && typeof item.customFields === 'object' ? item.customFields : {};
+  const customFields: Record<string, unknown> = {};
+  if (typeof cf.ingredients === 'string' && cf.ingredients.trim()) {
+    customFields.ingredients = cf.ingredients.trim();
+  }
+  if (Array.isArray(cf.supplements) && cf.supplements.length > 0) {
+    customFields.supplements = cf.supplements;
+  }
   return {
     ...item,
     image: '',
     images: [],
     description: '',
     notes: '',
-    customFields: {},
+    customFields,
     articles: [],
     comboItems: [],
   };
@@ -80,12 +88,29 @@ export function readTpvCatalogCache(userId: string, businessId: string): TpvCata
 }
 
 export function clearTpvCatalogCache(userId?: string, businessId?: string): void {
-  if (userId) {
-    const key = cacheKey(userId, businessId || '');
+  if (userId && businessId) {
+    const key = cacheKey(userId, businessId);
     memory.delete(key);
     if (typeof sessionStorage !== 'undefined') {
       try {
         sessionStorage.removeItem(`${SESSION_PREFIX}${key}`);
+      } catch {
+        /* ignore */
+      }
+    }
+    return;
+  }
+  if (userId) {
+    const prefix = `${String(userId).trim()}:`;
+    for (const key of [...memory.keys()]) {
+      if (key.startsWith(prefix)) memory.delete(key);
+    }
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+          const k = sessionStorage.key(i);
+          if (k?.startsWith(`${SESSION_PREFIX}${prefix}`)) sessionStorage.removeItem(k);
+        }
       } catch {
         /* ignore */
       }

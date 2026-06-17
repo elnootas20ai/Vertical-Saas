@@ -10,6 +10,7 @@ import {
   reopenDeliveryOrder,
   refundDeliveryOrder,
   registerPayment,
+  correctDeliveryOrderPayment,
   filterDeliveryOrders,
   clientOrderHistory,
   listCatalogItems,
@@ -131,6 +132,7 @@ deliveryRouter.put('/orders/:userId/:orderId/cancel', cancelDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/reopen', reopenDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/refund', refundDeliveryOrder);
 deliveryRouter.put('/orders/:userId/:orderId/payment', registerPayment);
+deliveryRouter.put('/orders/:userId/:orderId/payment-method', correctDeliveryOrderPayment);
 deliveryRouter.delete('/orders/:userId/:orderId', removeDeliveryOrder);
 
 deliveryRouter.get('/catalog/:userId', listCatalogItems);
