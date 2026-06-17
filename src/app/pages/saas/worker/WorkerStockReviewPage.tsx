@@ -1,10 +1,16 @@
+import { Navigate } from 'react-router-dom';
 import { MapPin } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { StockRevisionPanel } from '../../../components/saas/StockRevisionPanel';
 import { useStockWorkspace } from '../../../hooks/useStockWorkspace';
+import { useTpvStockScope } from '../../../hooks/useTpvStockScope';
 import { useVerticalCatalog } from '../../../hooks/useVerticalCatalog';
+import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
+import { tpvPathWithStockReview } from '../../../lib/tpvStockReview';
 
 export function WorkerStockReviewPage() {
+  const tabletBound = isTpvTabletBound();
+  const tpvScope = useTpvStockScope();
   const { config } = useVerticalCatalog();
   const {
     dataUserId,
@@ -14,7 +20,14 @@ export function WorkerStockReviewPage() {
     stockedCount,
     loading,
     reload,
-  } = useStockWorkspace();
+  } = useStockWorkspace({
+    dataUserId: tpvScope.dataUserId,
+    storeLabel: tpvScope.storeLabel,
+  });
+
+  if (tabletBound) {
+    return <Navigate to={tpvPathWithStockReview(resolveTpvTabletWorkerPath())} replace />;
+  }
 
   const itemLabel = config.itemLabelPlural || 'Productos';
 

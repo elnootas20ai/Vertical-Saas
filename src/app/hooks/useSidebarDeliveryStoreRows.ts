@@ -1,0 +1,137 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useBusiness } from '../context/BusinessContext';
+import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
+import {
+  buildDeliverySidebarStoreRows,
+  listPointsOfSaleRequest,
+  type DeliverySidebarStoreRow,
+} from '../lib/deliveryApi';
+import { filterPointsOfSaleForWorkCenters, resolveBusinessScopeId } from '../lib/deliverySetup';
+import { listWorkCentersForDelivery } from '../lib/workCentersApi';
+import { readSidebarRetailCache, writeSidebarRetailCache } from '../lib/sidebarRetailCache';
+import { resolveBusinessDataUserId } from '../lib/tenantUserId';
+
+function pickRetailWorkCenters(workCenters: Awaited<ReturnType<typeof listWorkCentersForDelivery>>) {
+  return workCenters.filter(
+    (wc) =>
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+}
+
+/**
+ * Filas de tiendas para el sidebar: usa ActiveStoreScope y, si hace falta,
+ * caché local + fetch directo de PDV (nunca dejar el menú vacío por una carga fallida).
+ */
+export function useSidebarDeliveryStoreRows(enabled: boolean) {
+  const { user } = useAuth();
+  const { currentBusiness, businessesFetchSettled } = useBusiness();
+  const activeStore = useActiveStoreScope();
+  const [fallbackRows, setFallbackRows] = useState<DeliverySidebarStoreRow[]>([]);
+  const [fallbackLoading, setFallbackLoading] = useState(false);
+  const inflightRef = useRef(false);
+
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+
+  const rowsFromScope = useMemo(
+    () =>
+      enabled
+        ? buildDeliverySidebarStoreRows(activeStore.retailWorkCenters, activeStore.allPointsOfSale)
+        : [],
+    [enabled, activeStore.retailWorkCenters, activeStore.allPointsOfSale],
+  );
+
+  useEffect(() => {
+    if (!enabled || !businessId) {
+      setFallbackRows([]);
+      return;
+    }
+
+    if (rowsFromScope.length > 0) {
+      setFallbackRows([]);
+      writeSidebarRetailCache(businessId, {
+        rows: rowsFromScope,
+        retailWorkCenters: activeStore.retailWorkCenters,
+        allPointsOfSale: activeStore.allPointsOfSale,
+        savedAt: Date.now(),
+      });
+      return;
+    }
+
+    const cached = readSidebarRetailCache(businessId);
+    if (cached?.rows.length) {
+      setFallbackRows(cached.rows);
+    }
+  }, [
+    enabled,
+    businessId,
+    rowsFromScope,
+    activeStore.retailWorkCenters,
+    activeStore.allPointsOfSale,
+  ]);
+
+  useEffect(() => {
+    if (!enabled || !dataUserId || !businessId) return;
+    if (rowsFromScope.length > 0) return;
+    if (!businessesFetchSettled && activeStore.loading) return;
+    if (inflightRef.current) return;
+
+    let cancelled = false;
+    inflightRef.current = true;
+    setFallbackLoading(true);
+
+    void (async () => {
+      try {
+        const [rawPdvs, allWcs] = await Promise.all([
+          listPointsOfSaleRequest(dataUserId).catch(() => []),
+          listWorkCentersForDelivery(dataUserId, currentBusiness ?? null).catch(() => []),
+        ]);
+        if (cancelled) return;
+        const retail = pickRetailWorkCenters(allWcs);
+        const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
+        const rows = buildDeliverySidebarStoreRows(retail, scopedPdvs);
+        if (rows.length > 0) {
+          setFallbackRows(rows);
+          writeSidebarRetailCache(businessId, {
+            rows,
+            retailWorkCenters: retail,
+            allPointsOfSale: scopedPdvs,
+            savedAt: Date.now(),
+          });
+          if (activeStore.allPointsOfSale.length === 0) {
+            void activeStore.refresh();
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setFallbackLoading(false);
+          inflightRef.current = false;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    dataUserId,
+    businessId,
+    businessesFetchSettled,
+    rowsFromScope.length,
+    activeStore.loading,
+    activeStore.allPointsOfSale.length,
+    activeStore.refresh,
+    currentBusiness,
+  ]);
+
+  const rows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+  const loading =
+    enabled &&
+    rows.length === 0 &&
+    (activeStore.loading || fallbackLoading || !businessesFetchSettled);
+
+  return { rows, loading };
+}

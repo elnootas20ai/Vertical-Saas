@@ -105,16 +105,87 @@ export function getAbuseStats() {
   return Array.from(_abuseMap.entries()).map(([key, entry]) => ({ key, ...entry }));
 }
 
-// ─── Auth limiters (por IP) ───────────────────────────────────────────────────
+// ─── Auth limiters (por IP / email) ───────────────────────────────────────────
 
-export const authLimiter = rateLimit({
+function loginKeyGenerator(req) {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const ip = getClientIp(req);
+  return email ? `login:${ip}:${email}` : `login-ip:${ip}`;
+}
+
+/** Intentos de contraseña: por email+IP; los logins correctos no consumen cupo. */
+export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: Math.max(10, parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '25', 10)),
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: loginKeyGenerator,
+  message: {
+    ok: false,
+    success: false,
+    code: 'RATE_LIMIT_EXCEEDED',
+    error: 'Demasiados intentos con contraseña. Usa «Entrar con código por email» o espera unos minutos.',
+  },
+});
+
+/** Refresh / logout: no compartir cupo con login (el dashboard renueva token a menudo). */
+export const authSessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientIp,
-  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiados intentos. Inténtalo de nuevo en 15 minutos.' } },
+  skip: skipRateLimitInDev,
 });
+
+/** TPV tablet / team login: cupo separado del login de empresa. */
+export const teamLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => {
+    const ip = getClientIp(req);
+    const code = String(req.body?.companyCode || '').trim().toUpperCase();
+    const user = String(req.body?.username || '').trim().toLowerCase();
+    return code && user ? `team:${ip}:${code}:${user}` : `team-ip:${ip}`;
+  },
+  message: {
+    ok: false,
+    success: false,
+    code: 'RATE_LIMIT_EXCEEDED',
+    error: 'Demasiados intentos. Espera unos minutos o pide a tu gerente un código por email.',
+  },
+});
+
+export const tpvTabletAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: getClientIp,
+});
+
+/** Código de acceso por email (alternativa cuando falla contraseña o hay bloqueo). */
+export const loginCodeLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: loginKeyGenerator,
+  message: {
+    ok: false,
+    success: false,
+    code: 'RATE_LIMIT_EXCEEDED',
+    error: 'Demasiadas solicitudes de código. Inténtalo en unos minutos.',
+  },
+});
+
+/** @deprecated Usar loginLimiter; mantiene compatibilidad si algún router lo importa. */
+export const authLimiter = loginLimiter;
 
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,

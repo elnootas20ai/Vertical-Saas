@@ -703,6 +703,24 @@ export async function recoverPasswordRequest(email: string) {
   });
 }
 
+export async function requestLoginCodeRequest(email: string) {
+  return request<AuthUser>('/api/auth/login-code/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function verifyLoginCodeRequest(email: string, code: string) {
+  const result = await request<AuthUser>('/api/auth/login-code/verify', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  });
+  if (result.accessToken) {
+    cacheAccessToken(result.accessToken);
+  }
+  return result;
+}
+
 export async function resetPasswordRequest(token: string, email: string, newPassword: string) {
   return request<AuthUser>('/api/auth/reset-password', {
     method: 'POST',

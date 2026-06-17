@@ -83,6 +83,8 @@ export interface DeliveryOrderPdvFilterOptions {
   primaryPdvId?: string | null;
   /** Nombre del PDV activo (empareja pedidos web/app con salesPointName). */
   pdvName?: string | null;
+  /** Centro de trabajo enlazado al PDV activo (algunos pedidos guardan el wc id). */
+  pdvWorkCenterId?: string | null;
 }
 
 /**
@@ -105,7 +107,10 @@ export function deliveryOrderMatchesPdvFilter(
     if (orderStore && pdvLabel && orderStore === pdvLabel) return true;
     return false;
   }
-  return orderPdv === filterId;
+  if (orderPdv === filterId) return true;
+  const wcId = String(options?.pdvWorkCenterId || '').trim();
+  if (wcId && orderPdv === wcId) return true;
+  return false;
 }
 
 /**

@@ -7,14 +7,20 @@ export interface DeliveryTicketBusinessInfo {
   phone?: string;
 }
 
+export type DeliveryTicketVariant = 'customer' | 'kitchen' | 'delivery';
+
 export interface DeliveryOrderLike {
   _id: string;
   orderNumber?: string;
   ticketNumber?: string;
   customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  deliveryType?: string;
   salesPointName?: string;
   takenByName?: string;
   paymentMethod?: string;
+  paymentStatus?: string;
   totalAmount?: number;
   paidAmount?: number;
   refundAmount?: number;
@@ -23,7 +29,8 @@ export interface DeliveryOrderLike {
   createdAt?: string;
   updatedAt?: string;
   refundedAt?: string;
-  items?: Array<{ quantity?: number; name?: string; total?: number }>;
+  notes?: string;
+  items?: Array<{ quantity?: number; name?: string; total?: number; notes?: string }>;
 }
 
 export interface DeliveryTicketPrintOptions {
@@ -33,4 +40,5 @@ export interface DeliveryTicketPrintOptions {
   cashierName?: string;
   vatRate?: number;
   isRefund?: boolean;
+  variant?: DeliveryTicketVariant;
 }

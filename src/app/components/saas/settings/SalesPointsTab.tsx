@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
@@ -16,6 +16,7 @@ import {
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
 import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
+import { readRetailScopeCache } from '../../../lib/retailScopeCache';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -1504,17 +1505,16 @@ export function SalesPointsTab() {
   const [regeneratingTerminal, setRegeneratingTerminal] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
   const loadSeqRef = useRef(0);
+  const loadInflightRef = useRef<Promise<void> | null>(null);
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const accountBusinessCountRef = useRef(accountBusinessCount);
+  accountBusinessCountRef.current = accountBusinessCount;
+  const isDeliveryAccountRef = useRef(isDeliveryAccount);
+  isDeliveryAccountRef.current = isDeliveryAccount;
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
-
-  useEffect(() => {
-    if (!businessesFetchSettled) return;
-    if (isDelivery && !businessScopeId) {
-      setWorkCenters([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-  }, [businessScopeId, isDelivery, businessesFetchSettled]);
 
   const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadDeliveryStores>>) => {
     setWorkCenters(state.workCenters);
@@ -1539,43 +1539,81 @@ export function SalesPointsTab() {
     setDeliveryPdvsByWorkCenter(byWc);
   }, []);
 
+  useLayoutEffect(() => {
+    if (!businessScopeId) return;
+    const cached = readRetailScopeCache(businessScopeId);
+    if (!cached) return;
+    applyDeliveryStoresState({
+      dataUserId: dataUserId || '',
+      workCenters: cached.retailWorkCenters,
+      pointsOfSale: cached.allPointsOfSale,
+    });
+    setLoading(false);
+  }, [businessScopeId, dataUserId, applyDeliveryStoresState]);
+
   const loadData = useCallback(async (options?: { skipPdvMerge?: boolean }) => {
-    if (!businessesFetchSettled) return;
-    if (!dataUserId || !user) {
-      setLoading(false);
-      return;
+    if (loadInflightRef.current) {
+      return loadInflightRef.current;
     }
-    const bid = resolveBusinessScopeId(currentBusiness);
-    if (isDelivery && !bid) {
+
+    const run = async () => {
+      if (!businessesFetchSettled) return;
+
+      const userNow = userRef.current;
+      const bizNow = currentBusinessRef.current;
+      const uid = resolveBusinessDataUserId(userNow, bizNow);
+      const bid = businessScopeId || resolveBusinessScopeId(bizNow);
+
+      if (!uid || !userNow) {
+        setLoading(false);
+        return;
+      }
+      if (isDeliveryAccountRef.current && !bid) {
+        setWorkCenters([]);
+        setLoading(false);
+        return;
+      }
+
+      const seq = ++loadSeqRef.current;
+      const hadCache = Boolean(bid && readRetailScopeCache(bid));
+      if (!hadCache) setLoading(true);
+
+      const skipPdvMerge = options?.skipPdvMerge ?? true;
+      try {
+        const state = await loadDeliveryStores(userNow, bizNow, {
+          skipPdvMerge,
+          accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
+        });
+        if (seq !== loadSeqRef.current) return;
+        if ((businessScopeId || resolveBusinessScopeId(currentBusinessRef.current)) !== bid) return;
+        applyDeliveryStoresState(state);
+      } catch {
+        if (seq === loadSeqRef.current) {
+          toast.error('Error al cargar los centros de trabajo');
+        }
+      } finally {
+        if (seq === loadSeqRef.current) setLoading(false);
+      }
+    };
+
+    const promise = run().finally(() => {
+      if (loadInflightRef.current === promise) {
+        loadInflightRef.current = null;
+      }
+    });
+    loadInflightRef.current = promise;
+    return promise;
+  }, [businessScopeId, businessesFetchSettled, businesses.length, applyDeliveryStoresState]);
+
+  useEffect(() => {
+    if (!businessesFetchSettled) return;
+    if (isDeliveryAccount && !businessScopeId) {
       setWorkCenters([]);
       setLoading(false);
       return;
     }
-    const seq = ++loadSeqRef.current;
-    const skipPdvMerge = options?.skipPdvMerge ?? true;
-    try {
-      const state = await loadDeliveryStores(user, currentBusiness, {
-        skipPdvMerge,
-        accountBusinessCount: businessesFetchSettled
-          ? (accountBusinessCount ?? businesses.length)
-          : undefined,
-      });
-      if (seq !== loadSeqRef.current) return;
-      if (resolveBusinessScopeId(currentBusiness) !== bid) return;
-      applyDeliveryStoresState(state);
-    } catch {
-      if (seq === loadSeqRef.current) {
-        toast.error('Error al cargar los centros de trabajo');
-      }
-    } finally {
-      if (seq === loadSeqRef.current) setLoading(false);
-    }
-  }, [dataUserId, user, currentBusiness, accountBusinessCount, businesses.length, businessesFetchSettled, isDelivery, applyDeliveryStoresState]);
-
-  useEffect(() => {
-    if (!businessesFetchSettled) return;
     void loadData();
-  }, [businessesFetchSettled, loadData]);
+  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, loadData]);
 
   useEffect(() => {
     const onChanged = () => {

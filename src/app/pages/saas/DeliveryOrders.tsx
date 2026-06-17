@@ -35,6 +35,7 @@ import { CancelOrderModal } from '../../components/delivery/CancelOrderModal';
 import { RefundOrderModal } from '../../components/delivery/RefundOrderModal';
 import { ReopenOrderModal } from '../../components/delivery/ReopenOrderModal';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
 import { CreateOrderWizard } from '../../components/delivery/CreateOrderWizard';
 import { DeliveryAlertsBar, type DeliveryAlert } from '../../components/delivery/DeliveryAlertsBar';
 import {
@@ -361,14 +362,7 @@ export function DeliveryOrders() {
     }
     printDeliveryTicket({
       order,
-      business: {
-        name: currentBusiness.name,
-        legalName: currentBusiness.legalName,
-        taxId: currentBusiness.taxId,
-        address: currentBusiness.address,
-        city: currentBusiness.city,
-        phone: currentBusiness.phone,
-      },
+      business: businessTicketInfoFrom(currentBusiness),
       salesPointName: order.salesPointName,
       isRefund,
     });
@@ -742,6 +736,7 @@ export function DeliveryOrders() {
           onRegisterPayment={(o) => { setPaymentOrder(o); }}
           onRefund={(o) => { setRefundOrder(o); }}
           onPrintTicket={handlePrintTicket}
+          ticketBusiness={currentBusiness ? businessTicketInfoFrom(currentBusiness) : undefined}
           canCancel={canCancel}
           canReopen={canReopen}
           canRefund={canOperate}

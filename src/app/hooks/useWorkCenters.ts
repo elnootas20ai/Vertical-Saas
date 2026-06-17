@@ -7,6 +7,7 @@ import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 let cachedCenters: WorkCenter[] | null = null;
 let cacheKey: string | null = null;
 let pendingPromise: Promise<WorkCenter[]> | null = null;
+let pendingPromiseKey: string | null = null;
 
 function buildCacheKey(dataUserId: string, businessId: string | undefined): string {
   return `${dataUserId}::${businessId || ''}`;
@@ -33,7 +34,11 @@ export function useWorkCenters() {
   }, []);
 
   useEffect(() => {
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      setWorkCenters([]);
+      setLoading(false);
+      return;
+    }
     if (cacheKey === cacheId && cachedCenters) {
       setWorkCenters(cachedCenters);
       setLoading(false);
@@ -43,7 +48,8 @@ export function useWorkCenters() {
     async function load() {
       setLoading(true);
       try {
-        if (!pendingPromise) {
+        if (pendingPromiseKey !== cacheId || !pendingPromise) {
+          pendingPromiseKey = cacheId;
           pendingPromise = listWorkCentersForDelivery(dataUserId, currentBusiness);
         }
         const result = await pendingPromise;
@@ -54,6 +60,7 @@ export function useWorkCenters() {
         if (mounted.current) setWorkCenters([]);
       } finally {
         pendingPromise = null;
+        pendingPromiseKey = null;
         if (mounted.current) setLoading(false);
       }
     }

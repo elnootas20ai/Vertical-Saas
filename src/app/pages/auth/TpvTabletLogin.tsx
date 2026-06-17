@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { ArrowLeft, Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
+import { seedRetailScopeCacheFromTabletLogin } from '../../lib/retailScopeCache';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   readTpvTabletBinding,
@@ -18,11 +19,16 @@ import {
 
 export function TpvTabletLogin() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { tpvTabletLogin } = useAuth();
   const { switchBusiness, reloadBusinesses } = useBusiness();
   const binding = readTpvTabletBinding();
 
-  const [terminalCode, setTerminalCode] = useState(binding?.terminalCode || '');
+  const [terminalCode, setTerminalCode] = useState(() => {
+    const fromState = (location.state as { terminalCode?: string } | null)?.terminalCode;
+    if (fromState) return String(fromState).trim().toUpperCase();
+    return binding?.terminalCode || '';
+  });
   const [errors, setErrors] = useState<{ terminalCode?: string; general?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [storeLabel, setStoreLabel] = useState(binding?.pdvName || binding?.businessName || '');
@@ -79,14 +85,20 @@ export function TpvTabletLogin() {
       setStoreLabel(pdv?.name || business?.name || '');
     }
 
+    if (business?.business_id && pdv) {
+      seedRetailScopeCacheFromTabletLogin({
+        businessId: business.business_id,
+        pointOfSale: pdv,
+        workCenterId: terminalBinding?.workCenterId,
+      });
+    }
+
     if (user?.user_id && business?.business_id) {
       try {
         localStorage.setItem(`vertial_current_business:${user.user_id}`, business.business_id);
       } catch {
         // ignore
       }
-      switchBusiness(business.business_id);
-      void reloadBusinesses();
     }
 
     if (business?.business_id && terminalBinding?.dataUserId && terminalBinding.pdvId) {
@@ -98,6 +110,10 @@ export function TpvTabletLogin() {
     }
 
     navigate(TPV_TABLET_DELIVERY_PATH, { replace: true });
+
+    void reloadBusinesses().then(() => {
+      if (business?.business_id) switchBusiness(business.business_id);
+    });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

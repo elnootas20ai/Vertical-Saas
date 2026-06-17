@@ -66,6 +66,11 @@ export const recoverSchema = z.object({
   email: z.string().email('Email inválido').max(254).trim().toLowerCase(),
 });
 
+export const loginCodeVerifySchema = z.object({
+  email: z.string().email('Email inválido').max(254).trim().toLowerCase(),
+  code: z.string().regex(/^\d{6}$/, 'El código debe tener 6 dígitos'),
+});
+
 export const resetPasswordSchema = z.object({
   token: z.string().min(1, 'Token obligatorio').max(128),
   email: z.string().email('Email inválido').max(254).trim().toLowerCase(),

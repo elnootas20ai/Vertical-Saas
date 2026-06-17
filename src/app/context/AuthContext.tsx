@@ -35,6 +35,8 @@ import {
   logoutRequest,
   posSwitchUserRequest,
   recoverPasswordRequest,
+  requestLoginCodeRequest,
+  verifyLoginCodeRequest,
   rejectInvitationRequest,
   resendInvitationRequest,
   resendVerificationEmailRequest,
@@ -105,6 +107,8 @@ export interface AuthContextType {
     newPassword: string,
   ) => Promise<{ success: boolean; error?: string }>;
   recoverPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  requestLoginCode: (email: string) => Promise<{ success: boolean; error?: string; info?: string }>;
+  verifyLoginCode: (email: string, code: string) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
   resetPassword: (
     token: string,
     email: string,
@@ -443,6 +447,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Error al solicitar la recuperación',
+      };
+    }
+  };
+
+  const requestLoginCode = async (email: string): Promise<{ success: boolean; error?: string; info?: string }> => {
+    try {
+      const res = await requestLoginCodeRequest(email);
+      return {
+        success: true,
+        info: typeof res.message === 'string' ? res.message : 'Si el email existe, recibirás un código en breve',
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Error al enviar el código',
+      };
+    }
+  };
+
+  const verifyLoginCode = async (
+    email: string,
+    code: string,
+  ): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
+    try {
+      clearVertialClientCaches();
+      const response = await verifyLoginCodeRequest(email, code);
+      if (!response.user) {
+        return { success: false, error: 'No se recibió usuario desde el backend' };
+      }
+      setSessionUser(response.user);
+      return { success: true, redirectTo: response.redirectTo };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Código inválido o expirado',
       };
     }
   };
@@ -1038,6 +1077,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         updateProfile,
         updatePassword,
         recoverPassword,
+        requestLoginCode,
+        verifyLoginCode,
         resetPassword,
         acceptInvite,
         saveBillingCard,

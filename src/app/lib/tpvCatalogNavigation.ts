@@ -176,20 +176,24 @@ export function filterTpvCatalogProducts(
   productSearch: string,
   clientProductScores: Record<string, number>,
 ): CatalogItem[] {
-  if (!scope) return [];
+  const q = productSearch.trim().toLowerCase();
 
-  let items = itemsInScope(catalog, scope);
-
-  if (selectedCategory) {
-    items = items.filter((i) => i.category === selectedCategory);
-  }
-  if (productSearch.trim()) {
-    const q = productSearch.toLowerCase();
-    items = items.filter(
+  let items: CatalogItem[];
+  if (q) {
+    // Con texto de búsqueda: todo el catálogo vendible (no solo la marca activa).
+    items = catalog.filter(isSellable).filter(
       (i) =>
         i.name.toLowerCase().includes(q) ||
-        i.category?.toLowerCase().includes(q),
+        i.category?.toLowerCase().includes(q) ||
+        String(i.sku || '').toLowerCase().includes(q) ||
+        String(i.barcode || '').toLowerCase().includes(q),
     );
+  } else {
+    if (!scope) return [];
+    items = itemsInScope(catalog, scope);
+    if (selectedCategory) {
+      items = items.filter((i) => i.category === selectedCategory);
+    }
   }
 
   return items.sort((a, b) => {
@@ -198,4 +202,72 @@ export function filterTpvCatalogProducts(
     if (pricedA !== pricedB) return pricedB - pricedA;
     return (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0);
   });
+}
+
+export const TPV_PRODUCT_SEARCH_LIMIT = 48;
+
+export type TpvProductSearchRow = {
+  item: CatalogItem;
+  haystack: string;
+  nameFold: string;
+};
+
+export function buildTpvProductSearchIndex(catalog: CatalogItem[]): TpvProductSearchRow[] {
+  return catalog
+    .filter(isSellable)
+    .map((item) => ({
+      item,
+      haystack: foldKey(
+        [item.name, item.category, item.sku, item.barcode].map((s) => String(s || '')).join(' '),
+      ),
+      nameFold: foldKey(item.name),
+    }));
+}
+
+function sortTpvCatalogItems(
+  items: CatalogItem[],
+  clientProductScores: Record<string, number>,
+): CatalogItem[] {
+  return [...items].sort((a, b) => {
+    const pricedA = Number(a.unitPrice || 0) > 0 ? 1 : 0;
+    const pricedB = Number(b.unitPrice || 0) > 0 ? 1 : 0;
+    if (pricedA !== pricedB) return pricedB - pricedA;
+    return (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0);
+  });
+}
+
+/** Búsqueda indexada en cliente (instantánea) + navegación por marca/categoría. */
+export function searchTpvProducts(
+  index: TpvProductSearchRow[],
+  catalog: CatalogItem[],
+  productSearch: string,
+  scope: TpvCatalogScope | null,
+  selectedCategory: string | null,
+  clientProductScores: Record<string, number>,
+): CatalogItem[] {
+  const q = foldKey(productSearch);
+
+  if (q.length > 0) {
+    const matched = index
+      .filter((row) => row.haystack.includes(q))
+      .sort((a, b) => {
+        const aStarts = a.nameFold.startsWith(q) ? 1 : 0;
+        const bStarts = b.nameFold.startsWith(q) ? 1 : 0;
+        if (aStarts !== bStarts) return bStarts - aStarts;
+        const aWord = a.nameFold.split(/\s+/).some((w) => w.startsWith(q)) ? 1 : 0;
+        const bWord = b.nameFold.split(/\s+/).some((w) => w.startsWith(q)) ? 1 : 0;
+        if (aWord !== bWord) return bWord - aWord;
+        return a.nameFold.localeCompare(b.nameFold, 'es');
+      })
+      .slice(0, TPV_PRODUCT_SEARCH_LIMIT)
+      .map((row) => row.item);
+    return sortTpvCatalogItems(matched, clientProductScores);
+  }
+
+  if (!scope) return [];
+  let items = itemsInScope(catalog, scope);
+  if (selectedCategory) {
+    items = items.filter((i) => i.category === selectedCategory);
+  }
+  return sortTpvCatalogItems(items, clientProductScores);
 }

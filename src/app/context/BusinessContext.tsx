@@ -8,7 +8,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import { BusinessContext, type BusinessContextType } from './businessContextRef';
-import { useAuth } from './AuthContext';
+import { useAuthOptional } from './AuthContext';
 import {
   type Business,
   type BusinessMember,
@@ -22,7 +22,7 @@ import {
   updateBusinessMemberRequest,
   updateBusinessRequest,
 } from '../lib/businessApi';
-import { notifyDeliveryWorkCentersChanged } from '../lib/deliverySetup';
+import { notifyDeliveryWorkCentersChanged, normalizeBusinessScopeId } from '../lib/deliverySetup';
 
 export type { BusinessContextType } from './businessContextRef';
 
@@ -104,7 +104,9 @@ function userLikelyHasBusinesses(userId: string): boolean {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function BusinessProvider({ children }: { children: ReactNode }) {
-  const { user, isInitializing } = useAuth();
+  const auth = useAuthOptional();
+  const user = auth?.user ?? null;
+  const isInitializing = auth?.isInitializing ?? true;
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
@@ -303,11 +305,14 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
   const switchBusiness = useCallback(
     (businessId: string) => {
-      const found = businesses.find((b) => b.business_id === businessId);
+      const norm = normalizeBusinessScopeId(businessId);
+      const found = businesses.find(
+        (b) => normalizeBusinessScopeId(b.business_id) === norm,
+      );
       if (!found) return;
       setCurrentBusiness(found);
       if (user?.user_id) {
-        storeBusinessId(user.user_id, businessId);
+        storeBusinessId(user.user_id, found.business_id);
       }
     },
     [businesses, user?.user_id],

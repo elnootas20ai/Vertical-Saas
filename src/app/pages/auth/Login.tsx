@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, type FormEvent, type PointerEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { Eye, Mail, Lock, ShieldAlert } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from 'next-themes';
@@ -10,6 +10,13 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
+import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
+import { seedRetailScopeCacheFromTabletLogin } from '../../lib/retailScopeCache';
+import {
+  writeTpvTabletBinding,
+  TPV_TABLET_DELIVERY_PATH,
+} from '../../lib/tpvTabletSession';
+import { useBusiness } from '../../context/BusinessContext';
 
 const CREDENTIALS_KEY = 'vertial_saved_login';
 
@@ -26,7 +33,9 @@ function loadSavedLogin(): { email: string } | null {
 
 export function Login() {
   const navigate = useNavigate();
-  const { login, googleLogin } = useAuth();
+  const location = useLocation();
+  const { login, googleLogin, requestLoginCode, verifyLoginCode, tpvTabletLogin } = useAuth();
+  const { switchBusiness, reloadBusinesses } = useBusiness();
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
 
@@ -38,9 +47,76 @@ export function Login() {
   });
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [lockInfo, setLockInfo] = useState<{ lockUntil?: string } | null>(null);
+  const [loginMode, setLoginMode] = useState<'password' | 'emailCode' | 'tpvStore'>('password');
+  const [codeValue, setCodeValue] = useState('');
+  const [tpvStoreCode, setTpvStoreCode] = useState('');
+  const [codeInfo, setCodeInfo] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
+
+  useEffect(() => {
+    const state = location.state as { mode?: string; terminalCode?: string } | null;
+    if (state?.mode === 'tpvStore' || state?.terminalCode) {
+      setLoginMode('tpvStore');
+      if (state?.terminalCode) {
+        setTpvStoreCode(String(state.terminalCode).trim().toUpperCase());
+      }
+    }
+  }, [location.state]);
+
+  const completeTpvTabletSession = useCallback(
+    async (result: Awaited<ReturnType<typeof tpvTabletLogin>>) => {
+      const user = result.user;
+      const business = result.business;
+      const terminalBinding = result.terminalBinding;
+      const pdv = result.pointOfSale;
+
+      if (terminalBinding) {
+        writeTpvTabletBinding({
+          terminalCode: terminalBinding.terminalCode,
+          pdvId: terminalBinding.pdvId,
+          workCenterId: terminalBinding.workCenterId,
+          businessId: terminalBinding.businessId,
+          dataUserId: terminalBinding.dataUserId,
+          tpvVertical: terminalBinding.tpvVertical || 'delivery',
+          pdvName: pdv?.name,
+          businessName: business?.name,
+        });
+      }
+
+      if (business?.business_id && pdv) {
+        seedRetailScopeCacheFromTabletLogin({
+          businessId: business.business_id,
+          pointOfSale: pdv,
+          workCenterId: terminalBinding?.workCenterId,
+        });
+      }
+
+      if (user?.user_id && business?.business_id) {
+        try {
+          localStorage.setItem(`vertial_current_business:${user.user_id}`, business.business_id);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (business?.business_id && terminalBinding?.dataUserId && terminalBinding.pdvId) {
+        writeDeliveryOpsSelectedPdvId(
+          business.business_id,
+          terminalBinding.dataUserId,
+          terminalBinding.pdvId,
+        );
+      }
+
+      navigate(result.redirectTo || TPV_TABLET_DELIVERY_PATH, { replace: true });
+
+      void reloadBusinesses().then(() => {
+        if (business?.business_id) switchBusiness(business.business_id);
+      });
+    },
+    [navigate, reloadBusinesses, switchBusiness],
+  );
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -83,11 +159,80 @@ export function Login() {
       navigate(result.redirectTo || '/auth/gate');
     } else if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });
-      setErrors({ email: result.error || 'Cuenta bloqueada temporalmente' });
+      setLoginMode('emailCode');
+      setErrors({
+        email: result.error || 'Cuenta bloqueada temporalmente. Usa el código por email.',
+      });
     } else {
       const msg = (result.error ?? '').trim();
       if (msg) console.warn('[auth/login]', msg);
+      const rateLimited = /demasiados intentos/i.test(msg) || /rate_limit/i.test(msg);
+      if (rateLimited) setLoginMode('emailCode');
       setErrors({ email: msg || t('auth.errors.loginError') });
+    }
+  };
+
+  const handleRequestCode = async () => {
+    const email = formData.email.trim();
+    if (!email) {
+      setErrors({ email: t('auth.errors.emailRequired') });
+      return;
+    }
+    setIsSubmitting(true);
+    setCodeInfo(null);
+    setErrors({});
+    const result = await requestLoginCode(email);
+    setIsSubmitting(false);
+    if (result.success) {
+      setLoginMode('emailCode');
+      setCodeInfo(result.info || 'Revisa tu correo. El código caduca en 10 minutos.');
+    } else {
+      setErrors({ email: result.error || 'No se pudo enviar el código' });
+    }
+  };
+
+  const handleTpvStoreLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    const code = tpvStoreCode.trim().toUpperCase();
+    if (code.length < 4) {
+      setErrors({ email: 'Introduce el código de tienda (4-12 caracteres, ej. ABC123)' });
+      return;
+    }
+    setIsSubmitting(true);
+    setErrors({});
+    const result = await tpvTabletLogin(code, false);
+    setIsSubmitting(false);
+    if (result.success) {
+      await completeTpvTabletSession(result);
+    } else {
+      setErrors({
+        email:
+          result.error ||
+          'Código de tienda incorrecto. Revisa Ajustes → Tienda → Código tablet.',
+      });
+    }
+  };
+
+  const handleVerifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    const email = formData.email.trim();
+    const code = codeValue.replace(/\D/g, '').slice(0, 6);
+    if (!email) {
+      setErrors({ email: t('auth.errors.emailRequired') });
+      return;
+    }
+    if (code.length !== 6) {
+      setErrors({ password: 'Introduce el código de 6 dígitos' });
+      return;
+    }
+    setIsSubmitting(true);
+    setErrors({});
+    const result = await verifyLoginCode(email, code);
+    setIsSubmitting(false);
+    if (result.success) {
+      navigate(result.redirectTo || '/auth/gate');
+    } else {
+      setErrors({ password: result.error || 'Código inválido o expirado' });
     }
   };
 
@@ -166,15 +311,146 @@ export function Login() {
             <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-red-700">Cuenta bloqueada temporalmente</p>
+                <p className="text-sm font-semibold text-red-700">Acceso con contraseña bloqueado temporalmente</p>
                 <p className="text-xs text-red-500 mt-0.5">
                   Demasiados intentos fallidos.
-                  {lockInfo.lockUntil ? ` Podrás volver a intentarlo a las ${new Date(lockInfo.lockUntil).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}.` : ''}
+                  {lockInfo.lockUntil ? ` Podrás usar la contraseña otra vez a las ${new Date(lockInfo.lockUntil).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}.` : ''}
+                  Puedes entrar ahora con un código por email.
                 </p>
               </div>
             </div>
           )}
 
+          {codeInfo && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+              {codeInfo}
+            </div>
+          )}
+
+          {loginMode === 'emailCode' ? (
+            <form onSubmit={handleVerifyCode} className="space-y-6">
+              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+                Código de <strong>6 dígitos</strong> que llega a tu correo. No es el código de la tablet.
+              </p>
+              <ACCESO__Input
+                label={t('auth.email')}
+                type="email"
+                placeholder={t('auth.emailPlaceholder')}
+                icon={<Mail className="w-5 h-5" />}
+                value={formData.email}
+                onChange={(e) => {
+                  setFormData({ ...formData, email: e.target.value });
+                  setErrors({ ...errors, email: undefined });
+                }}
+                error={errors.email}
+              />
+              <ACCESO__Input
+                label="Código del correo (6 dígitos)"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                icon={<Lock className="w-5 h-5" />}
+                value={codeValue}
+                onChange={(e) => {
+                  setCodeValue(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  setErrors({ ...errors, password: undefined });
+                }}
+                error={errors.password}
+              />
+              <div className="flex flex-col gap-2">
+                <ACCESO__Button
+                  type="submit"
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Verificando…' : 'Entrar con código'}
+                </ACCESO__Button>
+                <button
+                  type="button"
+                  onClick={() => void handleRequestCode()}
+                  disabled={isSubmitting}
+                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                >
+                  Reenviar código al email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('password');
+                    setCodeInfo(null);
+                    setCodeValue('');
+                    setErrors({});
+                  }}
+                  className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                >
+                  Volver a contraseña
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('tpvStore');
+                    setErrors({});
+                  }}
+                  className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  Tengo el código de tienda (tablet)
+                </button>
+              </div>
+            </form>
+          ) : loginMode === 'tpvStore' ? (
+            <form onSubmit={handleTpvStoreLogin} className="space-y-6">
+              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+                Código de <strong>tablet / tienda</strong> (Ajustes → Tienda → Código tablet). Letras y números.
+              </p>
+              <ACCESO__Input
+                label="Código de tienda"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="characters"
+                placeholder="Ej. ABC123"
+                icon={<Lock className="w-5 h-5" />}
+                value={tpvStoreCode}
+                onChange={(e) => {
+                  setTpvStoreCode(e.target.value.toUpperCase().replace(/\s/g, '').slice(0, 12));
+                  setErrors({ ...errors, email: undefined });
+                }}
+                error={errors.email}
+                className="font-mono uppercase tracking-widest"
+              />
+              <div className="flex flex-col gap-2">
+                <ACCESO__Button
+                  type="submit"
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Activando…' : 'Entrar con código de tienda'}
+                </ACCESO__Button>
+                <button
+                  type="button"
+                  onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                >
+                  Pantalla completa tablet TPV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('password');
+                    setTpvStoreCode('');
+                    setErrors({});
+                  }}
+                  className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                >
+                  Volver a contraseña
+                </button>
+              </div>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-6">
             <ACCESO__Input
               label={t('auth.email')}
@@ -274,7 +550,31 @@ export function Login() {
                 <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode('emailCode');
+                setErrors({});
+              }}
+              disabled={isSubmitting}
+              className="w-full text-sm text-center text-indigo-600 dark:text-indigo-400 hover:underline"
+            >
+              Entrar con código del correo (6 dígitos)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode('tpvStore');
+                setErrors({});
+              }}
+              disabled={isSubmitting}
+              className="w-full text-sm text-center text-gray-600 dark:text-gray-400 hover:underline"
+            >
+              Código de tienda / tablet TPV
+            </button>
           </form>
+          )}
 
           <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
             {t('auth.noAccount')}{' '}

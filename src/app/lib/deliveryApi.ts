@@ -151,10 +151,16 @@ export type CajaRegistrationStatus =
 export interface CajaRegistrationResult {
   status: CajaRegistrationStatus;
   message?: string;
+  session?: TpvRegisterSession;
 }
+
+export const TPV_SESSION_SYNC_EVENT = 'vertial:tpv-session-sync';
 
 export function notifyCajaRegistration(caja?: CajaRegistrationResult | null) {
   if (!caja?.status) return;
+  if (caja.session) {
+    window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: caja.session }));
+  }
   if (caja.status === 'registered' || caja.status === 'nothing_to_register' || caja.status === 'already_registered') return;
   toast.warning(caja.message || 'El cobro no quedó registrado en caja. Revisa que la caja esté abierta.');
 }
@@ -453,9 +459,16 @@ export async function reopenDeliveryOrderRequest(userId: string, orderId: string
 
 // ─── Catalog Items API ────────────────────────────────────────────────────────
 
-export async function listCatalogItemsRequest(userId: string, module?: 'stock' | 'catalog'): Promise<CatalogItem[]> {
+export async function listCatalogItemsRequest(
+  userId: string,
+  module?: 'stock' | 'catalog',
+  options?: { view?: 'tpv' },
+): Promise<CatalogItem[]> {
   const id = normalizeUserId(userId);
-  const qs = module ? `?module=${module}` : '';
+  const params = new URLSearchParams();
+  if (module) params.set('module', module);
+  if (options?.view) params.set('view', options.view);
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; items: CatalogItem[] }>(
     `/api/delivery/catalog/${encodeURIComponent(id)}${qs}`,
   );
@@ -775,6 +788,21 @@ export async function listDriverCashSessionsRequest(userId: string): Promise<Dri
   return payload.sessions || [];
 }
 
+export async function listCajaBootstrapRequest(
+  userId: string,
+): Promise<{ sessions: TpvRegisterSession[]; driverSessions: DriverCashSession[] }> {
+  const id = normalizeUserId(userId);
+  const payload = await request<{
+    ok: boolean;
+    sessions: TpvRegisterSession[];
+    driverSessions: DriverCashSession[];
+  }>(`/api/delivery/caja-bootstrap/${encodeURIComponent(id)}`);
+  return {
+    sessions: payload.sessions || [],
+    driverSessions: payload.driverSessions || [],
+  };
+}
+
 export async function createDriverCashSessionRequest(userId: string, data: Partial<DriverCashSession>): Promise<DriverCashSession> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; session: DriverCashSession }>(
@@ -900,7 +928,7 @@ export type DeliverySidebarStoreRow = {
   needsPdv: boolean;
 };
 
-/** Una fila por centro retail: con PDV enlazado, solo centro (pendiente de PDV) o PDV huérfano. */
+/** Una fila por centro retail: con PDV enlazado o solo centro (pendiente de PDV). */
 export function buildDeliverySidebarStoreRows(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
@@ -950,21 +978,6 @@ export function buildDeliverySidebarStoreRows(
       needsPdv: true,
     };
   });
-
-  const usedPdvIds = new Set(rows.map((r) => r.pdvId).filter(Boolean));
-  for (const p of pointsOfSale) {
-    if (p.active === false || usedPdvIds.has(p._id)) continue;
-    const lines = pointOfSaleSidebarLines(p);
-    rows.push({
-      rowId: p._id,
-      pdvId: p._id,
-      workCenterId: String(p.workCenterId || '').trim() || undefined,
-      title: lines.title,
-      code: lines.code || undefined,
-      inactive: false,
-      needsPdv: false,
-    });
-  }
 
   return rows;
 }

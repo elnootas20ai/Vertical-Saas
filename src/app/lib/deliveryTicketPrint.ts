@@ -2,6 +2,7 @@ export type {
   DeliveryTicketBusinessInfo,
   DeliveryOrderLike,
   DeliveryTicketPrintOptions,
+  DeliveryTicketVariant,
 } from './deliveryTicketTypes';
 
 export async function printDeliveryTicket(

@@ -14,6 +14,9 @@ import {
   getCatalogDbName,
   getDeliveryDbName,
   putDocument,
+  dedupeActivePointsOfSale,
+  filterPointsOfSaleLinkedToWorkCenters,
+  listActiveWorkCenterIds,
 } from './couchdb.js';
 import { emitGlobalAlert } from './alertEmitter.js';
 import { mutateAlertStatus } from './alertHistory.js';
@@ -131,7 +134,11 @@ async function fetchCatalogInfraDocs(userId) {
 }
 
 async function fetchPointsOfSale(userId) {
-  return fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((p) => p.user_id === userId));
+  const raw = await fetchDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) =>
+    d.filter((p) => p.user_id === userId && !p.deletedAt),
+  );
+  const wcIds = await listActiveWorkCenterIds(fakeReq);
+  return filterPointsOfSaleLinkedToWorkCenters(dedupeActivePointsOfSale(raw), wcIds);
 }
 
 async function fetchDrivers(userId) {

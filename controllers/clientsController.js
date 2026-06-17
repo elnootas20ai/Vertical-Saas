@@ -711,7 +711,7 @@ export async function searchByPhone(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const clients = await searchClientsByPhone(req, userId, q, limit);
-    return res.json({ ok: true, clients });
+    return res.json({ ok: true, clients: clients.map((c) => sanitizeClient(c)).filter(Boolean) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al buscar clientes' });
   }

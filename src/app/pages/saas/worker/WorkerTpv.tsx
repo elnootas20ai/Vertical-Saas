@@ -1,11 +1,13 @@
 import { Navigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
 import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
+import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../../lib/tpvStockReview';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
 import { WorkerTpvWorkshop } from './WorkerTpvWorkshop';
@@ -25,6 +27,7 @@ import { WorkerTpvGym } from './WorkerTpvGym';
 import { WorkerTpvClinic } from './WorkerTpvClinic';
 import { WorkerTpvHotel } from './WorkerTpvHotel';
 import { WorkerTpvTaxi } from './WorkerTpvTaxi';
+import { WorkerTpvStockReview } from './WorkerTpvStockReview';
 import { ButcherTpvPage } from '../ButcherTpvPage';
 import { EventsWorkstationPage } from '../EventsWorkstationPage';
 import { HairSalonWorkstationPage } from '../HairSalonWorkstationPage';
@@ -101,13 +104,27 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
 };
 
 function WorkerTpvShell({ children }: { children: ReactNode }) {
+  const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+
+  useEffect(() => {
+    const onOpen = () => setStockOpen(true);
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+  }, []);
+
   return (
     <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
       <TpvOfflineBanner />
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <TpvRegisterGate fillParent>{children}</TpvRegisterGate>
+        <TpvRegisterGate fillParent>
+          {stockOpen ? (
+            <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
+          ) : (
+            children
+          )}
+        </TpvRegisterGate>
       </div>
-      <WorkerTpvBottomBar />
+      {!stockOpen && <WorkerTpvBottomBar />}
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
+import type { DeliveryTicketPrintOptions, DeliveryTicketVariant } from '../deliveryTicketTypes';
 
 export interface TicketDocument {
+  variant: DeliveryTicketVariant;
   title: string;
   ticketNo: string;
   dateLabel: string;
@@ -11,14 +12,19 @@ export interface TicketDocument {
   salesPointName: string;
   orderNumber: string;
   customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  deliveryTypeLabel: string;
   cashierName: string;
-  lines: Array<{ qty: number; name: string; total: number }>;
+  lines: Array<{ qty: number; name: string; total: number; notes?: string }>;
   base: number;
   vat: number;
   vatRate: number;
   total: number;
   paymentLabel: string;
+  paymentStatusLabel: string;
   refundReason: string;
+  orderNotes: string;
   footer: string;
   isRefund: boolean;
 }
@@ -29,6 +35,11 @@ const PAYMENT_LABELS: Record<string, string> = {
   bizum: 'Bizum',
   online: 'Online',
   otro: 'Otro',
+};
+
+const DELIVERY_TYPE_LABELS: Record<string, string> = {
+  domicilio: 'Envío a domicilio',
+  recogida: 'Recogida en local',
 };
 
 export function splitTicketVat(total: number, vatRate: number) {
@@ -45,16 +56,34 @@ export function buildTicketDocument({
   cashierName,
   vatRate = 21,
   isRefund = false,
+  variant: requestedVariant,
 }: DeliveryTicketPrintOptions): TicketDocument {
+  const variant: DeliveryTicketVariant = isRefund
+    ? 'customer'
+    : (requestedVariant || 'customer');
   const amount = isRefund
     ? Number(order.refundAmount || order.paidAmount || order.totalAmount || 0)
     : Number(order.totalAmount || 0);
   const { base, vat } = splitTicketVat(amount, vatRate);
   const date = new Date(isRefund ? (order.refundedAt || order.updatedAt) : (order.paidAt || order.createdAt))
     .toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  const deliveryTypeLabel = DELIVERY_TYPE_LABELS[order.deliveryType || ''] || order.deliveryType || '';
+  const paymentMethodLabel = PAYMENT_LABELS[order.paymentMethod || ''] || order.paymentMethod || '';
+  const isPaid = order.paymentStatus === 'paid';
+  const paymentStatusLabel = isPaid ? 'Cobrado' : 'Pendiente de cobro';
+  const paymentLabel = isPaid
+    ? paymentMethodLabel || 'Cobrado'
+    : (variant === 'customer' ? 'Pendiente' : '-');
 
-  return {
-    title: isRefund ? 'DEVOLUCION' : 'TICKET',
+  const lines = (order.items || []).map((item) => ({
+    qty: Number(item.quantity || 0),
+    name: item.name || '',
+    total: Number(item.total || 0),
+    notes: item.notes || '',
+  }));
+
+  const shared = {
+    variant,
     ticketNo: order.ticketNumber || order.orderNumber || order._id.slice(-8),
     dateLabel: date,
     issuer: business.legalName || business.name || 'Negocio',
@@ -64,19 +93,41 @@ export function buildTicketDocument({
     salesPointName: salesPointName || order.salesPointName || '',
     orderNumber: order.orderNumber || '',
     customerName: order.customerName || '-',
+    customerPhone: order.customerPhone || '',
+    customerAddress: order.customerAddress || '',
+    deliveryTypeLabel,
     cashierName: cashierName || order.takenByName || '',
-    lines: (order.items || []).map((item) => ({
-      qty: Number(item.quantity || 0),
-      name: item.name || '',
-      total: Number(item.total || 0),
-    })),
-    base,
-    vat,
+    lines,
+    base: variant === 'kitchen' ? 0 : base,
+    vat: variant === 'kitchen' ? 0 : vat,
     vatRate,
-    total: amount,
-    paymentLabel: PAYMENT_LABELS[order.paymentMethod || ''] || order.paymentMethod || '-',
+    total: variant === 'kitchen' ? 0 : amount,
+    paymentLabel,
+    paymentStatusLabel,
     refundReason: isRefund ? (order.refundReason || '') : '',
-    footer: 'Documento interno de venta',
+    orderNotes: order.notes || '',
     isRefund: Boolean(isRefund),
+  };
+
+  if (variant === 'kitchen') {
+    return {
+      ...shared,
+      title: 'COMANDA',
+      footer: 'Comanda cocina / montaje',
+    };
+  }
+
+  if (variant === 'delivery') {
+    return {
+      ...shared,
+      title: 'REPARTO',
+      footer: 'Hoja de reparto',
+    };
+  }
+
+  return {
+    ...shared,
+    title: isRefund ? 'DEVOLUCION' : 'TICKET',
+    footer: isPaid ? 'Documento interno de venta' : 'Documento provisional (sin cobro)',
   };
 }

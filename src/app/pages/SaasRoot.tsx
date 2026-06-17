@@ -1,4 +1,4 @@
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Outlet, useLocation, useNavigate, Navigate } from 'react-router';
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -388,9 +388,7 @@ function SaasContent() {
 
 
   if (!isAuthenticated) {
-
-    return null;
-
+    return <Navigate to="/auth/login" replace />;
   }
 
 

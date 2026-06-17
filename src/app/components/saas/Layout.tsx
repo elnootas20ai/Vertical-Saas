@@ -111,6 +111,14 @@ function UnverifiedEmailBanner({ user }: { user: AuthContextType['user'] }) {
 export function Layout({ children, title, subtitle, noPadding, titleClassName, subtitleClassName }: LayoutProps) {
   const auth = useAuthOptional();
   if (!auth) return null;
+  if (auth.isInitializing && !auth.user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
+      </div>
+    );
+  }
+  if (!auth.user) return null;
   return (
     <LayoutInner
       auth={auth}

@@ -1,7 +1,13 @@
-import type { ReactNode } from 'react';
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Loader2, Minus, Package, Plus, Search, Sparkles } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import type { TpvCatalogSection } from '../../../lib/tpvCatalogNavigation';
+import {
+  buildTpvProductSearchIndex,
+  parseTpvSectionId,
+  searchTpvProducts,
+  TPV_PRODUCT_SEARCH_LIMIT,
+} from '../../../lib/tpvCatalogNavigation';
 import { brandTint } from '../../../lib/brandUtils';
 
 type TpvProductPickerProps = {
@@ -9,12 +15,12 @@ type TpvProductPickerProps = {
   selectedSectionId: string;
   onSelectedSectionChange: (sectionId: string) => void;
   loading: boolean;
-  productSearch: string;
-  onProductSearchChange: (value: string) => void;
+  catalog: CatalogItem[];
+  clientProductScores: Record<string, number>;
+  resetSignal?: number;
   selectedCategory: string | null;
   onSelectedCategoryChange: (category: string | null) => void;
   categories: string[];
-  filteredProducts: CatalogItem[];
   habitualProducts: CatalogItem[];
   crossSellProducts: CatalogItem[];
   getCartQty: (itemId: string) => number;
@@ -33,7 +39,7 @@ function categoryShortLabel(label: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-function ProductTile({
+const ProductTile = memo(function ProductTile({
   item,
   qty,
   accentColor,
@@ -56,7 +62,7 @@ function ProductTile({
 
   return (
     <article
-      className={`flex flex-col rounded-xl border overflow-hidden transition-all ${
+      className={`flex flex-col rounded-xl border overflow-hidden transition-colors ${
         inCart
           ? 'border-emerald-500 bg-emerald-50/40 dark:bg-emerald-950/20 shadow-sm'
           : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-gray-300 dark:hover:border-gray-600'
@@ -70,7 +76,7 @@ function ProductTile({
       >
         <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 overflow-hidden">
           {hasImage ? (
-            <img src={item.image} alt="" className="w-full h-full object-cover" />
+            <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
           ) : (
             <div
               className="w-full h-full flex items-center justify-center"
@@ -124,6 +130,51 @@ function ProductTile({
       )}
     </article>
   );
+});
+
+function SearchResultRow({
+  item,
+  qty,
+  formatPrice,
+  onAdd,
+  disabled,
+}: {
+  item: CatalogItem;
+  qty: number;
+  formatPrice: (n: number) => string;
+  onAdd: () => void;
+  disabled: boolean;
+}) {
+  const price = Number(item.unitPrice || 0);
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onAdd}
+      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition-colors ${
+        qty > 0
+          ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
+          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-300 dark:hover:border-indigo-600'
+      } disabled:opacity-50`}
+    >
+      <span className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+        {item.name}
+      </span>
+      {item.category && (
+        <span className="shrink-0 text-[10px] text-gray-400 max-w-[28%] truncate">{item.category}</span>
+      )}
+      <span className="shrink-0 text-sm font-bold tabular-nums text-gray-700 dark:text-gray-300">
+        {price > 0 ? formatPrice(price) : '—'}
+      </span>
+      {qty > 0 ? (
+        <span className="shrink-0 min-w-[1.25rem] h-5 px-1 rounded bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+          {qty}
+        </span>
+      ) : (
+        <Plus className="w-4 h-4 shrink-0 text-indigo-500" />
+      )}
+    </button>
+  );
 }
 
 export function TpvProductPicker({
@@ -131,12 +182,12 @@ export function TpvProductPicker({
   selectedSectionId,
   onSelectedSectionChange,
   loading,
-  productSearch,
-  onProductSearchChange,
+  catalog,
+  clientProductScores,
+  resetSignal = 0,
   selectedCategory,
   onSelectedCategoryChange,
   categories,
-  filteredProducts,
   habitualProducts,
   crossSellProducts,
   getCartQty,
@@ -147,11 +198,44 @@ export function TpvProductPicker({
   hasPricedProducts,
   onImportCatalog,
 }: TpvProductPickerProps) {
+  const [productSearch, setProductSearch] = useState('');
+
+  useEffect(() => {
+    if (resetSignal > 0) {
+      setProductSearch('');
+      onSelectedCategoryChange(null);
+    }
+  }, [resetSignal, onSelectedCategoryChange]);
+
   const activeSection = sections.find((s) => s.id === selectedSectionId) ?? sections[0];
   const accentColor =
     activeSection?.color && /^#[0-9A-Fa-f]{6}$/.test(activeSection.color)
       ? activeSection.color
       : '#6366f1';
+
+  const selectedScope = useMemo(
+    () => parseTpvSectionId(selectedSectionId),
+    [selectedSectionId],
+  );
+
+  const searchIndex = useMemo(() => buildTpvProductSearchIndex(catalog), [catalog]);
+
+  const filteredProducts = useMemo(
+    () =>
+      searchTpvProducts(
+        searchIndex,
+        catalog,
+        productSearch,
+        selectedScope,
+        selectedCategory,
+        clientProductScores,
+      ),
+    [searchIndex, catalog, productSearch, selectedScope, selectedCategory, clientProductScores],
+  );
+
+  const isSearchMode = productSearch.trim().length > 0;
+  const searchTruncated =
+    isSearchMode && filteredProducts.length >= TPV_PRODUCT_SEARCH_LIMIT;
 
   return (
     <div className="flex flex-col lg:flex-row gap-3 min-h-[min(68vh,640px)]">
@@ -161,111 +245,118 @@ export function TpvProductPicker({
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
               value={productSearch}
-              onChange={(e) => onProductSearchChange(e.target.value)}
-              placeholder="Buscar…"
-              className="w-full h-9 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-xs text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              onChange={(e) => {
+                const v = e.target.value;
+                setProductSearch(v);
+                if (v.trim()) onSelectedCategoryChange(null);
+              }}
+              placeholder="Nombre, categoría, SKU o código…"
+              autoComplete="off"
+              className="w-full h-9 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
           </div>
         </div>
 
-        {/* Líneas comerciales + bloques compartidos (marcas / bebidas del Excel) */}
-        <div className="shrink-0 px-2 py-2 bg-gray-100/80 dark:bg-gray-950/50 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-            {sections.map((section) => {
-              const active = selectedSectionId === section.id;
-              const color =
-                section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color)
-                  ? section.color
-                  : '#374151';
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => {
-                    onSelectedSectionChange(section.id);
-                    onSelectedCategoryChange(null);
-                  }}
-                  className={`shrink-0 min-w-[5rem] max-w-[8rem] px-2 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate ${
-                    active
-                      ? 'text-white shadow-sm'
-                      : 'bg-white/70 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800'
-                  }`}
-                  style={active ? { backgroundColor: color } : undefined}
-                  title={section.label}
-                >
-                  {section.logo ? (
-                    <img src={section.logo} alt="" className="w-4 h-4 mx-auto mb-0.5 rounded object-cover" />
-                  ) : section.shortCode ? (
-                    <span className="block text-[9px] opacity-80 mb-0.5">{section.shortCode}</span>
-                  ) : null}
-                  <span className="block truncate">{section.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {!isSearchMode && (
+          <>
+            <div className="shrink-0 px-2 py-2 bg-gray-100/80 dark:bg-gray-950/50 border-b border-gray-200 dark:border-gray-800">
+              <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                {sections.map((section) => {
+                  const active = selectedSectionId === section.id;
+                  const color =
+                    section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color)
+                      ? section.color
+                      : '#374151';
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectedSectionChange(section.id);
+                        onSelectedCategoryChange(null);
+                      }}
+                      className={`shrink-0 min-w-[5rem] max-w-[8rem] px-2 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate ${
+                        active
+                          ? 'text-white shadow-sm'
+                          : 'bg-white/70 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800'
+                      }`}
+                      style={active ? { backgroundColor: color } : undefined}
+                      title={section.label}
+                    >
+                      {section.logo ? (
+                        <img src={section.logo} alt="" className="w-4 h-4 mx-auto mb-0.5 rounded object-cover" />
+                      ) : section.shortCode ? (
+                        <span className="block text-[9px] opacity-80 mb-0.5">{section.shortCode}</span>
+                      ) : null}
+                      <span className="block truncate">{section.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-        {/* Categorías de la línea (Pizzas, Refrescos, Cervezas…) */}
-        {categories.length > 0 && (
-          <div className="shrink-0 px-2 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40">
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide items-start">
-              <button
-                type="button"
-                onClick={() => onSelectedCategoryChange(null)}
-                className="shrink-0 flex flex-col items-center gap-1 w-14 focus:outline-none"
-              >
-                <span
-                  className={`w-11 h-11 rounded-xl flex items-center justify-center text-[10px] font-bold transition-all ${
-                    !selectedCategory
-                      ? 'text-white shadow-md scale-105'
-                      : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
-                  }`}
-                  style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
-                >
-                  ALL
-                </span>
-                <span className={`text-[9px] font-medium text-center leading-tight ${!selectedCategory ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
-                  Todas
-                </span>
-              </button>
-              {categories.map((cat) => {
-                const active = selectedCategory === cat;
-                return (
+            {categories.length > 0 && (
+              <div className="shrink-0 px-2 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40">
+                <div className="flex gap-2 overflow-x-auto scrollbar-hide items-start">
                   <button
-                    key={cat}
                     type="button"
-                    onClick={() => onSelectedCategoryChange(active ? null : cat)}
+                    onClick={() => onSelectedCategoryChange(null)}
                     className="shrink-0 flex flex-col items-center gap-1 w-14 focus:outline-none"
                   >
                     <span
                       className={`w-11 h-11 rounded-xl flex items-center justify-center text-[10px] font-bold transition-all ${
-                        active
+                        !selectedCategory
                           ? 'text-white shadow-md scale-105'
-                          : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                          : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
                       }`}
-                      style={
-                        active
-                          ? { backgroundColor: accentColor }
-                          : { color: accentColor, backgroundColor: brandTint(accentColor, '14') }
-                      }
+                      style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
                     >
-                      {categoryShortLabel(cat)}
+                      ALL
                     </span>
-                    <span
-                      className={`text-[9px] font-medium text-center leading-tight line-clamp-2 w-full px-0.5 ${
-                        active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'
-                      }`}
-                    >
-                      {cat}
+                    <span className={`text-[9px] font-medium text-center leading-tight ${!selectedCategory ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
+                      Todas
                     </span>
                   </button>
-                );
-              })}
-            </div>
-          </div>
+                  {categories.map((cat) => {
+                    const active = selectedCategory === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => onSelectedCategoryChange(active ? null : cat)}
+                        className="shrink-0 flex flex-col items-center gap-1 w-14 focus:outline-none"
+                      >
+                        <span
+                          className={`w-11 h-11 rounded-xl flex items-center justify-center text-[10px] font-bold transition-all ${
+                            active
+                              ? 'text-white shadow-md scale-105'
+                              : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                          }`}
+                          style={
+                            active
+                              ? { backgroundColor: accentColor }
+                              : { color: accentColor, backgroundColor: brandTint(accentColor, '14') }
+                          }
+                        >
+                          {categoryShortLabel(cat)}
+                        </span>
+                        <span
+                          className={`text-[9px] font-medium text-center leading-tight line-clamp-2 w-full px-0.5 ${
+                            active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'
+                          }`}
+                        >
+                          {cat}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
-        {!hasPricedProducts && (
+        {!hasPricedProducts && !isSearchMode && (
           <div className="mx-2 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1.5">
             <p className="text-[10px] text-amber-800 dark:text-amber-300">Sin precios en catálogo.</p>
             {onImportCatalog && (
@@ -276,7 +367,7 @@ export function TpvProductPicker({
           </div>
         )}
 
-        {habitualProducts.length > 0 && (
+        {!isSearchMode && habitualProducts.length > 0 && (
           <div className="shrink-0 mx-2 mt-2 px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-200/60 dark:border-emerald-800/40">
             <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 mb-1">Este cliente suele pedir</p>
             <div className="flex flex-wrap gap-1">
@@ -295,7 +386,7 @@ export function TpvProductPicker({
           </div>
         )}
 
-        {crossSellProducts.length > 0 && (
+        {!isSearchMode && crossSellProducts.length > 0 && (
           <div className="shrink-0 mx-2 mt-2 px-2 py-1.5 rounded-lg bg-violet-50/80 dark:bg-violet-950/20 border border-violet-200/50 dark:border-violet-800/40">
             <p className="text-[10px] font-semibold text-violet-800 dark:text-violet-300 mb-1 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
@@ -326,10 +417,34 @@ export function TpvProductPicker({
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Package className="w-8 h-8 text-gray-300 dark:text-gray-600 mb-2" />
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {sections.length === 0
-                  ? 'Configura marcas y catálogo en Ajustes'
-                  : 'Sin productos en esta sección'}
+                {isSearchMode
+                  ? 'Sin coincidencias'
+                  : sections.length === 0
+                    ? 'Configura marcas y catálogo en Ajustes'
+                    : 'Sin productos en esta sección'}
               </p>
+            </div>
+          ) : isSearchMode ? (
+            <div className="space-y-1">
+              {searchTruncated && (
+                <p className="text-[10px] text-gray-400 px-1 mb-2">
+                  Mostrando los primeros {TPV_PRODUCT_SEARCH_LIMIT} resultados. Afina la búsqueda.
+                </p>
+              )}
+              {filteredProducts.map((item) => {
+                const qty = getCartQty(item._id);
+                const disabled = !item.active || Number(item.unitPrice || 0) <= 0;
+                return (
+                  <SearchResultRow
+                    key={item._id}
+                    item={item}
+                    qty={qty}
+                    formatPrice={formatPrice}
+                    onAdd={() => addToCart(item)}
+                    disabled={disabled}
+                  />
+                );
+              })}
             </div>
           ) : (
             <div

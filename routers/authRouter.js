@@ -21,6 +21,8 @@ import {
   listRoles,
   listSessions,
   listUsers,
+  requestLoginCode,
+  verifyLoginCode,
   login,
   logActivity,
   logout,
@@ -51,7 +53,7 @@ import {
   verifyEmail,
 } from '../controllers/authController.js';
 import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate } from '../middleware/auth.js';
-import { authLimiter, emailVerificationLimiter, registerLimiter, recoverLimiter } from '../middleware/rateLimiter.js';
+import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
   validateParams,
@@ -63,6 +65,7 @@ import {
   joinRequestSchema,
   joinRequestActionSchema,
   loginSchema,
+  loginCodeVerifySchema,
   posSwitchUserSchema,
   recoverSchema,
   refreshTokenSchema,
@@ -80,21 +83,23 @@ const authRouter = Router();
 
 // Rutas públicas con rate limiting y validación de input
 authRouter.post('/register', registerLimiter, validate(registerSchema), register);
-authRouter.post('/login', authLimiter, validate(loginSchema), login);
-authRouter.post('/google-login', authLimiter, validate(googleLoginSchema), googleLogin);
-authRouter.post('/logout', authLimiter, logout);
+authRouter.post('/login', loginLimiter, validate(loginSchema), login);
+authRouter.post('/google-login', loginLimiter, validate(googleLoginSchema), googleLogin);
+authRouter.post('/logout', authSessionLimiter, logout);
+authRouter.post('/login-code/request', loginCodeLimiter, validate(recoverSchema), requestLoginCode);
+authRouter.post('/login-code/verify', loginCodeLimiter, validate(loginCodeVerifySchema), verifyLoginCode);
 authRouter.post('/recover', recoverLimiter, validate(recoverSchema), recoverPassword);
 authRouter.post('/reset-password', recoverLimiter, validate(resetPasswordSchema), resetPasswordWithToken);
-authRouter.post('/refresh', authLimiter, validate(refreshTokenSchema), refreshToken);
+authRouter.post('/refresh', authSessionLimiter, validate(refreshTokenSchema), refreshToken);
 authRouter.get('/verify-email', emailVerificationLimiter, verifyEmail);
 authRouter.post('/resend-verification', emailVerificationLimiter, validate(recoverSchema), resendVerificationEmail);
 // A-04: Aceptación de invitación de miembro
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
 // Team login: miembros entran con código de empresa + usuario + contraseña
-authRouter.post('/team-login', authLimiter, validate(teamLoginSchema), teamLogin);
+authRouter.post('/team-login', teamLoginLimiter, validate(teamLoginSchema), teamLogin);
 // TPV tablet: código de tienda + PIN (activación o cambio de trabajador)
-authRouter.post('/tpv-tablet/activate', authLimiter, validate(tpvTabletLoginSchema), tpvTabletActivate);
-authRouter.post('/tpv-tablet/switch', authLimiter, validate(tpvTabletLoginSchema), tpvTabletSwitch);
+authRouter.post('/tpv-tablet/activate', tpvTabletAuthLimiter, validate(tpvTabletLoginSchema), tpvTabletActivate);
+authRouter.post('/tpv-tablet/switch', tpvTabletAuthLimiter, validate(tpvTabletLoginSchema), tpvTabletSwitch);
 // POS switch: cambio rápido de usuario en TPV (requiere sesión activa)
 authRouter.post('/pos-switch', requireAuthAndEmailVerified, validate(posSwitchUserSchema), posSwitchUser);
 

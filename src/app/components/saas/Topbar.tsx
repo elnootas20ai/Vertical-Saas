@@ -3,7 +3,7 @@ import { Bell, Search, Menu, HelpCircle, User, Sun, Moon, Globe, Check, Command,
 import { useTheme } from 'next-themes';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
@@ -29,8 +29,28 @@ export function Topbar({
   onToggleSidebar,
   onOpenGlobalSearch,
 }: TopbarProps) {
+  const auth = useAuthOptional();
+  if (!auth?.user) return null;
+  return (
+    <TopbarInner
+      auth={auth}
+      title={title}
+      titleClassName={titleClassName}
+      onToggleSidebar={onToggleSidebar}
+      onOpenGlobalSearch={onOpenGlobalSearch}
+    />
+  );
+}
+
+function TopbarInner({
+  auth,
+  title,
+  titleClassName,
+  onToggleSidebar,
+  onOpenGlobalSearch,
+}: TopbarProps & { auth: AuthContextType }) {
   const { notifications } = useApp();
-  const { user } = useAuth();
+  const { user } = auth;
   const isWorker = isWorkerAccount(user);
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(

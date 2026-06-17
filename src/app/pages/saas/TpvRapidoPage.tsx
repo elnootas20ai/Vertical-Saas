@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -8,7 +8,6 @@ import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
-  listCatalogItemsRequest,
   filterDeliveryOrdersRequest,
   createDeliveryOrderRequest,
   type CatalogItem,
@@ -23,20 +22,33 @@ import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
+import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
-import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
+import { useTpvCatalog } from '../../hooks/useTpvCatalog';
+import { prefetchTpvCatalog } from '../../lib/tpvCatalogCache';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
 import {
   buildTpvCatalogSections,
   categoriesForTpvScope,
   defaultTpvSectionId,
-  filterTpvCatalogProducts,
   parseTpvSectionId,
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
-import { shouldUseDeliveryStores } from '../../lib/deliverySetup';
+import { shouldUseDeliveryStores, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
+import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
+import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
+import { WorkerTpvDelivery } from './worker/WorkerTpvDelivery';
+import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
+import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
+import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
+import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import {
+  notifyDeliveryActiveStoreChanged,
+  writeDeliveryOpsSelectedPdvId,
+} from '../../lib/deliveryOpsPdvSelection';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import {
   ArrowLeft,
@@ -56,7 +68,6 @@ import {
   Wallet,
   ShoppingCart,
   CheckCircle2,
-  Printer,
   Home,
   Briefcase,
   Loader2,
@@ -154,15 +165,134 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
   return !all.some((a) => a.isPrimary) && all[0]?.id === addr.id;
 }
 
+function TpvRapidoCeoBoard() {
+  const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const activeStore = useActiveStoreScope();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
+
+  const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
+  const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
+  const wasOnTpvRouteRef = useRef(false);
+
+  useEffect(() => {
+    const onOpen = () => setStockOpen(true);
+    window.addEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+    return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
+  }, []);
+
+  /** Pedir tienda solo al entrar desde otra pantalla (no al cambiar ?clientId= etc.). */
+  useEffect(() => {
+    const onTpvRoute = location.pathname.includes('/vertical/delivery/tpv');
+    if (onTpvRoute && !wasOnTpvRouteRef.current) {
+      setSelectedPdvId(null);
+    }
+    wasOnTpvRouteRef.current = onTpvRoute;
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    try {
+      sessionStorage.removeItem(`vertial.ceoTpv.selectedPdv.${businessId}`);
+    } catch {
+      /* ignore */
+    }
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!businessId || !dataUserId) return;
+    prefetchTpvCatalog(dataUserId, businessId);
+  }, [businessId, dataUserId]);
+
+  const storeRows = useMemo(
+    () => buildCeoTpvStoreRows(activeStore.retailWorkCenters, activeStore.allPointsOfSale, businessId),
+    [activeStore.retailWorkCenters, activeStore.allPointsOfSale, businessId],
+  );
+
+  const selectedPdvName = useMemo(() => {
+    if (!selectedPdvId) return '';
+    const pdv = activeStore.allPointsOfSale.find((p) => p._id === selectedPdvId);
+    return pdv?.name || '';
+  }, [selectedPdvId, activeStore.allPointsOfSale]);
+
+  const handleSelectStore = useCallback(
+    (pdvId: string) => {
+      const id = String(pdvId || '').trim();
+      if (!id) return;
+      if (businessId && dataUserId) {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
+        notifyDeliveryActiveStoreChanged();
+      }
+      activeStore.setActiveSalesPoint(id);
+      setSelectedPdvId(id);
+    },
+    [businessId, dataUserId, activeStore],
+  );
+
+  const handleChangeStore = useCallback(() => {
+    if (businessId && dataUserId) {
+      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
+      notifyDeliveryActiveStoreChanged();
+    }
+    setSelectedPdvId(null);
+  }, [businessId, dataUserId]);
+
+  if (!selectedPdvId) {
+    return (
+      <CeoTpvStorePicker
+        storeName={currentBusiness?.name}
+        storeRows={storeRows}
+        pointsOfSale={activeStore.allPointsOfSale.filter((p) => p.active !== false)}
+        loading={activeStore.loading}
+        onSelect={handleSelectStore}
+        onBack={() => navigate('/saas/delivery-ops')}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+      <TpvOfflineBanner />
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <TpvRegisterGate
+          fillParent
+          initialManagerPdvId={selectedPdvId}
+          onManagerStoreCleared={handleChangeStore}
+        >
+          {stockOpen ? (
+            <WorkerTpvStockReview
+              onBack={() => setStockOpen(false)}
+              scopeOverride={{
+                dataUserId,
+                storeLabel: selectedPdvName,
+                pdvId: selectedPdvId,
+              }}
+            />
+          ) : (
+            <WorkerTpvDelivery
+              ceoMode
+              forcedPdvId={selectedPdvId}
+              onChangeStore={handleChangeStore}
+            />
+          )}
+        </TpvRegisterGate>
+      </div>
+      {!stockOpen && <WorkerTpvBottomBar ceoMode />}
+    </div>
+  );
+}
+
 export function TpvRapidoPage() {
   if (isTpvTabletBound()) {
     return <Navigate to={TPV_TABLET_DELIVERY_PATH} replace />;
   }
-  return (
-    <TpvRegisterGate>
-      <TpvRapidoOrderFlow />
-    </TpvRegisterGate>
-  );
+  return <TpvRapidoCeoBoard />;
 }
 
 export type TpvRapidoOrderFlowProps = {
@@ -250,12 +380,9 @@ export function TpvRapidoOrderFlow({
   );
 
   // Step 3 - Products
-  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
-  const [loadingCatalog, setLoadingCatalog] = useState(true);
-  const [productSearch, setProductSearch] = useState('');
+  const [productPickerReset, setProductPickerReset] = useState(0);
   const [selectedSectionId, setSelectedSectionId] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [brands, setBrands] = useState<Brand[]>([]);
   const brandInitRef = useRef(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
@@ -275,13 +402,27 @@ export function TpvRapidoOrderFlow({
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const effectiveOrderTakerId = useMemo(
-    () => normalizeClockinUserId(register.selectedOrderTakerId || register.session?.workerId),
-    [register.selectedOrderTakerId, register.session?.workerId],
-  );
+  const effectiveOrderTakerId = useMemo(() => {
+    if (!register) return normalizeClockinUserId(user?.user_id || user?.id) || '';
+    const fromPicker = normalizeClockinUserId(register.selectedOrderTakerId);
+    if (fromPicker) return fromPicker;
+    const fromSession = normalizeClockinUserId(register.session?.workerId);
+    if (fromSession) return fromSession;
+    if (String(register.session?.workerName || '').trim()) {
+      return normalizeClockinUserId(user?.user_id || user?.id);
+    }
+    return '';
+  }, [register, user?.user_id, user?.id]);
 
   const selectedOrderTaker = useMemo(() => {
     if (!effectiveOrderTakerId) return null;
+    if (!register) {
+      return {
+        id: effectiveOrderTakerId,
+        name: String(user?.fullName || 'TPV').trim(),
+        status: 'active' as const,
+      };
+    }
     return (
       register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId)
       || {
@@ -290,43 +431,10 @@ export function TpvRapidoOrderFlow({
         status: 'active' as const,
       }
     );
-  }, [register.clockedInWorkers, effectiveOrderTakerId, register.session?.workerName]);
-
-  // ─── Load catalog ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    setLoadingCatalog(true);
-    listCatalogItemsRequest(userId, 'catalog')
-      .then((items) => {
-        if (!cancelled) setCatalog(items);
-      })
-      .catch(() => {
-        if (!cancelled) toast.error('Error al cargar el catálogo');
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingCatalog(false);
-      });
-    return () => { cancelled = true; };
-  }, [userId]);
+  }, [register, effectiveOrderTakerId, user?.fullName]);
 
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
-
-  useEffect(() => {
-    if (!businessId) {
-      setBrands([]);
-      return;
-    }
-    let cancelled = false;
-    listBrandsRequest(businessId)
-      .then((list) => {
-        if (!cancelled) setBrands(list);
-      })
-      .catch(() => {
-        if (!cancelled) setBrands([]);
-      });
-    return () => { cancelled = true; };
-  }, [businessId]);
+  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId);
 
   const catalogSections = useMemo(
     () => buildTpvCatalogSections(brands, catalog),
@@ -417,18 +525,6 @@ export function TpvRapidoOrderFlow({
     });
     return m;
   }, [catalog]);
-
-  const filteredProducts = useMemo(
-    () =>
-      filterTpvCatalogProducts(
-        catalog,
-        selectedScope,
-        selectedCategory,
-        productSearch,
-        clientProductScores,
-      ),
-    [catalog, selectedScope, selectedCategory, productSearch, clientProductScores],
-  );
 
   const hasPricedProducts = useMemo(
     () => catalog.some((item) => Number(item.unitPrice || 0) > 0),
@@ -616,13 +712,15 @@ export function TpvRapidoOrderFlow({
     [selectedClient, deliveryType, cart.length],
   );
 
-  const canSubmit =
+  const orderReady =
     !!effectiveOrderTakerId &&
     !!selectedClient &&
     !!deliveryType &&
     cart.length > 0 &&
-    !!paymentMethod &&
     (deliveryType !== 'domicilio' || !!selectedAddressId);
+
+  const canSubmit =
+    orderReady && (deliveryType === 'domicilio' || !!paymentMethod);
   const isProductsFocus = currentStep === 'products' && isStepReachable('products');
 
   // ─── Cart helpers ──────────────────────────────────────────────────────────
@@ -679,7 +777,7 @@ export function TpvRapidoOrderFlow({
     setShowNewAddress(false);
     setAddressWarning(false);
     setCart([]);
-    setProductSearch('');
+    setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
       setSelectedSectionId(defaultTpvSectionId(catalogSections));
@@ -709,9 +807,7 @@ export function TpvRapidoOrderFlow({
       selectClient(client);
       setShowCreateForm(false);
       setDuplicateWarning(false);
-      setPaymentMethod(
-        (client.defaultPaymentMethod as PaymentMethod) || null,
-      );
+      setPaymentMethod(null);
       const assigned = getClientAppliedPromo(client.id);
       if (assigned) {
         setAppliedPromo(assigned);
@@ -1012,14 +1108,20 @@ export function TpvRapidoOrderFlow({
 
   // ─── Submit order ─────────────────────────────────────────────────────────
   const handleSubmitOrder = useCallback(
-    async (status: DeliveryOrderStatus) => {
+    async (status: DeliveryOrderStatus, methodOverride?: PaymentMethod) => {
       if (!selectedClient || !deliveryType || cart.length === 0) return;
+      if (!register || !isTpvRegisterSessionOpen(register.session)) {
+        toast.error('Abre la caja de la tienda para cobrar y enviar');
+        return;
+      }
 
       if (deliveryType === 'domicilio' && !selectedAddressId) {
         setAddressWarning(true);
         return;
       }
-      if (!paymentMethod) return;
+      const method = methodOverride || paymentMethod;
+      const collectOnDelivery = deliveryType === 'domicilio';
+      if (!collectOnDelivery && !method) return;
 
       setSubmitting(true);
       try {
@@ -1077,29 +1179,14 @@ export function TpvRapidoOrderFlow({
           totalAmount: finalTotal,
           notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
           observations: takerName ? `Atendido por: ${takerName}` : '',
-          paymentMethod,
-          paymentStatus: paymentMethod === 'efectivo' ? 'paid' : 'pending',
-          paidAmount: paymentMethod === 'efectivo' ? finalTotal : 0,
+          paymentMethod: collectOnDelivery ? '' : (method || ''),
+          paymentStatus: collectOnDelivery ? 'pending' : method === 'efectivo' ? 'paid' : 'pending',
+          paidAmount: collectOnDelivery ? 0 : method === 'efectivo' ? finalTotal : 0,
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
         };
 
         const created = await createDeliveryOrderRequest(userId, orderData);
-
-        const pm = (paymentMethod === 'efectivo' || paymentMethod === 'tarjeta' || paymentMethod === 'bizum')
-          ? paymentMethod
-          : 'otro';
-        await register.addTransaction({
-          type: 'sale',
-          paymentMethod: pm as any,
-          amount: Number(finalTotal || 0),
-          description: `TPV rápido · ${created.customerName || selectedClient.name}`,
-          orderId: created.id,
-          orderNumber: created.orderNumber,
-          channel: 'tpv',
-          registeredBy: takerName,
-          linkedDeliveryOrderId: created._id,
-        });
 
         setCreatedOrder(created);
         toast.success('Pedido creado correctamente');
@@ -1132,7 +1219,7 @@ export function TpvRapidoOrderFlow({
     setSelectedAddressId(null);
     setShowNewAddress(false);
     setCart([]);
-    setProductSearch('');
+    setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
       setSelectedSectionId(defaultTpvSectionId(catalogSections));
@@ -1174,26 +1261,16 @@ export function TpvRapidoOrderFlow({
                 <p className="text-sm font-mono text-gray-500 mt-2">Ticket {createdOrder.ticketNumber}</p>
               )}
             </div>
-            <div className="flex flex-wrap gap-3 mt-4 justify-center">
-              {createdOrder.paymentStatus === 'paid' && currentBusiness && (
-                <button
-                  onClick={() => printDeliveryTicket({
-                    order: createdOrder,
-                    business: {
-                      name: currentBusiness.name,
-                      legalName: currentBusiness.legalName,
-                      taxId: currentBusiness.taxId,
-                      address: currentBusiness.address,
-                      city: currentBusiness.city,
-                      phone: currentBusiness.phone,
-                    },
-                    salesPointName: createdOrder.salesPointName || register.session?.pointOfSaleName,
-                    cashierName: createdOrder.takenByName,
-                  })}
-                  className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors inline-flex items-center gap-2"
-                >
-                  <Printer className="w-4 h-4" /> Imprimir ticket
-                </button>
+            <div className="flex flex-wrap gap-3 mt-4 justify-center w-full max-w-md">
+              {currentBusiness && (
+                <OrderTicketButtons
+                  order={createdOrder}
+                  business={businessTicketInfoFrom(currentBusiness)}
+                  salesPointName={createdOrder.salesPointName || register.session?.pointOfSaleName}
+                  cashierName={createdOrder.takenByName}
+                  layout="grid"
+                  className="w-full"
+                />
               )}
               <button
                 onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery'))}
@@ -1216,11 +1293,14 @@ export function TpvRapidoOrderFlow({
 
   const clientSearchReady = phoneInput.trim().length >= 2;
 
-  if (!register) {
+  const needsOpenRegister =
+    currentStep === 'products' || currentStep === 'payment';
+
+  if (needsOpenRegister && !register) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Abre la caja de la tienda antes de crear un pedido.
+          Abre la caja de la tienda para cobrar y enviar el pedido.
         </p>
         <button
           type="button"
@@ -1256,6 +1336,8 @@ export function TpvRapidoOrderFlow({
     if (currentStep === 'client' && selectedClient) return 'Continuar';
     if (currentStep === 'client') return 'Selecciona un cliente';
     if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return 'Continuar';
+    if (currentStep === 'products' && orderReady) return 'Continuar al pago';
+    if (currentStep === 'payment' && deliveryType === 'domicilio') return 'Enviar pedido';
     if (submitting) return 'Enviando...';
     return 'Cobrar y enviar';
   })();
@@ -1264,6 +1346,8 @@ export function TpvRapidoOrderFlow({
     if (currentStep === 'client' && showCreateForm) return creatingClient;
     if (currentStep === 'client' && selectedClient) return false;
     if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return false;
+    if (currentStep === 'products') return !orderReady || submitting;
+    if (currentStep === 'payment') return !canSubmit || submitting;
     return !canSubmit || submitting;
   })();
 
@@ -1278,6 +1362,10 @@ export function TpvRapidoOrderFlow({
     }
     if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) {
       completeStep('delivery');
+      return;
+    }
+    if (currentStep === 'products' && orderReady) {
+      completeStep('products');
       return;
     }
     void handleSubmitOrder(tabletMode ? 'listo' : initialStatus);
@@ -1336,7 +1424,7 @@ export function TpvRapidoOrderFlow({
       footerSlot={stickyFooter}
     >
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-4 px-2 md:px-4`}>
-        {!tabletMode && (
+        {!tabletMode && register && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
               workers={register.clockedInWorkers}
@@ -1364,12 +1452,16 @@ export function TpvRapidoOrderFlow({
                     inputMode="search"
                     value={phoneInput}
                     onChange={(e) => {
-                      setPhoneInput(e.target.value);
-                      resetFlowFromClientStep();
-                      setShowCreateForm(false);
-                      setNewClientPhone('');
-                      setDuplicateWarning(false);
-                      setPhoneShake(false);
+                      const value = e.target.value;
+                      setPhoneInput(value);
+                      if (selectedClient) {
+                        resetFlowFromClientStep();
+                      } else {
+                        setShowCreateForm(false);
+                        setNewClientPhone('');
+                        setDuplicateWarning(false);
+                        setPhoneShake(false);
+                      }
                     }}
                     placeholder="Ej. 612… o María García"
                     className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
@@ -1714,12 +1806,12 @@ export function TpvRapidoOrderFlow({
               selectedSectionId={selectedSectionId}
               onSelectedSectionChange={setSelectedSectionId}
               loading={loadingCatalog}
-              productSearch={productSearch}
-              onProductSearchChange={setProductSearch}
+              catalog={catalog}
+              clientProductScores={clientProductScores}
+              resetSignal={productPickerReset}
               selectedCategory={selectedCategory}
               onSelectedCategoryChange={setSelectedCategory}
               categories={categories}
-              filteredProducts={filteredProducts}
               habitualProducts={selectedClient ? habitualProducts : []}
               crossSellProducts={cart.length > 0 ? crossSellProducts : []}
               getCartQty={getCartQty}
@@ -1859,51 +1951,63 @@ export function TpvRapidoOrderFlow({
         {/* ═══════════════ STEP 4: PAYMENT ═══════════════ */}
         {currentStep === 'payment' && isStepReachable('payment') ? (
           <StepContainer step={4} title="Pago y finalizar" visible>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {([
-                { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
-                { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                { key: 'otros' as const, label: 'Otros', icon: Wallet },
-              ]).map(({ key, label, icon: Icon }) => (
-                <button
-                  key={key}
-                  onClick={() => setPaymentMethod(key)}
-                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
-                    paymentMethod === key
-                      ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
-                  } ${!paymentMethod && paymentMethod !== key ? '' : ''}`}
-                >
-                  <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
-                </button>
-              ))}
-            </div>
-
-            {paymentMethod === 'efectivo' && (
-              <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                <label className={LABEL_CLASS}>El cliente paga con</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={cashGiven}
-                    onChange={(e) => setCashGiven(e.target.value)}
-                    placeholder={formatPrice(finalTotal)}
-                    className={`${INPUT_CLASS} text-lg font-medium pr-8`}
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+            {deliveryType === 'domicilio' ? (
+              <div className="p-4 rounded-2xl border-2 border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 text-sm text-cyan-900 dark:text-cyan-100">
+                <p className="font-semibold">Envío a domicilio</p>
+                <p className="mt-1 text-cyan-800 dark:text-cyan-200">
+                  El cobro se confirma al entregar. El repartidor elegirá efectivo, tarjeta o bizum.
+                </p>
+                <p className="mt-2 text-lg font-bold tabular-nums">{formatPrice(finalTotal)}</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                    { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                    { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                    { key: 'otros' as const, label: 'Otros', icon: Wallet },
+                  ]).map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => setPaymentMethod(key)}
+                      className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                        paymentMethod === key
+                          ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
+                    >
+                      <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
+                    </button>
+                  ))}
                 </div>
-                {changeAmount !== null && changeAmount >= 0 && (
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
-                    <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
-                      {formatPrice(changeAmount)}
-                    </span>
+
+                {paymentMethod === 'efectivo' && (
+                  <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                    <label className={LABEL_CLASS}>El cliente paga con</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={cashGiven}
+                        onChange={(e) => setCashGiven(e.target.value)}
+                        placeholder={formatPrice(finalTotal)}
+                        className={`${INPUT_CLASS} text-lg font-medium pr-8`}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                    </div>
+                    {changeAmount !== null && changeAmount >= 0 && (
+                      <div className="mt-3 flex items-center justify-between">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
+                        <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
+                          {formatPrice(changeAmount)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+              </>
             )}
 
             <div className="mt-4">

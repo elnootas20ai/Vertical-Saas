@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useApp } from '../../context/AppContext';
-import { useAuth } from '../../context/AuthContext';
-import { useBusiness } from '../../context/BusinessContext';
+import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -142,10 +142,13 @@ function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
   );
 }
 
-function AlertCenterDrawer({ isOpen, onClose }: Props) {
+function AlertCenterDrawer({
+  isOpen,
+  onClose,
+  user,
+}: Props & { user: NonNullable<AuthContextType['user']> }) {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const currentBusiness = useBusinessOptional()?.currentBusiness;
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = useAlertCenterBusinessId();
   const { departments, departmentSourceFilter, vertical } = useAlertDepartments();
@@ -352,12 +355,14 @@ function AlertCenterDrawer({ isOpen, onClose }: Props) {
 }
 
 export function SAAS__NotificationsDrawer({ isOpen, onClose }: Props) {
-  const { user } = useAuth();
-  const isWorker = isWorkerAccount(user);
+  const auth = useAuthOptional();
+  if (!auth?.user) return null;
 
-  if (isWorker) {
+  if (isWorkerAccount(auth.user)) {
     return <LegacyNotificationsDrawer isOpen={isOpen} onClose={onClose} />;
   }
 
-  return <AlertCenterDrawer isOpen={isOpen} onClose={onClose} />;
+  if (!isOpen) return null;
+
+  return <AlertCenterDrawer isOpen={isOpen} onClose={onClose} user={auth.user} />;
 }

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useBusiness } from '../context/BusinessContext';
+import { useBusinessOptional } from '../context/BusinessContext';
 import {
   getAlertDepartmentsForVertical,
   departmentSourceFilter as deptSourceFilter,
@@ -13,7 +13,7 @@ export function useAlertDepartments(): {
   departmentSourceFilter: (deptId: string) => string | undefined;
   isDepartmentVisible: (deptId: string) => boolean;
 } {
-  const { currentBusiness } = useBusiness();
+  const currentBusiness = useBusinessOptional()?.currentBusiness;
   const vertical = currentBusiness?.businessType || 'delivery';
 
   const departments = useMemo(

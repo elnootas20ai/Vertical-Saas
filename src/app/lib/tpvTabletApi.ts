@@ -4,6 +4,17 @@ import type { PointOfSale } from './deliveryApi';
 
 const API_BASE = getApiBase();
 
+function extractApiError(payload: Record<string, unknown>): string {
+  const err = payload.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+  }
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return 'Error inesperado en la petición';
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T & ApiEnvelope<unknown>> {
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
@@ -12,10 +23,12 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T & ApiE
       ...(init?.headers || {}),
     },
   });
-  const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope<unknown> & { error?: string };
+  const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope<unknown> & {
+    error?: string | { message?: string };
+    message?: string;
+  };
   if (!response.ok || payload.ok === false) {
-    const err = payload.error;
-    throw new Error(typeof err === 'string' ? err : 'Error inesperado en la petición');
+    throw new Error(extractApiError(payload as Record<string, unknown>));
   }
   return payload;
 }

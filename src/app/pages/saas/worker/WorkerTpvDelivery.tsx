@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
@@ -11,17 +11,22 @@ import {
   updateDeliveryOrderRequest,
   cancelDeliveryOrderRequest,
   getDeliveryConfigRequest,
+  isTpvRegisterSessionOpen,
+  TPV_SESSION_SYNC_EVENT,
   type DeliveryOrder,
   type DeliveryOrderStatus,
   type DeliveryType,
+  type TpvRegisterSession,
 } from '../../../lib/deliveryApi';
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
-import { TpvRegisterProvider, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
+import { TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
+import { businessTicketInfoFrom } from '../../../lib/deliveryTicketHelpers';
+import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
@@ -55,6 +60,8 @@ import {
 } from 'lucide-react';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
+import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
+import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
 
 type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum';
 
@@ -76,6 +83,60 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 };
 
 type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
+
+function localCalendarDayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+function localDayBounds(): { from: string; to: string; dayKey: string } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  return { from: start.toISOString(), to: end.toISOString(), dayKey: localCalendarDayKey() };
+}
+
+function isLocalCalendarDay(iso: string | undefined, dayKey: string): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return key === dayKey;
+}
+
+/** Pedido visible en el tablero TPV: mismo día y desde la apertura de caja actual. */
+function isOrderInOpenRegisterScope(
+  order: DeliveryOrder,
+  dayKey: string,
+  sessionOpenedAt?: string | null,
+): boolean {
+  if (!isLocalCalendarDay(order.createdAt, dayKey)) return false;
+  const openedAt = String(sessionOpenedAt || '').trim();
+  if (!openedAt) return true;
+  const createdMs = new Date(order.createdAt).getTime();
+  const openedMs = new Date(openedAt).getTime();
+  if (Number.isNaN(createdMs) || Number.isNaN(openedMs)) return true;
+  return createdMs >= openedMs;
+}
+
+function isCompletedBoardOrder(order: DeliveryOrder): boolean {
+  return order.status === 'entregado' || orderAlreadyCobrado(order);
+}
+
+/** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
+function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryPaymentMethod {
+  const pm = String(raw || '').trim().toLowerCase();
+  if (pm === 'tarjeta' || pm === 'bizum') return pm;
+  return 'efectivo';
+}
+
+function orderAlreadyCobrado(order: DeliveryOrder): boolean {
+  const total = Number(order.totalAmount || 0);
+  const paid = Number(order.paidAmount || 0);
+  if (order.paymentStatus === 'paid' || order.paymentCollected) return true;
+  if (paid > 0 && total > 0 && paid >= total) return true;
+  return false;
+}
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
   nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   icon: <Clock className="w-4 h-4" /> },
@@ -181,7 +242,10 @@ function matchesSearch(order: DeliveryOrder, query: string): boolean {
   if (!q) return true;
   const customer = order.customerName?.toLowerCase() || '';
   const orderNo = order.orderNumber.toLowerCase();
+  const phoneDigits = String(order.customerPhone || '').replace(/\D/g, '');
+  const qDigits = query.replace(/\D/g, '');
   if (orderNo.includes(q) || customer.includes(q)) return true;
+  if (qDigits.length >= 3 && phoneDigits.includes(qDigits)) return true;
   // Prefijo de palabra en el nombre (evita "uri" → pedido de Carlos por un producto "Pureza")
   const nameWords = customer.split(/[^a-z0-9áéíóúüñ]+/i).filter(Boolean);
   if (q.length < 4) {
@@ -424,48 +488,75 @@ function DeliverPaymentModal({
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
             {formatCurrency(order.totalAmount)}
           </p>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">¿Cómo ha pagado?</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
+            {orderAlreadyCobrado(order)
+              ? 'Confirma la entrega (ya cobrado en caja)'
+              : '¿Cómo ha pagado?'}
+          </p>
+          {orderAlreadyCobrado(order) && order.paymentMethod && (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
+              Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => onConfirm('efectivo')}
-            disabled={loading}
-            className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors disabled:opacity-50"
-          >
-            {loading ? (
-              <Loader2 className="w-7 h-7 animate-spin text-emerald-600" />
-            ) : (
-              <Banknote className="w-7 h-7 text-emerald-700 dark:text-emerald-400" />
-            )}
-            <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Efectivo</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm('tarjeta')}
-            disabled={loading}
-            className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors disabled:opacity-50"
-          >
-            {loading ? (
-              <Loader2 className="w-7 h-7 animate-spin text-blue-600" />
-            ) : (
-              <CreditCard className="w-7 h-7 text-blue-700 dark:text-blue-400" />
-            )}
-            <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Tarjeta</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onConfirm('bizum')}
-            disabled={loading}
-            className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors disabled:opacity-50"
-          >
-            {loading ? (
-              <Loader2 className="w-7 h-7 animate-spin text-purple-600" />
-            ) : (
-              <Smartphone className="w-7 h-7 text-purple-700 dark:text-purple-400" />
-            )}
-            <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Bizum</span>
-          </button>
+          {orderAlreadyCobrado(order) ? (
+            <button
+              type="button"
+              onClick={() => onConfirm(resolveDeliveryPaymentMethod(order.paymentMethod))}
+              disabled={loading}
+              className="col-span-3 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5" />
+              )}
+              Confirmar entrega
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onConfirm('efectivo')}
+                disabled={loading}
+                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="w-7 h-7 animate-spin text-emerald-600" />
+                ) : (
+                  <Banknote className="w-7 h-7 text-emerald-700 dark:text-emerald-400" />
+                )}
+                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Efectivo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirm('tarjeta')}
+                disabled={loading}
+                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="w-7 h-7 animate-spin text-blue-600" />
+                ) : (
+                  <CreditCard className="w-7 h-7 text-blue-700 dark:text-blue-400" />
+                )}
+                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Tarjeta</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirm('bizum')}
+                disabled={loading}
+                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="w-7 h-7 animate-spin text-purple-600" />
+                ) : (
+                  <Smartphone className="w-7 h-7 text-purple-700 dark:text-purple-400" />
+                )}
+                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Bizum</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -480,6 +571,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
   advancing: boolean;
 }) {
   useModalClose(true, onClose);
+  const { currentBusiness } = useBusiness();
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
   const displayLabel = LANE_STATUS_LABEL[order.status] || cfg.label;
@@ -573,6 +665,19 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
             </span>
           </div>
 
+          {currentBusiness && (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Imprimir</h3>
+              <OrderTicketButtons
+                order={order}
+                business={businessTicketInfoFrom(currentBusiness)}
+                salesPointName={order.salesPointName}
+                cashierName={order.takenByName}
+                layout="grid"
+              />
+            </div>
+          )}
+
           {nextLabel && (
             <button
               type="button"
@@ -600,7 +705,18 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, advancing }: {
   );
 }
 
-export function WorkerTpvDelivery() {
+export type WorkerTpvDeliveryProps = {
+  /** TPV Rápido CEO: misma UI que tablet, con tienda elegida antes. */
+  ceoMode?: boolean;
+  forcedPdvId?: string | null;
+  onChangeStore?: () => void;
+};
+
+export function WorkerTpvDelivery({
+  ceoMode = false,
+  forcedPdvId = null,
+  onChangeStore,
+}: WorkerTpvDeliveryProps = {}) {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
@@ -618,19 +734,28 @@ export function WorkerTpvDelivery() {
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(false);
 
   const userId = resolveBusinessDataUserId(user, currentBusiness);
-  const register = useTpvRegisterIfOpen();
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const registerLive = useTpvRegisterIfOpen();
+  const stickyRegisterRef = useRef<TpvRegisterContextType | null>(null);
+  if (registerLive && isTpvRegisterSessionOpen(registerLive.session)) {
+    stickyRegisterRef.current = registerLive;
+  }
+  const register =
+    registerLive ??
+    (view === 'new-order' || view === 'staff-consumption' ? stickyRegisterRef.current : null);
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
     [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
   );
   const scopedPdvId = useMemo(() => {
+    if (ceoMode && forcedPdvId) return String(forcedPdvId).trim() || null;
     const fromTablet = String(tabletBinding?.pdvId || '').trim();
     if (fromTablet) return fromTablet;
     const fromWorker = String(workerPdv.pdvId || '').trim();
     if (fromWorker) return fromWorker;
     return String(activeStoreScope.activeSalesPointId || '').trim() || null;
-  }, [tabletBinding?.pdvId, workerPdv.pdvId, activeStoreScope.activeSalesPointId]);
+  }, [ceoMode, forcedPdvId, tabletBinding?.pdvId, workerPdv.pdvId, activeStoreScope.activeSalesPointId]);
   const primaryPdvId = useMemo(
     () => pickDefaultActivePdvId(activeStoreScope.pointsOfSale.filter((p) => p.active !== false)),
     [activeStoreScope.pointsOfSale],
@@ -640,22 +765,35 @@ export function WorkerTpvDelivery() {
     const pdv = activeStoreScope.pointsOfSale.find((p) => p._id === scopedPdvId);
     return pdv?.name || tabletBinding?.pdvName || null;
   }, [scopedPdvId, activeStoreScope.pointsOfSale, tabletBinding?.pdvName]);
+  const scopedPdvWorkCenterId = useMemo(() => {
+    if (!scopedPdvId) return null;
+    const pdv = activeStoreScope.pointsOfSale.find((p) => p._id === scopedPdvId);
+    return String(pdv?.workCenterId || '').trim() || null;
+  }, [scopedPdvId, activeStoreScope.pointsOfSale]);
 
-  const [showDelivered, setShowDelivered] = useState(false);
+  const [showDelivered, setShowDelivered] = useState(true);
+  const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
+  const sessionOpenedAt = register?.session?.openedAt ?? null;
 
   const loadOrders = useCallback(async (options?: { silent?: boolean }) => {
     if (!userId) return;
     const silent = options?.silent ?? false;
     if (!silent) setRefreshing(true);
-    const today = new Date().toISOString().slice(0, 10);
+    const bounds = localDayBounds();
+    setDayKey(bounds.dayKey);
     try {
       const data = await filterDeliveryOrdersRequest(userId, {
-        ...(scopedPdvId ? { salesPointId: scopedPdvId } : {}),
-        dateFrom: `${today}T00:00:00.000Z`,
-        dateTo: `${today}T23:59:59.999Z`,
+        dateFrom: bounds.from,
+        dateTo: bounds.to,
         limit: 500,
       });
-      const scoped = filterOrdersForActivePdv(data.orders, scopedPdvId, primaryPdvId, scopedPdvName);
+      const scoped = filterOrdersForActivePdv(
+        data.orders,
+        scopedPdvId,
+        primaryPdvId,
+        scopedPdvName,
+        scopedPdvWorkCenterId,
+      );
       setOrders(scoped.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       if (!silent) toast.error('Error al cargar pedidos');
@@ -663,9 +801,43 @@ export function WorkerTpvDelivery() {
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName]);
+  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  useEffect(() => {
+    const tick = () => {
+      const key = localCalendarDayKey();
+      if (key !== dayKey) {
+        setDayKey(key);
+        void loadOrders({ silent: true });
+      }
+    };
+    const interval = setInterval(tick, 60000);
+    return () => clearInterval(interval);
+  }, [dayKey, loadOrders]);
+
+  useEffect(() => {
+    const onSessionSync = (event: Event) => {
+      const session = (event as CustomEvent<TpvRegisterSession>).detail;
+      if (!session) return;
+      if (session.status === 'closed') {
+        setOrders((prev) => prev.filter((o) => !isCompletedBoardOrder(o)));
+        return;
+      }
+      if (session.status === 'open') {
+        setDayKey(localCalendarDayKey());
+        void loadOrders({ silent: true });
+      }
+    };
+    window.addEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
+    return () => window.removeEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
+  }, [loadOrders]);
+
+  useEffect(() => {
+    if (!userId) return;
+    prefetchTpvCatalog(userId, businessId || '');
+  }, [userId, businessId]);
 
   useEffect(() => {
     if (!userId) {
@@ -709,7 +881,8 @@ export function WorkerTpvDelivery() {
     const next = TABLET_NEXT_STATUS[order.status];
     if (!next || !userId) return;
 
-    if (next === 'entregado' && !paymentMethod) {
+    let resolvedPayment = paymentMethod;
+    if (next === 'entregado' && !resolvedPayment) {
       setDeliveryCompleteOrder(order);
       return;
     }
@@ -724,15 +897,15 @@ export function WorkerTpvDelivery() {
         if (!order.assemblyStartedAt) extras.assemblyStartedAt = now;
         if (!order.kitchenCompletedAt) extras.kitchenCompletedAt = now;
       }
-      if (next === 'entregado' && paymentMethod) {
+      if (next === 'entregado' && resolvedPayment) {
         extras.deliveredAt = now;
-        extras.paymentMethod = paymentMethod;
+        extras.paymentMethod = resolvedPayment;
         extras.paymentCollected = true;
         extras.paymentCollectedAt = now;
         extras.paymentCollectedBy = user?.user_id || user?.id || user?.fullName || 'Tablet';
         extras.paymentStatus = 'paid';
-        extras.paidAmount = order.totalAmount;
-        extras.paidAt = now;
+        extras.paidAmount = Number(order.totalAmount || 0);
+        extras.paidAt = order.paidAt || now;
       }
       const payload: DeliveryOrder = {
         ...order,
@@ -744,8 +917,8 @@ export function WorkerTpvDelivery() {
             status: next,
             date: now,
             user: user?.fullName || 'Tablet',
-            notes: next === 'entregado' && paymentMethod
-              ? `Entregado · ${PAYMENT_LABELS[paymentMethod]}`
+            notes: next === 'entregado' && resolvedPayment
+              ? `Entregado · ${PAYMENT_LABELS[resolvedPayment]}`
               : undefined,
           },
         ],
@@ -765,36 +938,52 @@ export function WorkerTpvDelivery() {
         return;
       }
 
-      const updated = await updateDeliveryOrderRequest(userId, payload);
+      const submitUpdate = async (body: DeliveryOrder): Promise<DeliveryOrder> => {
+        try {
+          return await updateDeliveryOrderRequest(userId, body);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          if (!/conflict|409|revision/i.test(msg)) throw err;
+          const bounds = localDayBounds();
+          const data = await filterDeliveryOrdersRequest(userId, {
+            dateFrom: bounds.from,
+            dateTo: bounds.to,
+            limit: 500,
+          });
+          const fresh = data.orders.find((o) => o._id === body._id);
+          if (!fresh?._rev || fresh._rev === body._rev) throw err;
+          return await updateDeliveryOrderRequest(userId, { ...body, _rev: fresh._rev });
+        }
+      };
+
+      const updated = await submitUpdate(payload);
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
       if (next === 'entregado') {
         setSelectedOrder(null);
         setDeliveryCompleteOrder(null);
         toast.success(
-          `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[paymentMethod!]}`,
+          `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[resolvedPayment!]}`,
         );
         if (updated.paymentStatus === 'paid' && currentBusiness) {
-          printDeliveryTicket({
-            order: updated,
-            business: {
-              name: currentBusiness.name,
-              legalName: currentBusiness.legalName,
-              taxId: currentBusiness.taxId,
-              address: currentBusiness.address,
-              city: currentBusiness.city,
-              phone: currentBusiness.phone,
-            },
-            salesPointName: updated.salesPointName,
-            cashierName: user?.fullName,
-          });
+          try {
+            printDeliveryTicket({
+              order: updated,
+              business: businessTicketInfoFrom(currentBusiness),
+              salesPointName: updated.salesPointName,
+              cashierName: user?.fullName,
+              variant: 'customer',
+            });
+          } catch {
+            /* el ticket es opcional; no bloquear la entrega */
+          }
         }
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
         toast.success(`Pedido #${order.orderNumber} → ${label}`);
       }
-    } catch {
-      toast.error('Error al avanzar pedido');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
     } finally {
       setAdvancingId(null);
     }
@@ -803,9 +992,10 @@ export function WorkerTpvDelivery() {
   const confirmCompleteDelivery = useCallback(
     (method: DeliveryPaymentMethod) => {
       if (!deliveryCompleteOrder) return;
-      void advanceOrder(deliveryCompleteOrder, method);
+      const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
+      void advanceOrder(fresh, method);
     },
-    [deliveryCompleteOrder, advanceOrder],
+    [deliveryCompleteOrder, advanceOrder, orders],
   );
 
   const requestDeleteOrder = useCallback((order: DeliveryOrder) => {
@@ -839,9 +1029,17 @@ export function WorkerTpvDelivery() {
   }, [navigate]);
 
   const stats = useMemo(() => {
-    const montaje = orders.filter(o => MONTAGE_STATUSES.includes(o.status));
-    const enReparto = orders.filter(o => o.status === 'en_reparto');
-    const entregados = orders.filter(o => o.status === 'entregado');
+    const dayKeyLocal = dayKey;
+    const montaje = orders.filter(
+      (o) => MONTAGE_STATUSES.includes(o.status) && isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt),
+    );
+    const enReparto = orders.filter(
+      (o) => o.status === 'en_reparto' && isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt),
+    );
+    const completados = orders.filter((o) => {
+      if (!isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt)) return false;
+      return isCompletedBoardOrder(o);
+    });
     const activeWait = [...montaje, ...enReparto];
     const avgWait =
       activeWait.length > 0
@@ -850,14 +1048,18 @@ export function WorkerTpvDelivery() {
     return {
       montaje: montaje.length,
       delivery: enReparto.length,
-      delivered: entregados.length,
+      delivered: completados.length,
       avgWait,
     };
-  }, [orders]);
+  }, [orders, dayKey, sessionOpenedAt]);
 
   const scopedActive = useMemo(
-    () => orders.filter((o) => MONTAGE_STATUSES.includes(o.status) || o.status === 'en_reparto'),
-    [orders],
+    () => orders.filter(
+      (o) =>
+        (MONTAGE_STATUSES.includes(o.status) || o.status === 'en_reparto')
+        && isOrderInOpenRegisterScope(o, dayKey, sessionOpenedAt),
+    ),
+    [orders, dayKey, sessionOpenedAt],
   );
 
   const assemblyOrders = useMemo(
@@ -878,14 +1080,18 @@ export function WorkerTpvDelivery() {
     [scopedActive, fulfillmentFilter, search],
   );
 
-  const deliveredOrders = useMemo(
+  const completedTodayOrders = useMemo(
     () => orders
-      .filter((o) => o.status === 'entregado')
+      .filter((o) => {
+        if (o.status === 'cancelled') return false;
+        if (!isOrderInOpenRegisterScope(o, dayKey, sessionOpenedAt)) return false;
+        return isCompletedBoardOrder(o);
+      })
       .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
       .filter((o) => matchesSearch(o, search))
-      .sort((a, b) => new Date(b.deliveredAt || b.updatedAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.updatedAt || a.createdAt).getTime())
-      .slice(0, 40),
-    [orders, fulfillmentFilter, search],
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 50),
+    [orders, dayKey, sessionOpenedAt, fulfillmentFilter, search],
   );
 
   const filterCounts = useMemo(() => ({
@@ -947,14 +1153,27 @@ export function WorkerTpvDelivery() {
               <Package className="w-5 h-5 text-indigo-600" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">Pedidos activos</h1>
+              <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+                {ceoMode ? (scopedPdvName || 'Pedidos activos') : 'Pedidos activos'}
+              </h1>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Montaje y reparto · {visibleCount} visibles
+                {ceoMode ? 'TPV operativo · ' : ''}Montaje y reparto · {visibleCount} visibles
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {tabletBinding && (
+            {ceoMode && onChangeStore && (
+              <button
+                type="button"
+                onClick={onChangeStore}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                title="Elegir otra tienda"
+              >
+                <Store className="w-4 h-4" />
+                Cambiar tienda
+              </button>
+            )}
+            {tabletBinding && !ceoMode && (
               <button
                 type="button"
                 onClick={exitTabletTpv}
@@ -1045,45 +1264,52 @@ export function WorkerTpvDelivery() {
         </div>
       </div>
 
-      {/* Entregados hoy — desplegable */}
-      {deliveredOrders.length > 0 && (
-        <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
-          <button
-            type="button"
-            onClick={() => setShowDelivered((v) => !v)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left"
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-              <span className="text-sm font-bold text-green-800 dark:text-green-300">
-                Entregados hoy ({deliveredOrders.length})
-              </span>
-            </div>
-            {showDelivered ? <ChevronUp className="w-4 h-4 text-green-700" /> : <ChevronDown className="w-4 h-4 text-green-700" />}
-          </button>
-          {showDelivered && (
-            <div className="mt-2 max-h-44 overflow-y-auto space-y-1">
-              {deliveredOrders.map((order) => (
-                <button
-                  key={order._id}
-                  type="button"
-                  onClick={() => setSelectedOrder(order)}
-                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
-                    <p className="text-[11px] text-gray-500 truncate">{order.customerName || 'Cliente'}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs font-bold tabular-nums">{formatCurrency(order.totalAmount)}</p>
-                    <p className="text-[10px] text-gray-500 capitalize">{order.paymentMethod || '—'}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Completados hoy — cobrados en TPV + entregados */}
+      <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setShowDelivered((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+            <span className="text-sm font-bold text-green-800 dark:text-green-300">
+              Completados hoy ({completedTodayOrders.length})
+            </span>
+          </div>
+          {showDelivered ? <ChevronUp className="w-4 h-4 text-green-700" /> : <ChevronDown className="w-4 h-4 text-green-700" />}
+        </button>
+        {showDelivered && (
+          <div className="mt-2 max-h-44 overflow-y-auto space-y-1">
+            {completedTodayOrders.length === 0 ? (
+              <p className="text-xs text-gray-500 dark:text-gray-400 px-3 py-2 text-center">
+                Sin completados en esta caja. Al cerrar, el histórico queda en Caja → Historial.
+              </p>
+            ) : (
+              completedTodayOrders.map((order) => {
+                const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
+                return (
+                  <button
+                    key={order._id}
+                    type="button"
+                    onClick={() => setSelectedOrder(order)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
+                      <p className="text-[11px] text-gray-500 truncate">{order.customerName || 'Cliente'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-bold tabular-nums">{formatCurrency(order.totalAmount)}</p>
+                      <p className={`text-[10px] font-semibold ${statusCfg.color}`}>{statusCfg.label}</p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Columnas Montaje | Reparto */}
       <div className="flex-1 min-h-0 overflow-hidden p-3 sm:p-4">
@@ -1134,7 +1360,7 @@ export function WorkerTpvDelivery() {
           {[
             { label: 'Montaje', value: stats.montaje, color: 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300' },
             { label: 'Reparto', value: stats.delivery, color: 'text-cyan-700 bg-cyan-50 border-cyan-200 dark:bg-cyan-950/30 dark:border-cyan-900 dark:text-cyan-300' },
-            { label: 'Entregados', value: stats.delivered, color: 'text-green-700 bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300' },
+            { label: 'Completados', value: stats.delivered, color: 'text-green-700 bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300' },
             {
               label: 'Espera media',
               value: stats.avgWait != null ? `${stats.avgWait}m` : '—',

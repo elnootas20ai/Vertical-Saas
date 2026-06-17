@@ -1,6 +1,6 @@
 import {
   listDeliveryOrdersByUser,
-  listPointsOfSaleByUser,
+  listScopedPointsOfSaleForUser,
 } from '../services/couchdb.js';
 
 const AGGREGATOR_COMMISSION_PCT = {
@@ -101,7 +101,7 @@ function round2(n) {
 async function loadScopedOrders(req, userId, filters) {
   const { salesPointId, channel } = filters;
   const orders = await listDeliveryOrdersByUser(req, userId);
-  const pdvs = await listPointsOfSaleByUser(req, userId).catch(() => []);
+  const pdvs = await listScopedPointsOfSaleForUser(req, userId).catch(() => []);
   const primaryPdvId = pickPrimaryPdvId(pdvs);
   const pdvDoc = salesPointId ? pdvs.find((p) => p._id === salesPointId) : null;
   const pdvName = pdvDoc?.name || '';
@@ -574,7 +574,7 @@ export async function getDeliveryTiendas(req, res) {
     const range = parseRange(from, to);
     if (!range) return bad(res, 'Rango inválido');
 
-    const pdvs = await listPointsOfSaleByUser(req, userId).catch(() => []);
+    const pdvs = await listScopedPointsOfSaleForUser(req, userId).catch(() => []);
     const primaryPdvId = pickPrimaryPdvId(pdvs);
     const all = await listDeliveryOrdersByUser(req, userId);
     const orders = filterByRange(all, range.from, range.to);

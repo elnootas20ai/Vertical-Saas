@@ -8,12 +8,17 @@ import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import { listWarehousesRequest, type Warehouse } from '../lib/warehouseApi';
 import type { BusinessType } from '../lib/businessApi';
 
-export function useStockWorkspace() {
+export type StockWorkspaceScopeInput = {
+  dataUserId?: string;
+  storeLabel?: string;
+};
+
+export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
 
-  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+  const dataUserId = scopeInput?.dataUserId || resolveBusinessDataUserId(user, currentBusiness);
   const businessType = (currentBusiness?.businessType || '') as BusinessType;
   const ready = businessesFetchSettled && Boolean(dataUserId);
 
@@ -22,10 +27,21 @@ export function useStockWorkspace() {
   const [loading, setLoading] = useState(true);
 
   const storeLabel = useMemo(() => {
+    if (scopeInput?.storeLabel) return scopeInput.storeLabel;
+    if (activeStore.activeSalesPointId) {
+      const pdv = activeStore.pointsOfSale.find((p) => p._id === activeStore.activeSalesPointId);
+      if (pdv?.name) return pdv.name;
+    }
     if (activeStore.displayLabelForActive) return activeStore.displayLabelForActive;
     if (currentBusiness?.name) return currentBusiness.name;
     return 'Almacén';
-  }, [activeStore.displayLabelForActive, currentBusiness?.name]);
+  }, [
+    scopeInput?.storeLabel,
+    activeStore.activeSalesPointId,
+    activeStore.pointsOfSale,
+    activeStore.displayLabelForActive,
+    currentBusiness?.name,
+  ]);
 
   const storeWarehouseId = useMemo(() => {
     const activeWh = warehouses.filter((w) => w.active);

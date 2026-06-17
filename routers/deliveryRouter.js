@@ -37,6 +37,7 @@ import {
   updateDriverCashSession,
   removeDriverCashSession,
   listTpvRegisterSessions,
+  listCajaBootstrap,
   createTpvRegisterSession,
   updateTpvRegisterSession,
   removeTpvRegisterSession,
@@ -159,6 +160,8 @@ deliveryRouter.get('/driver-sessions/:userId', listDriverCashSessions);
 deliveryRouter.post('/driver-sessions/:userId', createDriverCashSession);
 deliveryRouter.put('/driver-sessions/:userId/:sessionId', updateDriverCashSession);
 deliveryRouter.delete('/driver-sessions/:userId/:sessionId', removeDriverCashSession);
+
+deliveryRouter.get('/caja-bootstrap/:userId', listCajaBootstrap);
 
 deliveryRouter.get('/tpv-sessions/:userId', listTpvRegisterSessions);
 deliveryRouter.post('/tpv-sessions/:userId', createTpvRegisterSession);

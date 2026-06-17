@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { userOwnsAnyBusiness, WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
+import { AuthRouteLoading } from '../AuthRouteLoading';
 
 /**
  * Restringe el acceso a páginas "de negocio" (Centro Operativo, listas
@@ -34,7 +35,11 @@ export function RequireBusinessOwner({ children }: { children: React.ReactNode }
     }
   }, [isInitializing, user, isWorker, ownsBusiness, businessesPending, navigate]);
 
-  if (isInitializing || businessesPending) return null;
-  if (isWorker && !ownsBusiness) return null;
+  if (isInitializing || businessesPending) {
+    return <AuthRouteLoading label="Preparando acceso…" />;
+  }
+  if (isWorker && !ownsBusiness) {
+    return <AuthRouteLoading label="Redirigiendo…" />;
+  }
   return <>{children}</>;
 }

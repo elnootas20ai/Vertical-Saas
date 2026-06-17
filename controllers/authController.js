@@ -61,6 +61,10 @@ import {
   saveJoinRequest,
   saveSession,
   saveResetToken,
+  saveLoginOtp,
+  canResendLoginOtp,
+  findAccountByLoginOtp,
+  clearLoginOtp,
   saveTeamInvitation,
   findJoinRequestById,
   softDeleteDocument,
@@ -86,6 +90,7 @@ import {
   buildEmailVerificationEmail,
   buildInvitationEmail,
   buildPasswordResetEmail,
+  buildLoginCodeEmail,
   buildAccountLockedEmail,
   buildTrialExpiringEmail,
   buildPaymentFailedEmail,
@@ -561,9 +566,10 @@ export async function login(req, res) {
       const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
       return res.status(423).json({
         ok: false,
-        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''}.`,
+        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''} o usa un código por email.`,
         code: 'ACCOUNT_LOCKED',
         lockUntil: lockStatus.lockUntil,
+        canUseLoginCode: true,
       });
     }
 
@@ -668,6 +674,128 @@ export async function login(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al iniciar sesión',
+    });
+  }
+}
+
+/** Envía un código de 6 dígitos al email para entrar sin esperar bloqueos por contraseña. */
+export async function requestLoginCode(req, res) {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return badRequest(res, 'El email es obligatorio');
+    }
+
+    invalidateDb(ACCOUNTS_DB);
+    const account = await findAccountByEmail(req, email);
+
+    if (!account) {
+      logger.warn({ tag: 'AUTH_LOGIN_CODE', hint: 'no_account' }, 'Código solicitado para email sin cuenta');
+      return res.json({ ok: true, message: 'Si el email existe, recibirás un código en breve' });
+    }
+
+    if (!canResendLoginOtp(account)) {
+      return res.status(429).json({
+        ok: false,
+        code: 'LOGIN_CODE_COOLDOWN',
+        error: 'Ya enviamos un código recientemente. Revisa tu correo o espera 1 minuto.',
+      });
+    }
+
+    const code = String(crypto.randomInt(100000, 1000000));
+    await saveLoginOtp(req, account, code);
+
+    const { subject, html } = buildLoginCodeEmail(account.email, code);
+    await sendEmail({ to: account.email, subject, html, requireDelivery: true });
+
+    logger.info({ tag: 'AUTH_LOGIN_CODE', to: account.email }, 'Código de acceso enviado');
+
+    await logAccountActivity(req, {
+      actorUserId: account.user_id,
+      actorName: account.fullName,
+      targetUserId: account.user_id,
+      type: 'security',
+      action: 'Solicitud de código de acceso por email',
+      entityId: account.user_id,
+      entityLabel: account.fullName,
+      ip: getClientIp(req),
+    });
+
+    return res.json({ ok: true, message: 'Si el email existe, recibirás un código en breve' });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al enviar el código',
+    });
+  }
+}
+
+/** Verifica el código de email y abre sesión (resetea bloqueos por contraseña). */
+export async function verifyLoginCode(req, res) {
+  try {
+    const { email, code } = req.body || {};
+    const ip = getClientIp(req);
+
+    if (!email || !code) {
+      return badRequest(res, 'Email y código son obligatorios');
+    }
+
+    invalidateDb(ACCOUNTS_DB);
+    const account = await findAccountByLoginOtp(req, email, code);
+    if (!account) {
+      return res.status(400).json({
+        ok: false,
+        code: 'INVALID_LOGIN_CODE',
+        error: 'Código inválido o expirado. Solicita uno nuevo.',
+      });
+    }
+
+    let savedAccount = await resetFailedLoginAttempts(req, account);
+    savedAccount = await clearLoginOtp(req, savedAccount);
+    savedAccount = await saveAccount(req, {
+      ...savedAccount,
+      status: 'active',
+      inviteStatus: savedAccount.inviteStatus === 'pending' ? 'accepted' : savedAccount.inviteStatus,
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Inicio de sesión con código por email',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: { ip, userAgent: req.headers['user-agent'] || '', method: 'login_code' },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones (login code):', invErr?.message);
+    }
+
+    const redirectTo = resolvePostLoginRedirect(savedAccount, { pendingInvitationsCount });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo,
+      pendingInvitationsCount,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al verificar el código',
     });
   }
 }
@@ -2882,9 +3010,10 @@ export async function teamLogin(req, res) {
       const remainingMin = Math.ceil(lockStatus.remainingMs / 60000);
       return res.status(423).json({
         ok: false,
-        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''}.`,
+        error: `Cuenta bloqueada temporalmente. Inténtalo de nuevo en ${remainingMin} minuto${remainingMin !== 1 ? 's' : ''} o usa un código por email.`,
         code: 'ACCOUNT_LOCKED',
         lockUntil: lockStatus.lockUntil,
+        canUseLoginCode: true,
       });
     }
 

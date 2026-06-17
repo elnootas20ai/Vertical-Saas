@@ -179,6 +179,38 @@ export async function getAllDocuments(req, dbName) {
   return docs;
 }
 
+/** Evita dos lecturas completas del delivery DB en paralelo (Caja: TPV + reparto). */
+const deliveryDocumentsInflight = new Map();
+
+export async function getDeliveryDatabaseDocumentsInflight(req) {
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  if (deliveryDocumentsInflight.has(db)) {
+    return deliveryDocumentsInflight.get(db);
+  }
+  const promise = getAllDocuments(req, db).finally(() => {
+    deliveryDocumentsInflight.delete(db);
+  });
+  deliveryDocumentsInflight.set(db, promise);
+  return promise;
+}
+
+/** Evita lecturas duplicadas del catálogo en paralelo (TPV + catálogo + stock). */
+const catalogDocumentsInflight = new Map();
+
+export async function getCatalogDatabaseDocumentsInflight(req) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  if (catalogDocumentsInflight.has(db)) {
+    return catalogDocumentsInflight.get(db);
+  }
+  const promise = getAllDocuments(req, db).finally(() => {
+    catalogDocumentsInflight.delete(db);
+  });
+  catalogDocumentsInflight.set(db, promise);
+  return promise;
+}
+
 export async function getDocument(req, dbName, docId) {
   const encodedDbName = encodeURIComponent(dbName);
   const encodedDocId = encodeURIComponent(docId);
@@ -1396,6 +1428,47 @@ export async function findAccountByResetToken(req, rawToken) {
   );
 }
 
+const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
+const LOGIN_OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
+export async function saveLoginOtp(req, account, rawCode) {
+  const expiry = new Date(Date.now() + LOGIN_OTP_TTL_MS).toISOString();
+  return saveAccount(req, {
+    ...account,
+    loginOtpHash: hashToken(rawCode),
+    loginOtpExpiry: expiry,
+    loginOtpSentAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function canResendLoginOtp(account) {
+  const sentAt = account?.loginOtpSentAt;
+  if (!sentAt) return true;
+  return Date.now() - new Date(sentAt).getTime() >= LOGIN_OTP_RESEND_COOLDOWN_MS;
+}
+
+export async function findAccountByLoginOtp(req, email, rawCode) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const code = String(rawCode || '').trim();
+  if (!normalizedEmail || !code) return null;
+  const account = await findAccountByEmail(req, normalizedEmail);
+  if (!account?.loginOtpHash || !account.loginOtpExpiry) return null;
+  if (new Date(account.loginOtpExpiry) <= new Date()) return null;
+  if (account.loginOtpHash !== hashToken(code)) return null;
+  return account;
+}
+
+export async function clearLoginOtp(req, account) {
+  if (!account?.loginOtpHash) return account;
+  return saveAccount(req, {
+    ...account,
+    loginOtpHash: null,
+    loginOtpExpiry: null,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function saveEmailVerificationToken(req, account, rawToken) {
   const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
   return saveAccount(req, {
@@ -1468,7 +1541,7 @@ export async function findAccountByInviteToken(req, rawToken) {
 // El primer umbral es configurable vía env; los siguientes escalan automáticamente
 function buildLockoutThresholds() {
   const firstAttempts = Math.max(1, parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10));
-  const firstDurationMs = Math.max(60_000, parseInt(process.env.LOCK_DURATION_MINUTES || '15', 10) * 60 * 1000);
+  const firstDurationMs = Math.max(60_000, parseInt(process.env.LOCK_DURATION_MINUTES || '5', 10) * 60 * 1000);
   return [
     { attempts: firstAttempts,      durationMs: firstDurationMs },
     { attempts: firstAttempts * 2,  durationMs: firstDurationMs * 4 },
@@ -5651,12 +5724,22 @@ export function sanitizeDriverCashSession(doc) {
 }
 
 export async function listDriverCashSessionsByUser(req, userId) {
-  const db = getDeliveryDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await getDeliveryDatabaseDocumentsInflight(req);
   return docs
     .filter((doc) => doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+/** Una sola pasada al delivery DB para la pantalla Caja (TPV + reparto). */
+export async function listCajaDataByUser(req, userId) {
+  const docs = await getDeliveryDatabaseDocumentsInflight(req);
+  const tpvSessions = docs
+    .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const driverSessions = docs
+    .filter((doc) => doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  return { tpvSessions, driverSessions };
 }
 
 // ─── POINTS OF SALE ───────────────────────────────────────────────────────────
@@ -5806,6 +5889,44 @@ export async function listPointsOfSaleByUser(req, userId) {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 }
 
+/** IDs de centros de trabajo retail existentes (no borrados). */
+export async function listActiveWorkCenterIds(req) {
+  const db = getWorkCentersDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  return new Set(
+    docs
+      .filter((d) => d?.type === 'sales_point' && !d?.deletedAt)
+      .map((d) => String(d._id || '').trim())
+      .filter(Boolean),
+  );
+}
+
+/** Solo PDV enlazados a un centro que sigue existiendo (como en Ajustes → Tienda). */
+export function filterPointsOfSaleLinkedToWorkCenters(pdvs, workCenterIds) {
+  const ids = workCenterIds instanceof Set ? workCenterIds : new Set(workCenterIds);
+  return (Array.isArray(pdvs) ? pdvs : []).filter((p) => {
+    const wcId = String(p.workCenterId || '').trim();
+    return wcId && ids.has(wcId);
+  });
+}
+
+export function findOrphanPointsOfSale(pdvs, workCenterIds) {
+  const linkedIds = new Set(
+    filterPointsOfSaleLinkedToWorkCenters(pdvs, workCenterIds).map((p) => p._id),
+  );
+  return (Array.isArray(pdvs) ? pdvs : []).filter(
+    (p) => p && !p.deletedAt && !linkedIds.has(p._id),
+  );
+}
+
+/** PDV activos enlazados a un centro existente (fuente única para listados operativos). */
+export async function listScopedPointsOfSaleForUser(req, userId) {
+  const pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+  const workCenterIds = await listActiveWorkCenterIds(req);
+  return filterPointsOfSaleLinkedToWorkCenters(pdvs, workCenterIds);
+}
+
 export async function findWorkCenterById(req, workCenterId) {
   const wcId = String(workCenterId || '').trim();
   if (!wcId) return null;
@@ -5823,12 +5944,20 @@ export async function findPointOfSaleByTerminalCode(req, terminalCode, excludePd
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
   const exclude = String(excludePdvId || '').trim();
-  return docs.find((d) =>
+  const isOpenPdv = (d) =>
     d?.type === 'point_of_sale' &&
     !d?.deletedAt &&
     d.active !== false &&
-    String(d.terminalCode || '').toUpperCase() === code &&
-    (!exclude || d._id !== exclude),
+    (!exclude || d._id !== exclude);
+
+  const byTerminal = docs.find(
+    (d) => isOpenPdv(d) && String(d.terminalCode || '').toUpperCase() === code,
+  );
+  if (byTerminal) return byTerminal;
+
+  // Fallback: algunos usuarios copian el código PDV (Ajustes) en lugar del código tablet.
+  return docs.find(
+    (d) => isOpenPdv(d) && String(d.code || '').trim().toUpperCase() === code,
   ) || null;
 }
 
@@ -5859,12 +5988,14 @@ export function workerCanAccessPdvForTablet(account, business, pdv) {
   if (!account || !business || !pdv) return false;
 
   const isOwner = business.owner_user_id === account.user_id;
+  if (isOwner) return true;
+
   const isMember = Array.isArray(business.members)
     && business.members.some((m) => m.user_id === account.user_id);
-  if (!isOwner && !isMember) return false;
+  if (!isMember) return false;
 
   const role = String(account.role || '').trim();
-  const isAdmin = isOwner || role === 'Admin';
+  const isAdmin = role === 'Admin';
   const salesPointId = String(account.employment?.salesPointId || '').trim();
   if (isAdmin && !salesPointId) return true;
   if (!salesPointId) return false;
@@ -5998,9 +6129,7 @@ export function sanitizeTpvRegisterSession(doc) {
 }
 
 export async function listTpvRegisterSessionsByUser(req, userId) {
-  const db = getDeliveryDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await getDeliveryDatabaseDocumentsInflight(req);
   return docs
     .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
@@ -8709,6 +8838,58 @@ export function sanitizeCatalogItem(doc) {
   };
 }
 
+/** Catálogo mínimo para TPV: sin imágenes ni campos pesados (carga y búsqueda más rápida). */
+export function sanitizeCatalogItemForTpv(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    type: 'catalog_item',
+    id: doc._id,
+    user_id: doc.user_id,
+    module: doc.module || 'catalog',
+    itemType: doc.itemType || 'product',
+    name: doc.name || '',
+    category: doc.category || 'general',
+    unitPrice: Number(doc.unitPrice || 0),
+    sku: doc.sku || '',
+    barcode: doc.barcode || '',
+    brandIds: Array.isArray(doc.brandIds) ? doc.brandIds : [],
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    image: '',
+    images: [],
+    description: '',
+    notes: '',
+    costPrice: 0,
+    taxRate: doc.taxRate !== undefined ? Number(doc.taxRate) : 21,
+    stockQuantity: 0,
+    minStock: 0,
+    reorderQuantity: 0,
+    autoReorder: false,
+    unit: doc.unit || 'ud',
+    supplierId: '',
+    supplierName: '',
+    allergens: [],
+    webVisible: true,
+    available: true,
+    articles: [],
+    comboItems: [],
+    salesChannels: [],
+    stockCategory: 'other',
+    stockSubcategory: '',
+    isStockItem: false,
+    warehouseStock: [],
+    maxStock: 0,
+    lastPurchasePrice: 0,
+    lastPurchaseDate: '',
+    customFields: {},
+    vertical: doc.vertical || '',
+    staffPrice: null,
+    createdAt: doc.createdAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+    deletedAt: doc.deletedAt || null,
+  };
+}
+
 // ─── STAFF CONSUMPTIONS ───────────────────────────────────────────────────────
 
 const STAFF_CONSUMPTION_PAYMENT_MODES = ['cash_now', 'payroll_deduction'];
@@ -8801,9 +8982,7 @@ export async function listStaffConsumptionsByUser(req, userId) {
 }
 
 export async function listCatalogItemsByUser(req, userId, { module: filterModule } = {}) {
-  const db = getCatalogDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  const docs = await getCatalogDatabaseDocumentsInflight(req);
   return docs
     .filter((doc) => {
       if (!doc || doc.type !== 'catalog_item' || doc.deletedAt) return false;

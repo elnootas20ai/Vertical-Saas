@@ -6,6 +6,7 @@ import {
   listDeliveryOrdersByUser,
   buildCatalogItemDocument,
   sanitizeCatalogItem,
+  sanitizeCatalogItemForTpv,
   listCatalogItemsByUser,
   resolveStaffUnitPrice,
   buildSupplierDocument,
@@ -23,6 +24,7 @@ import {
   buildTpvRegisterSessionDocument,
   sanitizeTpvRegisterSession,
   listTpvRegisterSessionsByUser,
+  listCajaDataByUser,
   findOpenTpvRegisterSessionForPointOfSale,
   sumTpvRegisterSaleAmountForOrder,
   sumTpvRegisterReturnAmountForOrder,
@@ -31,6 +33,7 @@ import {
   buildPointOfSaleDocument,
   sanitizePointOfSale,
   listPointsOfSaleByUser,
+  listScopedPointsOfSaleForUser,
   dedupeActivePointsOfSale,
   findActivePointOfSaleForWorkCenter,
   findOrphanPointOfSaleByName,
@@ -167,7 +170,7 @@ function resolvePdvIdFromRef(pdvs, ref) {
 }
 
 async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
-  const pdvs = await listPointsOfSaleByUser(req, userId);
+  const pdvs = await listScopedPointsOfSaleForUser(req, userId);
   let salesPointId = String(order?.salesPointId || '').trim();
   if (salesPointId) {
     const resolved = resolvePdvIdFromRef(pdvs, salesPointId);
@@ -367,7 +370,7 @@ export async function listDeliveryOrders(req, res) {
     // Defensa en profundidad para workers: solo su PDV y solo el día de hoy.
     // Las vistas operativas (cocina/montaje/reparto) trabajan con eso.
     if (req.callerIsWorker) {
-      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
       const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
       const today = new Date().toISOString().slice(0, 10);
@@ -401,7 +404,7 @@ export async function createDeliveryOrder(req, res) {
     await ensureDatabase(req, db);
     const scoped = await resolveOrderSalesPoint(req, userId, order, req.callerAccount || account);
     if (!scoped.salesPointId) {
-      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const active = (pdvs || []).filter((p) => p && p.active !== false);
       if (active.length > 1) {
         return badRequest(res, 'Indica la tienda (salesPointId) del pedido');
@@ -415,8 +418,10 @@ export async function createDeliveryOrder(req, res) {
     const saved = await putDocument(req, db, docWithTicket._id, docWithTicket);
     const savedDoc = { ...docWithTicket, _rev: saved.rev };
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
-    let cajaRegistration = { status: 'nothing_to_register' };
-    if (savedDoc.status === DELIVERED_ORDER_STATUS) {
+    let cajaRegistration = await maybeRegisterTpvSaleOnTpvChannelOrderCreate(
+      req, userId, savedDoc, account,
+    );
+    if (cajaRegistration.status === 'nothing_to_register' && savedDoc.status === DELIVERED_ORDER_STATUS) {
       cajaRegistration = await maybeRegisterDeliveryPaymentInTpvSession(
         req, userId, savedDoc, {}, account.fullName, req.callerAccount || account,
       );
@@ -728,7 +733,7 @@ export async function refundDeliveryOrder(req, res) {
 // ─── REGISTER PAYMENT ────────────────────────────────────────────────────────
 
 async function resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount) {
-  const pdvs = await listPointsOfSaleByUser(req, userId);
+  const pdvs = await listScopedPointsOfSaleForUser(req, userId);
   let pdvId = String(orderDoc.salesPointId || '').trim();
   if (pdvId) {
     return resolvePdvIdFromRef(pdvs, pdvId) || pdvId;
@@ -806,6 +811,7 @@ async function appendTpvSessionTransaction(req, userId, orderDoc, registerTx, {
       amount: Math.round(toRegister * 100) / 100,
       orderId: orderDoc._id,
       orderNumber: orderDoc.orderNumber || '',
+      linkedDeliveryOrderId: orderDoc._id,
       channel: orderDoc.channel || registerTx.channel || '',
       date: registerTx.date || now,
     };
@@ -888,6 +894,21 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
     mode: 'increment',
     targetAmount: Number(amount || 0),
     callerAccount,
+  });
+}
+
+async function maybeRegisterTpvSaleOnTpvChannelOrderCreate(req, userId, doc, account) {
+  const channel = String(doc.channel || '').toLowerCase();
+  if (channel !== 'tpv') return { status: 'nothing_to_register' };
+  const amount = Number(doc.totalAmount || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return { status: 'nothing_to_register' };
+  return autoRegisterTpvSaleForOrder(req, userId, doc, {
+    amount,
+    paymentMethod: doc.paymentMethod || 'efectivo',
+    registeredBy: account?.fullName || doc.takenByName || 'TPV',
+    description: `TPV rápido · ${doc.customerName || ''}`.trim(),
+    mode: 'increment',
+    callerAccount: req.callerAccount || account,
   });
 }
 
@@ -1007,7 +1028,7 @@ export async function filterDeliveryOrders(req, res) {
     }
     if (channel) orders = orders.filter((o) => o.channel === channel);
     if (salesPointId) {
-      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
       const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
@@ -1071,7 +1092,9 @@ export async function listCatalogItems(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const filterModule = req.query.module || undefined;
     const items = await listCatalogItemsByUser(req, userId, { module: filterModule });
-    return res.json({ ok: true, items: items.map(sanitizeCatalogItem) });
+    const view = String(req.query.view || '').trim().toLowerCase();
+    const sanitizer = view === 'tpv' ? sanitizeCatalogItemForTpv : sanitizeCatalogItem;
+    return res.json({ ok: true, items: items.map(sanitizer).filter(Boolean) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar artículos' });
   }
@@ -1965,7 +1988,7 @@ export async function listTpvRegisterSessions(req, res) {
     if (req.callerIsWorker) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
       if (workerSalesPoint) {
-        const pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+        const pdvs = await listScopedPointsOfSaleForUser(req, userId);
         const allowedPdvIds = new Set(
           pdvs
             .filter((p) => p._id === workerSalesPoint || p.workCenterId === workerSalesPoint)
@@ -1987,6 +2010,50 @@ export async function listTpvRegisterSessions(req, res) {
   }
 }
 
+/** Caja: una lectura al delivery DB (TPV + reparto). */
+export async function listCajaBootstrap(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    let { tpvSessions, driverSessions } = await listCajaDataByUser(req, userId);
+
+    if (req.callerIsWorker) {
+      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      if (workerSalesPoint) {
+        const pdvs = await listScopedPointsOfSaleForUser(req, userId);
+        const allowedPdvIds = new Set(
+          pdvs
+            .filter((p) => p._id === workerSalesPoint || p.workCenterId === workerSalesPoint)
+            .map((p) => p._id),
+        );
+        tpvSessions = tpvSessions.filter((s) => {
+          const pid = String(s.pointOfSaleId || '').trim();
+          return !pid || allowedPdvIds.has(pid);
+        });
+      }
+    }
+
+    const pdvFilter = String(req.query.salesPointId || req.query.pointOfSaleId || '').trim();
+    if (pdvFilter) {
+      tpvSessions = tpvSessions.filter((s) => String(s.pointOfSaleId || '') === pdvFilter);
+    }
+
+    return res.json({
+      ok: true,
+      sessions: tpvSessions.map(sanitizeTpvRegisterSession),
+      driverSessions: driverSessions.map(sanitizeDriverCashSession),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Error al cargar datos de caja',
+    });
+  }
+}
+
 export async function createTpvRegisterSession(req, res) {
   try {
     const { userId } = req.params;
@@ -2001,13 +2068,13 @@ export async function createTpvRegisterSession(req, res) {
     await ensureDatabase(req, db);
 
     const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-    const today = new Date().toISOString().slice(0, 10);
     const openForPdv = (allSessions || []).filter(
       (s) => s.status === 'open' && !s.deletedAt && String(s.pointOfSaleId || '').trim() === pdvId,
     );
 
     for (const stale of openForPdv) {
       const openDay = String(stale.openedAt || '').slice(0, 10);
+      const today = new Date().toISOString().slice(0, 10);
       if (openDay && openDay < today) {
         const closedDoc = autoCloseTpvRegisterSessionDocument(
           userId,
@@ -2056,6 +2123,23 @@ export async function createTpvRegisterSession(req, res) {
   }
 }
 
+function mergeTpvRegisterTransactions(existingTxs, incomingTxs) {
+  const existing = Array.isArray(existingTxs) ? existingTxs : [];
+  const incoming = Array.isArray(incomingTxs) ? incomingTxs : [];
+  const byId = new Map();
+  for (const t of existing) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  for (const t of incoming) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  return [...byId.values()].sort((a, b) => {
+    const ta = new Date(a.date || 0).getTime();
+    const tb = new Date(b.date || 0).getTime();
+    return ta - tb;
+  });
+}
+
 export async function updateTpvRegisterSession(req, res) {
   try {
     const { userId, sessionId } = req.params;
@@ -2066,7 +2150,18 @@ export async function updateTpvRegisterSession(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
-    const doc = buildTpvRegisterSessionDocument(userId, { ...existing, ...session }, existing);
+    const mergedTransactions = mergeTpvRegisterTransactions(existing.transactions, session.transactions);
+    const linkedOrderIds = [...new Set([
+      ...(existing.linkedOrderIds || []),
+      ...(session.linkedOrderIds || []),
+      ...mergedTransactions.map((t) => String(t.linkedDeliveryOrderId || t.orderId || '').trim()).filter(Boolean),
+    ])];
+    const doc = buildTpvRegisterSessionDocument(userId, {
+      ...existing,
+      ...session,
+      transactions: mergedTransactions,
+      linkedOrderIds,
+    }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     const action = doc.status === 'closed'
       ? `Cerró caja TPV "${doc.terminalName}" — Diferencia: ${doc.difference.toFixed(2)}€`
@@ -2163,7 +2258,7 @@ export async function listPointsOfSale(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let pdvs = dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+    let pdvs = await listScopedPointsOfSaleForUser(req, userId);
     pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));
     // Trabajadores con PDV asignado en empleo: solo ven ese centro (id PDV o workCenter enlazado).
     if (req.callerIsWorker) {
@@ -2880,7 +2975,7 @@ export async function getOpsCenter(req, res) {
     let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
 
     if (salesPointId) {
-      const pdvs = await listPointsOfSaleByUser(req, userId);
+      const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
       const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
@@ -2921,7 +3016,7 @@ export async function getOpsCenter(req, res) {
     const [tpvSessions, driverSessions, pointsOfSale] = await Promise.all([
       listTpvRegisterSessionsByUser(req, userId),
       listDriverCashSessionsByUser(req, userId),
-      listPointsOfSaleByUser(req, userId).catch(() => []),
+      listScopedPointsOfSaleForUser(req, userId).catch(() => []),
     ]);
     let openTpv = tpvSessions.filter(s => s.status === 'open');
     if (salesPointId) {
@@ -2967,7 +3062,7 @@ export async function getOpsCenter(req, res) {
       accumulateDeliveredOrderLines(o, revenueByBrand, revenueByCategory);
     }
 
-    const pdvs = await listPointsOfSaleByUser(req, userId);
+    const pdvs = await listScopedPointsOfSaleForUser(req, userId);
 
     let brandLabels = {};
     const businessId = String(account.business_id || account.businessId || '').trim();

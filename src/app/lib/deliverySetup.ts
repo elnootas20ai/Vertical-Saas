@@ -383,7 +383,8 @@ export async function loadDeliveryStores(
     : await mergePointsOfSaleWithRetailWorkCenters(dataUserId, dedupePointsOfSale(rawPdvs), {
         business: business ?? null,
       });
-  pointsOfSale = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters));
+  const filteredByWc = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters));
+  pointsOfSale = filteredByWc;
 
   return { dataUserId, workCenters, pointsOfSale };
 }
@@ -428,9 +429,6 @@ export async function loadTpvPointsOfSaleForBusiness(
   pointsOfSale = dedupePointsOfSale(
     filterPointsOfSaleForWorkCenters(beforeScopeFilter, state.workCenters),
   );
-  if (pointsOfSale.length === 0 && beforeScopeFilter.length > 0) {
-    pointsOfSale = beforeScopeFilter.filter((p) => p.active !== false);
-  }
 
   const priorityWcId = String(options?.priorityWorkCenterId || '').trim();
   if (priorityWcId) {

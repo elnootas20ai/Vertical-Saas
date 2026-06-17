@@ -5,6 +5,8 @@ import {
   ExternalLink, Banknote, ArrowRight, Printer, RotateCcw,
 } from 'lucide-react';
 import type { DeliveryOrder, DeliveryOrderStatus } from '../../lib/deliveryApi';
+import type { DeliveryTicketBusinessInfo } from '../../lib/deliveryTicketTypes';
+import { OrderTicketButtons } from './OrderTicketButtons';
 
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; icon: typeof Clock }> = {
   nuevo:      { label: 'Nuevo',      color: 'bg-amber-100 text-amber-700 border-amber-200',   icon: Clock },
@@ -69,6 +71,7 @@ interface Props {
   onRegisterPayment: (order: DeliveryOrder) => void;
   onRefund?: (order: DeliveryOrder) => void;
   onPrintTicket?: (order: DeliveryOrder, isRefund?: boolean) => void;
+  ticketBusiness?: DeliveryTicketBusinessInfo;
   canCancel: boolean;
   canReopen: boolean;
   canRefund?: boolean;
@@ -78,7 +81,7 @@ interface Props {
 
 export function OrderDetailDrawer({
   order, onClose, onAdvanceStatus, onCancel, onReopen, onRegisterPayment,
-  onRefund, onPrintTicket, canCancel, canReopen, canRefund, canOperate, canPayment,
+  onRefund, onPrintTicket, ticketBusiness, canCancel, canReopen, canRefund, canOperate, canPayment,
 }: Props) {
   const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
   const channelCfg = CHANNEL_CONFIG[order.channel] || CHANNEL_CONFIG.direct;
@@ -272,7 +275,18 @@ export function OrderDetailDrawer({
               <Banknote className="w-4 h-4" /> Cobrar
             </button>
           )}
-          {onPrintTicket && order.paymentStatus === 'paid' && order.status !== 'devuelto' && (
+          {ticketBusiness && order.status !== 'devuelto' && (
+            <div className="w-full">
+              <OrderTicketButtons
+                order={order}
+                business={ticketBusiness}
+                salesPointName={order.salesPointName}
+                layout="grid"
+                className="w-full"
+              />
+            </div>
+          )}
+          {onPrintTicket && order.paymentStatus === 'paid' && order.status !== 'devuelto' && !ticketBusiness && (
             <button onClick={() => onPrintTicket(order)}
               className="py-2.5 px-4 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2">
               <Printer className="w-4 h-4" /> Ticket

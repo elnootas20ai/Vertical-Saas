@@ -124,6 +124,7 @@ import {
   FileCheck,
   Plug,
   Mail,
+  Loader2,
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
@@ -139,7 +140,6 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
-  buildDeliverySidebarStoreRows,
   pointOfSaleDisplayLabel,
 } from '../../lib/deliveryApi';
 import {
@@ -149,6 +149,7 @@ import {
 } from '../../lib/deliverySetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { useSidebarDeliveryStoreRows } from '../../hooks/useSidebarDeliveryStoreRows';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
@@ -523,7 +524,7 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed, mobileOpen, onMobileClose }: SidebarProps) {
   const auth = useAuthOptional();
-  if (!auth) return null;
+  if (!auth?.user) return null;
   return (
     <SidebarInner
       auth={auth}
@@ -646,6 +647,7 @@ function SidebarInner({
   }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount]);
 
   const activeStore = useActiveStoreScope();
+  const sidebarDelivery = useSidebarDeliveryStoreRows(vertical === 'delivery');
 
   useEffect(() => {
     if (vertical === 'delivery') return;
@@ -654,9 +656,28 @@ function SidebarInner({
 
   useEffect(() => {
     if (vertical !== 'delivery') return;
-    if (activeStore.retailWorkCenters.length === 0) return;
+    if (sidebarDelivery.rows.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
-  }, [vertical, activeStore.retailWorkCenters.length]);
+  }, [vertical, sidebarDelivery.rows.length]);
+
+  useEffect(() => {
+    if (vertical !== 'delivery') return;
+    if (sidebarDelivery.loading) return;
+    if (sidebarDelivery.rows.length > 0) return;
+    if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
+    const onFocus = () => {
+      void activeStore.refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [
+    vertical,
+    sidebarDelivery.loading,
+    sidebarDelivery.rows.length,
+    activeStore.retailWorkCenters.length,
+    activeStore.allPointsOfSale.length,
+    activeStore.refresh,
+  ]);
 
   /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
   const selectedSidebarWorkCenterId = useMemo(() => {
@@ -802,13 +823,7 @@ function SidebarInner({
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
-        const rows =
-          vertical === 'delivery'
-            ? buildDeliverySidebarStoreRows(
-                activeStore.retailWorkCenters,
-                activeStore.allPointsOfSale,
-              )
-            : [];
+        const rows = vertical === 'delivery' ? sidebarDelivery.rows : [];
         const row = rows.find((r) => r.rowId === rawId);
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         const pdvId = row?.pdvId || pdv?._id;
@@ -1028,10 +1043,7 @@ function SidebarInner({
   const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
-  const deliverySidebarRows =
-    vertical === 'delivery'
-      ? buildDeliverySidebarStoreRows(activeStore.retailWorkCenters, activeStore.allPointsOfSale)
-      : [];
+  const deliverySidebarRows = vertical === 'delivery' ? sidebarDelivery.rows : [];
 
   const salesPointRows: SidebarItem[] =
     vertical === 'delivery'
@@ -1061,7 +1073,17 @@ function SidebarInner({
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
-    workCentersSidebarCount === 0
+    vertical === 'delivery' && sidebarDelivery.loading && deliverySidebarRows.length === 0
+      ? [
+          {
+            id: 'salesPoints-loading',
+            label: t('sidebar.workCenters.loading', 'Cargando tiendas…'),
+            icon: <Loader2 className="w-3.5 h-3.5 animate-spin" />,
+            path: '#',
+            disabled: true,
+          },
+        ]
+      : workCentersSidebarCount === 0
       ? [
           {
             id: 'salesPoints-settings',
@@ -1174,7 +1196,10 @@ function SidebarInner({
 
   const searchNorm = sidebarSearch.trim().toLowerCase();
   const itemMatchesSearch = (item: SidebarItem) =>
-    !searchNorm || item.label.toLowerCase().includes(searchNorm) || item.id.toLowerCase().includes(searchNorm);
+    !searchNorm
+    || item.label.toLowerCase().includes(searchNorm)
+    || item.id.toLowerCase().includes(searchNorm)
+    || (item.subLabel?.toLowerCase().includes(searchNorm) ?? false);
 
   const splitGroupsBySearch = (groups: Array<SidebarGroup & { items: SidebarItem[] }>) => {
     if (!searchNorm) return { matched: groups, unmatched: [] as typeof groups };

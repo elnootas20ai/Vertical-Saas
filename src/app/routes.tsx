@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './context/AuthContext';
 import { useBusinessOptional } from './context/BusinessContext';
 import { isWorkerAccount } from './lib/authApi';
@@ -307,7 +308,7 @@ import {
   WorkerStockReviewPage,
 } from './pages/saas/worker';
 import { UserDashboard } from './pages/saas/UserDashboard';
-import { ProtectedRoute } from './components/ProtectedRoute';
+import { AuthRouteLoading } from './components/AuthRouteLoading';
 
 function MechanicStandalone() {
   return (
@@ -336,7 +337,7 @@ function SaasIndexRedirect() {
   const businessesPending =
     !businessCtx?.businessesFetchSettled || Boolean(businessCtx?.isLoading);
   if (businessesPending) {
-    return null;
+    return <AuthRouteLoading label="Preparando espacio de trabajo…" />;
   }
   const ownsBusiness = userOwnsAnyBusiness(user.user_id, businessCtx?.businesses);
   if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim() && !ownsBusiness) {
@@ -387,7 +388,11 @@ export const router = createBrowserRouter([
       },
       {
         path: 'auth/login',
-        Component: Login,
+        element: (
+          <ErrorBoundary moduleName="Inicio de sesión">
+            <Login />
+          </ErrorBoundary>
+        ),
       },
       {
         path: 'auth/team-login',

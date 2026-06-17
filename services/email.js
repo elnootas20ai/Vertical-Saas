@@ -827,6 +827,50 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
   };
 }
 
+export function buildLoginCodeEmail(email, code) {
+  const support = getSupportMailto();
+  const supportBlock = support
+    ? `<p style="color:#555;font-size:13px;margin:20px 0 0;line-height:1.5;">
+            ¿No fuiste tú? Escríbenos a
+            <a href="mailto:${encodeURIComponent(support)}" style="color:#111;font-weight:600;">${escapeHtml(support)}</a>.
+          </p>`
+    : '';
+
+  return {
+    subject: 'Código de acceso · Vertial',
+    html: `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:#000;padding:24px 32px;">
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu código de acceso</h2>
+          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+            Usa este código para entrar a la cuenta <strong>${escapeHtml(email)}</strong>.
+          </p>
+          <p style="margin:0 0 8px;font-size:32px;font-weight:bold;letter-spacing:8px;color:#111;text-align:center;">${escapeHtml(code)}</p>
+          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;text-align:center;">
+            Válido <strong>10 minutos</strong>. No compartas este código.
+          </p>
+          ${supportBlock}
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+  };
+}
+
 export function buildPasswordResetEmail(email, token) {
   const baseUrl = getAppBaseUrl();
   const resetUrl = `${baseUrl}/auth/reset-password?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;

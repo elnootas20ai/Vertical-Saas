@@ -167,6 +167,16 @@ async function main() {
           `${retail.length} tienda(s) retail · dataUserId=${dataUserId.slice(0, 8)}…`,
         );
       }
+
+      const tpvRes = await api(
+        `/api/delivery/tpv-sessions/${encodeURIComponent(dataUserId)}`,
+        { token },
+      );
+      if (tpvRes.status === 200 && tpvRes.data?.ok === true && Array.isArray(tpvRes.data?.sessions)) {
+        ok(`caja:${name}`, `${tpvRes.data.sessions.length} sesión(es) TPV`);
+      } else {
+        fail(`caja:${name}`, tpvRes.data?.error || `HTTP ${tpvRes.status}`);
+      }
     } else {
       ok(`stores:${name}`, 'no delivery — tiendas omitidas');
     }

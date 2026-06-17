@@ -68,35 +68,72 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
 
   if (doc.salesPointName) chunks.push(textLine(`Tienda: ${doc.salesPointName}`, width));
   chunks.push(textLine(`Pedido: #${doc.orderNumber}`, width));
-  chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
-  if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
-  chunks.push(textLine('--------------------------------', width));
 
-  for (const line of doc.lines) {
-    chunks.push(textLine(row(`${line.qty}x ${line.name}`, money(line.total), width), width));
+  if (doc.variant === 'kitchen') {
+    if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
+    chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
+    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
+    if (doc.customerAddress) chunks.push(textLine(doc.customerAddress, width));
+    if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
+    chunks.push(textLine('--------------------------------', width));
+    for (const line of doc.lines) {
+      chunks.push(textLine(`${line.qty}x ${line.name}`, width));
+      if (line.notes) chunks.push(textLine(`  > ${line.notes}`, width));
+    }
+    if (doc.orderNotes) {
+      chunks.push(textLine('--------------------------------', width));
+      chunks.push(textLine(`NOTA: ${doc.orderNotes}`, width));
+    }
+  } else if (doc.variant === 'delivery') {
+    chunks.push(textLine(doc.customerName, width));
+    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
+    if (doc.customerAddress) chunks.push(textLine(doc.customerAddress, width));
+    chunks.push(textLine('--------------------------------', width));
+    for (const line of doc.lines) {
+      chunks.push(textLine(`${line.qty}x ${line.name}`, width));
+    }
+    chunks.push(
+      textLine('--------------------------------', width),
+      command([ESC, 0x45, 1]),
+      textLine(row('TOTAL', money(doc.total), width), width),
+      command([ESC, 0x45, 0]),
+      textLine(doc.paymentStatusLabel, width),
+    );
+    if (doc.paymentLabel && doc.paymentLabel !== '-') {
+      chunks.push(textLine(doc.paymentLabel, width));
+    }
+    if (doc.orderNotes) chunks.push(textLine(`NOTA: ${doc.orderNotes}`, width));
+  } else {
+    chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
+    if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
+    chunks.push(textLine('--------------------------------', width));
+
+    for (const line of doc.lines) {
+      chunks.push(textLine(row(`${line.qty}x ${line.name}`, money(line.total), width), width));
+    }
+
+    chunks.push(
+      textLine('--------------------------------', width),
+      textLine(row('Base imponible', money(doc.base), width), width),
+      textLine(row(`IVA ${doc.vatRate}%`, money(doc.vat), width), width),
+      textLine('--------------------------------', width),
+      command([ESC, 0x45, 1]),
+      textLine(
+        row(doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL', `${doc.isRefund ? '-' : ''}${money(doc.total)}`, width),
+        width,
+      ),
+      command([ESC, 0x45, 0]),
+      textLine('--------------------------------', width),
+      textLine(`Metodo: ${doc.paymentLabel}`, width),
+    );
+
+    if (doc.refundReason) chunks.push(textLine(`Motivo: ${doc.refundReason}`, width));
   }
-
-  chunks.push(
-    textLine('--------------------------------', width),
-    textLine(row('Base imponible', money(doc.base), width), width),
-    textLine(row(`IVA ${doc.vatRate}%`, money(doc.vat), width), width),
-    textLine('--------------------------------', width),
-    command([ESC, 0x45, 1]),
-    textLine(
-      row(doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL', `${doc.isRefund ? '-' : ''}${money(doc.total)}`, width),
-      width,
-    ),
-    command([ESC, 0x45, 0]),
-    textLine('--------------------------------', width),
-    textLine(`Metodo: ${doc.paymentLabel}`, width),
-  );
-
-  if (doc.refundReason) chunks.push(textLine(`Motivo: ${doc.refundReason}`, width));
 
   chunks.push(
     command([ESC, 0x61, 1]),
     textLine(doc.footer, width),
-    textLine('Gracias por su visita', width),
+    textLine(doc.variant === 'customer' ? 'Gracias por su visita' : '', width),
     textLine('', width),
     textLine('', width),
     command([GS, 0x56, 0]),
@@ -108,6 +145,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
 export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return encodeTicketEscpos({
+    variant: 'customer',
     title: 'PRUEBA',
     ticketNo: 'TEST-001',
     dateLabel: now,
@@ -118,6 +156,9 @@ export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
     salesPointName: '',
     orderNumber: '0000',
     customerName: 'Impresion de prueba',
+    customerPhone: '',
+    customerAddress: '',
+    deliveryTypeLabel: '',
     cashierName: '',
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],
     base: 8.26,
@@ -125,7 +166,9 @@ export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
     vatRate: 21,
     total: 9.99,
     paymentLabel: 'Efectivo',
+    paymentStatusLabel: 'Cobrado',
     refundReason: '',
+    orderNotes: '',
     footer: 'Si ves esto, la impresora funciona',
     isRefund: false,
   }, paperWidthMm);

@@ -51,10 +51,11 @@ export function filterOrdersForActivePdv<T extends { salesPointId?: string | nul
   pdvId: string | null | undefined,
   primaryPdvId: string | null | undefined,
   pdvName?: string | null,
+  pdvWorkCenterId?: string | null,
 ): T[] {
   if (!pdvId) return orders;
   return orders.filter((o) =>
-    deliveryOrderMatchesPdvFilter(o, pdvId, { primaryPdvId, pdvName }),
+    deliveryOrderMatchesPdvFilter(o, pdvId, { primaryPdvId, pdvName, pdvWorkCenterId }),
   );
 }
 

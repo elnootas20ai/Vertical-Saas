@@ -1,17 +1,15 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
-import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { ensureTpvSessionIncome } from '../../lib/tpvFinanceSync';
 import {
-  listTpvRegisterSessionsRequest,
+  listCajaBootstrapRequest,
   updateTpvRegisterSessionRequest,
   filterDeliveryOrdersRequest,
-  listDriverCashSessionsRequest,
   type TpvRegisterSession,
   type TpvRegisterSummary,
   type PointOfSale,
@@ -22,10 +20,10 @@ import {
 import {
   Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
   Store, Clock, BarChart3, AlertTriangle, CheckCircle2, XCircle,
-  ChevronDown, ChevronUp, Filter, Download, Calendar, Eye,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Download, Calendar, Eye,
   ShieldCheck, ShieldX, MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin,
-  ArrowLeft, Plug,
+  ArrowLeft, Plug, History, ShoppingBag, Radio,
 } from 'lucide-react';
 import {
   buildAggregatorCashRows,
@@ -97,21 +95,333 @@ const TPV_TX_LABELS: Record<string, string> = {
   tip: 'Propina',
 };
 
-// ─── KPI Card ──────────────────────────────────────────────────────────────
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
-function KpiCard({ label, value, sub, color = 'gray' }: { label: string; value: string; sub?: string; color?: string }) {
-  const colors: Record<string, string> = {
-    green: 'bg-green-50 dark:bg-green-900/20 border-green-100 dark:border-green-800',
-    blue: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800',
-    amber: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800',
-    red: 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-800',
-    gray: 'bg-gray-50 dark:bg-gray-900/30 border-gray-100 dark:border-gray-800',
-  };
+function addDaysIso(isoDate: string, delta: number): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDayHeading(isoDate: string): string {
+  const today = todayIsoDate();
+  if (isoDate === today) return 'Hoy';
+  if (isoDate === addDaysIso(today, -1)) return 'Ayer';
+  return new Date(`${isoDate}T12:00:00`).toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+function sessionOnDate(session: TpvRegisterSession, isoDate: string): boolean {
+  const openDay = session.openedAt?.slice(0, 10);
+  const closeDay = session.closedAt?.slice(0, 10);
+  return openDay === isoDate || closeDay === isoDate;
+}
+
+/** Cierres de prueba (sin ventas ni descuadre) no bloquean la bandeja del gerente. */
+function isMeaningfulPendingClose(session: TpvRegisterSession): boolean {
+  if (session.status !== 'closed' || session.closingValidationStatus !== 'pending') return false;
+  const sales = session.transactions?.filter((t) => t.type === 'sale').length || 0;
+  const hasDiff = Math.abs(session.difference || 0) >= 0.01;
+  const hasIncidents = (session.incidents?.length || 0) > 0;
+  return sales > 0 || hasDiff || hasIncidents;
+}
+
+function isEmptyTestClose(session: TpvRegisterSession): boolean {
+  if (session.status !== 'closed' || session.closingValidationStatus !== 'pending') return false;
+  const sales = session.transactions?.filter((t) => t.type === 'sale').length || 0;
+  return sales === 0 && Math.abs(session.difference || 0) < 0.01;
+}
+
+function isAutoValidatedEmptyTurn(session: TpvRegisterSession): boolean {
+  if (session.status !== 'closed' || session.closingValidationStatus !== 'validated') return false;
+  const sales = session.transactions?.filter((t) => t.type === 'sale').length || 0;
+  return sales === 0 && Math.abs(session.difference || 0) < 0.01;
+}
+
+function sessionStatusLabel(session: TpvRegisterSession): { text: string; className: string } {
+  if (session.status === 'open') {
+    return { text: 'Abierta', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' };
+  }
+  if (session.closingValidationStatus === 'pending') {
+    return { text: 'Pendiente', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' };
+  }
+  if (session.closingValidationStatus === 'validated') {
+    return { text: 'Validada', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' };
+  }
+  if (session.closingValidationStatus === 'rejected') {
+    return { text: 'Rechazada', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' };
+  }
+  return { text: 'Cerrada', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' };
+}
+
+interface StoreDayGroup {
+  pdvId: string;
+  storeName: string;
+  sessions: TpvRegisterSession[];
+  openCount: number;
+  totalSales: number;
+}
+
+function groupSessionsByStore(
+  daySessions: TpvRegisterSession[],
+  pointsOfSale: PointOfSale[],
+): StoreDayGroup[] {
+  const byPdv = new Map<string, TpvRegisterSession[]>();
+  for (const s of daySessions) {
+    const id = String(s.pointOfSaleId || '_sin_tienda').trim();
+    const list = byPdv.get(id) || [];
+    list.push(s);
+    byPdv.set(id, list);
+  }
+
+  const storeIds = new Set<string>();
+  for (const p of pointsOfSale) storeIds.add(p._id);
+  for (const id of byPdv.keys()) if (id !== '_sin_tienda') storeIds.add(id);
+
+  const groups: StoreDayGroup[] = [];
+  for (const pdvId of storeIds) {
+    const pdv = pointsOfSale.find((p) => p._id === pdvId);
+    const storeName = pdv?.name || daySessions.find((s) => s.pointOfSaleId === pdvId)?.pointOfSaleName || 'Tienda';
+    const sessions = (byPdv.get(pdvId) || []).sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
+    const openCount = sessions.filter((s) => s.status === 'open').length;
+    const totalSales = sessions.reduce((sum, s) => sum + buildSummary(s).totalSales, 0);
+    groups.push({ pdvId, storeName, sessions, openCount, totalSales });
+  }
+
+  for (const [pdvId, sessions] of byPdv) {
+    if (pdvId === '_sin_tienda' || storeIds.has(pdvId)) continue;
+    groups.push({
+      pdvId,
+      storeName: sessions[0]?.pointOfSaleName || 'Tienda',
+      sessions: sessions.sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt))),
+      openCount: sessions.filter((s) => s.status === 'open').length,
+      totalSales: sessions.reduce((sum, s) => sum + buildSummary(s).totalSales, 0),
+    });
+  }
+
+  return groups.sort((a, b) => {
+    if (a.openCount !== b.openCount) return b.openCount - a.openCount;
+    if (a.sessions.length !== b.sessions.length) return b.sessions.length - a.sessions.length;
+    return a.storeName.localeCompare(b.storeName, 'es');
+  });
+}
+
+function last7Days(): string[] {
+  const today = todayIsoDate();
+  return Array.from({ length: 7 }, (_, i) => addDaysIso(today, -6 + i)  );
+}
+
+// ─── Vista por tienda / turno ───────────────────────────────────────────────
+
+function turnAccentClass(session: TpvRegisterSession): string {
+  if (session.status === 'open') return 'border-l-emerald-500';
+  if (session.closingValidationStatus === 'pending') return 'border-l-amber-500';
+  if (session.closingValidationStatus === 'rejected') return 'border-l-red-500';
+  if (session.closingValidationStatus === 'validated') return 'border-l-blue-500';
+  return 'border-l-gray-300 dark:border-l-gray-600';
+}
+
+function turnBadgeClass(session: TpvRegisterSession): string {
+  if (session.status === 'open') return 'bg-emerald-600 text-white ring-emerald-200 dark:ring-emerald-900';
+  if (session.closingValidationStatus === 'pending') return 'bg-amber-500 text-white ring-amber-200 dark:ring-amber-900';
+  if (session.closingValidationStatus === 'rejected') return 'bg-red-500 text-white ring-red-200 dark:ring-red-900';
+  if (session.closingValidationStatus === 'validated') return 'bg-blue-600 text-white ring-blue-200 dark:ring-blue-900';
+  return 'bg-gray-600 text-white ring-gray-200 dark:ring-gray-700';
+}
+
+function StoreDayBlock({
+  group,
+  expandedSessionId,
+  onToggleSession,
+  onViewClosing,
+  onValidate,
+}: {
+  group: StoreDayGroup;
+  expandedSessionId: string | null;
+  onToggleSession: (id: string) => void;
+  onViewClosing: (session: TpvRegisterSession) => void;
+  onValidate: (session: TpvRegisterSession) => void;
+}) {
   return (
-    <div className={`p-4 rounded-xl border ${colors[color] || colors.gray}`}>
-      <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">{label}</div>
-      <div className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">{value}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+      <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 flex items-center justify-center shrink-0">
+            <Store className="w-4 h-4 text-white dark:text-gray-900" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-gray-100">{group.storeName}</h3>
+            <p className="text-[11px] text-gray-500">
+              {group.sessions.length === 0
+                ? 'Sin turnos este día'
+                : `${group.sessions.length} turno${group.sessions.length > 1 ? 's' : ''}${group.openCount > 0 ? ` · ${group.openCount} abierta${group.openCount > 1 ? 's' : ''} ahora` : ''}`}
+              {group.totalSales > 0 ? ` · ${group.totalSales.toFixed(2)}€` : ''}
+            </p>
+          </div>
+        </div>
+        {group.openCount > 0 && (
+          <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 animate-pulse">
+            En vivo
+          </span>
+        )}
+      </div>
+
+      {group.sessions.length === 0 ? (
+        <p className="px-4 py-6 text-sm text-center text-gray-400">Nadie abrió caja aquí este día</p>
+      ) : (
+        <div className="p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/30">
+          {group.sessions.map((session, turnIndex) => {
+            const summary = buildSummary(session);
+            const status = sessionStatusLabel(session);
+            const expanded = expandedSessionId === session._id;
+            const turnNumber = turnIndex + 1;
+            const emptyAuto = isAutoValidatedEmptyTurn(session);
+            const timeRange = `${new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}${session.closedAt ? ` – ${new Date(session.closedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}` : ' – …'}`;
+            const diffLabel = session.status === 'closed'
+              ? `${session.difference >= 0 ? '+' : ''}${session.difference.toFixed(2)}€`
+              : `${calcExpectedCash(session).toFixed(2)}€ ef.`;
+
+            const isSiblingCollapsed = Boolean(expandedSessionId && !expanded);
+
+            return (
+              <div
+                key={session._id}
+                data-caja-turn={session._id}
+                className={`transition-all duration-300 ease-out ${turnAccentClass(session)} ${
+                  expanded
+                    ? 'rounded-xl border-2 border-indigo-600 dark:border-indigo-500 bg-white dark:bg-gray-800 shadow-xl shadow-indigo-200/40 dark:shadow-none scale-100 opacity-100'
+                    : `rounded-lg border-2 border-dashed bg-white dark:bg-gray-800 shadow-none scale-[0.98] ${
+                        isSiblingCollapsed
+                          ? 'border-gray-200 dark:border-gray-700 opacity-45 hover:opacity-70'
+                          : 'border-gray-300 dark:border-gray-600 opacity-100 hover:border-gray-400 hover:shadow-sm'
+                      }`
+                }`}
+              >
+                {expanded ? (
+                  <>
+                    <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 bg-indigo-600 dark:bg-indigo-700 text-white border-b border-indigo-700 dark:border-indigo-600">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="shrink-0 w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-sm font-bold tabular-nums">
+                          {turnNumber}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold uppercase tracking-wide truncate">
+                            Turno {turnNumber} · desplegado
+                          </p>
+                          <p className="text-[11px] text-indigo-100 truncate font-mono tabular-nums">
+                            {timeRange} · {session.workerName}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onToggleSession(session._id)}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-indigo-700 text-xs font-bold uppercase tracking-wide hover:bg-indigo-50 transition-colors shadow-sm"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                        Plegar
+                      </button>
+                    </div>
+
+                    <div className="border-l-[4px] border-indigo-400 dark:border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/20">
+                      <div className="px-4 py-3 flex flex-wrap items-center gap-2 border-b border-indigo-100 dark:border-indigo-900/50 bg-white/70 dark:bg-gray-800/70">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${status.className}`}>
+                          {status.text}
+                        </span>
+                        <span className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {summary.totalSales.toFixed(2)}€
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {summary.totalTransactions} movimientos · {session.terminalName}
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        <RegisterCard session={session} onViewClosing={onViewClosing} detailOnly />
+                      </div>
+                      <div className="px-4 pb-4">
+                        <button
+                          type="button"
+                          onClick={() => onToggleSession(session._id)}
+                          className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold uppercase tracking-wide transition-colors flex items-center justify-center gap-2 shadow-md"
+                        >
+                          <ChevronUp className="w-5 h-5" />
+                          Plegar turno {turnNumber}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSession(session._id)}
+                    aria-expanded={false}
+                    className="w-full text-left px-3 py-2.5 sm:px-4 sm:py-3 hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`shrink-0 w-9 h-9 rounded-lg flex flex-col items-center justify-center ring-2 ${turnBadgeClass(session)} group-hover:scale-105 transition-transform`}
+                        aria-hidden
+                      >
+                        <span className="text-[8px] font-bold uppercase leading-none opacity-80">T</span>
+                        <span className="text-sm font-bold leading-none tabular-nums">{turnNumber}</span>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                          <span className="text-[11px] font-mono tabular-nums text-gray-500">{timeRange}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${status.className}`}>
+                            {status.text}
+                          </span>
+                          {emptyAuto && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-gray-100 text-gray-500">
+                              Sin ventas
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                          {session.workerName}
+                          <span className="text-gray-400 font-normal"> · {session.terminalName}</span>
+                        </p>
+                        <p className="text-[10px] text-gray-400">{summary.totalTransactions} movimientos</p>
+                      </div>
+
+                      <div className="hidden sm:block text-right shrink-0 mr-1">
+                        <div className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {summary.totalSales.toFixed(2)}€
+                        </div>
+                        <div className={`text-[10px] tabular-nums ${session.status === 'closed' && session.difference !== 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                          {session.status === 'closed' ? `Dif. ${diffLabel}` : diffLabel}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        {session.status === 'closed' && session.closingValidationStatus === 'pending' && isMeaningfulPendingClose(session) && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onValidate(session); }}
+                            className="px-2 py-1 text-[9px] font-bold rounded-md bg-blue-600 text-white"
+                          >
+                            Revisar
+                          </button>
+                        )}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border-2 border-gray-800 dark:border-gray-200 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-[10px] font-bold uppercase tracking-wide group-hover:bg-gray-900 group-hover:text-white dark:group-hover:bg-gray-100 dark:group-hover:text-gray-900 transition-colors">
+                          <ChevronDown className="w-3.5 h-3.5" />
+                          Desplegar
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -122,12 +432,16 @@ function RegisterCard({
   session,
   isDriver = false,
   onViewClosing,
+  defaultExpanded = false,
+  detailOnly = false,
 }: {
   session: TpvRegisterSession | DriverCashSession;
   isDriver?: boolean;
   onViewClosing?: (session: TpvRegisterSession) => void;
+  defaultExpanded?: boolean;
+  detailOnly?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded || detailOnly);
 
   if (isDriver) {
     const ds = session as DriverCashSession;
@@ -161,9 +475,69 @@ function RegisterCard({
   const summary = buildSummary(ts);
   const incidentCount = ts.incidents?.filter(i => !i.resolvedAt).length || 0;
   const lastCount = ts.cashCounts[ts.cashCounts.length - 1];
+  const accentBorder =
+    ts.status === 'open'
+      ? 'border-l-emerald-500'
+      : ts.closingValidationStatus === 'pending'
+        ? 'border-l-amber-400'
+        : ts.closingValidationStatus === 'rejected'
+          ? 'border-l-red-400'
+          : 'border-l-slate-300 dark:border-l-slate-600';
+
+  const detailBody = (
+    <div className="space-y-4">
+      {ts.status === 'closed' ? (
+        <>
+          <RegisterClosingDetailPanel session={ts} />
+          {onViewClosing && (
+            <button
+              type="button"
+              onClick={() => onViewClosing(ts)}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 underline"
+            >
+              Abrir cierre en pantalla completa
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <div>
+            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Movimientos</h4>
+            <div className="space-y-1">
+              {ts.transactions.slice(-15).reverse().map(tx => (
+                <div key={tx.id} className="flex items-center justify-between text-xs py-1.5 px-2 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-gray-400 w-10 shrink-0">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${tx.type === 'sale' ? 'bg-green-100 text-green-700' : tx.type === 'return' || tx.type === 'cash_out' ? 'bg-red-100 text-red-700' : tx.type === 'cash_in' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
+                    <span className="text-gray-600 dark:text-gray-400 truncate">{tx.description || tx.orderNumber || '—'}</span>
+                  </div>
+                  <span className={`font-semibold shrink-0 ml-2 ${tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
+                    {tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? '-' : '+'}{tx.amount.toFixed(2)}€
+                  </span>
+                </div>
+              ))}
+              {ts.transactions.length === 0 && <div className="text-xs text-gray-400 text-center py-4">Sin movimientos</div>}
+            </div>
+          </div>
+          {(ts.incidents?.length || 0) > 0 && (
+            <div>
+              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Incidencias</h4>
+              {ts.incidents.map(inc => (
+                <div key={inc.id} className="text-xs p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg mb-1">{inc.description}</div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  if (detailOnly) {
+    return <div className="pt-1">{detailBody}</div>;
+  }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+    <div className={`bg-white dark:bg-gray-800/95 rounded-xl border border-gray-200 dark:border-gray-700 border-l-[4px] ${accentBorder} overflow-hidden shadow-sm`}>
       <div className="p-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -243,70 +617,8 @@ function RegisterCard({
       </div>
 
       {expanded && (
-        <div className="border-t border-gray-100 dark:border-gray-700 p-4 space-y-4">
-          {ts.status === 'closed' ? (
-            <RegisterClosingDetailPanel session={ts} />
-          ) : (
-          <>
-          <div>
-            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Transacciones recientes</h4>
-            <div className="space-y-1">
-              {ts.transactions.slice(-10).reverse().map(tx => (
-                <div key={tx.id} className="flex items-center justify-between text-xs py-1.5 px-2 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <span className="text-gray-400 w-10">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${tx.type === 'sale' ? 'bg-green-100 text-green-700' : tx.type === 'return' || tx.type === 'cash_out' ? 'bg-red-100 text-red-700' : tx.type === 'cash_in' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
-                    <span className="text-gray-600 dark:text-gray-400 truncate max-w-[200px]">{tx.description || tx.orderNumber || '—'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {tx.channel && <span className="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">{tx.channel}</span>}
-                    <span className={`font-semibold ${tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                      {tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? '-' : '+'}{tx.amount.toFixed(2)}€
-                    </span>
-                    <span className="text-[10px] text-gray-400">{tx.paymentMethod}</span>
-                  </div>
-                </div>
-              ))}
-              {ts.transactions.length === 0 && <div className="text-xs text-gray-400 text-center py-4">Sin transacciones</div>}
-            </div>
-          </div>
-
-          {ts.cashCounts.length > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Arqueos</h4>
-              <div className="space-y-1">
-                {ts.cashCounts.map(cc => (
-                  <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <span className="text-gray-500">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}{cc.notes ? ` · ${cc.notes}` : ''}</span>
-                    <span className={`font-semibold ${cc.difference === 0 ? 'text-green-600' : cc.difference > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                      {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {(ts.incidents?.length || 0) > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Incidencias</h4>
-              <div className="space-y-1">
-                {ts.incidents.map(inc => (
-                  <div key={inc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${inc.severity === 'high' ? 'bg-red-100 text-red-700' : inc.severity === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                        {inc.severity === 'high' ? 'Alta' : inc.severity === 'medium' ? 'Media' : 'Baja'}
-                      </span>
-                      <span className="text-gray-600 truncate max-w-[250px]">{inc.description}</span>
-                    </div>
-                    <span className={`text-[10px] font-semibold ${inc.resolvedAt ? 'text-green-600' : 'text-amber-600'}`}>{inc.resolvedAt ? 'Resuelta' : 'Abierta'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          </>
-          )}
+        <div className="border-t border-gray-100 dark:border-gray-700 p-4">
+          {detailBody}
         </div>
       )}
     </div>
@@ -389,8 +701,6 @@ function ValidationModal({ session, shiftOrders, onValidate, onReject, onCancel 
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
 
-type TabId = 'estado' | 'historial' | 'incidencias';
-
 export function CajaPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
@@ -406,41 +716,42 @@ export function CajaPage() {
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [driverSessions, setDriverSessions] = useState<DriverCashSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabId>('estado');
+  const [selectedDate, setSelectedDate] = useState(() => todayIsoDate());
   const [filterPdv, setFilterPdv] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed'>('all');
+  const [onlyOpenNow, setOnlyOpenNow] = useState(false);
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+  const [showExtras, setShowExtras] = useState(false);
   const [validatingSession, setValidatingSession] = useState<TpvRegisterSession | null>(null);
   const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
-  const [ordersFrom, setOrdersFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 7);
-    return d.toISOString().slice(0, 10);
-  });
-  const [ordersTo, setOrdersTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [todayOrders, setTodayOrders] = useState<DeliveryOrder[]>([]);
+  const [dismissingEmpty, setDismissingEmpty] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
 
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
   const handleViewClosing = useCallback((session: TpvRegisterSession) => {
     setViewingClosingSession(session);
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!dataUserId) return;
-    const pdvForApi = filterPdv?.trim() || activeStoreScope.activeSalesPointId?.trim() || undefined;
+    const silent = options?.silent ?? hasLoadedOnceRef.current;
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
-      const [sessData, driverData] = await Promise.all([
-        listTpvRegisterSessionsRequest(dataUserId, pdvForApi ? { salesPointId: pdvForApi } : undefined),
-        listDriverCashSessionsRequest(dataUserId),
-      ]);
-      setSessions(sessData);
+      const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId);
+      const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values());
+      setSessions(unique);
       setDriverSessions(driverData);
+      hasLoadedOnceRef.current = true;
     } catch {
-      toast.error('Error al cargar datos de caja');
+      if (!silent) toast.error('Error al cargar datos de caja');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId]);
+  }, [dataUserId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -486,38 +797,19 @@ export function CajaPage() {
   }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
 
   useEffect(() => {
-    if (tab !== 'estado') return undefined;
-    const id = window.setInterval(() => { void loadData(); }, 30000);
+    const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
     return () => window.clearInterval(id);
-  }, [tab, loadData]);
-
-  const loadTodayOrders = useCallback(async () => {
-    if (!dataUserId) {
-      setTodayOrders([]);
-      return;
-    }
-    const day = new Date().toISOString().slice(0, 10);
-    try {
-      const data = await filterDeliveryOrdersRequest(dataUserId, {
-        dateFrom: `${day}T00:00:00.000Z`,
-        dateTo: `${day}T23:59:59.999Z`,
-        limit: 500,
-      });
-      setTodayOrders(data.orders || []);
-    } catch {
-      setTodayOrders([]);
-    }
-  }, [dataUserId]);
+  }, [loadData]);
 
   useEffect(() => {
-    void loadTodayOrders();
-  }, [loadTodayOrders]);
+    const onFocus = () => { void loadData({ silent: true }); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [loadData]);
 
-  const pointsOfSale = activeStoreScope.pointsOfSale;
-  const applyGlobalPdvFilter = useCallback((pdvId: string | undefined) => {
-    setFilterPdv(pdvId || '');
-  }, []);
-  useSyncDeliveryPdvFilter(pointsOfSale, applyGlobalPdvFilter);
+  const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
+    ? activeStoreScope.allPointsOfSale
+    : activeStoreScope.pointsOfSale;
 
   const loadOrders = useCallback(async () => {
     if (!dataUserId) return;
@@ -526,8 +818,8 @@ export function CajaPage() {
     try {
       const data = await filterDeliveryOrdersRequest(dataUserId, {
         ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
-        dateFrom: `${ordersFrom}T00:00:00.000Z`,
-        dateTo: `${ordersTo}T23:59:59.999Z`,
+        dateFrom: `${selectedDate}T00:00:00.000Z`,
+        dateTo: `${selectedDate}T23:59:59.999Z`,
         limit: 500,
       });
       setOrders(data.orders || []);
@@ -536,103 +828,96 @@ export function CajaPage() {
     } finally {
       setLoadingOrders(false);
     }
-  }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId, ordersFrom, ordersTo]);
+  }, [dataUserId, filterPdv, activeStoreScope.activeSalesPointId, selectedDate]);
 
   useEffect(() => {
-    if (tab !== 'historial') return;
+    if (!showExtras) return;
     void loadOrders();
-  }, [tab, loadOrders]);
+  }, [showExtras, loadOrders]);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayIsoDate();
+  const weekDays = useMemo(() => last7Days(), [todayStr]);
 
-  const todaySessions = useMemo(() => sessions.filter(s => s.openedAt?.startsWith(todayStr)), [sessions, todayStr]);
+  const daySessions = useMemo(() => {
+    let list = sessions.filter((s) => sessionOnDate(s, selectedDate));
+    if (onlyOpenNow) list = list.filter((s) => s.status === 'open');
+    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
+    return list;
+  }, [sessions, selectedDate, onlyOpenNow, filterPdv]);
+
+  const storeGroups = useMemo(() => {
+    const groups = groupSessionsByStore(daySessions, pointsOfSale);
+    if (filterPdv) return groups.filter((g) => g.pdvId === filterPdv);
+    return groups;
+  }, [daySessions, pointsOfSale, filterPdv]);
+
   const openSessions = useMemo(() => sessions.filter(s => s.status === 'open'), [sessions]);
   const openDriverSessions = useMemo(() => driverSessions.filter(s => s.status === 'open'), [driverSessions]);
-  const pendingValidation = useMemo(() => sessions.filter(s => s.status === 'closed' && s.closingValidationStatus === 'pending'), [sessions]);
-  const totalTerminals = useMemo(() => pointsOfSale.reduce((sum, p) => sum + p.terminals.filter(t => t.active).length, 0), [pointsOfSale]);
+  const pendingValidation = useMemo(() => sessions.filter(isMeaningfulPendingClose), [sessions]);
+  const emptyPendingClosures = useMemo(() => sessions.filter(isEmptyTestClose), [sessions]);
 
-  const todayTotalSales = useMemo(() => todaySessions.reduce((sum, s) => {
-    const sm = buildSummary(s);
-    return sum + sm.totalSales;
-  }, 0), [todaySessions]);
+  const dayStats = useMemo(() => {
+    const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
+    const storesWithActivity = new Set(allDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
+    const openNow = allDay.filter((s) => s.status === 'open').length;
+    const sales = allDay.reduce((sum, s) => sum + buildSummary(s).totalSales, 0);
+    const diff = allDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
+    return {
+      stores: filterPdv ? 1 : Math.max(storesWithActivity, storeGroups.length),
+      turns: allDay.length,
+      openNow,
+      sales,
+      diff,
+    };
+  }, [sessions, selectedDate, filterPdv, storeGroups.length]);
 
-  const todayCashInRegisters = useMemo(() => openSessions.reduce((sum, s) => sum + calcExpectedCash(s), 0), [openSessions]);
-
-  const todayByMethod = useMemo(() => {
-    const result = { efectivo: 0, tarjeta: 0, bizum: 0, online: 0, otro: 0 };
-    for (const s of todaySessions) {
-      const sm = buildSummary(s);
-      result.efectivo += sm.salesByMethod.efectivo;
-      result.tarjeta += sm.salesByMethod.tarjeta;
-      result.bizum += sm.salesByMethod.bizum;
-      result.online += sm.salesByMethod.online;
-      result.otro += sm.salesByMethod.otro;
-    }
-    return result;
-  }, [todaySessions]);
-
-  const todayDifference = useMemo(() => todaySessions.filter(s => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0), [todaySessions]);
-
-  const todayAggregatorRows = useMemo(
-    () => buildDailyAggregatorRows(closingPlatforms, todayOrders, todayStr, sessions),
-    [closingPlatforms, todayOrders, todayStr, sessions],
+  const dayAggregatorRows = useMemo(
+    () => buildDailyAggregatorRows(closingPlatforms, orders, selectedDate, sessions),
+    [closingPlatforms, orders, selectedDate, sessions],
   );
-  const todayAggregatorTotals = useMemo(() => sumAggregatorRows(todayAggregatorRows), [todayAggregatorRows]);
+
+  const ordersInRange = useMemo(() => {
+    return (orders || [])
+      .filter((o) => String(o.createdAt || o.updatedAt || '').slice(0, 10) === selectedDate)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }, [orders, selectedDate]);
 
   const validationShiftOrders = useMemo(() => {
     if (!validatingSession) return [];
     const from = new Date(validatingSession.openedAt).getTime();
     const to = new Date(validatingSession.closedAt || Date.now()).getTime();
-    return todayOrders.filter((o) => {
+    return ordersInRange.filter((o) => {
       const ts = new Date(o.createdAt || o.updatedAt || 0).getTime();
       return Number.isFinite(ts) && ts >= from && ts <= to;
     });
-  }, [validatingSession, todayOrders]);
+  }, [validatingSession, ordersInRange]);
 
-  const filteredSessions = useMemo(() => {
-    let result = tab === 'estado' ? sessions : sessions;
-    if (filterPdv) result = result.filter(s => s.pointOfSaleId === filterPdv);
-    if (filterStatus !== 'all') result = result.filter(s => s.status === filterStatus);
-    return result;
-  }, [sessions, filterPdv, filterStatus, tab]);
-
-  const ordersInRange = useMemo(() => {
-    if (!ordersFrom || !ordersTo) return [];
-    const from = new Date(`${ordersFrom}T00:00:00`).getTime();
-    const to = new Date(`${ordersTo}T23:59:59`).getTime();
-    return (orders || [])
-      .filter((o) => {
-        const ts = new Date(o.createdAt || o.updatedAt || '').getTime();
-        return Number.isFinite(ts) && ts >= from && ts <= to;
-      })
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  }, [orders, ordersFrom, ordersTo]);
-
-  const ordersMetrics = useMemo(() => {
-    const sales = ordersInRange.filter((o) => o.status !== 'cancelled');
-    const gross = sales.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
-    const count = sales.length;
-    const avg = count > 0 ? gross / count : 0;
-    const byMethod: Record<string, number> = {};
-    const byChannel: Record<string, number> = {};
-    for (const o of sales) {
-      const m = String(o.paymentMethod || 'otro');
-      const ch = String(o.channel || 'direct');
-      byMethod[m] = (byMethod[m] || 0) + Number(o.totalAmount || 0);
-      byChannel[ch] = (byChannel[ch] || 0) + Number(o.totalAmount || 0);
+  const handleDismissEmptyPending = async () => {
+    if (!dataUserId || emptyPendingClosures.length === 0) return;
+    setDismissingEmpty(true);
+    try {
+      const updatedList = await Promise.all(
+        emptyPendingClosures.map((s) =>
+          updateTpvRegisterSessionRequest(dataUserId, {
+            ...s,
+            closingValidationStatus: 'validated',
+            closingValidatedAt: new Date().toISOString(),
+            closingValidatedBy: user?.name || user?.email || 'Gerente',
+            closingValidationNotes: 'Archivado: cierre de prueba sin movimientos.',
+          }),
+        ),
+      );
+      setSessions((prev) => {
+        const byId = new Map(updatedList.map((s) => [s._id, s]));
+        return prev.map((s) => byId.get(s._id) || s);
+      });
+      toast.success(`${updatedList.length} cierre${updatedList.length > 1 ? 's' : ''} de prueba archivado${updatedList.length > 1 ? 's' : ''}`);
+    } catch {
+      toast.error('No se pudieron archivar los cierres vacíos');
+    } finally {
+      setDismissingEmpty(false);
     }
-    return { gross, count, avg, byMethod, byChannel };
-  }, [ordersInRange]);
-
-  const allIncidents = useMemo(() => {
-    const incs: (TpvIncident & { sessionTerminal: string; sessionWorker: string })[] = [];
-    for (const s of sessions) {
-      for (const inc of (s.incidents || [])) {
-        incs.push({ ...inc, sessionTerminal: `${s.pointOfSaleName ? `${s.pointOfSaleName} / ` : ''}${s.terminalName}`, sessionWorker: s.workerName });
-      }
-    }
-    return incs.sort((a, b) => b.date.localeCompare(a.date));
-  }, [sessions]);
+  };
 
   const handleValidate = async (notes: string) => {
     if (!validatingSession || !dataUserId) return;
@@ -683,11 +968,17 @@ export function CajaPage() {
     }
   };
 
-  const tabs: { id: TabId; label: string; count?: number }[] = [
-    { id: 'estado', label: 'Estado actual', count: openSessions.length },
-    { id: 'historial', label: 'Historial' },
-    { id: 'incidencias', label: 'Incidencias', count: allIncidents.filter(i => !i.resolvedAt).length || undefined },
-  ];
+  const handleToggleSession = useCallback((id: string) => {
+    setExpandedSessionId((prev) => {
+      const next = prev === id ? null : id;
+      if (next) {
+        requestAnimationFrame(() => {
+          document.querySelector(`[data-caja-turn="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+      return next;
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -724,255 +1015,236 @@ export function CajaPage() {
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Control de efectivo y cobros de cada TPV</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Elige un día → mira cada tienda → abre un turno para ver movimientos y cierre
+            </p>
           </div>
+          {openSessions.length > 0 && (
+            <span className="shrink-0 mt-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+              {openSessions.length} abierta{openSessions.length > 1 ? 's' : ''} ahora
+            </span>
+          )}
+          {refreshing && (
+            <span className="shrink-0 mt-1 text-[11px] text-gray-400">Actualizando…</span>
+          )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
-          <p className="text-xs text-blue-800 dark:text-blue-200">
-            Las alertas de caja (cierre, descuadre, horarios) se configuran en el centro de notificaciones.
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate('/saas/alerts?tab=ajustes')}
-            className="text-xs font-semibold text-blue-700 dark:text-blue-300 hover:underline shrink-0"
-          >
-            Configurar alertas de caja →
-          </button>
-        </div>
+        {/* ── 1. DÍA ── */}
+        <section className="rounded-2xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 sm:p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase tracking-wide">1 · Día</h2>
+          </div>
 
-        {/* Pending validations banner */}
-        {pendingValidation.length > 0 && (
-          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-semibold text-sm mb-2"><ShieldCheck className="w-4 h-4" /> {pendingValidation.length} cierre{pendingValidation.length > 1 ? 's' : ''} pendiente{pendingValidation.length > 1 ? 's' : ''} de validación</div>
-            <div className="space-y-1.5">
-              {pendingValidation.map(s => (
-                <div key={s._id} className="flex items-center justify-between text-xs bg-white dark:bg-gray-800 p-2.5 rounded-lg">
-                  <span className="text-gray-700 dark:text-gray-300">
-                    {s.pointOfSaleName ? `${s.pointOfSaleName} / ` : ''}{s.terminalName} · {s.workerName} · {new Date(s.closedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })} · Dif: <span className={s.difference === 0 ? 'text-green-600' : 'text-red-600 font-semibold'}>{s.difference >= 0 ? '+' : ''}{s.difference.toFixed(2)}€</span>
-                  </span>
-                  <button onClick={() => setValidatingSession(s)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center gap-1"><Eye className="w-3 h-3" /> Revisar</button>
-                </div>
-              ))}
+          <div className="flex flex-wrap gap-1.5">
+            {weekDays.map((d) => {
+              const active = d === selectedDate;
+              const label = d === todayStr ? 'Hoy' : new Date(`${d}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => { setSelectedDate(d); setExpandedSessionId(null); }}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-indigo-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setSelectedDate((d) => addDaysIso(d, -1))} className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100 capitalize min-w-[160px] text-center">
+                {formatDayHeading(selectedDate)}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelectedDate((d) => addDaysIso(d, 1))}
+                disabled={selectedDate >= todayStr}
+                className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 disabled:opacity-40"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              type="date"
+              value={selectedDate}
+              max={todayStr}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.stores}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Tiendas</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.turns}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Turnos</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-emerald-600">{dayStats.openNow}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Abiertas ahora</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.sales.toFixed(0)}€</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Ventas caja</div>
             </div>
           </div>
-        )}
+        </section>
 
-        {/* KPIs */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <KpiCard label="Cajas abiertas" value={`${openSessions.length + openDriverSessions.length}/${totalTerminals || '—'}`} color="green" sub={openDriverSessions.length > 0 ? `${openDriverSessions.length} repartidor${openDriverSessions.length > 1 ? 'es' : ''}` : undefined} />
-          <KpiCard label="Ventas hoy" value={`${todayTotalSales.toFixed(2)}€`} color="blue" sub={`${todaySessions.reduce((s, se) => s + se.transactions.filter(t => t.type === 'sale').length, 0)} operaciones`} />
-          <KpiCard label="Efectivo en caja" value={`${todayCashInRegisters.toFixed(2)}€`} color="green" />
-          <KpiCard label="Tarjeta hoy" value={`${todayByMethod.tarjeta.toFixed(2)}€`} color="blue" sub={todayByMethod.bizum > 0 ? `Bizum: ${todayByMethod.bizum.toFixed(2)}€` : undefined} />
-          <KpiCard label="Descuadre hoy" value={`${todayDifference >= 0 ? '+' : ''}${todayDifference.toFixed(2)}€`} color={todayDifference === 0 ? 'green' : Math.abs(todayDifference) > 20 ? 'red' : 'amber'} />
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <Plug className="w-4 h-4 text-purple-600" />
-              Agregadores hoy (Glovo, Uber, Just Eat, Flipdish)
-            </h2>
+        {pendingValidation.length > 0 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-amber-900 dark:text-amber-200">
+              <ShieldCheck className="w-4 h-4 inline mr-1" />
+              {pendingValidation.length} cierre{pendingValidation.length > 1 ? 's' : ''} esperando tu validación
+            </p>
             <button
               type="button"
-              onClick={() => navigate('/saas/vertical/delivery/integraciones')}
-              className="text-xs font-semibold text-purple-600 hover:text-purple-800 dark:text-purple-400"
+              onClick={() => setValidatingSession(pendingValidation[0])}
+              className="text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 text-white"
             >
-              Integraciones
+              Revisar
             </button>
           </div>
-          <AggregatorCashSummary rows={todayAggregatorRows} title="Totales declarados / sistema" />
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Total agregadores hoy: {todayAggregatorTotals.totalSales.toFixed(2)}€
+        )}
+
+        {emptyPendingClosures.length > 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+            <p className="text-xs text-gray-500">{emptyPendingClosures.length} cierres de prueba sin ventas</p>
+            <button type="button" disabled={dismissingEmpty} onClick={() => void handleDismissEmptyPending()} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white disabled:opacity-50">
+              {dismissingEmpty ? 'Archivando…' : 'Archivar'}
+            </button>
+          </div>
+        )}
+
+        {/* ── 2. TIENDAS ── */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Store className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide">2 · Tiendas y turnos</h2>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {pointsOfSale.length > 0 && (
+                <select
+                  value={filterPdv}
+                  onChange={(e) => setFilterPdv(e.target.value)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                >
+                  <option value="">Todas las tiendas ({pointsOfSale.length})</option>
+                  {pointsOfSale.map((p) => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                onClick={() => setOnlyOpenNow((v) => !v)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                  onlyOpenNow
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600'
+                }`}
+              >
+                Solo abiertas ahora
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-500 -mt-1">
+            Plegado = tarjeta compacta con borde discontinuo y botón «Desplegar». Abierto = barra índigo con «Plegar».
           </p>
-        </div>
 
-        {/* Tabs */}
-        <div className="flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${tab === t.id ? 'border-gray-900 dark:border-gray-100 text-gray-900 dark:text-gray-100' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {t.label}
-              {t.count != null && t.count > 0 && <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400">{t.count}</span>}
-            </button>
-          ))}
-        </div>
+          {storeGroups.length === 0 ? (
+            <div className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 text-gray-400">
+              <Store className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Ningún turno de caja este día</p>
+              {onlyOpenNow && <p className="text-xs mt-1">Prueba quitando el filtro «Solo abiertas ahora»</p>}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {storeGroups.map((group) => (
+                <StoreDayBlock
+                  key={group.pdvId}
+                  group={group}
+                  expandedSessionId={expandedSessionId}
+                  onToggleSession={handleToggleSession}
+                  onViewClosing={handleViewClosing}
+                  onValidate={setValidatingSession}
+                />
+              ))}
+            </div>
+          )}
 
-        {/* Filters */}
-        {(tab === 'estado' || tab === 'historial') && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2 text-xs text-gray-500"><Filter className="w-3.5 h-3.5" /> Filtrar:</div>
-            {pointsOfSale.length > 1 && (
-              <select value={filterPdv} onChange={e => setFilterPdv(e.target.value)}
-                className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                <option value="">Todos los PDV</option>
-                {pointsOfSale.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
-              </select>
-            )}
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as typeof filterStatus)}
-              className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-              <option value="all">Todas</option>
-              <option value="open">Abiertas</option>
-              <option value="closed">Cerradas</option>
-            </select>
-          </div>
-        )}
+          {openDriverSessions.length > 0 && (
+            <div className="rounded-2xl border border-amber-200 dark:border-amber-800 p-4 space-y-2">
+              <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                <Truck className="w-4 h-4" /> Repartidores con caja abierta
+              </h3>
+              {openDriverSessions.map((s) => (
+                <RegisterCard key={s._id} session={s} isDriver />
+              ))}
+            </div>
+          )}
+        </section>
 
-        {/* Tab content */}
-        {tab === 'estado' && (
-          <div className="space-y-3">
-            {openSessions.length === 0 && openDriverSessions.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <Store className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">No hay cajas abiertas</p>
-              </div>
-            )}
-            {openSessions.map(s => <RegisterCard key={s._id} session={s} onViewClosing={handleViewClosing} />)}
-            {openDriverSessions.map(s => <RegisterCard key={s._id} session={s as any} isDriver />)}
-          </div>
-        )}
+        {/* ── 3. Extra (opcional) ── */}
+        <section>
+          <button
+            type="button"
+            onClick={() => setShowExtras((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900"
+          >
+            <span className="flex items-center gap-2">
+              {showExtras ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              3 · Pedidos y agregadores del día (opcional)
+            </span>
+            <span className="text-xs text-gray-400 font-normal">No es el arqueo de caja</span>
+          </button>
 
-        {tab === 'historial' && (
-          <div className="space-y-3">
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Tickets (pedidos)</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Métricas por rango usando los pedidos guardados</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    type="date"
-                    value={ordersFrom}
-                    onChange={(e) => setOrdersFrom(e.target.value)}
-                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
-                  />
-                  <span className="text-xs text-gray-400">→</span>
-                  <input
-                    type="date"
-                    value={ordersTo}
-                    onChange={(e) => setOrdersTo(e.target.value)}
-                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void loadOrders()}
-                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                    disabled={loadingOrders}
-                  >
+          {showExtras && (
+            <div className="mt-3 space-y-4 pl-1">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Pedidos facturados</h3>
+                  <button type="button" onClick={() => void loadOrders()} disabled={loadingOrders} className="text-xs text-indigo-600 font-semibold">
                     {loadingOrders ? 'Cargando…' : 'Actualizar'}
                   </button>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4">
-                <KpiCard label="Ventas" value={`${ordersMetrics.gross.toFixed(2)}€`} color="blue" />
-                <KpiCard label="Tickets" value={`${ordersMetrics.count}`} color="gray" />
-                <KpiCard label="Ticket medio" value={`${ordersMetrics.avg.toFixed(2)}€`} color="gray" />
-                <KpiCard
-                  label="Efectivo"
-                  value={`${(ordersMetrics.byMethod.efectivo || 0).toFixed(2)}€`}
-                  color="green"
-                />
-                <KpiCard
-                  label="Tarjeta"
-                  value={`${(ordersMetrics.byMethod.tarjeta || 0).toFixed(2)}€`}
-                  color="blue"
-                />
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-                  <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Por método</p>
-                  <div className="space-y-1">
-                    {Object.entries(ordersMetrics.byMethod).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => (
-                      <div key={k} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-600 dark:text-gray-300">{k}</span>
-                        <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{v.toFixed(2)}€</span>
+                {ordersInRange.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-6">Sin pedidos</p>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 text-xs">
+                    {ordersInRange.map((o) => (
+                      <div key={o._id} className="flex justify-between py-2">
+                        <span>#{o.orderNumber} · {new Date(o.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
+                        <span className="font-bold">{Number(o.totalAmount || 0).toFixed(2)}€</span>
                       </div>
                     ))}
-                    {Object.keys(ordersMetrics.byMethod).length === 0 && (
-                      <div className="text-xs text-gray-400">Sin datos</div>
-                    )}
                   </div>
-                </div>
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3">
-                  <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Por canal</p>
-                  <div className="space-y-1">
-                    {Object.entries(ordersMetrics.byChannel).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => (
-                      <div key={k} className="flex items-center justify-between text-xs">
-                        <span className="text-gray-600 dark:text-gray-300">{k}</span>
-                        <span className="font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{v.toFixed(2)}€</span>
-                      </div>
-                    ))}
-                    {Object.keys(ordersMetrics.byChannel).length === 0 && (
-                      <div className="text-xs text-gray-400">Sin datos</div>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
-
-              <div className="mt-4">
-                <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Últimos tickets</p>
-                <div className="space-y-1">
-                  {ordersInRange.slice(0, 8).map((o) => (
-                    <div key={o._id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-gray-50 dark:bg-gray-900">
-                      <span className="text-gray-600 dark:text-gray-300 truncate">
-                        {new Date(o.createdAt || o.updatedAt || Date.now()).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })} · {o.orderNumber || o.id?.slice(-6)} · {o.customerName}
-                      </span>
-                      <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">{Number(o.totalAmount || 0).toFixed(2)}€</span>
-                    </div>
-                  ))}
-                  {!loadingOrders && ordersInRange.length === 0 && (
-                    <div className="text-xs text-gray-400 text-center py-4">Sin tickets en el rango</div>
-                  )}
-                </div>
+              <div className="rounded-xl border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-950/20 p-4">
+                <h3 className="text-sm font-bold flex items-center gap-2 mb-3"><Plug className="w-4 h-4 text-purple-600" /> Agregadores</h3>
+                <AggregatorCashSummary rows={dayAggregatorRows} title="Glovo, Uber, Just Eat…" />
               </div>
             </div>
+          )}
+        </section>
 
-            {filteredSessions.filter(s => s.status === 'closed').length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <Calendar className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">Sin sesiones cerradas</p>
-              </div>
-            )}
-            {filteredSessions.filter(s => s.status === 'closed').map(s => (
-              <RegisterCard key={s._id} session={s} onViewClosing={handleViewClosing} />
-            ))}
-          </div>
-        )}
-
-        {tab === 'incidencias' && (
-          <div className="space-y-2">
-            {allIncidents.length === 0 && (
-              <div className="text-center py-12 text-gray-400">
-                <AlertTriangle className="w-12 h-12 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">Sin incidencias</p>
-              </div>
-            )}
-            {allIncidents.map(inc => (
-              <div key={inc.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase ${inc.severity === 'high' ? 'bg-red-100 text-red-700' : inc.severity === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                    {inc.severity === 'high' ? 'Alta' : inc.severity === 'medium' ? 'Media' : 'Baja'}
-                  </span>
-                  <div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">{inc.description}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {new Date(inc.date).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })} · {inc.sessionTerminal} · {inc.reportedBy}
-                      {inc.amount != null && <span className="ml-2 font-semibold">{inc.amount.toFixed(2)}€</span>}
-                    </div>
-                  </div>
-                </div>
-                <span className={`px-2 py-1 rounded-lg text-[10px] font-bold ${inc.resolvedAt ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                  {inc.resolvedAt ? 'Resuelta' : 'Abierta'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
 
       </div>
 
