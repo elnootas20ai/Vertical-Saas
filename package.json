@@ -34,6 +34,7 @@
     "accounts:list-duplicates": "node scripts/delete-test-accounts.mjs --list-duplicates",
     "deploy:frontend": "node scripts/deploy-frontend.mjs",
     "deploy:backend": "node scripts/deploy-backend.mjs",
+    "deploy:all": "node scripts/deploy-all.mjs",
     "deploy:diagnose": "node scripts/remote-diagnose.mjs",
     "deploy:deep-diagnose": "node scripts/remote-deep-diagnose.mjs",
     "deploy:fix-dist": "node scripts/remote-fix-dist-perms.mjs",

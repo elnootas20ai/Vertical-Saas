@@ -55,8 +55,10 @@ set -e
 cd ${sq(repo)}
 
 echo "[deploy:backend] HEAD antes: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
-echo "[deploy:backend] git pull --ff-only"
-git pull --ff-only
+echo "[deploy:backend] git fetch + reset --hard origin (servidor = repo remoto)"
+git fetch origin
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+git reset --hard "origin/$BRANCH"
 echo "[deploy:backend] HEAD ahora: $(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 
 MODE="${forcedMode}"
