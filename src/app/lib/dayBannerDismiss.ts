@@ -3,12 +3,8 @@
  * Tras medianoche el día cambia y el banner puede volver a mostrarse.
  */
 
-export function localCalendarDayKey(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+export { localCalendarDayKey } from './tpvCajaScope';
+import { localCalendarDayKey } from './tpvCajaScope';
 
 export function isBannerDismissedForLocalToday(storageKey: string): boolean {
   if (!storageKey) return false;

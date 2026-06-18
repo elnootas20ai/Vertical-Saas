@@ -128,6 +128,14 @@ export function coerceSelectedPdvId(
   return pickDefaultActivePdvId(active);
 }
 
+/** PDV activo para TPV/Caja: preferencia guardada, selector global o única tienda activa. */
+export function resolveAutoSelectedPdvId(
+  pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean; createdAt?: string }>,
+  preferred: string | null | undefined,
+): string | null {
+  return coerceSelectedPdvId(pointsOfSale, preferred ?? null);
+}
+
 /** Si la preferencia es `wc:…`, devuelve el `_id` del PDV y opcionalmente reescribe storage al id estable. */
 export function normalizeStoredPdvPreference(
   pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean }>,

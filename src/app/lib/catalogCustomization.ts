@@ -703,6 +703,13 @@ function parseSupplementsArray(raw: unknown): CatalogSupplement[] {
     .filter((s): s is CatalogSupplement => Boolean(s));
 }
 
+export type ParseCatalogResolveOptions = {
+  /** TPV: solo ingredientes de esta pizza (Excel/ficha); sin lista maestra ni plantillas. */
+  productIngredientsOnly?: boolean;
+  /** TPV: todos los extras del negocio; ignora suplementos del producto. */
+  storeExtrasOnly?: boolean;
+};
+
 export function parseCatalogIngredients(
   item: CatalogItem,
   templates?: TpvCategoryTemplates,
@@ -710,6 +717,7 @@ export function parseCatalogIngredients(
   brandIngredientSelection?: TpvBrandIngredientSelection,
   legacyBrandIngredients?: TpvBrandCategoryIngredients,
   brands?: TpvBrandHint[],
+  options?: ParseCatalogResolveOptions,
 ): string[] {
   const templateKey = resolveTpvCategoryTemplateKey(item, brands);
 
@@ -717,6 +725,7 @@ export function parseCatalogIngredients(
     typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '',
   );
   if (fromProduct.length > 0) return fromProduct;
+  if (options?.productIngredientsOnly) return [];
 
   const brandIds = productBrandIdsFromItem(item);
 
@@ -753,9 +762,12 @@ export function parseCatalogSupplements(
   storeIngredients?: StoreIngredient[],
   defaultExtraPrice?: number,
   brands?: TpvBrandHint[],
+  options?: ParseCatalogResolveOptions,
 ): CatalogSupplement[] {
-  const fromProduct = parseSupplementsArray(item.customFields?.supplements);
-  if (fromProduct.length > 0) return fromProduct;
+  if (!options?.storeExtrasOnly) {
+    const fromProduct = parseSupplementsArray(item.customFields?.supplements);
+    if (fromProduct.length > 0) return fromProduct;
+  }
 
   const fromStore = parseStoreIngredientExtras(item, storeIngredients, defaultExtraPrice, brands);
   if (fromStore.length > 0) return fromStore;
@@ -826,8 +838,17 @@ export function buildOrderIngredients(
   templates?: TpvCategoryTemplates,
   storeIngredients?: StoreIngredient[],
   brandIngredientSelection?: TpvBrandIngredientSelection,
+  brands?: TpvBrandHint[],
 ): { name: string; quantity: string }[] {
-  return parseCatalogIngredients(item, templates, storeIngredients, brandIngredientSelection).map((name) => ({
+  return parseCatalogIngredients(
+    item,
+    templates,
+    storeIngredients,
+    brandIngredientSelection,
+    undefined,
+    brands,
+    { productIngredientsOnly: true },
+  ).map((name) => ({
     name,
     quantity: customization.removedIngredients.includes(name) ? 'sin' : 'normal',
   }));

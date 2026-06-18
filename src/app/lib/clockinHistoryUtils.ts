@@ -1,9 +1,9 @@
 import type { ClockinRecord } from './clockinsApi';
 import { deriveEffectiveClockinStatus, isClockinPresent } from './clockinStatus';
+import { localCalendarDayKey } from './tpvCajaScope';
 
 export function todayDateStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return localCalendarDayKey();
 }
 
 export function dateDaysAgo(days: number): string {
@@ -50,6 +50,30 @@ export function clockInTimeIso(record: Pick<ClockinRecord, 'entries' | 'createdA
   return record.entries?.find((e) => e.type === 'clock_in')?.time
     || record.createdAt
     || '';
+}
+
+/** Fichaje del día local (no mezclar UTC ni turnos anteriores). */
+export function clockinBelongsToLocalDay(
+  record: Pick<ClockinRecord, 'date' | 'entries' | 'createdAt'>,
+  dayKey = localCalendarDayKey(),
+): boolean {
+  const recordDay = String(record.date || '').trim();
+  if (recordDay && recordDay !== dayKey) return false;
+  const clockInIso = clockInTimeIso(record);
+  if (clockInIso) {
+    const clockDay = localCalendarDayKey(new Date(clockInIso));
+    if (clockDay !== dayKey) return false;
+  }
+  return recordDay === dayKey || Boolean(clockInIso);
+}
+
+/** Fichaje válido para el turno de caja: solo fichajes del día local de hoy. */
+export function clockinValidForRegisterSession(
+  record: Pick<ClockinRecord, 'date' | 'entries' | 'createdAt'>,
+  _sessionOpenedAt?: string | null | undefined,
+  dayKey = localCalendarDayKey(),
+): boolean {
+  return clockinBelongsToLocalDay(record, dayKey);
 }
 
 /** Orden cronológico de turnos (entrada más temprana primero). */

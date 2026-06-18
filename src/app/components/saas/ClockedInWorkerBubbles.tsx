@@ -12,7 +12,6 @@ interface ClockedInWorkerBubblesProps {
   loading?: boolean;
   compact?: boolean;
   label?: string;
-  emptyMessage?: string;
 }
 
 export function ClockedInWorkerBubbles({
@@ -22,25 +21,11 @@ export function ClockedInWorkerBubbles({
   loading = false,
   compact = false,
   label = 'En tienda',
-  emptyMessage = 'Nadie fichado — pulsa Fichar',
 }: ClockedInWorkerBubblesProps) {
   const selectable = Boolean(onSelect);
 
-  if (loading && workers.length === 0) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-gray-500 min-h-[2rem]">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        <span>Cargando equipo…</span>
-      </div>
-    );
-  }
-
   if (workers.length === 0) {
-    return (
-      <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 px-2.5 py-1.5 rounded-lg">
-        {emptyMessage}
-      </p>
-    );
+    return null;
   }
 
   return (

@@ -1,5 +1,5 @@
 import type { PointOfSale } from './deliveryApi';
-import { normalizeBusinessScopeId, filterPointsOfSaleForWorkCenters } from './deliverySetup';
+import { normalizeBusinessScopeId, sanitizeRetailScopeSnapshot } from './retailScopeSanitize';
 import type { WorkCenter } from './workCentersApi';
 
 export interface RetailScopeSnapshot {
@@ -7,40 +7,65 @@ export interface RetailScopeSnapshot {
   allPointsOfSale: PointOfSale[];
 }
 
-const CACHE_PREFIX = 'vertial_delivery_stores_cache:';
+const CACHE_PREFIX = 'vertial_delivery_stores_cache:v2:';
+const LEGACY_CACHE_PREFIX = 'vertial_delivery_stores_cache:';
 
-export function readRetailScopeCache(businessId: string): RetailScopeSnapshot | null {
+let legacyCachePurged = false;
+
+function purgeLegacyRetailScopeCache(): void {
+  if (legacyCachePurged || typeof sessionStorage === 'undefined') return;
+  legacyCachePurged = true;
+  try {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (!key?.startsWith(LEGACY_CACHE_PREFIX) || key.startsWith(CACHE_PREFIX)) continue;
+      sessionStorage.removeItem(key);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function readRetailScopeCache(
+  businessId: string,
+  options?: { accountBusinessCount?: number },
+): RetailScopeSnapshot | null {
   if (!businessId || typeof sessionStorage === 'undefined') return null;
+  purgeLegacyRetailScopeCache();
   try {
     const raw = sessionStorage.getItem(`${CACHE_PREFIX}${businessId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RetailScopeSnapshot;
     if (!parsed || !Array.isArray(parsed.retailWorkCenters)) return null;
-    const hasData =
-      parsed.retailWorkCenters.length > 0 ||
-      (Array.isArray(parsed.allPointsOfSale) && parsed.allPointsOfSale.length > 0);
-    if (!hasData) return null;
-    const retailWorkCenters = parsed.retailWorkCenters;
-    const allPointsOfSale = filterPointsOfSaleForWorkCenters(
-      Array.isArray(parsed.allPointsOfSale) ? parsed.allPointsOfSale : [],
-      retailWorkCenters,
+    const sanitized = sanitizeRetailScopeSnapshot(
+      businessId,
+      {
+        retailWorkCenters: parsed.retailWorkCenters,
+        allPointsOfSale: Array.isArray(parsed.allPointsOfSale) ? parsed.allPointsOfSale : [],
+      },
+      options,
     );
-    return {
-      retailWorkCenters,
-      allPointsOfSale,
-    };
+    const hasData =
+      sanitized.retailWorkCenters.length > 0 || sanitized.allPointsOfSale.length > 0;
+    if (!hasData) return null;
+    return sanitized;
   } catch {
     return null;
   }
 }
 
-export function writeRetailScopeCache(businessId: string, snapshot: RetailScopeSnapshot): void {
+export function writeRetailScopeCache(
+  businessId: string,
+  snapshot: RetailScopeSnapshot,
+  options?: { accountBusinessCount?: number },
+): void {
   if (!businessId || typeof sessionStorage === 'undefined') return;
+  const sanitized = sanitizeRetailScopeSnapshot(businessId, snapshot, options);
   const hasData =
-    snapshot.retailWorkCenters.length > 0 || snapshot.allPointsOfSale.length > 0;
+    sanitized.retailWorkCenters.length > 0 || sanitized.allPointsOfSale.length > 0;
   if (!hasData) return;
   try {
-    sessionStorage.setItem(`${CACHE_PREFIX}${businessId}`, JSON.stringify(snapshot));
+    sessionStorage.setItem(`${CACHE_PREFIX}${businessId}`, JSON.stringify(sanitized));
   } catch {
     // ignore
   }
@@ -75,17 +100,22 @@ export function seedRetailScopeCacheFromTabletLogin(params: {
   });
 }
 
-
 export function clearRetailScopeCache(businessId?: string): void {
   if (typeof sessionStorage === 'undefined') return;
   try {
     if (businessId) {
       sessionStorage.removeItem(`${CACHE_PREFIX}${businessId}`);
+      sessionStorage.removeItem(`${LEGACY_CACHE_PREFIX}${businessId}`);
       return;
     }
     for (let i = sessionStorage.length - 1; i >= 0; i--) {
       const key = sessionStorage.key(i);
-      if (key?.startsWith(CACHE_PREFIX)) sessionStorage.removeItem(key);
+      if (
+        key?.startsWith(CACHE_PREFIX) ||
+        (key?.startsWith(LEGACY_CACHE_PREFIX) && !key.startsWith(CACHE_PREFIX))
+      ) {
+        sessionStorage.removeItem(key);
+      }
     }
   } catch {
     // ignore

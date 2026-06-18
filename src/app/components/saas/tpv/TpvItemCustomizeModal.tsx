@@ -19,6 +19,7 @@ type TpvItemCustomizeModalProps = {
   templates?: import('../../../lib/catalogCustomization').TpvCategoryTemplates;
   storeIngredients?: StoreIngredient[];
   brandIngredientSelection?: import('../../../lib/catalogCustomization').TpvBrandIngredientSelection;
+  brandSupplements?: import('../../../lib/catalogCustomization').TpvBrandSupplements;
   defaultExtraPrice?: number;
   brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   onClose: () => void;
@@ -32,6 +33,7 @@ export function TpvItemCustomizeModal({
   templates,
   storeIngredients,
   brandIngredientSelection,
+  brandSupplements,
   defaultExtraPrice,
   brands,
   onClose,
@@ -40,13 +42,36 @@ export function TpvItemCustomizeModal({
   useModalClose(true, onClose);
 
   const customizable = isCustomizableCatalogItem(item, brands);
+  const tpvResolveOptions = useMemo(
+    () => ({ productIngredientsOnly: true, storeExtrasOnly: true }),
+    [],
+  );
   const ingredients = useMemo(
-    () => parseCatalogIngredients(item, templates, storeIngredients, brandIngredientSelection, undefined, brands),
-    [item, templates, storeIngredients, brandIngredientSelection, brands],
+    () =>
+      parseCatalogIngredients(
+        item,
+        templates,
+        storeIngredients,
+        brandIngredientSelection,
+        undefined,
+        brands,
+        tpvResolveOptions,
+      ),
+    [item, templates, storeIngredients, brandIngredientSelection, brands, tpvResolveOptions],
   );
   const supplements = useMemo(
-    () => parseCatalogSupplements(item, templates, brandIngredientSelection, undefined, storeIngredients, defaultExtraPrice, brands),
-    [item, templates, brandIngredientSelection, storeIngredients, defaultExtraPrice, brands],
+    () =>
+      parseCatalogSupplements(
+        item,
+        templates,
+        brandSupplements,
+        undefined,
+        storeIngredients,
+        defaultExtraPrice,
+        brands,
+        tpvResolveOptions,
+      ),
+    [item, templates, brandSupplements, storeIngredients, defaultExtraPrice, brands, tpvResolveOptions],
   );
 
   const [removed, setRemoved] = useState<string[]>(initial?.removedIngredients || []);

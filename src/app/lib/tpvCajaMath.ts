@@ -12,6 +12,21 @@ function isCashPaymentMethod(raw: string | null | undefined): boolean {
   return normalizeTpvPaymentMethod(raw) === 'efectivo';
 }
 
+export function sumCashStaffConsumption(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  return sumAmount(
+    session.transactions,
+    (t) => t.type === 'staff_consumption' && isCashPaymentMethod(t.paymentMethod),
+  );
+}
+
+export function sumCashReturns(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  return sumAmount(session.transactions, (t) => t.type === 'return' && isCashPaymentMethod(t.paymentMethod));
+}
+
+export function sumCashSales(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  return sumAmount(session.transactions, (t) => t.type === 'sale' && isCashPaymentMethod(t.paymentMethod));
+}
+
 function sumAmount(txs: TpvRegisterSession['transactions'], predicate: (tx: NonNullable<TpvRegisterSession['transactions']>[number]) => boolean): number {
   return (txs || [])
     .filter(predicate)
@@ -25,7 +40,7 @@ export function calcTpvExpectedCash(session: TpvRegisterSession): number {
     txs,
     (t) => (t.type === 'sale' || t.type === 'staff_consumption') && isCashPaymentMethod(t.paymentMethod),
   );
-  const cashReturns = sumAmount(txs, (t) => t.type === 'return' && isCashPaymentMethod(t.paymentMethod));
+  const cashReturns = sumCashReturns(session);
   const cashIn = sumAmount(txs, (t) => t.type === 'cash_in');
   const cashOut = sumAmount(txs, (t) => t.type === 'cash_out' || t.type === 'expense');
   return Number(session.initialCashAmount || 0) + cashSales - cashReturns + cashIn - cashOut;
@@ -68,4 +83,27 @@ export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegiste
 
 export function isCajaRegistrationOk(status: string | null | undefined): boolean {
   return status === 'registered' || status === 'nothing_to_register' || status === 'already_registered';
+}
+
+/** Compara recuento de pedidos vs ventas netas registradas en caja. */
+export function reconcileRegisterTotals(
+  summary: Pick<{ totalSales: number; totalReturns: number }, 'totalSales' | 'totalReturns'>,
+  breakdown: Pick<{ totalRevenue: number; orderCount: number }, 'totalRevenue' | 'orderCount'>,
+): {
+  netRegisterSales: number;
+  breakdownTotal: number;
+  orderCount: number;
+  difference: number;
+  aligned: boolean;
+} {
+  const netRegisterSales = Math.round((Number(summary.totalSales || 0) - Number(summary.totalReturns || 0)) * 100) / 100;
+  const breakdownTotal = Math.round(Number(breakdown.totalRevenue || 0) * 100) / 100;
+  const difference = Math.round((breakdownTotal - netRegisterSales) * 100) / 100;
+  return {
+    netRegisterSales,
+    breakdownTotal,
+    orderCount: breakdown.orderCount,
+    difference,
+    aligned: Math.abs(difference) < 0.02,
+  };
 }

@@ -4,7 +4,7 @@ import {
   Clock, User, Store,
 } from 'lucide-react';
 import type { DeliveryOrder, TpvRegisterSession, TpvRegisterSummary } from '../../lib/deliveryApi';
-import { filterDeliveryOrdersRequest } from '../../lib/deliveryApi';
+import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   aggregatorRowsFromClosingTotals,
   getClosingAggregatorPlatforms,
@@ -12,7 +12,7 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
-import { buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
+import { buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
   efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
@@ -79,14 +79,9 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     if (!userId || !session.openedAt) return;
     let cancelled = false;
     setOrdersLoading(true);
-    void filterDeliveryOrdersRequest(userId, {
-      salesPointId: session.pointOfSaleId,
-      dateFrom: session.openedAt,
-      dateTo: session.closedAt || new Date().toISOString(),
-      limit: 500,
-    })
-      .then((res) => {
-        if (!cancelled) setShiftOrders(res.orders || []);
+    void fetchShiftOrdersForSession(userId, session)
+      .then((orders) => {
+        if (!cancelled) setShiftOrders(orders);
       })
       .catch(() => {
         if (!cancelled) setShiftOrders([]);
@@ -97,7 +92,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     return () => {
       cancelled = true;
     };
-  }, [session.user_id, session.pointOfSaleId, session.openedAt, session.closedAt]);
+  }, [session.user_id, session.pointOfSaleId, session.openedAt, session.closedAt, session.status]);
 
   const aggregatorRows = useMemo(() => {
     if (aggregatorRowsProp?.length) return aggregatorRowsProp;
@@ -105,9 +100,8 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     return aggregatorRowsFromClosingTotals(getClosingAggregatorPlatforms(), totals);
   }, [aggregatorRowsProp, session.aggregatorClosingTotals, summary.salesByChannel]);
 
-  const cashReturns = transactions
-    .filter((t) => t.type === 'return' && t.paymentMethod === 'efectivo')
-    .reduce((s, t) => s + Number(t.amount || 0), 0);
+  const cashReturns = sumCashReturns(session);
+  const cashStaffConsumption = sumCashStaffConsumption(session);
 
   return (
     <div className="space-y-4">
@@ -157,12 +151,20 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </span>
       </div>
 
-      <RegisterShiftSalesBreakdown session={session} orders={shiftOrders} loading={ordersLoading} />
+      <RegisterShiftSalesBreakdown
+        session={session}
+        orders={shiftOrders}
+        loading={ordersLoading}
+        registerSummary={summary}
+      />
 
       <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
         <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Arqueo de efectivo</p>
         <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold">{fmtMoney(session.initialCashAmount)}€</span></div>
         <div className="flex justify-between"><span className="text-green-600">+ Cobros en efectivo</span><span className="font-semibold text-green-700">{fmtMoney(summary.salesByMethod.efectivo)}€</span></div>
+        {cashStaffConsumption > 0 && (
+          <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo (efectivo)</span><span className="font-semibold text-green-700">{fmtMoney(cashStaffConsumption)}€</span></div>
+        )}
         <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{fmtMoney(summary.totalCashIn)}€</span></div>
         <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{fmtMoney(cashReturns)}€</span></div>
         <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{fmtMoney(summary.totalCashOut)}€</span></div>

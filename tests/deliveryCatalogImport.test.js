@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as XLSX from 'xlsx';
 import {
   buildBrandCategoryMapFromItems,
   commercialLineBrands,
@@ -21,6 +22,8 @@ describe('deliveryCatalogImport', () => {
   it('readImportLineText prefers linea over marca', () => {
     expect(readImportLineText({ linea: 'modomio', marca: 'Coca-Cola' })).toBe('modomio');
     expect(readImportLineText({ marca: 'Sushi' })).toBe('Sushi');
+    expect(readImportLineText({ linea: 'Dejar linea vacía' })).toBe('');
+    expect(readImportLineText({ linea: '(vacío)' })).toBe('');
   });
 
   it('isCommercialLineBrand ignores supplier-only brands', () => {
@@ -161,16 +164,22 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(rows.some((r) => r[2] === 'Bebidas' && r[3] === '')).toBe(true);
   });
 
-  it('buildValidValuesRows lists each commercial line with its sections', async () => {
-    const { buildDeliveryCatalogImportWorkbook } = await import('../src/app/lib/deliveryCatalogExcelTemplate.ts');
+  it('buildDeliveryCatalogImportWorkbook: catalogo vacío + hojas de ayuda', async () => {
+    const {
+      buildDeliveryCatalogImportWorkbook,
+      DELIVERY_CATALOG_TEMPLATE_HEADERS,
+      DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
+    } = await import('../src/app/lib/deliveryCatalogExcelTemplate.ts');
     const wb = buildDeliveryCatalogImportWorkbook([
-      { _id: 'a', name: 'modomio', active: true, catalogCategories: ['Pizzas'] },
-      { _id: 'b', name: 'Burger', active: true, catalogCategories: ['Burgers', 'Complementos'] },
+      { _id: 'a', name: 'modomio', active: true, catalogCategories: ['Pizzas', 'Combos'] },
+      { _id: 'b', name: 'blackburger', active: true, catalogCategories: ['Burgers', 'Sides'] },
     ]);
-    expect(wb.SheetNames).toContain('catalogo');
-    expect(wb.SheetNames).toContain('referencia_tpv');
-    expect(wb.SheetNames).toContain('valores_validos');
-    expect(wb.SheetNames).toContain('instrucciones');
+    expect(wb.SheetNames).toEqual(['catalogo', 'referencia_tpv', 'valores_validos', 'instrucciones']);
+    const data = XLSX.utils.sheet_to_json(wb.Sheets.catalogo, { header: 1, defval: '' });
+    expect(data[0]).toEqual(DELIVERY_CATALOG_TEMPLATE_HEADERS);
+    expect(data.length).toBe(1 + DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS);
+    expect(data[1].every((cell) => !String(cell || '').trim())).toBe(true);
+    expect(data.some((row) => String(row[0] || '').includes('Pizza Margarita'))).toBe(false);
   });
 
   it('parseCatalogImportStockFields reads stock columns from Excel', async () => {
@@ -191,7 +200,10 @@ describe('deliveryCatalogExcelTemplate', () => {
       '../src/app/lib/deliveryCatalogExcelTemplate.ts',
     );
     expect(isOfficialCatalogTemplateHeaders(DELIVERY_CATALOG_TEMPLATE_HEADERS)).toBe(true);
-    expect(isOfficialCatalogTemplateHeaders(['Nombre', 'SKU', 'Categoría', 'Línea', 'Precio', 'Descripción'])).toBe(true);
+    expect(
+      isOfficialCatalogTemplateHeaders(['nombre', 'sku', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion']),
+    ).toBe(true);
+    expect(isOfficialCatalogTemplateHeaders(['Nombre', 'SKU', 'Categoría', 'Línea', 'Precio', 'Descripción'])).toBe(false);
     expect(isOfficialCatalogTemplateHeaders(['nombre', 'sku', 'categoria', 'linea', 'precio'])).toBe(false);
   });
 
@@ -200,13 +212,14 @@ describe('deliveryCatalogExcelTemplate', () => {
     const { DELIVERY_CATALOG_IMPORT_FIELDS, DELIVERY_CATALOG_HEADER_ALIASES } = await import(
       '../src/app/lib/deliveryCatalogExcelTemplate.ts',
     );
-    const headers = ['nombre', 'sku', 'categoria', 'linea', 'precio', 'descripcion'];
+    const headers = ['nombre', 'sku', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion'];
     const map = autoMapImportFields(DELIVERY_CATALOG_IMPORT_FIELDS, headers, DELIVERY_CATALOG_HEADER_ALIASES);
     expect(map.name).toBe('nombre');
     expect(map.sku).toBe('sku');
     expect(map.category).toBe('categoria');
     expect(map.linea).toBe('linea');
     expect(map.price).toBe('precio');
+    expect(map.ingredients).toBe('ingredientes');
     expect(map.description).toBe('descripcion');
   });
 
@@ -215,13 +228,14 @@ describe('deliveryCatalogExcelTemplate', () => {
     const { DELIVERY_CATALOG_IMPORT_FIELDS, DELIVERY_CATALOG_HEADER_ALIASES } = await import(
       '../src/app/lib/deliveryCatalogExcelTemplate.ts',
     );
-    const headers = ['Nombre', 'SKU', 'Categoría', 'Línea', 'Precio', 'Descripción'];
+    const headers = ['Nombre', 'SKU', 'Categoría', 'Línea', 'Precio', 'Ingredientes', 'Descripción'];
     const map = autoMapImportFields(DELIVERY_CATALOG_IMPORT_FIELDS, headers, DELIVERY_CATALOG_HEADER_ALIASES);
     expect(map.name).toBe('Nombre');
     expect(map.sku).toBe('SKU');
     expect(map.category).toBe('Categoría');
     expect(map.linea).toBe('Línea');
     expect(map.price).toBe('Precio');
+    expect(map.ingredients).toBe('Ingredientes');
     expect(map.description).toBe('Descripción');
   });
 
@@ -240,7 +254,7 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(result.ok).toBe(false);
     expect(result.issues.some((i) => i.field === 'nombre')).toBe(true);
     expect(result.issues.some((i) => i.field === 'categoria' && i.message.includes('Dato'))).toBe(true);
-    expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('fantasma'))).toBe(true);
+    expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('fantasma') && i.severity === 'warning')).toBe(true);
     expect(result.issues.some((i) => i.field === 'sku')).toBe(true);
   });
 });

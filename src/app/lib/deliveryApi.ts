@@ -522,6 +522,7 @@ export async function createCatalogItemRequest(userId: string, data: Partial<Cat
 export interface BulkCreateResult {
   ok: boolean;
   created: number;
+  updated?: number;
   errors: number;
   items: CatalogItem[];
   errorDetails?: { index: number; name: string; error: string }[];

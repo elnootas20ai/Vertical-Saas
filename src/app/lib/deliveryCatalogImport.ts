@@ -1,5 +1,6 @@
 import { listBrandsRequest, updateBrandRequest, type Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
+import { parseIngredientsBulkText } from './catalogCustomization';
 import {
   buildBrandCategoryMapFromItems,
   commercialLineBrands,
@@ -12,6 +13,7 @@ import {
   resolveCommercialLineIdsFromText,
   shouldClearBrandForCategory,
 } from './deliveryCatalogImportLogic';
+import { parseImportPrice } from './deliveryCatalogExcelTemplate';
 
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
@@ -170,7 +172,10 @@ export async function mapImportEntryToCatalogItem(
       ? (String(entry.itemType).trim() as CatalogItem['itemType'])
       : 'product',
     description: String(entry.description || '').trim(),
-    unitPrice: Number(String(entry.price || entry.unitPrice || '').replace(',', '.')) || 0,
+    unitPrice: (() => {
+      const p = parseImportPrice(String(entry.price || entry.unitPrice || ''));
+      return Number.isFinite(p) ? p : 0;
+    })(),
     costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
     stockQuantity: 0,
     minStock: 0,
@@ -186,6 +191,14 @@ export async function mapImportEntryToCatalogItem(
     webVisible: true,
     module: 'catalog',
   };
+
+  const ingredientsRaw = String(entry.ingredients || entry.ingredientes || '').trim();
+  if (ingredientsRaw) {
+    item.customFields = {
+      ...(item.customFields || {}),
+      ingredients: parseIngredientsBulkText(ingredientsRaw).join(', '),
+    };
+  }
 
   return { item, brandCache, unmatchedLineNames };
 }

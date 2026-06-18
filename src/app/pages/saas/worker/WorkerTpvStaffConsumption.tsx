@@ -251,7 +251,6 @@ export function WorkerTpvStaffConsumption({
           onSelect={setSelectedWorkerId}
           loading={register.clockedInWorkersLoading}
           label="¿Quién consume?"
-          emptyMessage="Ficha al equipo antes de registrar consumos"
         />
       </div>
 

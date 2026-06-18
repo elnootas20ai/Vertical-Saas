@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { sumTpvRegisterSaleAmountForOrder, sumTpvRegisterReturnAmountForOrder } from '../services/couchdb.js';
+import {
+  sumTpvRegisterSaleAmountForOrder,
+  sumTpvRegisterReturnAmountForOrder,
+  shouldRegisterTpvSaleOnTpvOrderCreate,
+} from '../services/couchdb.js';
 
 describe('sumTpvRegisterSaleAmountForOrder', () => {
   it('sums sale transactions for the same order id', () => {
@@ -17,6 +21,36 @@ describe('sumTpvRegisterSaleAmountForOrder', () => {
   it('returns 0 for empty or invalid input', () => {
     expect(sumTpvRegisterSaleAmountForOrder(null, 'order-1')).toBe(0);
     expect(sumTpvRegisterSaleAmountForOrder([], '')).toBe(0);
+  });
+});
+
+describe('shouldRegisterTpvSaleOnTpvOrderCreate', () => {
+  it('registra cobro inmediato en recogida', () => {
+    expect(shouldRegisterTpvSaleOnTpvOrderCreate({
+      channel: 'tpv',
+      totalAmount: 24.9,
+      paymentCollected: true,
+      paymentStatus: 'paid',
+      paidAmount: 24.9,
+    })).toBe(true);
+  });
+
+  it('no registra domicilio cobrar al entregar', () => {
+    expect(shouldRegisterTpvSaleOnTpvOrderCreate({
+      channel: 'tpv',
+      totalAmount: 24.9,
+      paymentCollected: false,
+      paymentStatus: 'pending',
+      paidAmount: 0,
+    })).toBe(false);
+  });
+
+  it('ignora otros canales', () => {
+    expect(shouldRegisterTpvSaleOnTpvOrderCreate({
+      channel: 'web',
+      totalAmount: 10,
+      paymentCollected: true,
+    })).toBe(false);
   });
 });
 

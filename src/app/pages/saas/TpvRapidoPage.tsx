@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
-import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -47,6 +47,7 @@ import {
   unifyStoreIngredientsFromConfig,
   type StoreIngredient,
   type TpvBrandIngredientSelection,
+  type TpvBrandSupplements,
   type TpvCategoryTemplates,
 } from '../../lib/catalogCustomization';
 import { isCajaRegistrationOk, normalizeTpvPaymentMethod } from '../../lib/tpvCajaMath';
@@ -68,7 +69,10 @@ import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import {
+  DELIVERY_ACTIVE_STORE_CHANGED,
+  coerceSelectedPdvId,
   notifyDeliveryActiveStoreChanged,
+  readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
@@ -192,9 +196,14 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
 function TpvRapidoCeoBoard() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const activeStore = useActiveStoreScope();
+  const {
+    pointsOfSale,
+    retailWorkCenters,
+    activeSalesPointId,
+    setActiveSalesPoint,
+    loading: storesLoading,
+  } = useActiveStoreScope();
   const navigate = useNavigate();
-  const location = useLocation();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
@@ -202,8 +211,8 @@ function TpvRapidoCeoBoard() {
   );
 
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
+  const [forceStorePicker, setForceStorePicker] = useState(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
-  const wasOnTpvRouteRef = useRef(false);
 
   useEffect(() => {
     const onOpen = () => setStockOpen(true);
@@ -211,23 +220,37 @@ function TpvRapidoCeoBoard() {
     return () => window.removeEventListener(TPV_OPEN_STOCK_REVIEW_EVENT, onOpen);
   }, []);
 
-  /** Pedir tienda solo al entrar desde otra pantalla (no al cambiar ?clientId= etc.). */
+  /** Misma tienda que Ops / sidebar / última elección — sin pedir de nuevo salvo "Cambiar tienda". */
   useEffect(() => {
-    const onTpvRoute = location.pathname.includes('/vertical/delivery/tpv');
-    if (onTpvRoute && !wasOnTpvRouteRef.current) {
-      setSelectedPdvId(null);
+    if (forceStorePicker || !businessId || !dataUserId) return;
+    const pdvs = pointsOfSale.filter((p) => p.active !== false);
+    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const pdvId = coerceSelectedPdvId(pdvs, saved || activeSalesPointId);
+    if (!pdvId) return;
+    setSelectedPdvId((prev) => (prev === pdvId ? prev : pdvId));
+    if (activeSalesPointId !== pdvId) {
+      setActiveSalesPoint(pdvId);
     }
-    wasOnTpvRouteRef.current = onTpvRoute;
-  }, [location.pathname]);
+  }, [
+    forceStorePicker,
+    businessId,
+    dataUserId,
+    pointsOfSale,
+    activeSalesPointId,
+    setActiveSalesPoint,
+  ]);
 
   useEffect(() => {
-    if (!businessId) return;
-    try {
-      sessionStorage.removeItem(`vertial.ceoTpv.selectedPdv.${businessId}`);
-    } catch {
-      /* ignore */
-    }
-  }, [businessId]);
+    const onStore = () => {
+      if (forceStorePicker || !businessId || !dataUserId) return;
+      const pdvs = pointsOfSale.filter((p) => p.active !== false);
+      const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+      const pdvId = coerceSelectedPdvId(pdvs, saved || activeSalesPointId);
+      if (pdvId) setSelectedPdvId(pdvId);
+    };
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
+  }, [forceStorePicker, businessId, dataUserId, pointsOfSale, activeSalesPointId]);
 
   useEffect(() => {
     if (!businessId || !dataUserId) return;
@@ -235,15 +258,15 @@ function TpvRapidoCeoBoard() {
   }, [businessId, dataUserId]);
 
   const storeRows = useMemo(
-    () => buildCeoTpvStoreRows(activeStore.retailWorkCenters, activeStore.allPointsOfSale, businessId),
-    [activeStore.retailWorkCenters, activeStore.allPointsOfSale, businessId],
+    () => buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId),
+    [retailWorkCenters, pointsOfSale, businessId],
   );
 
   const selectedPdvName = useMemo(() => {
     if (!selectedPdvId) return '';
-    const pdv = activeStore.allPointsOfSale.find((p) => p._id === selectedPdvId);
+    const pdv = pointsOfSale.find((p) => p._id === selectedPdvId);
     return pdv?.name || '';
-  }, [selectedPdvId, activeStore.allPointsOfSale]);
+  }, [selectedPdvId, pointsOfSale]);
 
   const handleSelectStore = useCallback(
     (pdvId: string) => {
@@ -253,10 +276,11 @@ function TpvRapidoCeoBoard() {
         writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
         notifyDeliveryActiveStoreChanged();
       }
-      activeStore.setActiveSalesPoint(id);
+      setActiveSalesPoint(id);
+      setForceStorePicker(false);
       setSelectedPdvId(id);
     },
-    [businessId, dataUserId, activeStore],
+    [businessId, dataUserId, setActiveSalesPoint],
   );
 
   const handleChangeStore = useCallback(() => {
@@ -264,16 +288,17 @@ function TpvRapidoCeoBoard() {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
       notifyDeliveryActiveStoreChanged();
     }
+    setForceStorePicker(true);
     setSelectedPdvId(null);
   }, [businessId, dataUserId]);
 
-  if (!selectedPdvId) {
+  if (!selectedPdvId || forceStorePicker) {
     return (
       <CeoTpvStorePicker
         storeName={currentBusiness?.name}
         storeRows={storeRows}
-        pointsOfSale={activeStore.allPointsOfSale.filter((p) => p.active !== false)}
-        loading={activeStore.loading}
+        pointsOfSale={pointsOfSale.filter((p) => p.active !== false)}
+        loading={storesLoading}
         onSelect={handleSelectStore}
         onBack={() => navigate('/saas/delivery-ops')}
       />
@@ -418,6 +443,7 @@ export function TpvRapidoOrderFlow({
   const [tpvCategoryTemplates, setTpvCategoryTemplates] = useState<TpvCategoryTemplates>({});
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [tpvBrandIngredientSelection, setTpvBrandIngredientSelection] = useState<TpvBrandIngredientSelection>({});
+  const [tpvBrandSupplements, setTpvBrandSupplements] = useState<TpvBrandSupplements>({});
   const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState<number>(0);
   const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
@@ -457,14 +483,7 @@ export function TpvRapidoOrderFlow({
         status: 'active' as const,
       };
     }
-    return (
-      register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId)
-      || {
-        id: effectiveOrderTakerId,
-        name: String(register.session?.workerName || 'TPV').trim(),
-        status: 'active' as const,
-      }
-    );
+    return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
   const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
@@ -476,10 +495,14 @@ export function TpvRapidoOrderFlow({
       .then((cfg) => {
         const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
         const brandIds = brands.map((b) => b._id);
-        const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(cfg || {}, brandIds);
+        const { ingredientSelection, brandSupplements } = resolveTpvBrandConfigFromDeliveryConfig(
+          cfg || {},
+          brandIds,
+        );
         setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
         setStoreIngredients(unified);
         setTpvBrandIngredientSelection(ingredientSelection);
+        setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
       })
       .catch(() => {});
@@ -510,9 +533,13 @@ export function TpvRapidoOrderFlow({
         setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
         const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
         const brandIds = brands.map((b) => b._id);
-        const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(cfg || {}, brandIds);
+        const { ingredientSelection, brandSupplements } = resolveTpvBrandConfigFromDeliveryConfig(
+          cfg || {},
+          brandIds,
+        );
         setStoreIngredients(unified);
         setTpvBrandIngredientSelection(ingredientSelection);
+        setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
       })
       .catch(() => {
@@ -520,6 +547,7 @@ export function TpvRapidoOrderFlow({
           setTpvCategoryTemplates({});
           setStoreIngredients([]);
           setTpvBrandIngredientSelection({});
+          setTpvBrandSupplements({});
           setTpvDefaultExtraPrice(0);
         }
       });
@@ -1308,6 +1336,7 @@ export function TpvRapidoOrderFlow({
               tpvCategoryTemplates,
               storeIngredients,
               tpvBrandIngredientSelection,
+              brands,
             ),
           };
         });
@@ -1609,15 +1638,14 @@ export function TpvRapidoOrderFlow({
       footerSlot={stickyFooter}
     >
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-4 px-2 md:px-4`}>
-        {!tabletMode && register && (
+        {!tabletMode && register && register.clockedInWorkers.length > 0 && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
               workers={register.clockedInWorkers}
               selectedId={register.selectedOrderTakerId}
               onSelect={register.setSelectedOrderTakerId}
               loading={register.clockedInWorkersLoading}
-              label="¿Quién coge el pedido?"
-              emptyMessage="Quién abrió caja atiende"
+              label="En tienda"
             />
           </div>
         )}
@@ -2316,6 +2344,7 @@ export function TpvRapidoOrderFlow({
           initial={customizeTarget.initial}
           templates={tpvCategoryTemplates}
           brandIngredientSelection={tpvBrandIngredientSelection}
+          brandSupplements={tpvBrandSupplements}
           storeIngredients={storeIngredients}
           defaultExtraPrice={tpvDefaultExtraPrice}
           brands={brands}

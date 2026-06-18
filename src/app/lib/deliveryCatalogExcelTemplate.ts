@@ -19,6 +19,7 @@ export const DELIVERY_CATALOG_IMPORT_COLUMNS = [
   'category',
   'linea',
   'price',
+  'ingredients',
   'description',
 ] as const;
 
@@ -30,6 +31,7 @@ export const DELIVERY_CATALOG_IMPORT_LABELS: Record<(typeof DELIVERY_CATALOG_IMP
   category: 'categoria',
   linea: 'linea',
   price: 'precio',
+  ingredients: 'ingredientes',
   description: 'descripcion',
 };
 
@@ -38,7 +40,13 @@ export const DELIVERY_CATALOG_TEMPLATE_HEADERS = DELIVERY_CATALOG_IMPORT_COLUMNS
   (key) => DELIVERY_CATALOG_IMPORT_LABELS[key],
 );
 
+/** Versión de la plantilla (solo cambiar si hay migración acordada). */
+export const DELIVERY_CATALOG_TEMPLATE_VERSION = 3;
+
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_delivery_tpv.xlsx';
+
+/** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. */
+export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 5000;
 
 export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'name', label: 'nombre', required: true, example: 'Pizza Margarita' },
@@ -46,6 +54,7 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'category', label: 'categoria', required: true, example: 'Pizzas' },
   { key: 'linea', label: 'linea', example: 'modomio' },
   { key: 'price', label: 'precio', required: true, example: '9.50' },
+  { key: 'ingredients', label: 'ingredientes', example: 'Tomate, Mozzarella, Albahaca' },
   { key: 'description', label: 'descripcion', example: '' },
 ];
 
@@ -56,6 +65,7 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   category: ['categoria', 'category', 'seccion', 'familia', 'tipo', 'categoria tpv'],
   linea: ['linea', 'line', 'marca', 'organizador', 'linea comercial', 'linea tpv', 'brand line'],
   price: ['precio', 'price', 'pvp', 'precio venta', 'unit price', 'precio unitario'],
+  ingredients: ['ingredientes', 'ingredients', 'ingrediente', 'receta', 'componentes'],
   description: ['descripcion', 'description', 'desc', 'notas', 'observaciones'],
 };
 
@@ -124,8 +134,16 @@ function exampleProductName(category: string, lineName: string, index: number): 
 }
 
 /**
- * Filas de ejemplo TPV: 1 producto por categoría de cada línea + bloques compartidos.
- * Borra las filas de ejemplo y pon las tuyas; conserva las cabeceras.
+ * Filas vacías para la plantilla descargable (solo cabecera + espacio para rellenar).
+ */
+export function buildDeliveryCatalogEmptyDataRows(
+  count = DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
+): string[][] {
+  return Array.from({ length: count }, () => DELIVERY_CATALOG_TEMPLATE_HEADERS.map(() => ''));
+}
+
+/**
+ * Filas de ejemplo (solo tests / documentación interna; no van en la plantilla descargable).
  */
 export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[]): string[][] {
   const lines = organizerBrandsForCatalogTemplate(commercialLines);
@@ -139,21 +157,23 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
     const cats = lineCategoriesForCatalogTemplate(brand);
 
     cats.forEach((cat, i) => {
+      const isPizza = /pizza/i.test(cat);
       rows.push([
         exampleProductName(cat, lineName, i),
         `${prefix}-${String(skuN++).padStart(3, '0')}`,
         cat,
         lineName,
         (9.5 + i * 0.5).toFixed(2),
+        isPizza ? 'Tomate, Mozzarella, Albahaca' : '',
         i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
       ]);
     });
   }
 
   const sharedExamples: Array<[string, string, string, string]> = [
-    ['Agua 50cl', 'BEB-001', 'Bebidas', 'Dejar linea vacía'],
-    ['Patatas fritas', 'COM-001', 'Complementos', 'Dejar linea vacía'],
-    ['Tiramisú', 'POS-001', 'Postres', 'Dejar linea vacía'],
+    ['Agua 50cl', 'BEB-001', 'Bebidas', 'Borra esta fila o pon tus bebidas · linea vacía'],
+    ['Patatas fritas', 'COM-001', 'Complementos', 'Borra esta fila · linea vacía en Bebidas/Complementos/Postres'],
+    ['Tiramisú', 'POS-001', 'Postres', 'Borra esta fila · linea vacía'],
   ];
   for (const [name, sku, cat, note] of sharedExamples) {
     rows.push([
@@ -162,23 +182,24 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
       cat,
       '',
       cat === 'Bebidas' ? '2.50' : cat === 'Complementos' ? '3.00' : '4.50',
+      '',
       note,
     ]);
   }
 
   if (lines.length === 0) {
     return [
-      ['Pizza Margarita', 'PIZ-001', 'Pizzas', 'modomio', '9.50', 'Crea marcas en Ajustes → Marca y vuelve a descargar'],
-      ['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', 'linea vacía = pestaña compartida TPV'],
-      ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', ''],
-      ['Tiramisú', 'POS-001', 'Postres', '', '4.50', ''],
+      ['Pizza Margarita', 'PIZ-001', 'Pizzas', 'modomio', '9.50', 'Tomate, Mozzarella, Albahaca', 'Crea marcas en Ajustes → Marca y vuelve a descargar'],
+      ['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía = pestaña compartida TPV'],
+      ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', ''],
+      ['Tiramisú', 'POS-001', 'Postres', '', '4.50', '', ''],
     ];
   }
 
   return rows;
 }
 
-/** Filas de referencia: cada combinación linea + categoría válida para copiar. */
+/** Combinaciones linea + categoría válidas (hoja referencia_tpv). */
 function buildCatalogReferenceRows(commercialLines: ImportBrandLike[]): string[][] {
   const lines = organizerBrandsForCatalogTemplate(commercialLines);
   const rows: string[][] = [['linea', 'categoria', 'va_en_columna_linea', 'va_en_columna_categoria']];
@@ -193,45 +214,10 @@ function buildCatalogReferenceRows(commercialLines: ImportBrandLike[]): string[]
   for (const cat of UNIVERSAL_CATALOG_CATEGORIES.filter((c) =>
     ['Bebidas', 'Complementos', 'Postres'].includes(c),
   )) {
-    rows.push(['(vacío)', cat, '', cat]);
+    rows.push(['', cat, '', cat]);
   }
 
   return rows;
-}
-
-function instructionLines(commercialLines: ImportBrandLike[]): string[] {
-  const lines = organizerBrandsForCatalogTemplate(commercialLines);
-  const lineNames = lines.map((b) => b.name.trim()).filter(Boolean);
-  const namesText = lineNames.length > 0 ? lineNames.join(' | ') : '(configura marcas en Ajustes → Marca)';
-
-  return [
-    'PLANTILLA OFICIAL — Catálogo + TPV tablet',
-    '',
-    'HOJA A USAR: «catalogo» (la primera). No importes «valores_validos» ni «instrucciones».',
-    '',
-    'COLUMNAS (fila 1 — NO renombrar):',
-    `  ${DELIVERY_CATALOG_TEMPLATE_HEADERS.join(' | ')}`,
-    '',
-    'OBLIGATORIO en cada fila de producto:',
-    '  · nombre — texto del producto en TPV',
-    '  · categoria — sección dentro de la línea (Pizzas, Rolls, Bebidas…)',
-    '  · precio — número con punto (9.50). Sin precio no se vende en TPV',
-    '',
-    'STOCK — usa la plantilla aparte «plantilla_stock_delivery.xlsx» (pestaña «stock»).',
-    '  · Este archivo es solo carta y precios de venta.',
-    '',
-    'COLUMNA linea (organizador / pestaña superior del TPV):',
-    `  · Pon el nombre EXACTO de Ajustes → Marca: ${namesText}`,
-    '  · En Bebidas, Complementos y Postres deja linea VACÍA (pestañas compartidas)',
-    '  · NO pongas Coca-Cola, Galbani, etc. en linea (eso no es organizador TPV)',
-    '',
-    'DESPUÉS DE IMPORTAR:',
-    '  · Productos → catálogo gerente',
-    '  · TPV tablet → linea (pestaña) → categoria → productos',
-    '  · Las categorías nuevas se añaden solas a cada marca',
-    '',
-    'Consejo: borra las filas de ejemplo y pega tus productos. Mantén la fila 1 intacta.',
-  ];
 }
 
 function buildValidValuesRows(commercialLines: ImportBrandLike[]): string[][] {
@@ -251,6 +237,37 @@ function buildValidValuesRows(commercialLines: ImportBrandLike[]): string[][] {
   return rows;
 }
 
+function instructionLines(commercialLines: ImportBrandLike[]): string[] {
+  const lines = organizerBrandsForCatalogTemplate(commercialLines);
+  const lineNames = lines.map((b) => b.name.trim()).filter(Boolean);
+  const namesText = lineNames.length > 0 ? lineNames.join(' | ') : '(configura marcas en Ajustes → Marca)';
+
+  return [
+    `PLANTILLA OFICIAL v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
+    `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+    '',
+    'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+    '',
+    'COLUMNAS fila 1 (NO renombrar):',
+    `  ${DELIVERY_CATALOG_TEMPLATE_HEADERS.join(' | ')}`,
+    '',
+    'RELLENA desde la fila 2. Las filas vacías no se importan.',
+    '',
+    'OBLIGATORIO por producto:',
+    '  · nombre — nombre en TPV',
+    '  · categoria — Pizzas, Burgers, Combos, Bebidas…',
+    '  · precio — número (14.50)',
+    '',
+    'RECOMENDADO:',
+    '  · sku — código único (PIZ-001). Mismo SKU = actualiza sin duplicar',
+    '  · linea — pestaña TPV: ' + namesText,
+    '  · linea VACÍA en Bebidas, Complementos y Postres',
+    '  · ingredientes — solo pizzas/burgers: Tomate, Mozzarella, Jamón',
+    '',
+    'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
+  ];
+}
+
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
   const coreHeaders = DELIVERY_CATALOG_CORE_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]);
   if (headers.length < coreHeaders.length) return false;
@@ -261,13 +278,12 @@ export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
 
 export function buildDeliveryCatalogImportWorkbook(commercialLines: ImportBrandLike[] = []) {
   const organizers = organizerBrandsForCatalogTemplate(commercialLines);
-  const catalogRows = [DELIVERY_CATALOG_TEMPLATE_HEADERS, ...buildDeliveryCatalogSampleRows(organizers)];
+  const catalogRows = [DELIVERY_CATALOG_TEMPLATE_HEADERS, ...buildDeliveryCatalogEmptyDataRows()];
 
   const catalogSheet = XLSX.utils.aoa_to_sheet(catalogRows);
-  catalogSheet['!cols'] = [{ wch: 28 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 42 }];
-  if (catalogSheet['!ref']) {
-    catalogSheet['!autofilter'] = { ref: catalogSheet['!ref'] };
-  }
+  catalogSheet['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 36 }, { wch: 42 }];
+  catalogSheet['!autofilter'] = { ref: 'A1:G1' };
+  catalogSheet['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
 
   const referenceSheet = XLSX.utils.aoa_to_sheet(buildCatalogReferenceRows(organizers));
   referenceSheet['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 22 }, { wch: 22 }];
@@ -293,6 +309,21 @@ export function downloadDeliveryCatalogImportTemplate(commercialLines: ImportBra
   XLSX.writeFile(wb, DELIVERY_CATALOG_TEMPLATE_FILENAME);
 }
 
+export function parseImportPrice(raw: string): number {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/\s/g, '')
+    .replace(/[€$£]/g, '')
+    .replace(',', '.');
+  const price = Number(cleaned);
+  return Number.isFinite(price) ? price : NaN;
+}
+
+function isTemplateExampleImportRow(entry: Record<string, string>): boolean {
+  const name = String(entry.name || '').trim();
+  return /^ejemplo\s*[·\-–—]/i.test(name);
+}
+
 export function validateDeliveryCatalogImportEntries(
   entries: Record<string, string>[],
   brands: ImportBrandLike[],
@@ -304,13 +335,15 @@ export function validateDeliveryCatalogImportEntries(
   const seenSkus = new Set<string>();
 
   entries.forEach((entry, index) => {
+    if (isTemplateExampleImportRow(entry)) return;
+
     const row = index + 2;
     const name = String(entry.name || '').trim();
     const categoryRaw = String(entry.category || '').trim();
     const category = normalizeImportCategory(categoryRaw);
     const lineText = readImportLineText(entry);
     const priceRaw = String(entry.price || entry.unitPrice || '').trim();
-    const price = Number(priceRaw.replace(',', '.'));
+    const price = parseImportPrice(priceRaw);
     const sku = String(entry.sku || '').trim().toLowerCase();
 
     if (!name) {
@@ -361,8 +394,8 @@ export function validateDeliveryCatalogImportEntries(
         issues.push({
           row,
           field: 'linea',
-          message: `Línea «${unmatchedNames[0]}» no existe en Ajustes → Marca (${[...lineNames].slice(0, 5).join(', ') || 'sin líneas'})`,
-          severity: 'error',
+          message: `Línea «${unmatchedNames[0]}» no coincide con Ajustes → Marca (${[...lineNames].slice(0, 5).join(', ') || 'sin líneas'}). Se asignará por categoría.`,
+          severity: 'warning',
         });
       }
       if (shouldClearBrandForCategory(category)) {

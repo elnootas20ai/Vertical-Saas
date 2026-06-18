@@ -28,6 +28,7 @@ import {
   findOpenTpvRegisterSessionForPointOfSale,
   sumTpvRegisterSaleAmountForOrder,
   sumTpvRegisterReturnAmountForOrder,
+  shouldRegisterTpvSaleOnTpvOrderCreate,
   normalizeTpvPaymentMethod,
   getNextDeliveryTicketNumber,
   autoCloseTpvRegisterSessionDocument,
@@ -412,6 +413,21 @@ export async function createDeliveryOrder(req, res) {
       }
     }
     const doc = buildDeliveryOrderDocument(userId, { ...order, ...scoped });
+    const channel = String(doc.channel || '').toLowerCase();
+    if (channel === 'tpv') {
+      const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, doc, req.callerAccount || account);
+      if (!orderPdvId) {
+        return badRequest(res, 'No se pudo identificar la tienda del pedido. Abre la caja en el TPV.');
+      }
+      const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+      const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
+      if (!openSession) {
+        return res.status(409).json({
+          ok: false,
+          error: 'No hay caja abierta en esta tienda. Abre la caja antes de cobrar.',
+        });
+      }
+    }
     const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, doc, null);
     const docWithTicket = ticketNumber
       ? buildDeliveryOrderDocument(userId, { ...doc, ticketNumber }, doc)
@@ -676,6 +692,7 @@ export async function refundDeliveryOrder(req, res) {
       ...existing,
       status: 'devuelto',
       paymentStatus: 'refunded',
+      paymentCollected: false,
       refundReason: trimmedReason,
       refundedAt: now,
       refundedBy: actorName,
@@ -900,10 +917,9 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
 }
 
 async function maybeRegisterTpvSaleOnTpvChannelOrderCreate(req, userId, doc, account) {
-  const channel = String(doc.channel || '').toLowerCase();
-  if (channel !== 'tpv') return { status: 'nothing_to_register' };
-  const amount = Number(doc.totalAmount || 0);
-  if (!Number.isFinite(amount) || amount <= 0) return { status: 'nothing_to_register' };
+  if (!shouldRegisterTpvSaleOnTpvOrderCreate(doc)) return { status: 'nothing_to_register' };
+  const paidAmount = Number(doc.paidAmount || 0);
+  const amount = paidAmount > 0 ? paidAmount : Number(doc.totalAmount || 0);
   return autoRegisterTpvSaleForOrder(req, userId, doc, {
     amount,
     paymentMethod: doc.paymentMethod || 'efectivo',
@@ -1249,17 +1265,18 @@ export async function bulkCreateCatalogItems(req, res) {
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
     const existingItems = await listCatalogItemsByUser(req, userId);
-    const existingSkuKeys = new Set();
-    existingItems.forEach(existing => {
+    const existingBySku = new Map();
+    existingItems.forEach((existing) => {
       if (!existing) return;
       const moduleKey = String(existing.module || 'catalog');
       const businessKey = String(existing.business_id || '');
       const skuKey = normalizeDuplicateValue(existing.sku);
-      if (skuKey) existingSkuKeys.add(`${moduleKey}|${businessKey}|sku|${skuKey}`);
+      if (skuKey) existingBySku.set(`${moduleKey}|${businessKey}|sku|${skuKey}`, existing);
     });
 
     const batchSkuKeys = new Set();
     const dedupedDocs = [];
+    const docsToUpdate = [];
     const duplicateErrors = [];
 
     docs.forEach((doc, idx) => {
@@ -1267,9 +1284,15 @@ export async function bulkCreateCatalogItems(req, res) {
       const businessKey = String(doc.business_id || '');
       const skuKey = normalizeDuplicateValue(doc.sku);
       const skuComposite = skuKey ? `${moduleKey}|${businessKey}|sku|${skuKey}` : '';
-      const repeatedSku = !!skuComposite && (existingSkuKeys.has(skuComposite) || batchSkuKeys.has(skuComposite));
+      const repeatedSku = !!skuComposite && (existingBySku.has(skuComposite) || batchSkuKeys.has(skuComposite));
 
       if (repeatedSku) {
+        const existing = existingBySku.get(skuComposite);
+        const importIngredients = String(doc.customFields?.ingredients || '').trim();
+        if (existing && importIngredients) {
+          docsToUpdate.push({ existing, doc, index: idx });
+          return;
+        }
         duplicateErrors.push({
           index: idx,
           name: doc?.name,
@@ -1282,7 +1305,7 @@ export async function bulkCreateCatalogItems(req, res) {
       dedupedDocs.push(doc);
     });
 
-    if (dedupedDocs.length === 0) {
+    if (dedupedDocs.length === 0 && docsToUpdate.length === 0) {
       return res.status(409).json({
         ok: false,
         error: 'No se pudo importar: todos los artículos están duplicados por SKU',
@@ -1293,9 +1316,10 @@ export async function bulkCreateCatalogItems(req, res) {
       });
     }
 
-    const results = await bulkPutDocuments(req, db, dedupedDocs);
+    const results = dedupedDocs.length > 0 ? await bulkPutDocuments(req, db, dedupedDocs) : [];
 
     const created = [];
+    const updated = [];
     const errors = [];
     results.forEach((result, idx) => {
       if (result.ok) {
@@ -1304,6 +1328,31 @@ export async function bulkCreateCatalogItems(req, res) {
         errors.push({ index: idx, name: dedupedDocs[idx]?.name, error: result.error || result.reason });
       }
     });
+
+    for (const { existing, doc, index } of docsToUpdate) {
+      try {
+        const mergedDoc = buildCatalogItemDocument(
+          userId,
+          {
+            ...existing,
+            customFields: {
+              ...(existing.customFields && typeof existing.customFields === 'object' ? existing.customFields : {}),
+              ...(doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {}),
+            },
+          },
+          existing,
+        );
+        const saved = await putDocument(req, db, mergedDoc._id, mergedDoc);
+        updated.push(sanitizeCatalogItem({ ...mergedDoc, _rev: saved.rev }));
+      } catch (error) {
+        errors.push({
+          index,
+          name: doc?.name,
+          error: error.message || 'Error al actualizar ingredientes',
+        });
+      }
+    }
+
     if (duplicateErrors.length > 0) errors.push(...duplicateErrors);
 
     if (created.length > 0) {
@@ -1322,8 +1371,9 @@ export async function bulkCreateCatalogItems(req, res) {
     return res.status(201).json({
       ok: true,
       created: created.length,
+      updated: updated.length,
       errors: errors.length,
-      items: created,
+      items: [...created, ...updated],
       errorDetails: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {

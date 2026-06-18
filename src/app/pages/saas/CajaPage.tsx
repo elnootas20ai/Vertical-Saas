@@ -36,6 +36,14 @@ import {
 import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
+import { filterOrdersForRegisterSession } from '../../lib/registerShiftSalesBreakdown';
+import {
+  buildTpvRegisterSummaryForDay,
+  isLocalCalendarDay,
+  localCalendarDayKey,
+  localDayBoundsForKey,
+  sessionActiveOnCalendarDay,
+} from '../../lib/tpvCajaScope';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,13 +64,13 @@ const TPV_TX_LABELS: Record<string, string> = {
 };
 
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return localCalendarDayKey();
 }
 
 function addDaysIso(isoDate: string, delta: number): string {
   const d = new Date(`${isoDate}T12:00:00`);
   d.setDate(d.getDate() + delta);
-  return d.toISOString().slice(0, 10);
+  return localCalendarDayKey(d);
 }
 
 function formatDayHeading(isoDate: string): string {
@@ -77,9 +85,7 @@ function formatDayHeading(isoDate: string): string {
 }
 
 function sessionOnDate(session: TpvRegisterSession, isoDate: string): boolean {
-  const openDay = session.openedAt?.slice(0, 10);
-  const closeDay = session.closedAt?.slice(0, 10);
-  return openDay === isoDate || closeDay === isoDate;
+  return sessionActiveOnCalendarDay(session, isoDate);
 }
 
 /** Cierres de prueba (sin ventas ni descuadre) no bloquean la bandeja del gerente. */
@@ -130,6 +136,7 @@ interface StoreDayGroup {
 function groupSessionsByStore(
   daySessions: TpvRegisterSession[],
   pointsOfSale: PointOfSale[],
+  selectedDate: string,
 ): StoreDayGroup[] {
   const byPdv = new Map<string, TpvRegisterSession[]>();
   for (const s of daySessions) {
@@ -149,7 +156,7 @@ function groupSessionsByStore(
     const storeName = pdv?.name || daySessions.find((s) => s.pointOfSaleId === pdvId)?.pointOfSaleName || 'Tienda';
     const sessions = (byPdv.get(pdvId) || []).sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
     const openCount = sessions.filter((s) => s.status === 'open').length;
-    const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0);
+    const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
     groups.push({ pdvId, storeName, sessions, openCount, totalSales });
   }
 
@@ -160,7 +167,7 @@ function groupSessionsByStore(
       storeName: sessions[0]?.pointOfSaleName || 'Tienda',
       sessions: sessions.sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt))),
       openCount: sessions.filter((s) => s.status === 'open').length,
-      totalSales: sessions.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0),
+      totalSales: sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0),
     });
   }
 
@@ -196,12 +203,14 @@ function turnBadgeClass(session: TpvRegisterSession): string {
 
 function StoreDayBlock({
   group,
+  selectedDate,
   expandedSessionId,
   onToggleSession,
   onViewClosing,
   onValidate,
 }: {
   group: StoreDayGroup;
+  selectedDate: string;
   expandedSessionId: string | null;
   onToggleSession: (id: string) => void;
   onViewClosing: (session: TpvRegisterSession) => void;
@@ -236,7 +245,7 @@ function StoreDayBlock({
       ) : (
         <div className="p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/30">
           {group.sessions.map((session, turnIndex) => {
-            const summary = buildTpvRegisterSummary(session);
+            const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
             const status = sessionStatusLabel(session);
             const expanded = expandedSessionId === session._id;
             const turnNumber = turnIndex + 1;
@@ -589,8 +598,8 @@ function RegisterCard({
 
 function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Cierre de caja</h2>
@@ -634,8 +643,8 @@ function ValidationModal({ session, shiftOrders, onValidate, onReject, onCancel 
   }, [session, closingPlatforms, autoAggregatorRows]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-blue-500" /> Validar cierre de caja</h2>
           <p className="text-xs text-gray-500 mt-1">Revisa el cierre completo antes de validar o rechazar</p>
@@ -775,11 +784,12 @@ export function CajaPage() {
     if (!dataUserId) return;
     setLoadingOrders(true);
     const pdvForApi = filterPdv?.trim() || activeStoreScope.activeSalesPointId?.trim() || undefined;
+    const bounds = localDayBoundsForKey(selectedDate);
     try {
       const data = await filterDeliveryOrdersRequest(dataUserId, {
         ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
-        dateFrom: `${selectedDate}T00:00:00.000Z`,
-        dateTo: `${selectedDate}T23:59:59.999Z`,
+        dateFrom: bounds.from,
+        dateTo: bounds.to,
         limit: 500,
       });
       setOrders(data.orders || []);
@@ -806,10 +816,10 @@ export function CajaPage() {
   }, [sessions, selectedDate, onlyOpenNow, filterPdv]);
 
   const storeGroups = useMemo(() => {
-    const groups = groupSessionsByStore(daySessions, pointsOfSale);
+    const groups = groupSessionsByStore(daySessions, pointsOfSale, selectedDate);
     if (filterPdv) return groups.filter((g) => g.pdvId === filterPdv);
     return groups;
-  }, [daySessions, pointsOfSale, filterPdv]);
+  }, [daySessions, pointsOfSale, filterPdv, selectedDate]);
 
   const openSessions = useMemo(() => sessions.filter(s => s.status === 'open'), [sessions]);
   const openDriverSessions = useMemo(() => driverSessions.filter(s => s.status === 'open'), [driverSessions]);
@@ -820,7 +830,7 @@ export function CajaPage() {
     const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
     const storesWithActivity = new Set(allDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
     const openNow = allDay.filter((s) => s.status === 'open').length;
-    const sales = allDay.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0);
+    const sales = allDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
     const diff = allDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
     return {
       stores: filterPdv ? 1 : Math.max(storesWithActivity, storeGroups.length),
@@ -838,18 +848,13 @@ export function CajaPage() {
 
   const ordersInRange = useMemo(() => {
     return (orders || [])
-      .filter((o) => String(o.createdAt || o.updatedAt || '').slice(0, 10) === selectedDate)
+      .filter((o) => isLocalCalendarDay(String(o.createdAt || ''), selectedDate))
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   }, [orders, selectedDate]);
 
   const validationShiftOrders = useMemo(() => {
     if (!validatingSession) return [];
-    const from = new Date(validatingSession.openedAt).getTime();
-    const to = new Date(validatingSession.closedAt || Date.now()).getTime();
-    return ordersInRange.filter((o) => {
-      const ts = new Date(o.createdAt || o.updatedAt || 0).getTime();
-      return Number.isFinite(ts) && ts >= from && ts <= to;
-    });
+    return filterOrdersForRegisterSession(validatingSession, ordersInRange);
   }, [validatingSession, ordersInRange]);
 
   const handleDismissEmptyPending = async () => {
@@ -1140,6 +1145,7 @@ export function CajaPage() {
                 <StoreDayBlock
                   key={group.pdvId}
                   group={group}
+                  selectedDate={selectedDate}
                   expandedSessionId={expandedSessionId}
                   onToggleSession={handleToggleSession}
                   onViewClosing={handleViewClosing}
@@ -1179,7 +1185,7 @@ export function CajaPage() {
             <div className="mt-3 space-y-4 pl-1">
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-bold flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Pedidos facturados</h3>
+                  <h3 className="text-sm font-bold flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> Pedidos creados hoy</h3>
                   <button type="button" onClick={() => void loadOrders()} disabled={loadingOrders} className="text-xs text-indigo-600 font-semibold">
                     {loadingOrders ? 'Cargando…' : 'Actualizar'}
                   </button>

@@ -1,5 +1,11 @@
 import type { DeliveryIntegrations } from './webApi';
 import type { DeliveryOrder, TpvRegisterSession } from './deliveryApi';
+import {
+  isCancelledDeliveryOrder,
+  isCompletedShiftOrder,
+  isRefundedDeliveryOrder,
+  orderInRegisterSession,
+} from './tpvCajaScope';
 
 export type AggregatorIntegrationKey = 'globo' | 'uber' | 'justead' | 'flipdish';
 
@@ -109,10 +115,9 @@ function sessionWindowMs(session: TpvRegisterSession): { from: number; to: numbe
 }
 
 function orderInSessionWindow(order: DeliveryOrder, session: TpvRegisterSession): boolean {
-  const { from, to } = sessionWindowMs(session);
-  const ts = new Date(order.createdAt || order.updatedAt || 0).getTime();
-  if (!Number.isFinite(ts) || ts < from || ts > to) return false;
-  if (order.status === 'cancelled') return false;
+  if (!orderInRegisterSession(order, session)) return false;
+  if (isCancelledDeliveryOrder(order) || isRefundedDeliveryOrder(order)) return false;
+  if (!isCompletedShiftOrder(order)) return false;
   const pdv = String(session.pointOfSaleId || '').trim();
   if (pdv) {
     const orderPdv = String(order.salesPointId || '').trim();

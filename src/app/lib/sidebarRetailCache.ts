@@ -1,7 +1,10 @@
 import type { DeliverySidebarStoreRow, PointOfSale } from './deliveryApi';
-import { filterPointsOfSaleForWorkCenters } from './deliverySetup';
+import { buildDeliverySidebarStoreRows } from './deliveryApi';
+import { sanitizeRetailScopeSnapshot } from './retailScopeSanitize';
 import type { WorkCenter } from './workCentersApi';
-const CACHE_PREFIX = 'vertial.sidebarRetail:v1:';
+
+const CACHE_PREFIX = 'vertial.sidebarRetail:v2:';
+const LEGACY_CACHE_PREFIX = 'vertial.sidebarRetail:v1:';
 
 export type SidebarRetailSnapshot = {
   rows: DeliverySidebarStoreRow[];
@@ -10,27 +13,52 @@ export type SidebarRetailSnapshot = {
   savedAt: number;
 };
 
-export function readSidebarRetailCache(businessId: string): SidebarRetailSnapshot | null {
+let legacyCachePurged = false;
+
+function purgeLegacySidebarRetailCache(): void {
+  if (legacyCachePurged || typeof localStorage === 'undefined') return;
+  legacyCachePurged = true;
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(LEGACY_CACHE_PREFIX) || key.startsWith(CACHE_PREFIX)) continue;
+      localStorage.removeItem(key);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readSidebarRetailCache(
+  businessId: string,
+  options?: { accountBusinessCount?: number },
+): SidebarRetailSnapshot | null {
   if (!businessId || typeof localStorage === 'undefined') return null;
+  purgeLegacySidebarRetailCache();
   try {
     const raw = localStorage.getItem(`${CACHE_PREFIX}${businessId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SidebarRetailSnapshot;
     if (!parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0) return null;
-    const retailWorkCenters = Array.isArray(parsed.retailWorkCenters) ? parsed.retailWorkCenters : [];
-    const wcIds = new Set(retailWorkCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
-    const allPointsOfSale = filterPointsOfSaleForWorkCenters(
-      Array.isArray(parsed.allPointsOfSale) ? parsed.allPointsOfSale : [],
-      retailWorkCenters,
+
+    const sanitized = sanitizeRetailScopeSnapshot(
+      businessId,
+      {
+        retailWorkCenters: Array.isArray(parsed.retailWorkCenters) ? parsed.retailWorkCenters : [],
+        allPointsOfSale: Array.isArray(parsed.allPointsOfSale) ? parsed.allPointsOfSale : [],
+      },
+      options,
     );
-    const rows = parsed.rows.filter(
-      (row) => row.needsPdv || (row.workCenterId && wcIds.has(row.workCenterId)),
+    const rows = buildDeliverySidebarStoreRows(
+      sanitized.retailWorkCenters,
+      sanitized.allPointsOfSale,
     );
     if (rows.length === 0) return null;
+
     return {
       rows,
-      retailWorkCenters,
-      allPointsOfSale,
+      retailWorkCenters: sanitized.retailWorkCenters,
+      allPointsOfSale: sanitized.allPointsOfSale,
       savedAt: Number(parsed.savedAt || 0),
     };
   } catch {
@@ -38,14 +66,58 @@ export function readSidebarRetailCache(businessId: string): SidebarRetailSnapsho
   }
 }
 
-export function writeSidebarRetailCache(businessId: string, snapshot: SidebarRetailSnapshot): void {
+export function writeSidebarRetailCache(
+  businessId: string,
+  snapshot: SidebarRetailSnapshot,
+  options?: { accountBusinessCount?: number },
+): void {
   if (!businessId || snapshot.rows.length === 0 || typeof localStorage === 'undefined') return;
+  const sanitized = sanitizeRetailScopeSnapshot(
+    businessId,
+    {
+      retailWorkCenters: snapshot.retailWorkCenters,
+      allPointsOfSale: snapshot.allPointsOfSale,
+    },
+    options,
+  );
+  const rows = buildDeliverySidebarStoreRows(
+    sanitized.retailWorkCenters,
+    sanitized.allPointsOfSale,
+  );
+  if (rows.length === 0) return;
   try {
     localStorage.setItem(
       `${CACHE_PREFIX}${businessId}`,
-      JSON.stringify({ ...snapshot, savedAt: Date.now() }),
+      JSON.stringify({
+        rows,
+        retailWorkCenters: sanitized.retailWorkCenters,
+        allPointsOfSale: sanitized.allPointsOfSale,
+        savedAt: Date.now(),
+      }),
     );
   } catch {
     /* quota */
+  }
+}
+
+export function clearSidebarRetailCache(businessId?: string): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (businessId) {
+      localStorage.removeItem(`${CACHE_PREFIX}${businessId}`);
+      localStorage.removeItem(`${LEGACY_CACHE_PREFIX}${businessId}`);
+      return;
+    }
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (
+        key?.startsWith(CACHE_PREFIX) ||
+        (key?.startsWith(LEGACY_CACHE_PREFIX) && !key.startsWith(CACHE_PREFIX))
+      ) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    /* ignore */
   }
 }

@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useDeliveryStorePdvGate } from '../../hooks/useDeliveryStorePdvGate';
 import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } from '../../lib/brandUtils';
-import { DELIVERY_MARCA_SETTINGS_PATH, DELIVERY_TIENDA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
+import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
@@ -36,6 +35,8 @@ import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../l
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
+  DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
+  DELIVERY_CATALOG_TEMPLATE_VERSION,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
   validateDeliveryCatalogImportEntries,
@@ -61,7 +62,9 @@ import {
   createPurchaseInvoiceRequest,
   updatePurchaseInvoiceRequest,
   deletePurchaseInvoiceRequest,
+  listDeliveryOrdersRequest,
   type CatalogItem,
+  type DeliveryOrder,
   type Supplier,
   type PurchaseInvoice,
   type PurchaseInvoiceLine,
@@ -71,6 +74,7 @@ import {
   Search,
   X,
   Trash2,
+  Eye,
   Edit3,
   Package,
   Layers,
@@ -89,8 +93,9 @@ import {
   Download,
   Loader2,
   ArrowRight,
-  Store,
   Wallet,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -107,6 +112,8 @@ import {
   parseCatalogSupplements,
 } from '../../lib/catalogCustomization';
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
+import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
+import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -527,11 +534,11 @@ function CreateCatalogItemModal({
             Ingredientes y suplementos (TPV)
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Opcional por producto. Si lo dejas vacío aquí, se usa la plantilla global de arriba (Pizzas / Hamburguesas).
+            Ingredientes de esta pizza (para quitar en TPV). Los extras de pago se configuran en la pestaña Ingredientes TPV.
           </p>
         </div>
         <div>
-          <label className={labelClass}>Ingredientes base</label>
+          <label className={labelClass}>Ingredientes de esta pizza</label>
           <textarea
             rows={3}
             className={`${inputClass} resize-none`}
@@ -542,7 +549,7 @@ function CreateCatalogItemModal({
         </div>
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className={labelClass}>Suplementos de pago</label>
+            <label className={labelClass}>Suplementos de pago (solo web)</label>
             <button
               type="button"
               onClick={() =>
@@ -1611,6 +1618,35 @@ function CatalogTabLoadingState({ phase }: { phase: CatalogLoadPhase }) {
 
 const TABS_NEED_CATALOG = new Set(['catalog', 'stock', 'staff-consumption']);
 
+/** Orden de secciones en la pestaña Catálogo (delivery / TPV). */
+const CATALOG_SECTION_ORDER = [
+  'Combos',
+  'Pizzas',
+  'Top Burgers',
+  'Burgers',
+  'Hamburguesas',
+  'Sides',
+  'Complementos',
+  'Entrantes',
+  'Principales',
+  'Bebidas',
+  'Postres',
+  'Extras',
+  'Otros',
+];
+
+function sortCatalogSectionKeys(categories: string[]): string[] {
+  return [...categories].sort((a, b) => {
+    const fold = (s: string) => s.trim().toLowerCase();
+    const ia = CATALOG_SECTION_ORDER.findIndex((o) => fold(o) === fold(a));
+    const ib = CATALOG_SECTION_ORDER.findIndex((o) => fold(o) === fold(b));
+    const sa = ia === -1 ? 999 : ia;
+    const sb = ib === -1 ? 999 : ib;
+    if (sa !== sb) return sa - sb;
+    return a.localeCompare(b, 'es');
+  });
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function CatalogPage() {
@@ -1627,7 +1663,6 @@ export function CatalogPage() {
   const { config: verticalConfig, businessType } = useVerticalCatalog();
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const pdvGate = useDeliveryStorePdvGate();
   const retailStoreCount = useMemo(
     () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
     [activeStore.retailWorkCenters],
@@ -1675,10 +1710,11 @@ export function CatalogPage() {
   // Catalog state
   const [showCreateItem, setShowCreateItem] = useState(false);
   const [editingItem, setEditingItem] = useState<CatalogItem | null>(null);
+  const [detailItem, setDetailItem] = useState<CatalogItem | null>(null);
+  const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const [searchCatalog, setSearchCatalog] = useState('');
-  const [filterCategory, setFilterCategory] = useState('all');
-  const [filterBrand, setFilterBrand] = useState('all');
-  const [filterType, setFilterType] = useState<CatalogItem['itemType'] | 'all'>('all');
+  const [collapsedCatalogSections, setCollapsedCatalogSections] = useState<Set<string>>(() => new Set());
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
   type CatalogDeleteOp =
@@ -1733,13 +1769,13 @@ export function CatalogPage() {
   );
 
   const handleDownloadCatalogTemplate = useCallback(() => {
-    if (templateOrganizerLines.length === 0) {
-      toast.error('Configura al menos una línea comercial en Ajustes → Marca antes de descargar la plantilla');
-      return;
-    }
     downloadDeliveryCatalogImportTemplate(templateOrganizerLines);
+    const linesHint =
+      templateOrganizerLines.length > 0
+        ? templateOrganizerLines.map((b) => b.name).join(', ')
+        : 'configura líneas en Ajustes → Marca';
     toast.success(
-      `Plantilla descargada · líneas TPV: ${templateOrganizerLines.map((b) => b.name).join(', ')} · revisa valores_validos`,
+      `Plantilla v${DELIVERY_CATALOG_TEMPLATE_VERSION} · ${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas · ${linesHint}`,
     );
   }, [templateOrganizerLines]);
 
@@ -1749,35 +1785,14 @@ export function CatalogPage() {
     const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
     for (const entry of entries) {
-      const name = String(entry.name || '').trim();
-      if (!name) continue;
-      const category = normalizeImportCategory(String(entry.category || ''));
-      const lineText = readImportLineText(entry as Record<string, string>);
-      let brandIds: string[] = [];
-      if (lineText && businessId) {
-        const resolved = await resolveBrandIdsFromImportText(businessId, lineText, brandCache);
-        brandCache = resolved.cache;
-        brandIds = resolved.brandIds;
-        unmatchedCommercialBrands.push(...resolved.unmatchedNames);
-      }
-      items.push({
-        name,
-        category,
-        brandIds: resolveCatalogImportBrandIds(brandIds, category, brandCache),
-        itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
-          ? (String(entry.itemType).trim() as CatalogItem['itemType'])
-          : 'product',
-        unitPrice: Number(String(entry.price ?? entry.unitPrice ?? '').replace(',', '.')) || 0,
-        description: String(entry.description || '').trim(),
-        allergens: String(entry.allergens || '')
-          .split(',')
-          .map((a) => a.trim())
-          .filter(Boolean),
-        active: true,
-        available: true,
-        webVisible: true,
-        module: 'catalog' as const,
+      const mapped = await mapImportEntryToCatalogItem(entry as Record<string, string>, {
+        businessId: businessId || '',
+        brandCache,
       });
+      if (!mapped) continue;
+      brandCache = mapped.brandCache;
+      unmatchedCommercialBrands.push(...mapped.unmatchedLineNames);
+      items.push(mapped.item);
     }
     const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
     if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
@@ -1809,7 +1824,21 @@ export function CatalogPage() {
   const handleImportEntries = async (entries: Record<string, string>[]) => {
     if (!user?.id) return 0;
 
-    const validation = validateDeliveryCatalogImportEntries(entries, brands);
+    const productRows = entries.filter((entry) => {
+      const name = String(entry.name || '').trim();
+      if (!name) return false;
+      if (/^ejemplo\s*[·\-–—]/i.test(name)) return false;
+      return true;
+    });
+
+    if (productRows.length === 0) {
+      toast.error('No hay productos para importar', {
+        description: 'Borra las filas de ejemplo de la plantilla y pon tus productos, o revisa que nombre y precio estén rellenos.',
+      });
+      return 0;
+    }
+
+    const validation = validateDeliveryCatalogImportEntries(productRows, brands);
     if (!validation.ok) {
       const detail = formatDeliveryCatalogImportValidationToast(validation);
       toast.error('Revisa la plantilla antes de importar', {
@@ -1829,8 +1858,8 @@ export function CatalogPage() {
     const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
 
-    for (let index = 0; index < entries.length; index += 1) {
-      const entry = entries[index];
+    for (let index = 0; index < productRows.length; index += 1) {
+      const entry = productRows[index];
       const mapped = await mapImportEntryToCatalogItem(entry, {
         businessId: businessId || '',
         brandCache,
@@ -1886,7 +1915,7 @@ export function CatalogPage() {
       };
       toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
     }
-    if (result.created > 0) {
+    if (result.created > 0 || (result.updated ?? 0) > 0) {
       if (businessId) {
         const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
         const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
@@ -1895,14 +1924,26 @@ export function CatalogPage() {
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
+      const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
+      const parts = [];
+      if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
+      if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s) con ingredientes`);
       toast.success(
-        `${result.created} producto(s) importado(s)` +
+        `${parts.join(' · ')}` +
           (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
-          ' · TPV actualizado',
+          (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
       );
     }
-    if (result.errors > 0) toast.error(`${result.errors} producto(s) no se pudieron importar`);
-    return result.created || 0;
+    if (result.errors > 0 && result.created === 0 && (result.updated ?? 0) === 0) {
+      toast.error(`${result.errors} producto(s) no se pudieron importar`, {
+        description:
+          'Si ya existían (mismo SKU), rellena la columna ingredientes y vuelve a importar para actualizarlos.',
+        duration: 12000,
+      });
+    } else if (result.errors > 0) {
+      toast.error(`${result.errors} producto(s) no se pudieron importar`);
+    }
+    return (result.created || 0) + (result.updated || 0);
   };
 
   const handleZipFileSelected = useCallback(async (file: File | null) => {
@@ -2112,6 +2153,29 @@ export function CatalogPage() {
     void loadInvoices();
   }, [activeTab, loadInvoices]);
 
+  const loadDeliveryOrders = useCallback(async () => {
+    if (!dataUserId) return;
+    setOrdersLoading(true);
+    try {
+      const orders = await listDeliveryOrdersRequest(dataUserId);
+      setDeliveryOrders(orders);
+    } catch {
+      setDeliveryOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [dataUserId]);
+
+  useEffect(() => {
+    if (activeTab !== 'catalog' || !dataUserId) return;
+    void loadDeliveryOrders();
+  }, [activeTab, dataUserId, loadDeliveryOrders]);
+
+  const catalogSalesIndex = useMemo(
+    () => buildCatalogSalesIndex(catalogForActiveStore, deliveryOrders),
+    [catalogForActiveStore, deliveryOrders],
+  );
+
   // ── CRUD: Catalog Items ─────────────────────────────────────────────────────
 
   const handleCreateItem = async (data: Partial<CatalogItem>) => {
@@ -2123,6 +2187,7 @@ export function CatalogPage() {
       if (editingItem) {
         const updated = await updateCatalogItemRequest(user.id, { ...editingItem, ...data } as CatalogItem);
         setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+        setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
         toast.success('Artículo actualizado');
       } else {
         const created = await createCatalogItemRequest(user.id, { ...data, module: 'catalog' } as any);
@@ -2227,6 +2292,7 @@ export function CatalogPage() {
     try {
       const updated = await updateCatalogItemRequest(user.id, { ...item, [field]: !item[field] });
       setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+      setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       const labels: Record<string, [string, string]> = {
         webVisible: ['visible en web', 'oculto de la web'],
@@ -2238,6 +2304,20 @@ export function CatalogPage() {
     } catch {
       toast.error('Error al actualizar el artículo');
     }
+  };
+
+  const handleSaveDetailIngredients = async (ingredients: string) => {
+    if (!user?.id || !detailItem) throw new Error('missing item');
+    const updated = await updateCatalogItemRequest(user.id, {
+      ...detailItem,
+      customFields: {
+        ...(detailItem.customFields || {}),
+        ingredients,
+      },
+    });
+    setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
+    setDetailItem(updated);
+    notifyDeliveryCatalogChanged(dataUserId, businessId);
   };
 
   const handleStockAdjust = async (item: CatalogItem, newQuantity: number) => {
@@ -2368,27 +2448,42 @@ export function CatalogPage() {
   }, [activationFocus, openNewCatalogItemManual, clearActivationFocus]);
 
   const filteredCatalog = useMemo(() => {
-    return catalogItems.filter(item => {
-      if (filterCategory !== 'all' && item.category !== filterCategory) return false;
-      if (filterBrand !== 'all') {
-        const ids = Array.isArray(item.brandIds) ? item.brandIds : [];
-        if (!ids.includes(filterBrand)) return false;
-      }
-      if (filterType !== 'all' && (item.itemType || 'product') !== filterType) return false;
-      if (searchCatalog) {
-        const q = searchCatalog.toLowerCase();
-        const brandNames = catalogItemBrandNames(item, brands).toLowerCase();
-        return (
-          item.name.toLowerCase().includes(q) ||
-          item.sku?.toLowerCase().includes(q) ||
-          item.category?.toLowerCase().includes(q) ||
-          item.description?.toLowerCase().includes(q) ||
-          brandNames.includes(q)
-        );
-      }
-      return true;
+    return catalogItems.filter((item) => {
+      if (!searchCatalog) return true;
+      const q = searchCatalog.toLowerCase();
+      const brandNames = catalogItemBrandNames(item, brands).toLowerCase();
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.sku?.toLowerCase().includes(q) ||
+        item.category?.toLowerCase().includes(q) ||
+        item.description?.toLowerCase().includes(q) ||
+        brandNames.includes(q)
+      );
     });
-  }, [catalogItems, searchCatalog, filterCategory, filterBrand, filterType, brands]);
+  }, [catalogItems, searchCatalog, brands]);
+
+  const catalogGroupedByCategory = useMemo(() => {
+    const map = new Map<string, CatalogItem[]>();
+    for (const item of filteredCatalog) {
+      const cat = String(item.category || '').trim() || 'Sin categoría';
+      const list = map.get(cat) || [];
+      list.push(item);
+      map.set(cat, list);
+    }
+    return sortCatalogSectionKeys([...map.keys()]).map((category) => ({
+      category,
+      items: map.get(category) || [],
+    }));
+  }, [filteredCatalog]);
+
+  const toggleCatalogSection = useCallback((category: string) => {
+    setCollapsedCatalogSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  }, []);
 
   const selectedCatalogCount = useMemo(
     () => filteredCatalog.filter((item) => selectedCatalogIds.has(item._id)).length,
@@ -2415,7 +2510,7 @@ export function CatalogPage() {
 
   useEffect(() => {
     setBulkDeleteConfirmStep(false);
-  }, [searchCatalog, filterCategory, filterBrand, filterType]);
+  }, [searchCatalog]);
 
   const catalogKpis = useMemo(() => ({
     totalItems: catalogItems.length,
@@ -2478,48 +2573,16 @@ export function CatalogPage() {
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Acciones + búsqueda */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex gap-2 flex-wrap">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-            <input
-              className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-56"
-              placeholder="Buscar artículo, marca, SKU..."
-              value={searchCatalog}
-              onChange={e => setSearchCatalog(e.target.value)}
-            />
-          </div>
-          <select
-            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
-            value={filterType}
-            onChange={e => setFilterType(e.target.value as CatalogItem['itemType'] | 'all')}
-          >
-            <option value="all">Todos los tipos</option>
-            <option value="product">Productos ({catalogKpis.products})</option>
-            <option value="service">Servicios ({catalogKpis.services})</option>
-            <option value="combo">Combos ({catalogKpis.combos})</option>
-          </select>
-          <select
-            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
-            value={filterCategory}
-            onChange={e => setFilterCategory(e.target.value)}
-          >
-            <option value="all">Todas las categorías</option>
-            {categories.map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-          <select
-            className="px-3 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 outline-none"
-            value={filterBrand}
-            onChange={(e) => setFilterBrand(e.target.value)}
-          >
-            <option value="all">Todas las marcas</option>
-            {sortBrandsForDisplay(brands.filter((b) => b.active !== false)).map((b) => (
-              <option key={b._id} value={b._id}>{b.name}</option>
-            ))}
-          </select>
+        <div className="relative w-full sm:w-auto">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+          <input
+            className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 w-full sm:w-72"
+            placeholder="Buscar en el catálogo..."
+            value={searchCatalog}
+            onChange={(e) => setSearchCatalog(e.target.value)}
+          />
         </div>
         <div className="flex flex-wrap gap-2">
           <ActivationFieldWrap
@@ -2619,7 +2682,7 @@ export function CatalogPage() {
         </div>
       )}
 
-      {/* Table */}
+      {/* Secciones por categoría */}
       {loading && catalogItems.length > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
           <Loader2 className="w-4 h-4 animate-spin shrink-0" />
@@ -2639,182 +2702,247 @@ export function CatalogPage() {
           </button>
         </div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
-          <table className="w-full min-w-[900px]">
-            <thead>
-              <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                {catalogSelectMode && (
-                  <th className="px-4 py-3 w-10">
-                    <span className="sr-only">Seleccionar</span>
-                  </th>
-                )}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Marca</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Categoría</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Precio</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Stock</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Web</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Disponible</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredCatalog.map(item => {
-                const itemType = item.itemType || 'product';
-                const isLowStock = itemType === 'product' && item.stockQuantity <= item.minStock;
-                const typeBadgeClass = itemType === 'service'
-                  ? 'bg-purple-100 text-purple-700 border-purple-200'
-                  : itemType === 'combo'
-                    ? 'bg-amber-100 text-amber-700 border-amber-200'
-                    : 'bg-blue-100 text-blue-700 border-blue-200';
-                const typeLabel = itemType === 'service' ? 'Servicio' : itemType === 'combo' ? 'Combo' : 'Producto';
-                return (
-                  <tr
-                    key={item._id}
-                    className={`transition-colors ${
-                      catalogSelectMode && selectedCatalogIds.has(item._id)
-                        ? 'bg-red-50/70 dark:bg-red-950/20'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    {catalogSelectMode && (
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedCatalogIds.has(item._id)}
-                          onChange={() => toggleCatalogItemSelected(item._id)}
-                          className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
-                          aria-label={`Seleccionar ${item.name}`}
-                        />
-                      </td>
+        <div className="space-y-3">
+          {catalogGroupedByCategory.map(({ category, items }) => {
+            const isCollapsed = collapsedCatalogSections.has(category);
+            return (
+              <div
+                key={category}
+                className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleCatalogSection(category)}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-left"
+                  aria-expanded={!isCollapsed}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isCollapsed ? (
+                      <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
                     )}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        {item.image ? (
-                          <img src={item.image} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0">
-                            <Package className="w-4 h-4 text-gray-400" />
-                          </div>
-                        )}
-                        <div>
-                          <div className="font-semibold text-gray-900 dark:text-gray-100 text-sm">{item.name}</div>
-                          {item.description && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-xs">{item.description}</div>
+                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{category}</span>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
+                      {items.length} producto{items.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                </button>
+                {!isCollapsed && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[820px]">
+                      <thead>
+                        <tr className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+                          {catalogSelectMode && (
+                            <th className="px-4 py-2.5 w-10">
+                              <span className="sr-only">Seleccionar</span>
+                            </th>
                           )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {(() => {
-                        const brandLabel = catalogItemBrandNames(item, brands);
-                        return brandLabel ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-1 bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300 text-xs font-medium rounded-lg border border-violet-200 dark:border-violet-800 max-w-[140px] truncate" title={brandLabel}>
-                            <Tag className="w-3 h-3 shrink-0" />
-                            {brandLabel}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 text-sm">—</span>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 text-xs font-semibold rounded-lg border ${typeBadgeClass}`}>
-                        {typeLabel}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.category ? (
-                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-lg">
-                          {item.category}
-                        </span>
-                      ) : <span className="text-gray-400 text-sm">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100">{item.unitPrice.toFixed(2)}€</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">Coste: {item.costPrice.toFixed(2)}€</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      {itemType === 'service' ? (
-                        <span className="text-sm text-gray-400">No aplica</span>
-                      ) : (
-                        <div className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                          {item.stockQuantity} {item.unit}
-                        </div>
-                      )}
-                      {isLowStock && (
-                        <div className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
-                          <AlertTriangle className="w-3 h-3" /> Min: {item.minStock}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleToggleField(item, 'webVisible')}
-                        title={item.webVisible ? 'Visible en web — clic para ocultar' : 'Oculto de la web — clic para mostrar'}
-                        className={`w-9 h-5 rounded-full transition-colors relative inline-block ${item.webVisible ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      >
-                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${item.webVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        onClick={() => handleToggleField(item, 'available')}
-                        title={item.available ? 'Disponible — clic para marcar agotado' : 'No disponible — clic para habilitar'}
-                        className={`px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
-                          item.available
-                            ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
-                            : 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
-                        }`}
-                      >
-                        {item.available ? 'Sí' : 'Agotado'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => handleToggleField(item, 'active')}
-                        className={`px-2 py-1 text-xs font-semibold rounded-full border cursor-pointer transition-colors ${
-                          item.active
-                            ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {item.active ? 'Activo' : 'Inactivo'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
-                          className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                          title="Editar"
-                        >
-                          <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                        </button>
-                        <button
-                          onClick={() => setStockAdjustItem(item)}
-                          className="p-1.5 hover:bg-blue-100 rounded-lg transition-colors"
-                          title="Ajustar stock"
-                        >
-                          <ArrowUpDown className="w-4 h-4 text-blue-600" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteItem(item)}
-                          disabled={bulkDeletingCatalog || deletingItemIds.has(item._id)}
-                          className="p-1.5 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          title="Eliminar"
-                        >
-                          <Trash2 className="w-4 h-4 text-red-500" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Nombre</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Marca</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Tipo</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Precio</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Ventas</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Stock</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Web</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Disponible</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Estado</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {items.map((item) => {
+                          const itemType = item.itemType || 'product';
+                          const isLowStock = itemType === 'product' && item.stockQuantity <= item.minStock;
+                          const typeBadgeClass = itemType === 'service'
+                            ? 'bg-purple-100 text-purple-700 border-purple-200'
+                            : itemType === 'combo'
+                              ? 'bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-blue-100 text-blue-700 border-blue-200';
+                          const typeLabel = itemType === 'service' ? 'Servicio' : itemType === 'combo' ? 'Combo' : 'Producto';
+                          const sales = catalogSalesIndex.get(item._id);
+                          return (
+                            <tr
+                              key={item._id}
+                              className={`transition-colors ${
+                                catalogSelectMode && selectedCatalogIds.has(item._id)
+                                  ? 'bg-red-50/70 dark:bg-red-950/20'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                              }`}
+                            >
+                              {catalogSelectMode && (
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedCatalogIds.has(item._id)}
+                                    onChange={() => toggleCatalogItemSelected(item._id)}
+                                    className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                    aria-label={`Seleccionar ${item.name}`}
+                                  />
+                                </td>
+                              )}
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  {item.image ? (
+                                    <img src={item.image} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0">
+                                      <Package className="w-4 h-4 text-gray-400" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setDetailItem(item)}
+                                      className="block w-full text-left group"
+                                      title="Ver ficha, ventas e ingredientes"
+                                    >
+                                      <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm leading-snug group-hover:text-indigo-600 dark:group-hover:text-indigo-400 line-clamp-2">
+                                        {item.name}
+                                      </span>
+                                      <span className="mt-0.5 inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 opacity-80 group-hover:opacity-100 group-hover:underline">
+                                        <Eye className="w-3 h-3 shrink-0" />
+                                        Ver ficha
+                                      </span>
+                                    </button>
+                                    {typeof item.customFields?.ingredients === 'string' && item.customFields.ingredients.trim() && (
+                                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 line-clamp-1" title={item.customFields.ingredients}>
+                                        {item.customFields.ingredients}
+                                      </p>
+                                    )}
+                                    {item.description && (
+                                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate max-w-[240px]">{item.description}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {(() => {
+                                  const brandLabel = catalogItemBrandNames(item, brands);
+                                  return brandLabel ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300 text-xs font-medium rounded-lg border border-violet-200 dark:border-violet-800 max-w-[140px] truncate" title={brandLabel}>
+                                      <Tag className="w-3 h-3 shrink-0" />
+                                      {brandLabel}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400 text-sm">—</span>
+                                  );
+                                })()}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`px-2 py-1 text-xs font-semibold rounded-lg border ${typeBadgeClass}`}>
+                                  {typeLabel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <div className="text-sm font-bold text-gray-900 dark:text-gray-100">{item.unitPrice.toFixed(2)}€</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">Coste: {item.costPrice.toFixed(2)}€</div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {ordersLoading && !sales ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                ) : (
+                                  <div>
+                                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                                      {sales?.totalUnits ?? 0} ud
+                                    </div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                                      {(sales?.totalRevenue ?? 0).toFixed(2)}€
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {itemType === 'service' ? (
+                                  <span className="text-sm text-gray-400">No aplica</span>
+                                ) : (
+                                  <div className={`text-sm font-bold ${isLowStock ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
+                                    {item.stockQuantity} {item.unit}
+                                  </div>
+                                )}
+                                {isLowStock && (
+                                  <div className="text-xs text-red-500 flex items-center gap-1 mt-0.5">
+                                    <AlertTriangle className="w-3 h-3" /> Min: {item.minStock}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleToggleField(item, 'webVisible')}
+                                  title={item.webVisible ? 'Visible en web — clic para ocultar' : 'Oculto de la web — clic para mostrar'}
+                                  className={`w-9 h-5 rounded-full transition-colors relative inline-block ${item.webVisible ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                                >
+                                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${item.webVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                                </button>
+                              </td>
+                              <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleToggleField(item, 'available')}
+                                  title={item.available ? 'Disponible — clic para marcar agotado' : 'No disponible — clic para habilitar'}
+                                  className={`px-2.5 py-1 text-xs font-semibold rounded-full border transition-colors ${
+                                    item.available
+                                      ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
+                                      : 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
+                                  }`}
+                                >
+                                  {item.available ? 'Sí' : 'Agotado'}
+                                </button>
+                              </td>
+                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleToggleField(item, 'active')}
+                                  className={`px-2 py-1 text-xs font-semibold rounded-full border cursor-pointer transition-colors ${
+                                    item.active
+                                      ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
+                                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-200'
+                                  }`}
+                                >
+                                  {item.active ? 'Activo' : 'Inactivo'}
+                                </button>
+                              </td>
+                              <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => { setDetailItem(item); }}
+                                    className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 rounded-lg transition-colors"
+                                    title="Ficha y estadísticas"
+                                  >
+                                    <BarChart3 className="w-4 h-4 text-indigo-600" />
+                                  </button>
+                                  <button
+                                    onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
+                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                    title="Editar"
+                                  >
+                                    <Edit3 className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                  </button>
+                                  <button
+                                    onClick={() => setStockAdjustItem(item)}
+                                    className="p-1.5 hover:bg-blue-100 rounded-lg transition-colors"
+                                    title="Ajustar stock"
+                                  >
+                                    <ArrowUpDown className="w-4 h-4 text-blue-600" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteItem(item)}
+                                    disabled={bulkDeletingCatalog || deletingItemIds.has(item._id)}
+                                    className="p-1.5 hover:bg-red-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-red-500" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -3159,36 +3287,8 @@ export function CatalogPage() {
           <CatalogTabLoadingState phase="session" />
         )}
 
-        {pageReady && isDelivery && pdvGate.loading && activeStore.pointsOfSale.length === 0 && (
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
-            <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-            Comprobando tienda y PDV… puedes seguir navegando.
-          </div>
-        )}
-
         {pageReady && (
           <>
-        {isDelivery && !pdvGate.ready && !pdvGate.loading && (
-          <div className="flex flex-col gap-3 rounded-xl border border-sky-200 dark:border-sky-800 bg-sky-50/90 dark:bg-sky-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3 text-left">
-              <Store className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" />
-              <div>
-                <p className="font-semibold text-sky-950 dark:text-sky-100">Falta tienda o PDV activo</p>
-                <p className="mt-1 text-sm text-sky-900/80 dark:text-sky-200/80">
-                  Crea o enlaza un PDV en Ajustes → Tienda. Mientras tanto puedes revisar el catálogo.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate(DELIVERY_TIENDA_SETTINGS_PATH)}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
-            >
-              Ir a Tienda
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-        )}
         {isDelivery && !brandReady && (
           <div className="flex flex-col gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/90 dark:bg-amber-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-left">
@@ -3279,6 +3379,21 @@ export function CatalogPage() {
         catalogCategoriesInUse={categories}
       />
 
+      {detailItem && (
+        <CatalogItemDetailModal
+          item={detailItem}
+          brands={brands}
+          stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
+          statsLoading={ordersLoading}
+          onClose={() => setDetailItem(null)}
+          onEdit={() => {
+            setEditingItem(detailItem);
+            setShowCreateItem(true);
+          }}
+          onSaveIngredients={handleSaveDetailIngredients}
+        />
+      )}
+
       <CreateSupplierModal
         isOpen={showCreateSupplier}
         onClose={() => { setShowCreateSupplier(false); setEditingSupplier(null); }}
@@ -3339,17 +3454,17 @@ export function CatalogPage() {
         skipMappingWhenComplete
         extraFileUpload={{
           label: 'ZIP de imágenes (opcional)',
-          helpText: 'Sube un ZIP con fotos nombradas por SKU o nombre del producto (si falta match se bloquea la importación).',
+          helpText:
+            'Sube un ZIP con fotos nombradas por SKU o nombre del producto (si falta match se bloquea la importación).',
           accept: '.zip,application/zip',
           loading: loadingImageZip,
-          countLabel: Object.keys(imageZipMap).length > 0
-            ? `${Object.keys(imageZipMap).length} imagen(es) preparadas para mapear`
-            : '',
+          countLabel:
+            Object.keys(imageZipMap).length > 0
+              ? `${Object.keys(imageZipMap).length} imagen(es) preparadas para mapear`
+              : '',
           sampleZipLabel: 'Descargar ZIP ejemplo',
           onDownloadSampleZip: handleDownloadSampleZip,
-          onFileSelected: async (file) => {
-            await handleZipFileSelected(file);
-          },
+          onFileSelected: (file) => handleZipFileSelected(file),
         }}
       />
     </Layout>

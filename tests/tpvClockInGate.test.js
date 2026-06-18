@@ -1,5 +1,4 @@
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, expect, it } from 'vitest';
 import { evaluateTpvClockInGate } from '../src/app/lib/tpvClockInGate.ts';
 
 describe('evaluateTpvClockInGate', () => {
@@ -11,8 +10,8 @@ describe('evaluateTpvClockInGate', () => {
       currentUserId: 'u1',
       isWorkerUser: false,
     });
-    assert.equal(r.allowed, false);
-    assert.equal(r.reason, 'loading');
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('loading');
   });
 
   it('allows manager when someone is active', () => {
@@ -23,7 +22,7 @@ describe('evaluateTpvClockInGate', () => {
       currentUserId: 'mgr',
       isWorkerUser: false,
     });
-    assert.equal(r.allowed, true);
+    expect(r.allowed).toBe(true);
   });
 
   it('allows worker when self is active', () => {
@@ -34,7 +33,7 @@ describe('evaluateTpvClockInGate', () => {
       currentUserId: 'u1',
       isWorkerUser: true,
     });
-    assert.equal(r.allowed, true);
+    expect(r.allowed).toBe(true);
   });
 
   it('allows manager when someone is active (account: id prefix)', () => {
@@ -45,6 +44,6 @@ describe('evaluateTpvClockInGate', () => {
       currentUserId: 'account:mgr',
       isWorkerUser: false,
     });
-    assert.equal(r.allowed, true);
+    expect(r.allowed).toBe(true);
   });
 });

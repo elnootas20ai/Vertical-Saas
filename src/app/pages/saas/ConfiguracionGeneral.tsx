@@ -74,6 +74,8 @@ import { organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImpo
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
+  DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
+  DELIVERY_CATALOG_TEMPLATE_VERSION,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
   validateDeliveryCatalogImportEntries,
@@ -370,12 +372,9 @@ export function ConfiguracionGeneral() {
     if (!bizId) return;
     const brandList = await listBrandsRequest(bizId).catch(() => []);
     const lines = organizerBrandsForCatalogTemplate(brandList);
-    if (lines.length === 0) {
-      toast.error('Configura al menos una línea comercial en Ajustes → Marca antes de descargar la plantilla');
-      return;
-    }
     downloadDeliveryCatalogImportTemplate(lines);
-    toast.success(`Plantilla descargada (${lines.map((b) => b.name).join(', ')})`);
+    const linesHint = lines.length > 0 ? lines.map((b) => b.name).join(', ') : 'Ajustes → Marca';
+    toast.success(`Plantilla v${DELIVERY_CATALOG_TEMPLATE_VERSION} · ${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas · ${linesHint}`);
   }, [bizId]);
 
   const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {

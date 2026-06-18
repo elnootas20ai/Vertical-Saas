@@ -6369,6 +6369,21 @@ export function calcTpvRegisterExpectedCash(session) {
 }
 
 /** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */
+export function shouldRegisterTpvSaleOnTpvOrderCreate(doc) {
+  const channel = String(doc?.channel || '').toLowerCase();
+  if (channel !== 'tpv') return false;
+  const paidAmount = Number(doc?.paidAmount || 0);
+  const paymentStatus = String(doc?.paymentStatus || '').toLowerCase();
+  const isCollected =
+    Boolean(doc?.paymentCollected)
+    || paymentStatus === 'paid'
+    || (Number.isFinite(paidAmount) && paidAmount > 0);
+  if (!isCollected) return false;
+  const amount = paidAmount > 0 ? paidAmount : Number(doc?.totalAmount || 0);
+  return Number.isFinite(amount) && amount > 0;
+}
+
+/** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */
 export function sumTpvRegisterSaleAmountForOrder(transactions, orderId) {
   const oid = String(orderId || '').trim();
   if (!oid) return 0;

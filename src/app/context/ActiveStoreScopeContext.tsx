@@ -23,7 +23,6 @@ import {
 import {
   dedupePointsOfSale,
   pointOfSaleDisplayLabel,
-  listPointsOfSaleRequest,
   type PointOfSale,
 } from '../lib/deliveryApi';
 import { readTpvTabletBinding } from '../lib/tpvTabletSession';
@@ -38,9 +37,11 @@ import { shouldSkipEmptyStoreApply } from '../lib/retailScopeApply';
 import type { WorkCenter } from '../lib/workCentersApi';
 import {
   shouldUseDeliveryStores,
-  loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
   resolveBusinessScopeId,
+  filterPointsOfSaleForWorkCenters,
+  workCentersStrictlyForBusiness,
+  isRetailWorkCenter,
 } from '../lib/deliverySetup';
 
 export interface ActiveStoreScopeValue {
@@ -79,13 +80,19 @@ function pickRetailWorkCenters(workCenters: WorkCenter[]): WorkCenter[] {
   );
 }
 
+function scopeRetailForBusiness(retail: WorkCenter[], businessId: string): WorkCenter[] {
+  const scoped = businessId ? workCentersStrictlyForBusiness(retail, businessId) : retail;
+  return scoped.filter(isRetailWorkCenter);
+}
+
 function scopeFromLoadState(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
   authUser: AuthUser | null | undefined,
+  businessId: string,
 ): { retail: WorkCenter[]; allPdvs: PointOfSale[] } {
-  let retail = pickRetailWorkCenters(workCenters);
-  let allPdvs = dedupePointsOfSale(pointsOfSale);
+  let retail = scopeRetailForBusiness(pickRetailWorkCenters(workCenters), businessId);
+  let allPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, retail));
 
   if (authUser && isInvitedWorkerUser(authUser)) {
     const scoped = filterStoresForWorkerAssignment(
@@ -183,11 +190,14 @@ function ActiveStoreScopeProviderImpl({
   const pathnameRef = useRef(location.pathname);
 
   const applyStores = useCallback((retail: WorkCenter[], allPdvs: PointOfSale[]) => {
-    const activePdvs = allPdvs.filter((p) => p.active !== false);
-    setRetailWorkCenters(retail);
-    setAllPointsOfSale(allPdvs);
+    const bid = businessIdRef.current;
+    const scopedRetail = bid ? scopeRetailForBusiness(retail, bid) : retail;
+    const scopedPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail));
+    const activePdvs = scopedPdvs.filter((p) => p.active !== false);
+    setRetailWorkCenters(scopedRetail);
+    setAllPointsOfSale(scopedPdvs);
     setPointsOfSale(activePdvs);
-    if (retail.length > 0 || allPdvs.length > 0) {
+    if (scopedRetail.length > 0 || scopedPdvs.length > 0) {
       hasDisplayedStoresRef.current = true;
     }
   }, []);
@@ -206,7 +216,14 @@ function ActiveStoreScopeProviderImpl({
       }
       applyStores(retail, allPdvs);
       if (retail.length > 0 || allPdvs.length > 0) {
-        writeRetailScopeCache(bid, { retailWorkCenters: retail, allPointsOfSale: allPdvs });
+        const accountN = businessesFetchSettledRef.current
+          ? (accountBusinessCountRef.current ?? businessesRef.current.length)
+          : undefined;
+        writeRetailScopeCache(
+          bid,
+          { retailWorkCenters: retail, allPointsOfSale: allPdvs },
+          accountN !== undefined ? { accountBusinessCount: accountN } : undefined,
+        );
       }
       // Nunca borrar caché en vacío: conservar última lista buena para el sidebar.
     },
@@ -223,27 +240,33 @@ function ActiveStoreScopeProviderImpl({
       return;
     }
     loadInflightRef.current = null;
-    const cached = readRetailScopeCache(businessId);
+    const cacheOpts =
+      accountBusinessCount !== undefined ? { accountBusinessCount } : undefined;
+    const cached = readRetailScopeCache(businessId, cacheOpts);
     if (cached) {
-      hasDisplayedStoresRef.current = true;
-      applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
-      return;
+      if (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0) {
+        hasDisplayedStoresRef.current = true;
+        applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
+        return;
+      }
     }
-    const sidebarCached = readSidebarRetailCache(businessId);
+    const sidebarCached = readSidebarRetailCache(businessId, cacheOpts);
     if (
       sidebarCached &&
       (sidebarCached.allPointsOfSale.length > 0 || sidebarCached.rows.length > 0)
     ) {
-      hasDisplayedStoresRef.current = true;
-      applyStores(sidebarCached.retailWorkCenters, sidebarCached.allPointsOfSale);
-      return;
+      if (sidebarCached.retailWorkCenters.length > 0 || sidebarCached.allPointsOfSale.length > 0) {
+        hasDisplayedStoresRef.current = true;
+        applyStores(sidebarCached.retailWorkCenters, sidebarCached.allPointsOfSale);
+        return;
+      }
     }
     if (!hasDisplayedStoresRef.current) {
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
     }
-  }, [businessId, applyStores]);
+  }, [businessId, accountBusinessCount, applyStores]);
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -287,28 +310,7 @@ function ActiveStoreScopeProviderImpl({
       };
 
       try {
-        let state = await loadTpvPointsOfSaleForBusiness(authUser, biz ?? null, loadOpts);
-
-        if (state.pointsOfSale.length === 0 && state.dataUserId) {
-          const raw = dedupePointsOfSale(
-            await listPointsOfSaleRequest(state.dataUserId).catch(() => []),
-          );
-          if (raw.length > 0) {
-            const fallbackState = await loadDeliveryStores(authUser, biz ?? null, {
-              ...loadOpts,
-              accountBusinessCount: accountN,
-            });
-            state = {
-              ...fallbackState,
-              pointsOfSale: raw.filter((p) => p.active !== false).length > 0
-                ? raw
-                : fallbackState.pointsOfSale,
-            };
-            if (state.pointsOfSale.length === 0) {
-              state = { ...state, pointsOfSale: raw };
-            }
-          }
-        }
+        const state = await loadTpvPointsOfSaleForBusiness(authUser, biz ?? null, loadOpts);
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
 
@@ -316,6 +318,7 @@ function ActiveStoreScopeProviderImpl({
           state.workCenters,
           state.pointsOfSale,
           authUser,
+          bidAtStart,
         );
         commitStores(retail, allPdvs, bidAtStart, force);
       } catch {
@@ -395,14 +398,16 @@ function ActiveStoreScopeProviderImpl({
     if (!businessId || !businessesFetchSettled) return;
     if (retailWorkCenters.length > 0 || allPointsOfSale.length > 0) return;
 
-    const cached = readRetailScopeCache(businessId);
+    const cacheOpts =
+      accountBusinessCount !== undefined ? { accountBusinessCount } : undefined;
+    const cached = readRetailScopeCache(businessId, cacheOpts);
     if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
       hasDisplayedStoresRef.current = true;
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
       return;
     }
 
-    const sidebarCached = readSidebarRetailCache(businessId);
+    const sidebarCached = readSidebarRetailCache(businessId, cacheOpts);
     if (
       sidebarCached &&
       (sidebarCached.allPointsOfSale.length > 0 || sidebarCached.rows.length > 0)
@@ -435,6 +440,7 @@ function ActiveStoreScopeProviderImpl({
     businesses,
     user?.user_id,
     user?.id,
+    accountBusinessCount,
     applyStores,
     load,
   ]);

@@ -24,7 +24,6 @@ import {
   listWorkCentersForDelivery,
   type WorkCenter,
 } from './workCentersApi';
-import { clearRetailScopeCache } from './retailScopeCache';
 import { clearTpvCatalogCache } from './tpvCatalogCache';
 import {
   notifyDeliveryActiveStoreChanged,
@@ -241,7 +240,11 @@ export function filterWorkCentersForBusinessScope(
   if (accountN === 1) {
     const isRetail = (wc: WorkCenter) =>
       wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
-    const legacy = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
+    // Solo legacy sin businessId si esta empresa aún no tiene tiendas propias.
+    const legacy =
+      mine.length === 0
+        ? active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc))
+        : [];
     const merged = new Map<string, WorkCenter>();
     for (const wc of [...mine, ...legacy]) merged.set(wc._id, wc);
     return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -308,6 +311,8 @@ export function filterPointsOfSaleForWorkCenters(
     return wcId && wcIds.has(wcId);
   });
 }
+
+export { isRetailWorkCenter, sanitizeRetailScopeSnapshot } from './retailScopeSanitize';
 
 export type LoadDeliveryStoresOptions = {
   /** Tras crear/editar un PDV ya enlazado: evita re-sincronizar todos los centros (muy lento). */
@@ -410,9 +415,12 @@ export async function loadTpvPointsOfSaleForBusiness(
 
   let pointsOfSale = [...state.pointsOfSale];
   if (pointsOfSale.length === 0) {
-    pointsOfSale = dedupePointsOfSale(
+    const raw = dedupePointsOfSale(
       await listPointsOfSaleRequest(state.dataUserId).catch(() => [] as PointOfSale[]),
     ).filter((p) => p.active !== false);
+    pointsOfSale = dedupePointsOfSale(
+      filterPointsOfSaleForWorkCenters(raw, state.workCenters),
+    );
   }
   for (const wc of retail) {
     const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, wc, {
@@ -629,7 +637,12 @@ export const DELIVERY_BRANDS_CHANGED = 'brands:changed';
 
 /** Invalida caché de tiendas en sesión (sidebar / scope) tras alta o edición. */
 export function clearDeliveryStoresSessionCache(businessId?: string): void {
-  clearRetailScopeCache(businessId);
+  void import('./retailScopeCache').then(({ clearRetailScopeCache }) => {
+    clearRetailScopeCache(businessId);
+  });
+  void import('./sidebarRetailCache').then(({ clearSidebarRetailCache }) => {
+    clearSidebarRetailCache(businessId);
+  });
 }
 
 export function notifyDeliveryWorkCentersChanged(businessId?: string): void {

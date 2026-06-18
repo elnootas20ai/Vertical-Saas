@@ -1,5 +1,5 @@
-import type { TpvClockedInWorker } from './tpvClockedInWorkers';
-import { clockinIdsMatch } from './tpvClockedInWorkers';
+import type { TpvClockedInWorker } from './tpvActiveStaff';
+import { clockinIdsMatch } from './tpvActiveStaff';
 
 export type TpvClockInBlockReason =
   | 'loading'

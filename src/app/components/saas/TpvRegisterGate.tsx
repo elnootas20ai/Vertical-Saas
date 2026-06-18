@@ -11,7 +11,6 @@ import {
   createTpvRegisterSessionRequest,
   TpvRegisterSessionConflictError,
   updateTpvRegisterSessionRequest,
-  filterDeliveryOrdersRequest,
   pointOfSaleDisplayLabel,
   buildDeliverySidebarStoreRows,
   type DeliverySidebarStoreRow,
@@ -25,7 +24,9 @@ import {
   type DeliveryOrder,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
+import { calcTpvExpectedCash, buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { localCalendarDayKey, registerSessionSpansMultipleDays } from '../../lib/tpvCajaScope';
+import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   buildAggregatorCashRows,
   applyManualAggregatorTotals,
@@ -40,7 +41,7 @@ import {
   filterStoresForWorkerAssignment,
   isInvitedWorkerUser,
 } from '../../lib/pdvScope';
-import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId } from '../../lib/deliveryOpsPdvSelection';
+import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import {
   loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
@@ -58,12 +59,13 @@ import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../lib/tpvTab
 import {
   filterUsersForStoreClockin,
   loadClockedInStoreWorkers,
-  pickDefaultOrderTaker,
+  pickDefaultOrderTakerForSession,
   buildTpvActiveStaff,
   clockinIdsMatch,
+  clockinValidForRegisterSession,
   type TpvClockedInWorker,
 } from '../../lib/tpvClockedInWorkers';
-import { pickPreferredMemberClockin } from '../../lib/clockinHistoryUtils';
+import { pickPreferredMemberClockin, todayDateStr } from '../../lib/clockinHistoryUtils';
 import { deriveEffectiveClockinStatus, isClockinPresent } from '../../lib/clockinStatus';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
@@ -1156,6 +1158,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
   const expected = calcTpvExpectedCash(session);
   const diff = countedTotal - expected;
   const summary = buildTpvRegisterSummary(session);
+  const cashStaffConsumption = sumCashStaffConsumption(session);
+  const cashReturnsTotal = sumCashReturns(session);
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
   const aggregatorRows = useMemo(
     () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
@@ -1186,20 +1190,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
       return;
     }
     setShiftOrdersLoading(true);
-    void filterDeliveryOrdersRequest(dataUserId, {
-      salesPointId: session.pointOfSaleId,
-      dateFrom: session.openedAt,
-      dateTo: new Date().toISOString(),
-      limit: 500,
-    })
-      .then((res) => setShiftOrders(res.orders || []))
+    void fetchShiftOrdersForSession(dataUserId, session)
+      .then((orders) => setShiftOrders(orders))
       .catch(() => setShiftOrders([]))
       .finally(() => setShiftOrdersLoading(false));
-  }, [dataUserId, session.pointOfSaleId, session.openedAt]);
+  }, [dataUserId, session.pointOfSaleId, session.openedAt, session.closedAt, session.status]);
 
   return (
-    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-4`}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col" style={{ maxHeight: '92vh' }}>
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6`}>
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
@@ -1210,7 +1209,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-5">
           {/* Summary KPIs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
@@ -1244,14 +1243,18 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
             session={session}
             orders={shiftOrders}
             loading={shiftOrdersLoading}
+            registerSummary={summary}
           />
 
           {/* Cash flow summary */}
           <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
             <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold text-gray-900 dark:text-gray-100">{session.initialCashAmount.toFixed(2)}€</span></div>
             <div className="flex justify-between"><span className="text-green-600">+ Cobros en efectivo</span><span className="font-semibold text-green-700">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
+            {cashStaffConsumption > 0 && (
+              <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo (efectivo)</span><span className="font-semibold text-green-700">{cashStaffConsumption.toFixed(2)}€</span></div>
+            )}
             <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{summary.totalCashIn.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{session.transactions.filter(t => t.type === 'return' && t.paymentMethod === 'efectivo').reduce((s, t) => s + t.amount, 0).toFixed(2)}€</span></div>
+            <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{cashReturnsTotal.toFixed(2)}€</span></div>
             <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{summary.totalCashOut.toFixed(2)}€</span></div>
             <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
               <span className="text-gray-900 dark:text-gray-100">= Efectivo esperado</span>
@@ -1357,6 +1360,7 @@ function ClockInModal({
   ownerUserId,
   pdvId,
   workCenterId,
+  sessionOpenedAt,
   onCancel,
   onChanged,
 }: {
@@ -1365,6 +1369,7 @@ function ClockInModal({
   ownerUserId: string;
   pdvId: string;
   workCenterId: string;
+  sessionOpenedAt?: string | null;
   onCancel: () => void;
   onChanged?: () => void;
 }) {
@@ -1383,7 +1388,7 @@ function ClockInModal({
       const [users, records] = await Promise.all([
         fetchBusinessUsers(businessId),
         listClockins(businessId, {
-          date: new Date().toISOString().slice(0, 10),
+          date: todayDateStr(),
           salesPointId: pdvId || undefined,
           workCenterId: workCenterId || undefined,
           storeScope: Boolean(pdvId),
@@ -1417,17 +1422,17 @@ function ClockInModal({
   }, [load]);
 
   const todayRecords = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayDateStr();
     const map = new Map<string, ClockinRecord>();
     for (const r of clockins) {
-      if (r.date !== today) continue;
+      if (!clockinValidForRegisterSession(r, sessionOpenedAt, today)) continue;
       const mid = normalizeClockinUserId(r.member_id);
       if (!mid) continue;
       const prev = map.get(mid);
       map.set(mid, prev ? pickPreferredMemberClockin(prev, r) : r);
     }
     return map;
-  }, [clockins]);
+  }, [clockins, sessionOpenedAt]);
 
   const memberKey = (member: AuthUser) =>
     normalizeClockinUserId(member.user_id || member.id);
@@ -1448,7 +1453,7 @@ function ClockInModal({
     setActingId(member.user_id);
     setActionMsg(null);
     let already = false;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayDateStr();
     try {
       const rec = await clockIn(businessId, mid, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
@@ -1568,23 +1573,9 @@ function ClockInModal({
           {error && (
             <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm">{error}</div>
           )}
-          {!loading && team.length > 0 && clockedInCount === 0 && (
-            <div className="p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 text-violet-900 dark:text-violet-100 text-sm">
-              Pulsa <span className="font-bold">Fichar</span> en cada persona que entre a trabajar. Cuando al menos una esté activa, podrás continuar.
-            </div>
-          )}
           {loading && (
             <div className="flex items-center justify-center gap-2 py-16 text-gray-500">
               <Loader2 className="w-5 h-5 animate-spin" />
-              Cargando equipo…
-            </div>
-          )}
-          {!loading && team.length === 0 && (
-            <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-5 text-sm text-amber-900 dark:text-amber-100">
-              <p className="font-semibold mb-1">Sin trabajadores asignados a esta tienda</p>
-              <p className="text-amber-800 dark:text-amber-200">
-                Asigna el local en Equipo → cada trabajador → Tienda / centro de trabajo. Solo pueden fichar en su tienda.
-              </p>
             </div>
           )}
           {!loading && team.map((member) => {
@@ -1795,8 +1786,7 @@ function RegisterStatusBar({
           onSelect={onSelectOrderTaker}
           loading={clockedInWorkersLoading}
           compact
-          label="Quién atiende"
-          emptyMessage="Quién abrió caja"
+          label="En tienda"
         />
         <button type="button" onClick={onRequestClockIn} className="px-3 py-1.5 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 rounded-lg font-semibold hover:bg-violet-200 dark:hover:bg-violet-900/50 transition-colors flex items-center gap-1">
           <LogIn className="w-3 h-3" /> Fichar
@@ -2201,6 +2191,51 @@ export function TpvRegisterGate({
     if (id) setManagerPdvPickId(id);
   }, [initialManagerPdvId, isWorkerUser, managerPdvPickId, sessions, pointsOfSale, dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
+  useEffect(() => {
+    if (isWorkerUser || isTabletSession) return;
+    const syncManagerPdvFromStorage = () => {
+      const bid = resolveBusinessScopeId(currentBusiness);
+      if (!bid || !dataUserId) return;
+      const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+      const pdvId = resolvePreferenceToPdvId(pointsOfSale, saved);
+      if (pdvId) setManagerPdvPickId(pdvId);
+    };
+    syncManagerPdvFromStorage();
+    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, syncManagerPdvFromStorage);
+    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, syncManagerPdvFromStorage);
+  }, [isWorkerUser, isTabletSession, currentBusiness, dataUserId, pointsOfSale]);
+
+  useEffect(() => {
+    if (!dataUserId) return;
+    const refreshSessions = () => {
+      void listTpvRegisterSessionsRequest(dataUserId)
+        .then((sessData) => {
+          setSessions((prev) => {
+            const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
+            let next = sessData;
+            if (isTabletSessionRef.current && tabletPdvId) {
+              next = sessData.filter((s) => {
+                const pid = String(s.pointOfSaleId || '').trim();
+                return !pid || pid === tabletPdvId;
+              });
+            } else if (pointsOfSale.length > 0) {
+              next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale));
+            }
+            if (next.length === 0 && prev.length > 0) return prev;
+            return next;
+          });
+        })
+        .catch(() => null);
+    };
+    refreshSessions();
+    const interval = window.setInterval(refreshSessions, 30000);
+    window.addEventListener('focus', refreshSessions);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshSessions);
+    };
+  }, [dataUserId, pointsOfSale]);
+
   const activeSession = useMemo(() => {
     const open = sessions.filter((s) => isTpvRegisterSessionOpen(s));
     if (isTabletSession && tabletRestrictedPdvId) {
@@ -2269,7 +2304,7 @@ export function TpvRegisterGate({
       setClockedInWorkers([]);
       return;
     }
-    const ownerUserId = String(currentBusiness?.owner_user_id || '').trim();
+    const ownerUserId = String(scopeBusiness?.owner_user_id || currentBusiness?.owner_user_id || '').trim();
     const silent = options?.silent ?? false;
     if (!silent) setClockedInWorkersLoading(true);
     try {
@@ -2278,39 +2313,32 @@ export function TpvRegisterGate({
         ownerUserId,
         pdvId,
         workCenterId,
+        activeSession?.openedAt,
       );
       setClockedInWorkers(workers);
       setSelectedOrderTakerId((prev) => {
         const staff = buildTpvActiveStaff(activeSession, workers);
         const prevNorm = normalizeClockinUserId(prev);
-        if (prevNorm && staff.some((w) => w.id === prevNorm)) return prevNorm;
-        const openerId = normalizeClockinUserId(activeSession?.workerId);
-        const userFallbackId = normalizeClockinUserId(user?.user_id || user?.id);
-        const openerFallback =
-          openerId || (String(activeSession?.workerName || '').trim() && userFallbackId ? userFallbackId : '');
-        return pickDefaultOrderTaker(staff) || openerFallback || null;
+        if (prevNorm && staff.some((w) => clockinIdsMatch(w.id, prevNorm))) return prevNorm;
+        return pickDefaultOrderTakerForSession(activeSession, workers);
       });
     } catch {
       if (!silent) setClockedInWorkers([]);
     } finally {
       if (!silent) setClockedInWorkersLoading(false);
     }
-  }, [businessId, currentBusiness?.owner_user_id, activeStoreScope, activeSession, user?.user_id, user?.id]);
+  }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) return;
-    const openerId = normalizeClockinUserId(activeSession.workerId);
-    const userFallbackId = normalizeClockinUserId(user?.user_id || user?.id);
-    const defaultTakerId =
-      openerId || (String(activeSession.workerName || '').trim() && userFallbackId ? userFallbackId : '');
-    if (!defaultTakerId && clockedInWorkers.length === 0) return;
+    if (clockedInWorkers.length === 0 && !normalizeClockinUserId(activeSession.workerId)) return;
     setSelectedOrderTakerId((prev) => {
       const staff = buildTpvActiveStaff(activeSession, clockedInWorkers);
       const prevNorm = normalizeClockinUserId(prev);
       if (prevNorm && staff.some((w) => clockinIdsMatch(w.id, prevNorm))) return prevNorm;
-      return pickDefaultOrderTaker(staff) || defaultTakerId || null;
+      return pickDefaultOrderTakerForSession(activeSession, clockedInWorkers);
     });
-  }, [activeSession?._id, activeSession?.workerId, activeSession?.workerName, clockedInWorkers, user?.user_id, user?.id]);
+  }, [activeSession?._id, activeSession?.workerId, activeSession?.workerName, activeSession?.openedAt, clockedInWorkers]);
 
   useEffect(() => {
     if (!activeStoreScope.pdvId) {
@@ -2845,6 +2873,7 @@ export function TpvRegisterGate({
         ownerUserId={String(currentBusiness?.owner_user_id || '')}
         pdvId={clockInStoreScope.pdvId}
         workCenterId={clockInStoreScope.workCenterId}
+        sessionOpenedAt={activeSession?.openedAt}
         onChanged={() => void refreshClockedInWorkers()}
         onCancel={() => {
           setShowClockIn(false);
@@ -3133,6 +3162,22 @@ export function TpvRegisterGate({
           selectedOrderTakerId={selectedOrderTakerId}
           onSelectOrderTaker={setSelectedOrderTakerId}
         />
+        {registerSessionSpansMultipleDays(activeSession) && (
+          <div className="relative z-20 bg-amber-100 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3 flex-wrap">
+            <span>
+              Caja abierta desde el{' '}
+              <strong>{new Date(activeSession.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</strong>
+              . Ciérrala para el cierre diario y abre una caja nueva hoy ({localCalendarDayKey()}).
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowClosing(true)}
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700"
+            >
+              Cerrar caja
+            </button>
+          </div>
+        )}
         <RegisterCashOpsStrip session={activeSession} />
         <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           {children}

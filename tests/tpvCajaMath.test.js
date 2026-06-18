@@ -3,6 +3,9 @@ import {
   buildTpvRegisterSummary,
   calcTpvExpectedCash,
   normalizeTpvPaymentMethod,
+  sumCashReturns,
+  sumCashStaffConsumption,
+  reconcileRegisterTotals,
 } from '../src/app/lib/tpvCajaMath.js';
 
 describe('normalizeTpvPaymentMethod', () => {
@@ -28,6 +31,31 @@ describe('calcTpvExpectedCash', () => {
   });
 });
 
+describe('sumCashReturns', () => {
+  it('solo cuenta devoluciones en efectivo', () => {
+    const session = {
+      transactions: [
+        { type: 'return', paymentMethod: 'efectivo', amount: 4 },
+        { type: 'return', paymentMethod: 'tarjeta', amount: 9 },
+        { type: 'return', paymentMethod: 'otros', amount: 3 },
+      ],
+    };
+    expect(sumCashReturns(session)).toBe(4);
+  });
+});
+
+describe('sumCashStaffConsumption', () => {
+  it('suma consumo equipo en efectivo', () => {
+    const session = {
+      transactions: [
+        { type: 'staff_consumption', paymentMethod: 'efectivo', amount: 6 },
+        { type: 'staff_consumption', paymentMethod: 'tarjeta', amount: 3 },
+      ],
+    };
+    expect(sumCashStaffConsumption(session)).toBe(6);
+  });
+});
+
 describe('buildTpvRegisterSummary', () => {
   it('counts otros legacy sales under otro', () => {
     const session = {
@@ -39,5 +67,25 @@ describe('buildTpvRegisterSummary', () => {
     };
     const summary = buildTpvRegisterSummary(session);
     expect(summary.salesByMethod.otro).toBe(10);
+  });
+});
+
+describe('reconcileRegisterTotals', () => {
+  it('marca alineado cuando recuento y ventas netas coinciden', () => {
+    const rec = reconcileRegisterTotals(
+      { totalSales: 100, totalReturns: 10 },
+      { totalRevenue: 90, orderCount: 5 },
+    );
+    expect(rec.aligned).toBe(true);
+    expect(rec.difference).toBe(0);
+  });
+
+  it('detecta diferencia entre recuento y caja', () => {
+    const rec = reconcileRegisterTotals(
+      { totalSales: 100, totalReturns: 0 },
+      { totalRevenue: 95, orderCount: 4 },
+    );
+    expect(rec.aligned).toBe(false);
+    expect(rec.difference).toBe(-5);
   });
 });

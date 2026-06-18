@@ -46,9 +46,37 @@ export function organizerBrandsForCatalogTemplate<T extends ImportBrandLike>(bra
 }
 
 /** Columna del Excel: línea / organizador TPV (no marca de fábrica del producto). */
+const EMPTY_LINEA_PLACEHOLDERS = new Set(
+  [
+    'dejar linea vacia',
+    'dejar linea vacía',
+    'dejar línea vacía',
+    'linea vacia',
+    'linea vacía',
+    'línea vacía',
+    'vacio',
+    'vacío',
+    '(vacio)',
+    '(vacío)',
+    '-',
+    '—',
+    'n/a',
+    'na',
+  ].map((s) => s.toLowerCase()),
+);
+
+/** Textos de ayuda de la plantilla («Dejar linea vacía») → sin línea comercial. */
+export function normalizeImportLineText(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (EMPTY_LINEA_PLACEHOLDERS.has(raw.toLowerCase())) return '';
+  if (/^dejar\s+l[ií]nea\s+vac[ií]a$/i.test(raw)) return '';
+  return raw;
+}
+
 export function readImportLineText(entry: Record<string, string | unknown>): string {
   for (const key of ['linea', 'línea', 'linea_comercial', 'organizador', 'marca', 'brand']) {
-    const value = String(entry[key] ?? '').trim();
+    const value = normalizeImportLineText(String(entry[key] ?? ''));
     if (value) return value;
   }
   return '';

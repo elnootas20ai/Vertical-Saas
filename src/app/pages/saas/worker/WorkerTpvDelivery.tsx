@@ -25,6 +25,14 @@ import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpv
 import { TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
+import {
+  isDeliveredBoardOrder,
+  localCalendarDayKey,
+  localDayBounds,
+  orderAlreadyCobrado,
+  orderInRegisterSession,
+  orderLoadBoundsForOpenSession,
+} from '../../../lib/tpvCajaScope';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
@@ -87,43 +95,8 @@ const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
 
 type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
 
-function localCalendarDayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-}
-
-function localDayBounds(): { from: string; to: string; dayKey: string } {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  return { from: start.toISOString(), to: end.toISOString(), dayKey: localCalendarDayKey() };
-}
-
-function isLocalCalendarDay(iso: string | undefined, dayKey: string): boolean {
-  if (!iso) return false;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return key === dayKey;
-}
-
-/** Pedido visible en el tablero TPV: mismo día y desde la apertura de caja actual. */
-function isOrderInOpenRegisterScope(
-  order: DeliveryOrder,
-  dayKey: string,
-  sessionOpenedAt?: string | null,
-): boolean {
-  if (!isLocalCalendarDay(order.createdAt, dayKey)) return false;
-  const openedAt = String(sessionOpenedAt || '').trim();
-  if (!openedAt) return true;
-  const createdMs = new Date(order.createdAt).getTime();
-  const openedMs = new Date(openedAt).getTime();
-  if (Number.isNaN(createdMs) || Number.isNaN(openedMs)) return true;
-  return createdMs >= openedMs;
-}
-
 function isCompletedBoardOrder(order: DeliveryOrder): boolean {
-  return order.status === 'entregado' || orderAlreadyCobrado(order);
+  return isDeliveredBoardOrder(order);
 }
 
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
@@ -134,12 +107,16 @@ function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryP
   return 'efectivo';
 }
 
-function orderAlreadyCobrado(order: DeliveryOrder): boolean {
-  const total = Number(order.totalAmount || 0);
-  const paid = Number(order.paidAmount || 0);
-  if (order.paymentStatus === 'paid' || order.paymentCollected) return true;
-  if (paid > 0 && total > 0 && paid >= total) return true;
-  return false;
+/** Al entregar a domicilio hay que preguntar cómo pagó salvo que ya conste cobrado. */
+function shouldAskPaymentOnDelivery(order: DeliveryOrder): boolean {
+  const fullyCollected =
+    Boolean(order.paymentCollected)
+    && order.paymentStatus === 'paid'
+    && Number(order.paidAmount || 0) >= Number(order.totalAmount || 0)
+    && Number(order.totalAmount || 0) > 0;
+  if (fullyCollected) return false;
+  if (String(order.deliveryType || '').toLowerCase() === 'domicilio') return true;
+  return !orderAlreadyCobrado(order);
 }
 
 function orderPaymentBoardBadge(order: DeliveryOrder): {
@@ -570,37 +547,23 @@ function DeliverPaymentModal({
             {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
-            {orderAlreadyCobrado(order)
-              ? 'Confirma la entrega (ya cobrado en caja)'
-              : '¿Cómo ha pagado?'}
+            {shouldAskPaymentOnDelivery(order)
+              ? '¿Cómo ha pagado?'
+              : 'Confirma la entrega (ya cobrado en caja)'}
           </p>
-          {!orderAlreadyCobrado(order) && order.paymentMethod && (
+          {shouldAskPaymentOnDelivery(order) && order.paymentMethod && (
             <p className="text-xs text-cyan-700 dark:text-cyan-300 mt-1 font-medium">
               Previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
             </p>
           )}
-          {orderAlreadyCobrado(order) && order.paymentMethod && (
+          {!shouldAskPaymentOnDelivery(order) && order.paymentMethod && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
               Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
             </p>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {orderAlreadyCobrado(order) ? (
-            <button
-              type="button"
-              onClick={() => onConfirm(resolveDeliveryPaymentMethod(order.paymentMethod))}
-              disabled={loading}
-              className="col-span-3 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors disabled:opacity-50"
-            >
-              {loading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <CheckCircle2 className="w-5 h-5" />
-              )}
-              Confirmar entrega
-            </button>
-          ) : (
+        <div className="grid grid-cols-2 gap-2">
+          {shouldAskPaymentOnDelivery(order) ? (
             <>
               <button
                 type="button"
@@ -641,7 +604,34 @@ function DeliverPaymentModal({
                 )}
                 <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Bizum</span>
               </button>
+              <button
+                type="button"
+                onClick={() => onConfirm('otro')}
+                disabled={loading}
+                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="w-7 h-7 animate-spin text-gray-600" />
+                ) : (
+                  <Wallet className="w-7 h-7 text-gray-700 dark:text-gray-300" />
+                )}
+                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Otros</span>
+              </button>
             </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onConfirm(resolveDeliveryPaymentMethod(order.paymentMethod))}
+              disabled={loading}
+              className="col-span-2 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5" />
+              )}
+              Confirmar entrega
+            </button>
           )}
         </div>
       </div>
@@ -928,8 +918,14 @@ export function WorkerTpvDelivery({
     if (!userId) return;
     const silent = options?.silent ?? false;
     if (!silent) setRefreshing(true);
-    const bounds = localDayBounds();
-    setDayKey(bounds.dayKey);
+    setDayKey(localCalendarDayKey());
+    if (!sessionOpenedAt) {
+      setOrders([]);
+      setInitialLoading(false);
+      if (!silent) setRefreshing(false);
+      return;
+    }
+    const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
     try {
       const data = await filterDeliveryOrdersRequest(userId, {
         dateFrom: bounds.from,
@@ -950,9 +946,13 @@ export function WorkerTpvDelivery({
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId]);
+  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  useEffect(() => {
+    setOrders([]);
+  }, [register?.session?._id, sessionOpenedAt]);
 
   useEffect(() => {
     const tick = () => {
@@ -971,10 +971,11 @@ export function WorkerTpvDelivery({
       const session = (event as CustomEvent<TpvRegisterSession>).detail;
       if (!session) return;
       if (session.status === 'closed') {
-        setOrders((prev) => prev.filter((o) => !isCompletedBoardOrder(o)));
+        setOrders([]);
         return;
       }
       if (session.status === 'open') {
+        setOrders([]);
         setDayKey(localCalendarDayKey());
         void loadOrders({ silent: true });
       }
@@ -1032,12 +1033,11 @@ export function WorkerTpvDelivery({
 
     let resolvedPayment = paymentMethod;
     if (next === 'entregado' && !resolvedPayment) {
-      if (orderAlreadyCobrado(order)) {
-        resolvedPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
-      } else {
+      if (shouldAskPaymentOnDelivery(order)) {
         setDeliveryCompleteOrder(order);
         return;
       }
+      resolvedPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
     }
 
     setAdvancingId(order._id);
@@ -1099,7 +1099,7 @@ export function WorkerTpvDelivery({
         } catch (err) {
           const msg = err instanceof Error ? err.message : '';
           if (!/conflict|409|revision/i.test(msg)) throw err;
-          const bounds = localDayBounds();
+          const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
           const data = await filterDeliveryOrdersRequest(userId, {
             dateFrom: bounds.from,
             dateTo: bounds.to,
@@ -1142,7 +1142,7 @@ export function WorkerTpvDelivery({
     } finally {
       setAdvancingId(null);
     }
-  }, [userId, selectedOrder, user?.fullName, user?.user_id, user?.id, currentBusiness]);
+  }, [userId, selectedOrder, user?.fullName, user?.user_id, user?.id, currentBusiness, sessionOpenedAt]);
 
   const confirmCompleteDelivery = useCallback(
     (method: DeliveryPaymentMethod) => {
@@ -1201,16 +1201,17 @@ export function WorkerTpvDelivery({
     navigate(exitTpvTabletSessionPath(), { replace: true });
   }, [navigate]);
 
+  const openSession = register?.session ?? null;
+
   const stats = useMemo(() => {
-    const dayKeyLocal = dayKey;
     const montaje = orders.filter(
-      (o) => MONTAGE_STATUSES.includes(o.status) && isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt),
+      (o) => MONTAGE_STATUSES.includes(o.status) && orderInRegisterSession(o, openSession),
     );
     const enReparto = orders.filter(
-      (o) => o.status === 'en_reparto' && isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt),
+      (o) => o.status === 'en_reparto' && orderInRegisterSession(o, openSession),
     );
     const completados = orders.filter((o) => {
-      if (!isOrderInOpenRegisterScope(o, dayKeyLocal, sessionOpenedAt)) return false;
+      if (!orderInRegisterSession(o, openSession)) return false;
       return isCompletedBoardOrder(o);
     });
     const activeWait = [...montaje, ...enReparto];
@@ -1224,15 +1225,15 @@ export function WorkerTpvDelivery({
       delivered: completados.length,
       avgWait,
     };
-  }, [orders, dayKey, sessionOpenedAt]);
+  }, [orders, openSession]);
 
   const scopedActive = useMemo(
     () => orders.filter(
       (o) =>
         (MONTAGE_STATUSES.includes(o.status) || o.status === 'en_reparto')
-        && isOrderInOpenRegisterScope(o, dayKey, sessionOpenedAt),
+        && orderInRegisterSession(o, openSession),
     ),
-    [orders, dayKey, sessionOpenedAt],
+    [orders, openSession],
   );
 
   const assemblyOrders = useMemo(
@@ -1257,14 +1258,14 @@ export function WorkerTpvDelivery({
     () => orders
       .filter((o) => {
         if (o.status === 'cancelled') return false;
-        if (!isOrderInOpenRegisterScope(o, dayKey, sessionOpenedAt)) return false;
+        if (!orderInRegisterSession(o, openSession)) return false;
         return isCompletedBoardOrder(o);
       })
       .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
       .filter((o) => matchesSearch(o, search))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 50),
-    [orders, dayKey, sessionOpenedAt, fulfillmentFilter, search],
+    [orders, openSession, fulfillmentFilter, search],
   );
 
   const filterCounts = useMemo(() => ({
@@ -1447,19 +1448,14 @@ export function WorkerTpvDelivery({
           <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
             <span className="text-sm font-bold text-green-800 dark:text-green-300">
-              Completados hoy ({completedTodayOrders.length})
+              Completados en turno ({completedTodayOrders.length})
             </span>
           </div>
           {showDelivered ? <ChevronUp className="w-4 h-4 text-green-700" /> : <ChevronDown className="w-4 h-4 text-green-700" />}
         </button>
-        {showDelivered && (
+        {showDelivered && completedTodayOrders.length > 0 && (
           <div className="mt-2 max-h-44 overflow-y-auto space-y-1">
-            {completedTodayOrders.length === 0 ? (
-              <p className="text-xs text-gray-500 dark:text-gray-400 px-3 py-2 text-center">
-                Sin completados en esta caja. Al cerrar, el histórico queda en Caja → Historial.
-              </p>
-            ) : (
-              completedTodayOrders.map((order) => {
+            {completedTodayOrders.map((order) => {
                 const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
                 return (
                   <button
@@ -1470,7 +1466,12 @@ export function WorkerTpvDelivery({
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
-                      <p className="text-[11px] text-gray-500 truncate">{order.customerName || 'Cliente'}</p>
+                      <p className="text-[11px] text-gray-500 truncate">
+                        {order.customerName || 'Cliente'}
+                        {' · '}
+                        {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                        {order.channel ? ` · ${String(order.channel).toUpperCase()}` : ''}
+                      </p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-xs font-bold tabular-nums">{formatCurrency(resolveDeliveryOrderChargeTotal(order))}</p>
@@ -1478,8 +1479,7 @@ export function WorkerTpvDelivery({
                     </div>
                   </button>
                 );
-              })
-            )}
+              })}
           </div>
         )}
       </div>

@@ -6,5 +6,6 @@ export function shouldSkipEmptyStoreApply(params: {
   force?: boolean;
 }): boolean {
   const hasIncoming = params.incomingRetailCount > 0 || params.incomingPdvCount > 0;
+  if (params.force === true) return false;
   return params.hasDisplayedStores && !hasIncoming;
 }

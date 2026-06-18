@@ -1,26 +1,22 @@
-import { listUsersRequest, type AuthUser } from './authApi';
+import type { AuthUser } from './authApi';
 import { listClockins, type ClockinRecord } from './clockinsApi';
 import { deriveEffectiveClockinStatus, isClockinPresent } from './clockinStatus';
-import { pickPreferredMemberClockin } from './clockinHistoryUtils';
+import { pickPreferredMemberClockin, todayDateStr, clockinValidForRegisterSession } from './clockinHistoryUtils';
 import { normalizeClockinUserId } from './clockinUserId';
 
-export interface TpvClockedInWorker {
-  id: string;
-  name: string;
-  status: 'active' | 'break';
-}
-
-export function clockinIdsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
-  const left = normalizeClockinUserId(a);
-  const right = normalizeClockinUserId(b);
-  return Boolean(left && right && left === right);
-}
-
-export function getWorkerInitials(name: string): string {
-  const parts = String(name || '').split(' ').filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0]?.[0] || '?').toUpperCase();
-}
+export {
+  clockinBelongsToLocalDay,
+  clockinValidForRegisterSession,
+} from './clockinHistoryUtils';
+export type { TpvClockedInWorker } from './tpvActiveStaff';
+export {
+  buildTpvActiveStaff,
+  clockinIdsMatch,
+  getWorkerInitials,
+  pickDefaultOrderTaker,
+  pickDefaultOrderTakerForSession,
+} from './tpvActiveStaff';
+import type { TpvClockedInWorker } from './tpvActiveStaff';
 
 export function isMemberAssignedToStore(
   member: AuthUser,
@@ -56,7 +52,6 @@ export function clockinRecordMatchesStore(
   workCenterId: string,
 ): boolean {
   const storedPdv = String(record.sales_point_id || '').trim();
-  // Sin tienda explícita no cuenta en el TPV de un PDV concreto (evita mezclar fichajes).
   if (!storedPdv) return false;
   return (
     storedPdv === pdvId
@@ -67,56 +62,27 @@ export function clockinRecordMatchesStore(
   );
 }
 
-/** Equipo operativo en TPV: quien abrió caja + fichajes de ESTA tienda (sin bloquear por nómina global). */
-export function buildTpvActiveStaff(
-  session: { workerId?: string; workerName?: string } | null | undefined,
-  storeClockins: TpvClockedInWorker[],
-): TpvClockedInWorker[] {
-  const byId = new Map<string, TpvClockedInWorker>();
-  const openerId = normalizeClockinUserId(session?.workerId);
-  const openerName = String(session?.workerName || '').trim();
-  if (openerId && openerName) {
-    byId.set(openerId, { id: openerId, name: openerName, status: 'active' });
-  }
-  for (const worker of storeClockins) {
-    byId.set(worker.id, worker);
-  }
-  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-}
-
-async function fetchBusinessUsers(businessId: string): Promise<AuthUser[]> {
-  const data = await listUsersRequest(businessId);
-  return data.users || [];
-}
-
 /** Trabajadores fichados hoy en la tienda (activos o en descanso). */
 export async function loadClockedInStoreWorkers(
   businessId: string,
-  ownerUserId: string,
+  _ownerUserId: string,
   pdvId: string,
   workCenterId: string,
+  sessionOpenedAt?: string | null,
 ): Promise<TpvClockedInWorker[]> {
   if (!businessId || !pdvId) return [];
-  const today = new Date().toISOString().slice(0, 10);
-  const [users, records] = await Promise.all([
-    fetchBusinessUsers(businessId),
-    listClockins(businessId, {
-      date: today,
-      salesPointId: pdvId,
-      workCenterId: workCenterId || undefined,
-      storeScope: true,
-    }),
-  ]);
-  const teamIds = new Set(
-    filterUsersForStoreClockin(users, ownerUserId, pdvId, workCenterId)
-      .map((u) => normalizeClockinUserId(u.user_id))
-      .filter(Boolean),
-  );
+  const dayKey = todayDateStr();
+  const records = await listClockins(businessId, {
+    date: dayKey,
+    salesPointId: pdvId,
+    workCenterId: workCenterId || undefined,
+    storeScope: true,
+  });
   const bestRecordByMember = new Map<string, ClockinRecord>();
   for (const r of records) {
     const mid = normalizeClockinUserId(r.member_id);
-    if (!mid || !teamIds.has(mid)) continue;
-    if (!clockinRecordMatchesStore(r, pdvId, workCenterId)) continue;
+    if (!mid) continue;
+    if (!clockinValidForRegisterSession(r, sessionOpenedAt, dayKey)) continue;
     const prev = bestRecordByMember.get(mid);
     bestRecordByMember.set(mid, prev ? pickPreferredMemberClockin(prev, r) : r);
   }
@@ -131,10 +97,4 @@ export async function loadClockedInStoreWorkers(
     });
   }
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-}
-
-export function pickDefaultOrderTaker(workers: TpvClockedInWorker[]): string | null {
-  if (workers.length === 0) return null;
-  const active = workers.find((w) => w.status === 'active');
-  return active?.id || workers[0].id;
 }
