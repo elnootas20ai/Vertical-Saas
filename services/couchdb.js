@@ -6340,15 +6340,24 @@ export async function listTpvRegisterSessionsByUser(req, userId) {
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
+/** Canonical TPV payment method (legacy orders may store `otros`). */
+export function normalizeTpvPaymentMethod(raw) {
+  const pm = String(raw || '').trim().toLowerCase();
+  if (pm === 'otros') return 'otro';
+  if (['efectivo', 'tarjeta', 'bizum', 'online', 'otro'].includes(pm)) return pm;
+  return 'efectivo';
+}
+
 /** Efectivo esperado en caja según transacciones registradas. */
 export function calcTpvRegisterExpectedCash(session) {
   if (!session) return 0;
   const txs = Array.isArray(session.transactions) ? session.transactions : [];
+  const isCash = (t) => normalizeTpvPaymentMethod(t?.paymentMethod) === 'efectivo';
   const cashSales = txs
-    .filter((t) => t?.type === 'sale' && t.paymentMethod === 'efectivo')
+    .filter((t) => (t?.type === 'sale' || t?.type === 'staff_consumption') && isCash(t))
     .reduce((s, t) => s + Number(t.amount || 0), 0);
   const cashReturns = txs
-    .filter((t) => t?.type === 'return' && t.paymentMethod === 'efectivo')
+    .filter((t) => t?.type === 'return' && isCash(t))
     .reduce((s, t) => s + Number(t.amount || 0), 0);
   const cashIn = txs
     .filter((t) => t?.type === 'cash_in')

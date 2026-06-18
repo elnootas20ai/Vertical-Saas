@@ -51,6 +51,7 @@ import {
   Plus,
   Banknote,
   CreditCard,
+  Wallet,
   Trash2,
   Smartphone,
   ChevronDown,
@@ -64,12 +65,13 @@ import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
 
-type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum';
+type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otro';
 
 const PAYMENT_LABELS: Record<DeliveryPaymentMethod, string> = {
   efectivo: 'Efectivo',
   tarjeta: 'Tarjeta',
   bizum: 'Bizum',
+  otro: 'Otros',
 };
 
 const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
@@ -127,7 +129,8 @@ function isCompletedBoardOrder(order: DeliveryOrder): boolean {
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
 function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryPaymentMethod {
   const pm = String(raw || '').trim().toLowerCase();
-  if (pm === 'tarjeta' || pm === 'bizum') return pm;
+  if (pm === 'otros') return 'otro';
+  if (pm === 'tarjeta' || pm === 'bizum' || pm === 'otro') return pm;
   return 'efectivo';
 }
 
@@ -164,7 +167,7 @@ function PaymentMethodBoardChip({
   paid: boolean;
 }) {
   const methodLabel = PAYMENT_LABELS[method];
-  const Icon = method === 'tarjeta' ? CreditCard : method === 'bizum' ? Smartphone : Banknote;
+  const Icon = method === 'tarjeta' ? CreditCard : method === 'bizum' ? Smartphone : method === 'otro' ? Wallet : Banknote;
 
   const methodStyles: Record<DeliveryPaymentMethod, { chip: string; icon: string }> = {
     efectivo: {
@@ -184,6 +187,12 @@ function PaymentMethodBoardChip({
         ? 'bg-violet-100 text-violet-950 border-violet-400 dark:bg-violet-950/50 dark:text-violet-100 dark:border-violet-600'
         : 'bg-violet-50 text-violet-900 border-violet-300 dark:bg-violet-950/30 dark:text-violet-200 dark:border-violet-700',
       icon: paid ? 'text-violet-700 dark:text-violet-300' : 'text-violet-600 dark:text-violet-400',
+    },
+    otro: {
+      chip: paid
+        ? 'bg-gray-200 text-gray-950 border-gray-400 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600'
+        : 'bg-gray-100 text-gray-900 border-gray-300 dark:bg-gray-900/30 dark:text-gray-200 dark:border-gray-700',
+      icon: paid ? 'text-gray-700 dark:text-gray-300' : 'text-gray-600 dark:text-gray-400',
     },
   };
 

@@ -28,6 +28,7 @@ import {
   findOpenTpvRegisterSessionForPointOfSale,
   sumTpvRegisterSaleAmountForOrder,
   sumTpvRegisterReturnAmountForOrder,
+  normalizeTpvPaymentMethod,
   getNextDeliveryTicketNumber,
   autoCloseTpvRegisterSessionDocument,
   buildPointOfSaleDocument,
@@ -809,6 +810,7 @@ async function appendTpvSessionTransaction(req, userId, orderDoc, registerTx, {
       ...registerTx,
       id: txId,
       amount: Math.round(toRegister * 100) / 100,
+      paymentMethod: normalizeTpvPaymentMethod(registerTx.paymentMethod || 'efectivo'),
       orderId: orderDoc._id,
       orderNumber: orderDoc.orderNumber || '',
       linkedDeliveryOrderId: orderDoc._id,
@@ -1002,7 +1004,7 @@ export async function registerPayment(req, res) {
   }
 }
 
-const ALLOWED_PAYMENT_METHODS = new Set(['efectivo', 'tarjeta', 'bizum', 'otros', 'online']);
+const ALLOWED_PAYMENT_METHODS = new Set(['efectivo', 'tarjeta', 'bizum', 'otro', 'otros', 'online']);
 
 function orderIsPaidForCorrection(order) {
   const total = Number(order?.totalAmount || 0);
@@ -1017,16 +1019,17 @@ export async function correctDeliveryOrderPayment(req, res) {
     const { userId, orderId } = req.params;
     const { paymentMethod } = req.body || {};
     if (!assertUserScope(req, res, userId)) return;
-    const pm = String(paymentMethod || '').trim().toLowerCase();
-    if (!pm || !ALLOWED_PAYMENT_METHODS.has(pm)) {
+    const rawPm = String(paymentMethod || '').trim().toLowerCase();
+    if (!rawPm || !ALLOWED_PAYMENT_METHODS.has(rawPm)) {
       return badRequest(res, 'Método de pago no válido');
     }
+    const pm = normalizeTpvPaymentMethod(rawPm);
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     if (!orderIsPaidForCorrection(existing)) {
       return badRequest(res, 'Solo se puede corregir el pago en pedidos ya cobrados');
     }
-    const prev = String(existing.paymentMethod || '').trim().toLowerCase();
+    const prev = normalizeTpvPaymentMethod(existing.paymentMethod);
     if (prev === pm) {
       return res.json({ ok: true, order: sanitizeDeliveryOrder(existing), unchanged: true });
     }
@@ -2657,7 +2660,7 @@ async function registerStaffConsumptionInTpvSession(req, userId, {
   const registerTx = {
     id: txId,
     type: 'staff_consumption',
-    paymentMethod: paymentMethod || 'efectivo',
+    paymentMethod: normalizeTpvPaymentMethod(paymentMethod || 'efectivo'),
     amount: Math.round(Number(consumptionDoc.total || 0) * 100) / 100,
     description: `Consumo equipo · ${consumptionDoc.workerName || ''} · ${consumptionDoc.itemName || ''}`.trim(),
     staffConsumptionId: consumptionDoc._id,
@@ -2800,16 +2803,29 @@ export async function createStaffConsumption(req, res) {
     const saved = await putDocument(req, db, doc._id, doc);
     const consumption = sanitizeStaffConsumption({ ...doc, _rev: saved.rev });
 
+    let cajaRegistration = { status: 'nothing_to_register' };
     if (paymentMode === 'cash_now') {
       try {
-        await registerStaffConsumptionInTpvSession(req, userId, {
+        const session = await registerStaffConsumptionInTpvSession(req, userId, {
           pdvId: salesPointId,
           consumptionDoc: consumption,
           paymentMethod,
           registeredBy: recordedByName,
         });
+        if (session) {
+          cajaRegistration = { status: 'registered', session };
+        } else {
+          cajaRegistration = {
+            status: 'no_open_session',
+            message: 'Consumo registrado, pero no hay caja abierta en esta tienda.',
+          };
+        }
       } catch (regErr) {
         console.error('[STAFF_CONSUMPTION] Error registrando en caja:', regErr?.message);
+        cajaRegistration = {
+          status: 'error',
+          message: regErr?.message || 'No se pudo registrar el consumo en caja.',
+        };
       }
     }
 
@@ -2838,6 +2854,7 @@ export async function createStaffConsumption(req, res) {
       consumption,
       stockDeducted,
       stockWarnings,
+      cajaRegistration,
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar consumo del equipo' });

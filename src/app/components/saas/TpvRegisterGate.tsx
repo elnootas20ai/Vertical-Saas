@@ -25,6 +25,7 @@ import {
   type DeliveryOrder,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
+import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 import {
   buildAggregatorCashRows,
   applyManualAggregatorTotals,
@@ -150,22 +151,6 @@ function findLastClosedTpvSession(
   return matches[0] || null;
 }
 
-function calcExpectedCash(session: TpvRegisterSession): number {
-  const cashSales = session.transactions
-    .filter(t => t.type === 'sale' && t.paymentMethod === 'efectivo')
-    .reduce((s, t) => s + t.amount, 0);
-  const cashReturns = session.transactions
-    .filter(t => t.type === 'return' && t.paymentMethod === 'efectivo')
-    .reduce((s, t) => s + t.amount, 0);
-  const cashIn = session.transactions
-    .filter(t => t.type === 'cash_in')
-    .reduce((s, t) => s + t.amount, 0);
-  const cashOut = session.transactions
-    .filter(t => t.type === 'cash_out' || t.type === 'expense')
-    .reduce((s, t) => s + t.amount, 0);
-  return session.initialCashAmount + cashSales - cashReturns + cashIn - cashOut;
-}
-
 function tpvSessionMatchesStoreRef(
   session: TpvRegisterSession,
   refId: string,
@@ -188,35 +173,6 @@ function shouldKeepTpvSessionInList(session: TpvRegisterSession, scopedPdvs: Poi
   if (!pid) return true;
   if (scopedPdvs.some((p) => p._id === pid)) return true;
   return scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid);
-}
-
-function buildSummary(session: TpvRegisterSession): TpvRegisterSummary {
-  const sales = session.transactions.filter(t => t.type === 'sale');
-  const returns = session.transactions.filter(t => t.type === 'return');
-  const totalSales = sales.reduce((s, t) => s + t.amount, 0);
-  const salesByChannel: Record<string, number> = {};
-  for (const tx of sales) {
-    if (tx.channel) salesByChannel[tx.channel] = (salesByChannel[tx.channel] || 0) + tx.amount;
-  }
-  return {
-    totalSales,
-    salesByMethod: {
-      efectivo: sales.filter(t => t.paymentMethod === 'efectivo').reduce((s, t) => s + t.amount, 0),
-      tarjeta: sales.filter(t => t.paymentMethod === 'tarjeta').reduce((s, t) => s + t.amount, 0),
-      bizum: sales.filter(t => t.paymentMethod === 'bizum').reduce((s, t) => s + t.amount, 0),
-      online: sales.filter(t => t.paymentMethod === 'online').reduce((s, t) => s + t.amount, 0),
-      otro: sales.filter(t => t.paymentMethod === 'otro').reduce((s, t) => s + t.amount, 0),
-    },
-    salesByChannel,
-    totalReturns: returns.reduce((s, t) => s + t.amount, 0),
-    returnCount: returns.length,
-    totalCashIn: session.transactions.filter(t => t.type === 'cash_in').reduce((s, t) => s + t.amount, 0),
-    totalCashOut: session.transactions.filter(t => t.type === 'cash_out' || t.type === 'expense').reduce((s, t) => s + t.amount, 0),
-    totalTips: session.transactions.filter(t => t.type === 'tip').reduce((s, t) => s + t.amount, 0),
-    totalTransactions: session.transactions.length,
-    averageTicket: sales.length > 0 ? totalSales / sales.length : 0,
-    incidentCount: session.incidents?.length || 0,
-  };
 }
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
@@ -1197,9 +1153,9 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
   const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
   const [manualInitialized, setManualInitialized] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
-  const expected = calcExpectedCash(session);
+  const expected = calcTpvExpectedCash(session);
   const diff = countedTotal - expected;
-  const summary = buildSummary(session);
+  const summary = buildTpvRegisterSummary(session);
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
   const aggregatorRows = useMemo(
     () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
@@ -1817,7 +1773,7 @@ function RegisterStatusBar({
   selectedOrderTakerId: string | null;
   onSelectOrderTaker: (workerId: string) => void;
 }) {
-  const expected = calcExpectedCash(session);
+  const expected = calcTpvExpectedCash(session);
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
 
@@ -1872,7 +1828,7 @@ function CashCountModal({ session, onConfirm, onCancel }: {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
   const countedTotal = calcDenominationTotal(counts);
-  const expected = calcExpectedCash(session);
+  const expected = calcTpvExpectedCash(session);
   const diff = countedTotal - expected;
   const hasCounted = countedTotal > 0;
 
@@ -2639,9 +2595,9 @@ export function TpvRegisterGate({
     }
     const session = activeSession;
     const finalAmount = calcDenominationTotal(counts);
-    const expected = calcExpectedCash(session);
+    const expected = calcTpvExpectedCash(session);
     const diff = finalAmount - expected;
-    const summary = buildSummary(session);
+    const summary = buildTpvRegisterSummary(session);
     const aggregatorClosingTotals: Record<string, number> = {};
     for (const row of aggregatorRows) {
       aggregatorClosingTotals[row.platform.channel] = row.totalSales;
@@ -2739,7 +2695,7 @@ export function TpvRegisterGate({
           enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, tx: fullTx });
           setSessions((prev) => prev.map((s) => (s._id === sessionId ? nextSession : s)));
           const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
-          toast.info(`${label} guardado en cola local. Efectivo esperado: ${calcExpectedCash(nextSession).toFixed(2)}€`);
+          toast.info(`${label} guardado en cola local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
           setShowCashOps(false);
           return;
         }
@@ -2749,7 +2705,7 @@ export function TpvRegisterGate({
           setSessions((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
           if (isTpvCashMovementTx(fullTx.type)) {
             const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
-            toast.success(`${label} de ${fullTx.amount.toFixed(2)}€ registrada. Efectivo esperado: ${calcExpectedCash(updated).toFixed(2)}€`);
+            toast.success(`${label} de ${fullTx.amount.toFixed(2)}€ registrada. Efectivo esperado: ${calcTpvExpectedCash(updated).toFixed(2)}€`);
             setShowCashOps(false);
           }
           return;
@@ -2775,7 +2731,7 @@ export function TpvRegisterGate({
   const performCashCount = useCallback(async (countedBy: string, denominations: CashDenominationCount, notes?: string) => {
     if (!dataUserId || !activeSession) return;
     const actualCash = calcDenominationTotal(denominations);
-    const expectedCash = calcExpectedCash(activeSession);
+    const expectedCash = calcTpvExpectedCash(activeSession);
     const difference = Number((actualCash - expectedCash).toFixed(2));
     const cashCount: TpvCashCount = {
       id: `cc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -2843,7 +2799,7 @@ export function TpvRegisterGate({
       requestClose: () => setShowClosing(true),
       requestCashCount: () => setShowCashCount(true),
       requestIncident: () => setShowIncident(true),
-      expectedCash: calcExpectedCash(activeSession),
+      expectedCash: calcTpvExpectedCash(activeSession),
       clockedInWorkers: activeStaff,
       clockedInWorkersLoading,
       selectedOrderTakerId,
@@ -2948,7 +2904,7 @@ export function TpvRegisterGate({
   }
 
   if (!activeSession && postCloseSession) {
-    const expected = calcExpectedCash(postCloseSession);
+    const expected = calcTpvExpectedCash(postCloseSession);
     return wrapShell(
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">

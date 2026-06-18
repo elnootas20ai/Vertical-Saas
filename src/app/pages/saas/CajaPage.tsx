@@ -35,49 +35,9 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
+import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function calcExpectedCash(session: TpvRegisterSession): number {
-  const cashSales = session.transactions
-    .filter(t => t.type === 'sale' && t.paymentMethod === 'efectivo')
-    .reduce((s, t) => s + t.amount, 0);
-  const cashReturns = session.transactions
-    .filter(t => t.type === 'return' && t.paymentMethod === 'efectivo')
-    .reduce((s, t) => s + t.amount, 0);
-  const cashIn = session.transactions.filter(t => t.type === 'cash_in').reduce((s, t) => s + t.amount, 0);
-  const cashOut = session.transactions.filter(t => t.type === 'cash_out' || t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  return session.initialCashAmount + cashSales - cashReturns + cashIn - cashOut;
-}
-
-function buildSummary(session: TpvRegisterSession): TpvRegisterSummary {
-  const sales = session.transactions.filter(t => t.type === 'sale');
-  const returns = session.transactions.filter(t => t.type === 'return');
-  const totalSales = sales.reduce((s, t) => s + t.amount, 0);
-  const salesByChannel: Record<string, number> = {};
-  for (const tx of sales) {
-    if (tx.channel) salesByChannel[tx.channel] = (salesByChannel[tx.channel] || 0) + tx.amount;
-  }
-  return {
-    totalSales,
-    salesByMethod: {
-      efectivo: sales.filter(t => t.paymentMethod === 'efectivo').reduce((s, t) => s + t.amount, 0),
-      tarjeta: sales.filter(t => t.paymentMethod === 'tarjeta').reduce((s, t) => s + t.amount, 0),
-      bizum: sales.filter(t => t.paymentMethod === 'bizum').reduce((s, t) => s + t.amount, 0),
-      online: sales.filter(t => t.paymentMethod === 'online').reduce((s, t) => s + t.amount, 0),
-      otro: sales.filter(t => t.paymentMethod === 'otro').reduce((s, t) => s + t.amount, 0),
-    },
-    salesByChannel,
-    totalReturns: returns.reduce((s, t) => s + t.amount, 0),
-    returnCount: returns.length,
-    totalCashIn: session.transactions.filter(t => t.type === 'cash_in').reduce((s, t) => s + t.amount, 0),
-    totalCashOut: session.transactions.filter(t => t.type === 'cash_out' || t.type === 'expense').reduce((s, t) => s + t.amount, 0),
-    totalTips: session.transactions.filter(t => t.type === 'tip').reduce((s, t) => s + t.amount, 0),
-    totalTransactions: session.transactions.length,
-    averageTicket: sales.length > 0 ? totalSales / sales.length : 0,
-    incidentCount: session.incidents?.length || 0,
-  };
-}
 
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
   efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
@@ -189,7 +149,7 @@ function groupSessionsByStore(
     const storeName = pdv?.name || daySessions.find((s) => s.pointOfSaleId === pdvId)?.pointOfSaleName || 'Tienda';
     const sessions = (byPdv.get(pdvId) || []).sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
     const openCount = sessions.filter((s) => s.status === 'open').length;
-    const totalSales = sessions.reduce((sum, s) => sum + buildSummary(s).totalSales, 0);
+    const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0);
     groups.push({ pdvId, storeName, sessions, openCount, totalSales });
   }
 
@@ -200,7 +160,7 @@ function groupSessionsByStore(
       storeName: sessions[0]?.pointOfSaleName || 'Tienda',
       sessions: sessions.sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt))),
       openCount: sessions.filter((s) => s.status === 'open').length,
-      totalSales: sessions.reduce((sum, s) => sum + buildSummary(s).totalSales, 0),
+      totalSales: sessions.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0),
     });
   }
 
@@ -276,7 +236,7 @@ function StoreDayBlock({
       ) : (
         <div className="p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/30">
           {group.sessions.map((session, turnIndex) => {
-            const summary = buildSummary(session);
+            const summary = buildTpvRegisterSummary(session);
             const status = sessionStatusLabel(session);
             const expanded = expandedSessionId === session._id;
             const turnNumber = turnIndex + 1;
@@ -284,7 +244,7 @@ function StoreDayBlock({
             const timeRange = `${new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}${session.closedAt ? ` – ${new Date(session.closedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}` : ' – …'}`;
             const diffLabel = session.status === 'closed'
               ? `${session.difference >= 0 ? '+' : ''}${session.difference.toFixed(2)}€`
-              : `${calcExpectedCash(session).toFixed(2)}€ ef.`;
+              : `${calcTpvExpectedCash(session).toFixed(2)}€ ef.`;
 
             const isSiblingCollapsed = Boolean(expandedSessionId && !expanded);
 
@@ -471,8 +431,8 @@ function RegisterCard({
   }
 
   const ts = session as TpvRegisterSession;
-  const expected = calcExpectedCash(ts);
-  const summary = buildSummary(ts);
+  const expected = calcTpvExpectedCash(ts);
+  const summary = buildTpvRegisterSummary(ts);
   const incidentCount = ts.incidents?.filter(i => !i.resolvedAt).length || 0;
   const lastCount = ts.cashCounts[ts.cashCounts.length - 1];
   const accentBorder =
@@ -860,7 +820,7 @@ export function CajaPage() {
     const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
     const storesWithActivity = new Set(allDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
     const openNow = allDay.filter((s) => s.status === 'open').length;
-    const sales = allDay.reduce((sum, s) => sum + buildSummary(s).totalSales, 0);
+    const sales = allDay.reduce((sum, s) => sum + buildTpvRegisterSummary(s).totalSales, 0);
     const diff = allDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
     return {
       stores: filterPdv ? 1 : Math.max(storesWithActivity, storeGroups.length),

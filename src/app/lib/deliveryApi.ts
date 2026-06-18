@@ -159,13 +159,16 @@ export interface CajaRegistrationResult {
 
 export const TPV_SESSION_SYNC_EVENT = 'vertial:tpv-session-sync';
 
-export function notifyCajaRegistration(caja?: CajaRegistrationResult | null) {
-  if (!caja?.status) return;
+export function notifyCajaRegistration(caja?: CajaRegistrationResult | null): CajaRegistrationStatus | null {
+  if (!caja?.status) return null;
   if (caja.session) {
     window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: caja.session }));
   }
-  if (caja.status === 'registered' || caja.status === 'nothing_to_register' || caja.status === 'already_registered') return;
+  if (caja.status === 'registered' || caja.status === 'nothing_to_register' || caja.status === 'already_registered') {
+    return caja.status;
+  }
   toast.warning(caja.message || 'El cobro no quedó registrado en caja. Revisa que la caja esté abierta.');
+  return caja.status;
 }
 
 function unwrapOrderResponse<T extends { order?: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(result: T): DeliveryOrder {
@@ -388,6 +391,21 @@ export async function createDeliveryOrderRequest(userId: string, data: Partial<D
     { method: 'POST', body: JSON.stringify({ order: data }) },
   );
   return unwrapOrderResponse(result);
+}
+
+/** Igual que createDeliveryOrderRequest pero expone el estado de registro en caja (TPV). */
+export async function createDeliveryOrderWithCajaStatus(
+  userId: string,
+  data: Partial<DeliveryOrder>,
+): Promise<{ order: DeliveryOrder; cajaStatus: CajaRegistrationStatus | null }> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
+    `/api/delivery/orders/${encodeURIComponent(id)}`,
+    { method: 'POST', body: JSON.stringify({ order: data }) },
+  );
+  const cajaStatus = notifyCajaRegistration(result.cajaRegistration);
+  if (!result.order) throw new Error('Respuesta inválida del servidor');
+  return { order: result.order, cajaStatus };
 }
 
 export async function updateDeliveryOrderRequest(userId: string, order: DeliveryOrder): Promise<DeliveryOrder> {
@@ -1857,22 +1875,25 @@ export async function createStaffConsumptionRequest(
     registerSessionId?: string;
     notes?: string;
   },
-): Promise<{ consumption: StaffConsumption; stockDeducted?: number; stockWarnings?: string[] }> {
+): Promise<{ consumption: StaffConsumption; stockDeducted?: number; stockWarnings?: string[]; cajaStatus?: CajaRegistrationStatus | null }> {
   const id = normalizeUserId(userId);
   const result = await request<{
     ok: boolean;
     consumption: StaffConsumption;
     stockDeducted?: number;
     stockWarnings?: string[];
+    cajaRegistration?: CajaRegistrationResult;
   }>(
     `/api/delivery/staff-consumptions/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify(data) },
   );
   if (!result.consumption) throw new Error('Respuesta inválida del servidor');
+  const cajaStatus = notifyCajaRegistration(result.cajaRegistration);
   return {
     consumption: result.consumption,
     stockDeducted: result.stockDeducted,
     stockWarnings: result.stockWarnings,
+    cajaStatus,
   };
 }
 

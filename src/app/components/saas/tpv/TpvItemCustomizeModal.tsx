@@ -18,6 +18,7 @@ type TpvItemCustomizeModalProps = {
   formatPrice: (n: number) => string;
   templates?: import('../../../lib/catalogCustomization').TpvCategoryTemplates;
   storeIngredients?: StoreIngredient[];
+  brandIngredientSelection?: import('../../../lib/catalogCustomization').TpvBrandIngredientSelection;
   defaultExtraPrice?: number;
   brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   onClose: () => void;
@@ -30,6 +31,7 @@ export function TpvItemCustomizeModal({
   formatPrice,
   templates,
   storeIngredients,
+  brandIngredientSelection,
   defaultExtraPrice,
   brands,
   onClose,
@@ -39,12 +41,12 @@ export function TpvItemCustomizeModal({
 
   const customizable = isCustomizableCatalogItem(item, brands);
   const ingredients = useMemo(
-    () => parseCatalogIngredients(item, templates, storeIngredients, undefined, undefined, brands),
-    [item, templates, storeIngredients, brands],
+    () => parseCatalogIngredients(item, templates, storeIngredients, brandIngredientSelection, undefined, brands),
+    [item, templates, storeIngredients, brandIngredientSelection, brands],
   );
   const supplements = useMemo(
-    () => parseCatalogSupplements(item, templates, undefined, undefined, storeIngredients, defaultExtraPrice, brands),
-    [item, templates, storeIngredients, defaultExtraPrice, brands],
+    () => parseCatalogSupplements(item, templates, brandIngredientSelection, undefined, storeIngredients, defaultExtraPrice, brands),
+    [item, templates, brandIngredientSelection, storeIngredients, defaultExtraPrice, brands],
   );
 
   const [removed, setRemoved] = useState<string[]>(initial?.removedIngredients || []);

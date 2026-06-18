@@ -12,6 +12,7 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
+import { buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
   efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
@@ -34,38 +35,8 @@ function fmtMoney(value: number | undefined | null): string {
   return (Number.isFinite(n) ? n : 0).toFixed(2);
 }
 
-function buildSummary(session: TpvRegisterSession): TpvRegisterSummary {
-  const transactions = session.transactions || [];
-  const sales = transactions.filter((t) => t.type === 'sale');
-  const returns = transactions.filter((t) => t.type === 'return');
-  const totalSales = sales.reduce((s, t) => s + Number(t.amount || 0), 0);
-  const salesByChannel: Record<string, number> = {};
-  for (const tx of sales) {
-    if (tx.channel) salesByChannel[tx.channel] = (salesByChannel[tx.channel] || 0) + Number(tx.amount || 0);
-  }
-  return {
-    totalSales,
-    salesByMethod: {
-      efectivo: sales.filter((t) => t.paymentMethod === 'efectivo').reduce((s, t) => s + Number(t.amount || 0), 0),
-      tarjeta: sales.filter((t) => t.paymentMethod === 'tarjeta').reduce((s, t) => s + Number(t.amount || 0), 0),
-      bizum: sales.filter((t) => t.paymentMethod === 'bizum').reduce((s, t) => s + Number(t.amount || 0), 0),
-      online: sales.filter((t) => t.paymentMethod === 'online').reduce((s, t) => s + Number(t.amount || 0), 0),
-      otro: sales.filter((t) => t.paymentMethod === 'otro').reduce((s, t) => s + Number(t.amount || 0), 0),
-    },
-    salesByChannel,
-    totalReturns: returns.reduce((s, t) => s + Number(t.amount || 0), 0),
-    returnCount: returns.length,
-    totalCashIn: transactions.filter((t) => t.type === 'cash_in').reduce((s, t) => s + Number(t.amount || 0), 0),
-    totalCashOut: transactions.filter((t) => t.type === 'cash_out' || t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0),
-    totalTips: transactions.filter((t) => t.type === 'tip').reduce((s, t) => s + Number(t.amount || 0), 0),
-    totalTransactions: transactions.length,
-    averageTicket: sales.length > 0 ? totalSales / sales.length : 0,
-    incidentCount: session.incidents?.length || 0,
-  };
-}
-
 function resolveSessionSummary(session: TpvRegisterSession): TpvRegisterSummary {
-  const built = buildSummary(session);
+  const built = buildTpvRegisterSummary(session);
   const stored = session.summary;
   if (!stored) return built;
   return {

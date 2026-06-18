@@ -9,13 +9,14 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
-  createDeliveryOrderRequest,
+  createDeliveryOrderWithCajaStatus,
   getDeliveryConfigRequest,
   type CatalogItem,
   type DeliveryOrder,
   type DeliveryOrderItem,
   type DeliveryOrderStatus,
   type DeliveryType,
+  type TpvPaymentMethod,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { updateClientRequest, getClientDetailRequest } from '../../lib/crmApi';
@@ -42,10 +43,13 @@ import {
   inferTpvDefaultExtraPrice,
   normalizeTpvCategoryTemplates,
   normalizeStoreIngredients,
+  resolveTpvBrandConfigFromDeliveryConfig,
   unifyStoreIngredientsFromConfig,
   type StoreIngredient,
+  type TpvBrandIngredientSelection,
   type TpvCategoryTemplates,
 } from '../../lib/catalogCustomization';
+import { isCajaRegistrationOk, normalizeTpvPaymentMethod } from '../../lib/tpvCajaMath';
 import {
   buildTpvCatalogSections,
   categoriesForTpvScope,
@@ -92,7 +96,7 @@ import {
 } from 'lucide-react';
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
-type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otros';
+type PaymentMethod = TpvPaymentMethod;
 
 interface CartItem {
   lineId: string;
@@ -413,6 +417,7 @@ export function TpvRapidoOrderFlow({
   } | null>(null);
   const [tpvCategoryTemplates, setTpvCategoryTemplates] = useState<TpvCategoryTemplates>({});
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
+  const [tpvBrandIngredientSelection, setTpvBrandIngredientSelection] = useState<TpvBrandIngredientSelection>({});
   const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState<number>(0);
   const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
@@ -470,8 +475,11 @@ export function TpvRapidoOrderFlow({
     getDeliveryConfigRequest(userId)
       .then((cfg) => {
         const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        const brandIds = brands.map((b) => b._id);
+        const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(cfg || {}, brandIds);
         setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
         setStoreIngredients(unified);
+        setTpvBrandIngredientSelection(ingredientSelection);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
       })
       .catch(() => {});
@@ -501,13 +509,17 @@ export function TpvRapidoOrderFlow({
         if (cancelled) return;
         setTpvCategoryTemplates(normalizeTpvCategoryTemplates(cfg?.tpvCategoryTemplates));
         const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        const brandIds = brands.map((b) => b._id);
+        const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(cfg || {}, brandIds);
         setStoreIngredients(unified);
+        setTpvBrandIngredientSelection(ingredientSelection);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
       })
       .catch(() => {
         if (!cancelled) {
           setTpvCategoryTemplates({});
           setStoreIngredients([]);
+          setTpvBrandIngredientSelection({});
           setTpvDefaultExtraPrice(0);
         }
       });
@@ -1295,6 +1307,7 @@ export function TpvRapidoOrderFlow({
               ci.customization,
               tpvCategoryTemplates,
               storeIngredients,
+              tpvBrandIngredientSelection,
             ),
           };
         });
@@ -1343,7 +1356,7 @@ export function TpvRapidoOrderFlow({
           ...(discountAmount > 0 ? { discountAmount } : {}),
           notes: [orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
           observations: takerName ? `Atendido por: ${takerName}` : '',
-          paymentMethod: method,
+          paymentMethod: normalizeTpvPaymentMethod(method),
           paymentStatus: collectOnDelivery ? 'pending' : 'paid',
           paidAmount: collectOnDelivery ? 0 : finalTotal,
           paidAt: collectOnDelivery ? '' : now,
@@ -1354,17 +1367,21 @@ export function TpvRapidoOrderFlow({
           priority: 'normal',
         };
 
-        const created = await createDeliveryOrderRequest(userId, orderData);
+        const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
 
         setCreatedOrder(created);
-        toast.success('Pedido creado correctamente');
+        if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
+          toast.success('Pedido creado, pero no quedó en caja — revisa que esté abierta');
+        } else {
+          toast.success('Pedido creado y registrado en caja');
+        }
       } catch (err: unknown) {
         toast.error(err instanceof Error ? err.message : 'Error al crear el pedido');
       } finally {
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id, tabletMode],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -1726,7 +1743,7 @@ export function TpvRapidoOrderFlow({
                     <option value="efectivo">Efectivo</option>
                     <option value="tarjeta">Tarjeta</option>
                     <option value="bizum">Bizum</option>
-                    <option value="otros">Otros</option>
+                    <option value="otro">Otros</option>
                   </select>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
@@ -2199,7 +2216,7 @@ export function TpvRapidoOrderFlow({
                 { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                 { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
                 { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                { key: 'otros' as const, label: 'Otros', icon: Wallet },
+                { key: 'otro' as const, label: 'Otros', icon: Wallet },
               ]).map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}
@@ -2298,6 +2315,7 @@ export function TpvRapidoOrderFlow({
           item={customizeTarget.item}
           initial={customizeTarget.initial}
           templates={tpvCategoryTemplates}
+          brandIngredientSelection={tpvBrandIngredientSelection}
           storeIngredients={storeIngredients}
           defaultExtraPrice={tpvDefaultExtraPrice}
           brands={brands}
@@ -2418,7 +2436,7 @@ function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () =
     efectivo: 'Efectivo',
     tarjeta: 'Tarjeta',
     bizum: 'Bizum',
-    otros: 'Otros',
+    otro: 'Otros',
   };
 
   return (

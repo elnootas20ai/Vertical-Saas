@@ -98,7 +98,7 @@ function formatDateES(dateStr: string) {
 // ─── Create Order Wizard (5 steps) ───────────────────────────────────────────
 
 type OrderType = 'domicilio' | 'recogida';
-type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otros';
+type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otro';
 
 interface CartItem { catalogItem: CatalogItem; quantity: number }
 
@@ -165,7 +165,7 @@ const PAYMENT_METHOD_CONFIG: { value: PaymentMethod; label: string; icon: typeof
   { value: 'efectivo', label: 'Efectivo', icon: CreditCard },
   { value: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
   { value: 'bizum', label: 'Bizum', icon: Phone },
-  { value: 'otros', label: 'Otros', icon: CreditCard },
+  { value: 'otro', label: 'Otros', icon: CreditCard },
 ];
 
 function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems, activePdv }: {
