@@ -87,6 +87,8 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   bebida: 'Bebidas',
   complementos: 'Complementos',
   complemento: 'Complementos',
+  sides: 'Complementos',
+  side: 'Complementos',
   postres: 'Postres',
   postre: 'Postres',
   extras: 'Extras',

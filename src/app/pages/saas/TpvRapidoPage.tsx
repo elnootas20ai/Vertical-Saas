@@ -2348,6 +2348,7 @@ export function TpvRapidoOrderFlow({
           storeIngredients={storeIngredients}
           defaultExtraPrice={tpvDefaultExtraPrice}
           brands={brands}
+          catalogItems={catalog}
           formatPrice={formatPrice}
           onClose={() => setCustomizeTarget(null)}
           onConfirm={(customization) =>

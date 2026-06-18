@@ -8927,11 +8927,17 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
 
   const sanitizeComboItems = (arr) => {
     if (!Array.isArray(arr)) return [];
-    return arr.filter(a => a && a.productId).map(a => ({
-      productId: String(a.productId),
-      productName: String(a.productName || ''),
-      quantity: Number(a.quantity || 1),
-    }));
+    const validSlots = new Set(['main', 'drink', 'dessert', 'side', 'other']);
+    return arr.filter(a => a && a.productId).map(a => {
+      const slotKind = String(a.slotKind || '').trim();
+      const row = {
+        productId: String(a.productId),
+        productName: String(a.productName || ''),
+        quantity: Number(a.quantity || 1),
+      };
+      if (validSlots.has(slotKind)) row.slotKind = slotKind;
+      return row;
+    });
   };
 
   const sanitizeSalesChannels = (arr) => {
@@ -9109,7 +9115,21 @@ export function sanitizeCatalogItemForTpv(doc) {
     webVisible: true,
     available: true,
     articles: [],
-    comboItems: [],
+    comboItems: Array.isArray(doc.comboItems)
+      ? doc.comboItems
+          .map((c) => {
+            const slotKind = String(c?.slotKind || '').trim();
+            const validSlots = new Set(['main', 'drink', 'dessert', 'side', 'other']);
+            const row = {
+              productId: String(c?.productId || '').trim(),
+              productName: String(c?.productName || '').trim(),
+              quantity: Number(c?.quantity) > 0 ? Number(c.quantity) : 1,
+            };
+            if (validSlots.has(slotKind)) row.slotKind = slotKind;
+            return row;
+          })
+          .filter((c) => c.productId)
+      : [],
     salesChannels: [],
     stockCategory: 'other',
     stockSubcategory: '',

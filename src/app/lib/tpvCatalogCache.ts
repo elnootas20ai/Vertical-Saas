@@ -38,7 +38,14 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
     notes: '',
     customFields,
     articles: [],
-    comboItems: [],
+    comboItems: Array.isArray(item.comboItems)
+      ? item.comboItems.map((c) => ({
+          productId: c.productId,
+          productName: c.productName,
+          quantity: c.quantity,
+          ...(c.slotKind ? { slotKind: c.slotKind } : {}),
+        }))
+      : [],
   };
 }
 

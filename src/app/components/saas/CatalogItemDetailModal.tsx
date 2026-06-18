@@ -9,25 +9,35 @@ import {
   Tag,
   TrendingUp,
   X,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Brand } from '../../lib/brandsApi';
-import type { CatalogItem } from '../../lib/deliveryApi';
+import type { CatalogComboRef, CatalogItem } from '../../lib/deliveryApi';
 import {
-  isCustomizableCatalogItem,
+  isCatalogTpvConfigurable,
+  mergeComboProductIngredients,
   parseIngredientsBulkText,
 } from '../../lib/catalogCustomization';
 import type { CatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 import { useModalClose } from '../../hooks/useModalClose';
+import { CatalogComboCompositionEditor } from './CatalogComboCompositionEditor';
+import { comboStructureFromCustomFields, isComboStructureConfirmed, type ComboStructureSlot } from '../../lib/catalogComboSlots';
 
 type CatalogItemDetailModalProps = {
   item: CatalogItem;
   brands: Brand[];
+  catalogItems: CatalogItem[];
   stats: CatalogItemSalesStats;
   statsLoading?: boolean;
   onClose: () => void;
   onEdit: () => void;
-  onSaveIngredients: (ingredients: string) => Promise<void>;
+  onSaveTpvConfig: (payload: {
+    ingredients: string;
+    comboItems: CatalogComboRef[];
+    comboStructure?: ComboStructureSlot[];
+    comboStructureConfirmed?: boolean;
+  }) => Promise<void>;
 };
 
 function formatMoney(n: number): string {
@@ -47,35 +57,51 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 export function CatalogItemDetailModal({
   item,
   brands,
+  catalogItems,
   stats,
   statsLoading,
   onClose,
   onEdit,
-  onSaveIngredients,
+  onSaveTpvConfig,
 }: CatalogItemDetailModalProps) {
   useModalClose(true, onClose);
 
-  const customizable = isCustomizableCatalogItem(item, brands);
+  const tpvConfigurable = isCatalogTpvConfigurable(item, brands);
+  const showComboBuilder =
+    item.itemType === 'combo' || /combo/i.test(String(item.category || ''));
+
   const brandLabel = useMemo(() => {
     const ids = Array.isArray(item.brandIds) ? item.brandIds : [];
-    const names = ids
+    return ids
       .map((id) => brands.find((b) => b._id === id)?.name)
-      .filter(Boolean);
-    return names.join(', ');
+      .filter(Boolean)
+      .join(', ');
   }, [item.brandIds, brands]);
 
   const [ingredientDraft, setIngredientDraft] = useState('');
   const [newIngredient, setNewIngredient] = useState('');
-  const [savingIngredients, setSavingIngredients] = useState(false);
+  const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
+  const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(() =>
+    comboStructureFromCustomFields(item.customFields, item.comboItems?.length ?? 0),
+  );
+  const [comboStructureConfirmed, setComboStructureConfirmed] = useState(() =>
+    isComboStructureConfirmed(item.customFields, item.comboItems?.length ?? 0),
+  );
+  const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [tpvTab, setTpvTab] = useState<'ingredients' | 'combo'>('ingredients');
 
   useEffect(() => {
     const raw =
       typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '';
     setIngredientDraft(raw);
+    setComboItems(Array.isArray(item.comboItems) ? [...item.comboItems] : []);
+    setComboStructure(comboStructureFromCustomFields(item.customFields, item.comboItems?.length ?? 0));
+    setComboStructureConfirmed(isComboStructureConfirmed(item.customFields, item.comboItems?.length ?? 0));
     setNewIngredient('');
     setDirty(false);
-  }, [item._id, item.customFields?.ingredients]);
+    setTpvTab(showComboBuilder && !raw.trim() ? 'combo' : 'ingredients');
+  }, [item._id, item.customFields?.ingredients, item.comboItems, showComboBuilder]);
 
   const ingredientList = useMemo(() => parseIngredientsBulkText(ingredientDraft), [ingredientDraft]);
 
@@ -90,28 +116,47 @@ export function CatalogItemDetailModal({
   };
 
   const removeIngredient = (name: string) => {
-    const next = ingredientList.filter((n) => n !== name);
-    setIngredientDraft(next.join(', '));
+    setIngredientDraft(ingredientList.filter((n) => n !== name).join(', '));
     setDirty(true);
   };
 
-  const handleSaveIngredients = async () => {
-    setSavingIngredients(true);
+  const importIngredientsFromCombo = () => {
+    const merged = mergeComboProductIngredients(comboItems, catalogItems);
+    if (merged.length === 0) {
+      toast.error('Los productos del combo no tienen ingredientes en su ficha');
+      return;
+    }
+    setIngredientDraft(merged.join(', '));
+    setDirty(true);
+    setTpvTab('ingredients');
+    toast.success(`${merged.length} ingrediente(s) importados desde el combo`);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
     try {
-      await onSaveIngredients(ingredientDraft.trim());
+      await onSaveTpvConfig({
+        ingredients: ingredientDraft.trim(),
+        comboItems,
+        comboStructure,
+        comboStructureConfirmed,
+      });
       setDirty(false);
-      toast.success('Ingredientes guardados');
+      toast.success('Configuración TPV guardada');
     } catch {
-      toast.error('No se pudieron guardar los ingredientes');
+      toast.error('No se pudo guardar');
     } finally {
-      setSavingIngredients(false);
+      setSaving(false);
     }
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
@@ -130,7 +175,9 @@ export function CatalogItemDetailModal({
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">{item.name}</h2>
               <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {item.category ? (
-                  <span className="px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 font-medium">{item.category}</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 font-medium">
+                    {item.category}
+                  </span>
                 ) : null}
                 {brandLabel ? (
                   <span className="inline-flex items-center gap-1">
@@ -148,6 +195,149 @@ export function CatalogItemDetailModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {tpvConfigurable && (
+            <section className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 space-y-4">
+              <div className="flex items-start gap-2">
+                <Zap className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Configuración TPV</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                    Define qué puede quitar el cliente y qué incluye el combo. Los extras de pago (+) se gestionan en
+                    la pestaña <strong>Ingredientes TPV</strong> del catálogo.
+                  </p>
+                </div>
+              </div>
+
+              {showComboBuilder && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTpvTab('ingredients')}
+                    className={`flex-1 px-3 py-2 rounded-xl text-sm font-bold border-2 transition-colors ${
+                      tpvTab === 'ingredients'
+                        ? 'border-emerald-500 bg-white dark:bg-gray-900 text-emerald-800 dark:text-emerald-200'
+                        : 'border-transparent bg-emerald-100/50 dark:bg-emerald-950/30 text-gray-600'
+                    }`}
+                  >
+                    Ingredientes (quitar)
+                    {ingredientList.length > 0 ? ` · ${ingredientList.length}` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTpvTab('combo')}
+                    className={`flex-1 px-3 py-2 rounded-xl text-sm font-bold border-2 transition-colors ${
+                      tpvTab === 'combo'
+                        ? 'border-emerald-500 bg-white dark:bg-gray-900 text-emerald-800 dark:text-emerald-200'
+                        : 'border-transparent bg-emerald-100/50 dark:bg-emerald-950/30 text-gray-600'
+                    }`}
+                  >
+                    Composición del menú
+                    {comboItems.length > 0 ? ` · ${comboItems.length}` : ''}
+                  </button>
+                </div>
+              )}
+
+              {(tpvTab === 'ingredients' || !showComboBuilder) && (
+                <div className="space-y-3">
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    En el TPV el cliente verá estos ingredientes para <strong>quitarlos</strong> (sin coste extra).
+                  </p>
+                  {ingredientList.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {ingredientList.map((name) => (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => removeIngredient(name)}
+                          className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-red-300"
+                        >
+                          {name} ×
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-amber-800 dark:text-amber-300 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 px-3 py-2">
+                      Sin ingredientes — el TPV no mostrará opciones para quitar. Añádelos abajo o importa desde el
+                      combo.
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      value={newIngredient}
+                      onChange={(e) => setNewIngredient(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addIngredient();
+                        }
+                      }}
+                      placeholder="Ej: Mozzarella, Tomate…"
+                      className="flex-1 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={addIngredient}
+                      className="px-3 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={ingredientDraft}
+                    onChange={(e) => {
+                      setIngredientDraft(e.target.value);
+                      setDirty(true);
+                    }}
+                    placeholder="Tomate, Mozzarella, Albahaca (separados por comas)"
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm resize-none"
+                  />
+                  {showComboBuilder && comboItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={importIngredientsFromCombo}
+                      className="text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline"
+                    >
+                      Importar ingredientes desde los productos del combo →
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {showComboBuilder && tpvTab === 'combo' && (
+                <CatalogComboCompositionEditor
+                  comboItems={comboItems}
+                  catalogItems={catalogItems}
+                  excludeItemId={item._id}
+                  comboStructure={comboStructure}
+                  structureConfirmed={comboStructureConfirmed}
+                  onStructureChange={(next) => {
+                    setComboStructure(next);
+                    setDirty(true);
+                  }}
+                  onStructureConfirmedChange={(confirmed) => {
+                    setComboStructureConfirmed(confirmed);
+                    setDirty(true);
+                  }}
+                  onChange={(next) => {
+                    setComboItems(next);
+                    setDirty(true);
+                  }}
+                  onImportIngredients={importIngredientsFromCombo}
+                />
+              )}
+
+              <button
+                type="button"
+                disabled={!dirty || saving}
+                onClick={() => void handleSave()}
+                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold"
+              >
+                {saving ? 'Guardando…' : 'Guardar configuración TPV'}
+              </button>
+            </section>
+          )}
+
           <section>
             <div className="flex items-center gap-2 mb-3">
               <BarChart3 className="w-4 h-4 text-indigo-600" />
@@ -203,86 +393,6 @@ export function CatalogItemDetailModal({
               </div>
             )}
           </section>
-
-          {customizable && (
-            <section className="border-t border-gray-200 dark:border-gray-700 pt-5">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1">
-                Ingredientes de esta pizza
-              </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                Solo los de este producto. En el TPV el cliente podrá quitarlos. Los extras de pago se configuran en
-                Ingredientes TPV (lista global).
-              </p>
-
-              {ingredientList.length > 0 ? (
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {ingredientList.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      onClick={() => removeIngredient(name)}
-                      className="px-3 py-1.5 rounded-full text-xs font-semibold border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-200 hover:border-red-300 hover:bg-red-50 dark:hover:bg-red-950/30"
-                      title="Quitar de la lista"
-                    >
-                      {name} ×
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-amber-700 dark:text-amber-400 mb-3 rounded-lg border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2">
-                  Sin ingredientes definidos. Añádelos aquí o impórtalos en el Excel (columna «ingredientes»).
-                </p>
-              )}
-
-              <div className="flex gap-2 mb-3">
-                <input
-                  value={newIngredient}
-                  onChange={(e) => setNewIngredient(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      addIngredient();
-                    }
-                  }}
-                  placeholder="Ej: Mozzarella, Tomate…"
-                  className="flex-1 px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={addIngredient}
-                  className="px-3 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-
-              <textarea
-                rows={2}
-                value={ingredientDraft}
-                onChange={(e) => {
-                  setIngredientDraft(e.target.value);
-                  setDirty(true);
-                }}
-                placeholder="Tomate, Mozzarella, Albahaca (separados por comas)"
-                className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm resize-none mb-3"
-              />
-
-              {parseIngredientsBulkText(ingredientDraft).length > 0 && (
-                <p className="text-xs text-gray-500 mb-3">
-                  {parseIngredientsBulkText(ingredientDraft).length} ingrediente(s) en TPV para quitar
-                </p>
-              )}
-
-              <button
-                type="button"
-                disabled={!dirty || savingIngredients}
-                onClick={() => void handleSaveIngredients()}
-                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-bold"
-              >
-                {savingIngredients ? 'Guardando…' : 'Guardar ingredientes'}
-              </button>
-            </section>
-          )}
         </div>
 
         <div className="shrink-0 px-5 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
@@ -299,7 +409,7 @@ export function CatalogItemDetailModal({
             className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white text-sm font-bold inline-flex items-center gap-2"
           >
             <Edit3 className="w-4 h-4" />
-            Editar producto
+            Editar precio y datos
           </button>
         </div>
       </div>

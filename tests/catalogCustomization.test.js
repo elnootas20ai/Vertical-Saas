@@ -67,6 +67,36 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogIngredients(pizzaWithoutRecipe, undefined, master, undefined, undefined, undefined, {
       productIngredientsOnly: true,
     })).toEqual([]);
+    expect(parseCatalogIngredients(pizzaWithoutRecipe, undefined, master, undefined, undefined, undefined, {
+      productIngredientsOnly: true,
+      tpvFallbackWhenEmpty: true,
+    })).toEqual(['Tomate', 'Cebolla']);
+  });
+
+  it('TPV combina ingredientes de productos del combo si la ficha está vacía', () => {
+    const combo = {
+      _id: 'combo-1',
+      itemType: 'combo',
+      category: 'Combos',
+      brandIds: ['mod'],
+      customFields: {},
+      comboItems: [{ productId: 'p1', productName: 'Margarita', quantity: 1 }],
+    };
+    const catalog = [
+      {
+        _id: 'p1',
+        category: 'Pizzas',
+        brandIds: ['mod'],
+        customFields: { ingredients: 'Tomate, Mozzarella' },
+      },
+    ];
+    expect(
+      parseCatalogIngredients(combo, undefined, undefined, undefined, undefined, undefined, {
+        productIngredientsOnly: true,
+        tpvFallbackWhenEmpty: true,
+        catalogItems: catalog,
+      }),
+    ).toEqual(['Tomate', 'Mozzarella']);
   });
 
   it('TPV muestra todos los extras del negocio aunque el producto tenga suplementos propios', () => {

@@ -64,6 +64,7 @@ import {
   deletePurchaseInvoiceRequest,
   listDeliveryOrdersRequest,
   type CatalogItem,
+  type CatalogComboRef,
   type DeliveryOrder,
   type Supplier,
   type PurchaseInvoice,
@@ -93,14 +94,17 @@ import {
   Download,
   Loader2,
   ArrowRight,
+  ArrowRightLeft,
   Wallet,
   ChevronDown,
   ChevronRight,
+  Zap,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
+import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { StaffConsumptionTabPanel } from '../../components/saas/StaffConsumptionTabPanel';
@@ -108,12 +112,18 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { createMovementFromInvoice, listFinanceMovements } from '../../lib/financeApi';
 import {
   isCustomizableCatalogItem,
+  isCatalogTpvConfigurable,
+  mergeComboProductIngredients,
   normalizeCatalogSupplementsForSave,
   parseCatalogSupplements,
+  parseIngredientsBulkText,
 } from '../../lib/catalogCustomization';
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
 import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
+import { CatalogComboCompositionEditor } from '../../components/saas/CatalogComboCompositionEditor';
+import { COMBO_SLOT_META, DEFAULT_COMBO_STRUCTURE, comboStructureFromCustomFields, isComboStructureConfirmed, resolveComboRefSlotKind, type ComboStructureSlot } from '../../lib/catalogComboSlots';
 import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
+import { applyCatalogMoveTarget, type CatalogMoveTargetInput } from '../../lib/catalogItemMove';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -182,6 +192,8 @@ interface CreateCatalogItemModalProps {
   onBrandsChange: (brands: Brand[]) => void;
   /** Categorías ya usadas en el catálogo (para sugerencias). */
   catalogCategoriesInUse?: string[];
+  /** Catálogo completo (composición de combos). */
+  catalogItems?: CatalogItem[];
 }
 
 function CreateCatalogItemModal({
@@ -193,9 +205,13 @@ function CreateCatalogItemModal({
   businessId,
   onBrandsChange,
   catalogCategoriesInUse = [],
+  catalogItems = [],
 }: CreateCatalogItemModalProps) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
+  const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
+  const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
   const [form, setForm] = useState({
     itemType: 'product' as CatalogItem['itemType'],
     name: '',
@@ -221,6 +237,10 @@ function CreateCatalogItemModal({
 
   useEffect(() => {
     if (editItem) {
+      setComboItems(Array.isArray(editItem.comboItems) ? [...editItem.comboItems] : []);
+      const items = Array.isArray(editItem.comboItems) ? editItem.comboItems.length : 0;
+      setComboStructure(comboStructureFromCustomFields(editItem.customFields, items));
+      setComboStructureConfirmed(isComboStructureConfirmed(editItem.customFields, items));
       setForm({
         itemType: editItem.itemType || 'product',
         name: editItem.name,
@@ -248,6 +268,9 @@ function CreateCatalogItemModal({
         })),
       });
     } else {
+      setComboItems([]);
+      setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+      setComboStructureConfirmed(true);
       const defaultId = defaultBrandIdForCatalog(brands);
       setForm({
         itemType: 'product', name: '', description: '', category: '', unit: 'ud',
@@ -327,7 +350,10 @@ function CreateCatalogItemModal({
         shouldClearBrandForCategory(category) && form.selectedBrandIds.length === 0
           ? []
           : [...form.selectedBrandIds];
-      const customizable = isCustomizableCatalogItem({ category, name: form.name });
+      const customizable = isCatalogTpvConfigurable(
+        { category, name: form.name, brandIds, itemType: form.itemType },
+        brands,
+      );
       const customFields = {
         ...(editItem?.customFields || {}),
         ...(customizable
@@ -335,6 +361,9 @@ function CreateCatalogItemModal({
               ingredients: form.ingredients.trim(),
               supplements: normalizeCatalogSupplementsForSave(form.supplements),
             }
+          : {}),
+        ...(form.itemType === 'combo' || /combo/i.test(category)
+          ? { comboStructure, comboStructureConfirmed }
           : {}),
       };
       await onCreate({
@@ -344,6 +373,7 @@ function CreateCatalogItemModal({
         category,
         brandIds,
         itemType: form.itemType,
+        comboItems: form.itemType === 'combo' || /combo/i.test(category) ? comboItems : [],
         unitPrice: Number(form.unitPrice) || 0,
         staffPrice: form.staffPrice.trim() ? Number(form.staffPrice) : null,
         costPrice: Number(form.costPrice) || 0,
@@ -523,7 +553,45 @@ function CreateCatalogItemModal({
 
   const margin = Number(form.unitPrice) - Number(form.costPrice);
   const marginPct = Number(form.costPrice) > 0 ? ((margin / Number(form.costPrice)) * 100).toFixed(0) : '—';
-  const showCustomization = isCustomizableCatalogItem({ category: form.category, name: form.name });
+  const showCustomization = isCatalogTpvConfigurable(
+    {
+      category: form.category,
+      name: form.name,
+      brandIds: form.selectedBrandIds,
+      itemType: form.itemType,
+    },
+    brands,
+  );
+  const showComboBuilder =
+    form.itemType === 'combo' || /combo/i.test(form.category.trim());
+
+  const renderComboBuilderSection = () => {
+    if (!showComboBuilder) return null;
+    return (
+      <section className="border-t border-gray-200 dark:border-gray-700 pt-6">
+        <CatalogComboCompositionEditor
+          compact
+          comboItems={comboItems}
+          catalogItems={catalogItems}
+          excludeItemId={editItem?._id}
+          comboStructure={comboStructure}
+          structureConfirmed={comboStructureConfirmed}
+          onStructureChange={setComboStructure}
+          onStructureConfirmedChange={setComboStructureConfirmed}
+          onChange={setComboItems}
+          onImportIngredients={() => {
+            const merged = mergeComboProductIngredients(comboItems, catalogItems);
+            if (merged.length === 0) {
+              toast.error('Los productos seleccionados no tienen ingredientes');
+              return;
+            }
+            setForm((f) => ({ ...f, ingredients: merged.join(', ') }));
+            toast.success('Ingredientes importados desde el combo');
+          }}
+        />
+      </section>
+    );
+  };
 
   const renderCustomizationSection = () => {
     if (!showCustomization) return null;
@@ -531,14 +599,14 @@ function CreateCatalogItemModal({
       <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
         <div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-            Ingredientes y suplementos (TPV)
+            Ingredientes TPV (quitar en venta)
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Ingredientes de esta pizza (para quitar en TPV). Los extras de pago se configuran en la pestaña Ingredientes TPV.
+            Lo que el cliente puede quitar sin coste. Extras de pago (+) → pestaña Ingredientes TPV del catálogo.
           </p>
         </div>
         <div>
-          <label className={labelClass}>Ingredientes de esta pizza</label>
+          <label className={labelClass}>Ingredientes incluidos</label>
           <textarea
             rows={3}
             className={`${inputClass} resize-none`}
@@ -624,7 +692,12 @@ function CreateCatalogItemModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div
+        className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${
+          showComboBuilder ? 'max-w-3xl' : 'max-w-2xl'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-gray-800 z-10 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">
@@ -736,6 +809,7 @@ function CreateCatalogItemModal({
                 {renderCategoryUnit()}
               </section>
               {renderCustomizationSection()}
+              {renderComboBuilderSection()}
               <section className="space-y-5 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Precios e inventario</h3>
                 <div className="grid grid-cols-2 gap-4">
@@ -837,6 +911,7 @@ function CreateCatalogItemModal({
                 <label className={labelClass}>Descripción</label>
                 <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
               </div>
+              {renderComboBuilderSection()}
             </div>
           ) : step === 2 ? (
             <div className="space-y-5">
@@ -1714,9 +1789,12 @@ export function CatalogPage() {
   const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [searchCatalog, setSearchCatalog] = useState('');
-  const [collapsedCatalogSections, setCollapsedCatalogSections] = useState<Set<string>>(() => new Set());
+  /** Categorías desplegadas por el usuario; vacío = todas cerradas al cargar. */
+  const [catalogSectionsOpen, setCatalogSectionsOpen] = useState<Set<string>>(() => new Set());
   const [deletingItemIds, setDeletingItemIds] = useState<Set<string>>(new Set());
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
+  const [bulkMovingCatalog, setBulkMovingCatalog] = useState(false);
+  const [catalogMoveItems, setCatalogMoveItems] = useState<CatalogItem[] | null>(null);
   type CatalogDeleteOp =
     | null
     | { mode: 'single'; item: CatalogItem }
@@ -2225,7 +2303,7 @@ export function CatalogPage() {
   }, []);
 
   const handleBulkDeleteSelected = () => {
-    if (!user?.id || bulkDeletingCatalog) return;
+    if (!user?.id || bulkDeletingCatalog || bulkMovingCatalog) return;
     const items = filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
     if (items.length === 0) {
       toast.error('Selecciona al menos un artículo');
@@ -2306,13 +2384,29 @@ export function CatalogPage() {
     }
   };
 
-  const handleSaveDetailIngredients = async (ingredients: string) => {
+  const handleSaveDetailTpvConfig = async (payload: {
+    ingredients: string;
+    comboItems: CatalogComboRef[];
+    comboStructure?: ComboStructureSlot[];
+    comboStructureConfirmed?: boolean;
+  }) => {
     if (!user?.id || !detailItem) throw new Error('missing item');
+    const category = String(detailItem.category || '');
     const updated = await updateCatalogItemRequest(user.id, {
       ...detailItem,
+      itemType:
+        detailItem.itemType === 'combo' || /combo/i.test(category)
+          ? detailItem.itemType || 'combo'
+          : detailItem.itemType,
+      comboItems:
+        detailItem.itemType === 'combo' || /combo/i.test(category) ? payload.comboItems : detailItem.comboItems,
       customFields: {
         ...(detailItem.customFields || {}),
-        ingredients,
+        ingredients: payload.ingredients,
+        ...(payload.comboStructure ? { comboStructure: payload.comboStructure } : {}),
+        ...(payload.comboStructureConfirmed !== undefined
+          ? { comboStructureConfirmed: payload.comboStructureConfirmed }
+          : {}),
       },
     });
     setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
@@ -2477,7 +2571,7 @@ export function CatalogPage() {
   }, [filteredCatalog]);
 
   const toggleCatalogSection = useCallback((category: string) => {
-    setCollapsedCatalogSections((prev) => {
+    setCatalogSectionsOpen((prev) => {
       const next = new Set(prev);
       if (next.has(category)) next.delete(category);
       else next.add(category);
@@ -2511,6 +2605,61 @@ export function CatalogPage() {
   useEffect(() => {
     setBulkDeleteConfirmStep(false);
   }, [searchCatalog]);
+
+  const openCatalogMoveModal = useCallback(
+    (items?: CatalogItem[]) => {
+      const list =
+        items ??
+        filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
+      if (list.length === 0) {
+        toast.error('Selecciona al menos un artículo');
+        return;
+      }
+      setCatalogMoveItems(list);
+    },
+    [filteredCatalog, selectedCatalogIds],
+  );
+
+  const handleConfirmCatalogMove = useCallback(
+    async (target: CatalogMoveTargetInput) => {
+      if (!user?.id || !catalogMoveItems?.length) return;
+      setBulkMovingCatalog(true);
+      let moved = 0;
+      let failed = 0;
+      try {
+        for (const item of catalogMoveItems) {
+          try {
+            const patched = applyCatalogMoveTarget(item, target);
+            const updated = await updateCatalogItemRequest(user.id, patched);
+            setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
+            setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
+            moved += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        notifyDeliveryCatalogChanged(dataUserId, businessId);
+        if (moved > 0) {
+          toast.success(
+            `${moved} producto${moved !== 1 ? 's' : ''} movido${moved !== 1 ? 's' : ''} a «${target.category}»`,
+          );
+        }
+        if (failed > 0) toast.error(`${failed} producto(s) no se pudieron mover`);
+        setCatalogMoveItems(null);
+        if (catalogSelectMode) exitCatalogSelectMode();
+      } finally {
+        setBulkMovingCatalog(false);
+      }
+    },
+    [
+      user?.id,
+      catalogMoveItems,
+      dataUserId,
+      businessId,
+      catalogSelectMode,
+      exitCatalogSelectMode,
+    ],
+  );
 
   const catalogKpis = useMemo(() => ({
     totalItems: catalogItems.length,
@@ -2617,15 +2766,24 @@ export function CatalogPage() {
               <button
                 type="button"
                 onClick={exitCatalogSelectMode}
-                disabled={bulkDeletingCatalog}
+                disabled={bulkDeletingCatalog || bulkMovingCatalog}
                 className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
                 type="button"
+                onClick={() => openCatalogMoveModal()}
+                disabled={bulkDeletingCatalog || bulkMovingCatalog || selectedCatalogCount === 0}
+                className="px-4 py-2.5 border border-indigo-300 text-indigo-700 dark:text-indigo-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowRightLeft className="w-5 h-5" />
+                {bulkMovingCatalog ? 'Moviendo…' : `Mover (${selectedCatalogCount})`}
+              </button>
+              <button
+                type="button"
                 onClick={handleBulkDeleteSelected}
-                disabled={bulkDeletingCatalog || selectedCatalogCount === 0}
+                disabled={bulkDeletingCatalog || bulkMovingCatalog || selectedCatalogCount === 0}
                 className={`px-4 py-2.5 rounded-xl flex items-center gap-2 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   bulkDeleteConfirmStep
                     ? 'bg-red-700 hover:bg-red-800 text-white border border-red-800'
@@ -2648,30 +2806,30 @@ export function CatalogPage() {
                 setBulkDeleteConfirmStep(false);
                 setSelectedCatalogIds(new Set());
               }}
-              disabled={bulkDeletingCatalog || filteredCatalog.length === 0}
-              className="px-4 py-2.5 border border-red-300 text-red-700 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+              className="px-4 py-2.5 border border-indigo-300 text-indigo-700 dark:text-indigo-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Trash2 className="w-5 h-5" />
-              Eliminar
+              <ArrowRightLeft className="w-5 h-5" />
+              Gestionar
             </button>
           )}
         </div>
       </div>
 
       {catalogSelectMode && filteredCatalog.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/60 dark:bg-indigo-950/20">
           <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200 cursor-pointer">
             <input
               type="checkbox"
               checked={allFilteredCatalogSelected}
               onChange={toggleSelectAllFilteredCatalog}
-              className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+              className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
             />
             {allFilteredCatalogSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
           </label>
           <span className="text-sm text-gray-600 dark:text-gray-400">
             {selectedCatalogCount === 0
-              ? 'Marca los artículos que quieras eliminar'
+              ? 'Marca productos para mover de categoría/línea o eliminar'
               : `${selectedCatalogCount} seleccionado${selectedCatalogCount !== 1 ? 's' : ''}`}
           </span>
           {bulkDeleteConfirmStep && selectedCatalogCount > 0 && (
@@ -2704,7 +2862,7 @@ export function CatalogPage() {
       ) : (
         <div className="space-y-3">
           {catalogGroupedByCategory.map(({ category, items }) => {
-            const isCollapsed = collapsedCatalogSections.has(category);
+            const isCollapsed = !catalogSectionsOpen.has(category);
             return (
               <div
                 key={category}
@@ -2766,7 +2924,7 @@ export function CatalogPage() {
                               key={item._id}
                               className={`transition-colors ${
                                 catalogSelectMode && selectedCatalogIds.has(item._id)
-                                  ? 'bg-red-50/70 dark:bg-red-950/20'
+                                  ? 'bg-indigo-50/70 dark:bg-indigo-950/20'
                                   : 'hover:bg-gray-50 dark:hover:bg-gray-800'
                               }`}
                             >
@@ -2776,7 +2934,7 @@ export function CatalogPage() {
                                     type="checkbox"
                                     checked={selectedCatalogIds.has(item._id)}
                                     onChange={() => toggleCatalogItemSelected(item._id)}
-                                    className="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                     aria-label={`Seleccionar ${item.name}`}
                                   />
                                 </td>
@@ -2808,6 +2966,39 @@ export function CatalogPage() {
                                     {typeof item.customFields?.ingredients === 'string' && item.customFields.ingredients.trim() && (
                                       <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 line-clamp-1" title={item.customFields.ingredients}>
                                         {item.customFields.ingredients}
+                                      </p>
+                                    )}
+                                    {(item.comboItems?.length ?? 0) > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1.5">
+                                        {item.comboItems!.map((c) => {
+                                          const slotKind = resolveComboRefSlotKind(c, catalogItems);
+                                          const slotStyle = COMBO_SLOT_META[slotKind];
+                                          return (
+                                            <span
+                                              key={c.productId}
+                                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 max-w-full"
+                                              title={`${slotStyle.label}: ${c.productName}`}
+                                            >
+                                              <span className="shrink-0">{slotStyle.emoji}</span>
+                                              <span className="truncate">{c.productName}</span>
+                                              {c.quantity > 1 ? (
+                                                <span className="shrink-0 font-bold">×{c.quantity}</span>
+                                              ) : null}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                    {isCatalogTpvConfigurable(item, brands) && (
+                                      <p className="text-[10px] mt-1 inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-semibold">
+                                        <Zap className="w-3 h-3 shrink-0" />
+                                        TPV
+                                        {item.customFields?.ingredients
+                                          ? ` · ${parseIngredientsBulkText(String(item.customFields.ingredients)).length} ing.`
+                                          : ' · sin ingredientes'}
+                                        {(item.comboItems?.length ?? 0) > 0
+                                          ? ` · ${item.comboItems!.length} en combo`
+                                          : ''}
                                       </p>
                                     )}
                                     {item.description && (
@@ -2904,10 +3095,25 @@ export function CatalogPage() {
                                 <div className="flex items-center gap-1">
                                   <button
                                     onClick={() => { setDetailItem(item); }}
+                                    className="p-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-950/40 rounded-lg transition-colors"
+                                    title="Configurar TPV (ingredientes y combo)"
+                                  >
+                                    <Zap className="w-4 h-4 text-emerald-600" />
+                                  </button>
+                                  <button
+                                    onClick={() => { setDetailItem(item); }}
                                     className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 rounded-lg transition-colors"
                                     title="Ficha y estadísticas"
                                   >
                                     <BarChart3 className="w-4 h-4 text-indigo-600" />
+                                  </button>
+                                  <button
+                                    onClick={() => openCatalogMoveModal([item])}
+                                    disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                                    className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 rounded-lg transition-colors disabled:opacity-40"
+                                    title="Mover a otra categoría o línea"
+                                  >
+                                    <ArrowRightLeft className="w-4 h-4 text-indigo-600" />
                                   </button>
                                   <button
                                     onClick={() => { setEditingItem(item); setShowCreateItem(true); }}
@@ -3377,12 +3583,14 @@ export function CatalogPage() {
         businessId={businessId}
         onBrandsChange={setBrands}
         catalogCategoriesInUse={categories}
+        catalogItems={catalogItems}
       />
 
       {detailItem && (
         <CatalogItemDetailModal
           item={detailItem}
           brands={brands}
+          catalogItems={catalogItems}
           stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
           statsLoading={ordersLoading}
           onClose={() => setDetailItem(null)}
@@ -3390,7 +3598,7 @@ export function CatalogPage() {
             setEditingItem(detailItem);
             setShowCreateItem(true);
           }}
-          onSaveIngredients={handleSaveDetailIngredients}
+          onSaveTpvConfig={handleSaveDetailTpvConfig}
         />
       )}
 
@@ -3423,6 +3631,18 @@ export function CatalogPage() {
         moduleLabel="Catálogo"
         fields={MODULE_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
+      />
+      <CatalogMoveModal
+        open={catalogMoveItems !== null}
+        items={catalogMoveItems ?? []}
+        brands={brands}
+        commercialLines={commercialLines}
+        categoriesInUse={categories}
+        submitting={bulkMovingCatalog}
+        onClose={() => {
+          if (!bulkMovingCatalog) setCatalogMoveItems(null);
+        }}
+        onConfirm={handleConfirmCatalogMove}
       />
       <CatalogDeleteGuardModal
         open={catalogDeleteGuard !== null}

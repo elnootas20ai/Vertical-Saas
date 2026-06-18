@@ -1,0 +1,196 @@
+import { describe, expect, it } from 'vitest';
+import {
+  buildComboMenuSections,
+  catalogProductsForCategory,
+  catalogProductsForComboSection,
+  catalogProductsForComboSlot,
+  COMBO_MENU_PRESETS,
+  DEFAULT_COMBO_STRUCTURE,
+  expectedCountForComboSlot,
+  groupComboItemsBySlot,
+  inferComboMenuPresetId,
+  inferComboSlotKind,
+  isComboMenuComplete,
+  normalizeComboItemsForSave,
+  resolveComboRefSlotKind,
+  structureFromSectionDraft,
+  totalUnitsInComboSlot,
+  validateComboSectionDraft,
+  DEFAULT_COMBO_SECTION_DRAFT,
+} from '../src/app/lib/catalogComboSlots.ts';
+
+function item(partial) {
+  return {
+    _id: partial._id,
+    name: partial.name,
+    category: partial.category,
+    type: 'catalog_item',
+    id: partial._id,
+    sku: '',
+    user_id: 'u1',
+    module: 'catalog',
+    itemType: 'product',
+    vertical: 'delivery',
+    description: '',
+    unitPrice: 9,
+    costPrice: 3,
+    taxRate: 10,
+    stockQuantity: 0,
+    minStock: 0,
+    reorderQuantity: 0,
+    autoReorder: false,
+    unit: 'ud',
+    supplierId: '',
+    supplierName: '',
+    allergens: [],
+    image: '',
+    images: [],
+    active: true,
+    webVisible: true,
+    available: true,
+    notes: '',
+    barcode: '',
+    brandIds: [],
+    articles: [],
+    comboItems: [],
+    salesChannels: [],
+    stockCategory: 'other',
+    stockSubcategory: '',
+    isStockItem: false,
+    customFields: {},
+    createdAt: '',
+    updatedAt: '',
+    ...partial,
+  };
+}
+
+describe('catalogComboSlots', () => {
+  it('clasifica categorías en huecos del combo', () => {
+    expect(inferComboSlotKind('Pizzas')).toBe('main');
+    expect(inferComboSlotKind('Burgers')).toBe('main');
+    expect(inferComboSlotKind('Hamburguesas')).toBe('main');
+    expect(inferComboSlotKind('Bebidas')).toBe('drink');
+    expect(inferComboSlotKind('Postres')).toBe('dessert');
+    expect(inferComboSlotKind('Complementos')).toBe('side');
+  });
+
+  it('pizza con "extra" en el nombre sigue siendo plato principal', () => {
+    expect(inferComboSlotKind('Pizzas', 'Pizza Barbacoa extra queso')).toBe('main');
+    expect(inferComboSlotKind('Complementos', 'Patatas fritas')).toBe('side');
+  });
+
+  it('lista todos los productos del hueco sin límite artificial', () => {
+    const catalog = Array.from({ length: 30 }, (_, i) =>
+      item({ _id: `p${i}`, name: `Pizza ${i}`, category: 'Pizzas' }),
+    );
+    expect(catalogProductsForComboSlot('main', catalog)).toHaveLength(30);
+  });
+
+  it('agrupa productos del combo por tipo', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'b1', name: 'Coca-Cola', category: 'Bebidas' }),
+    ];
+    const comboItems = [
+      { productId: 'p1', productName: 'Margarita', quantity: 1 },
+      { productId: 'b1', productName: 'Coca-Cola', quantity: 1 },
+    ];
+    const grouped = groupComboItemsBySlot(comboItems, catalog);
+    expect(grouped.get('main')).toHaveLength(1);
+    expect(grouped.get('drink')).toHaveLength(1);
+  });
+
+  it('filtra catálogo por hueco', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'b1', name: 'Agua', category: 'Bebidas' }),
+    ];
+    const drinks = catalogProductsForComboSlot('drink', catalog);
+    expect(drinks.map((d) => d._id)).toEqual(['b1']);
+  });
+
+  it('persiste slotKind al guardar', () => {
+    const catalog = [item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' })];
+    const saved = normalizeComboItemsForSave(
+      [{ productId: 'p1', productName: 'Margarita', quantity: 1, slotKind: 'main' }],
+      catalog,
+    );
+    expect(saved[0].slotKind).toBe('main');
+    expect(resolveComboRefSlotKind(saved[0], catalog)).toBe('main');
+  });
+
+  it('menú estándar es pizza + complemento + bebida', () => {
+    expect(DEFAULT_COMBO_STRUCTURE.map((s) => s.slotKind)).toEqual(['main', 'side', 'drink']);
+    const err = validateComboSectionDraft({
+      ...DEFAULT_COMBO_SECTION_DRAFT,
+      side: { enabled: false, count: 1 },
+    });
+    expect(err).toContain('complemento');
+  });
+
+  it('plantillas duo y familiar incluyen complemento', () => {
+    const duo = COMBO_MENU_PRESETS.find((p) => p.id === 'duo').structure;
+    const familiar = COMBO_MENU_PRESETS.find((p) => p.id === 'familiar').structure;
+    expect(duo.some((s) => s.slotKind === 'side')).toBe(true);
+    expect(expectedCountForComboSlot('main', duo)).toBe(2);
+    expect(expectedCountForComboSlot('side', familiar)).toBe(2);
+    expect(inferComboMenuPresetId(duo)).toBe('duo');
+    expect(inferComboMenuPresetId(familiar)).toBe('familiar');
+    expect(inferComboMenuPresetId(structureFromSectionDraft(DEFAULT_COMBO_SECTION_DRAFT))).toBe('estandar');
+  });
+
+  it('cuenta unidades totales en un hueco (cantidad × líneas)', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'Pepperoni', category: 'Pizzas' }),
+    ];
+    const comboItems = [
+      { productId: 'p1', productName: 'Margarita', quantity: 2, slotKind: 'main' },
+    ];
+    expect(totalUnitsInComboSlot('main', comboItems, catalog)).toBe(2);
+    comboItems.push({ productId: 'p2', productName: 'Pepperoni', quantity: 1, slotKind: 'main' });
+    expect(totalUnitsInComboSlot('main', comboItems, catalog)).toBe(3);
+  });
+
+  it('buildComboMenuSections usa nombres del Excel (Complementos, Bebidas)', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Sides' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    expect(sections.find((s) => s.catalogCategory === 'Pizzas')?.expectedCount).toBe(1);
+    expect(sections.find((s) => s.catalogCategory === 'Complementos')?.slotQuota).toBe(1);
+    expect(sections.find((s) => s.catalogCategory === 'Bebidas')?.slotQuota).toBe(1);
+    expect(sections.find((s) => s.catalogCategory === 'Sides')).toBeUndefined();
+    const sideSection = sections.find((s) => s.catalogCategory === 'Complementos');
+    expect(catalogProductsForComboSection(sideSection, catalog).map((p) => p._id)).toEqual(['c1']);
+  });
+
+  it('Sides se normaliza a Complementos al importar', async () => {
+    const { normalizeImportCategory } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
+    expect(normalizeImportCategory('Sides')).toBe('Complementos');
+  });
+
+  it('Sides y Entrantes cuentan como complemento', () => {
+    expect(inferComboSlotKind('Sides')).toBe('side');
+    expect(inferComboSlotKind('Entrantes')).toBe('side');
+  });
+
+  it('isComboMenuComplete valida por sección de catálogo', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Sides' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    const partial = [{ productId: 'p1', productName: 'Margarita', quantity: 1, slotKind: 'main' }];
+    expect(isComboMenuComplete(sections, partial, catalog)).toBe(false);
+    const full = [
+      ...partial,
+      { productId: 'c1', productName: 'Patatas', quantity: 1, slotKind: 'side' },
+      { productId: 'b1', productName: 'Coca', quantity: 1, slotKind: 'drink' },
+    ];
+    expect(isComboMenuComplete(sections, full, catalog)).toBe(true);
+  });
+});

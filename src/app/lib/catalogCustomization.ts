@@ -100,14 +100,30 @@ export function resolveTpvCategoryTemplateKey(
   if (/hamburguesa|burger/.test(cat) || /hamburguesa|burger/.test(name)) return 'hamburguesas';
   if (/pizza/.test(cat) || /pizza/.test(name)) return 'pizzas';
   if (/bebida|postre|complemento|entrante|ensalada|bebidas|postres/.test(cat)) return null;
+  if (/combo/.test(cat)) {
+    const fromBrand = resolveTpvCategoryFromBrands(productBrandIdsFromItem(item), brands);
+    if (fromBrand) return fromBrand;
+  }
   return resolveTpvCategoryFromBrands(productBrandIdsFromItem(item), brands);
 }
 
+/** Producto/combo configurable en TPV (quitar ingredientes, extras globales). */
 export function isCustomizableCatalogItem(
   item: Pick<CatalogItem, 'category' | 'name' | 'brandIds'>,
   brands?: TpvBrandHint[],
 ): boolean {
   return resolveTpvCategoryTemplateKey(item, brands) !== null;
+}
+
+/** Catálogo: sección TPV editable (pizzas, burgers, combos…). */
+export function isCatalogTpvConfigurable(
+  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'itemType'>,
+  brands?: TpvBrandHint[],
+): boolean {
+  if (item.itemType === 'combo') return true;
+  const cat = foldCategoryKey(item.category || '');
+  if (cat === 'combos' || cat === 'combo') return true;
+  return isCustomizableCatalogItem(item, brands);
 }
 
 export function resolveItemPrimaryBrandId(item: Pick<CatalogItem, 'brandIds'>): string | null {
@@ -704,11 +720,44 @@ function parseSupplementsArray(raw: unknown): CatalogSupplement[] {
 }
 
 export type ParseCatalogResolveOptions = {
-  /** TPV: solo ingredientes de esta pizza (Excel/ficha); sin lista maestra ni plantillas. */
+  /** TPV: prioriza ingredientes de esta pizza (Excel/ficha). */
   productIngredientsOnly?: boolean;
   /** TPV: todos los extras del negocio; ignora suplementos del producto. */
   storeExtrasOnly?: boolean;
+  /** TPV: si la ficha está vacía, usar combo + ingredientes base del negocio + plantilla. */
+  tpvFallbackWhenEmpty?: boolean;
+  /** Catálogo completo (combos → ingredientes de productos incluidos). */
+  catalogItems?: CatalogItem[];
 };
+
+function mergeComboComponentIngredients(item: CatalogItem, catalog: CatalogItem[]): string[] {
+  return mergeComboProductIngredients(item.comboItems, catalog);
+}
+
+/** Ingredientes unidos desde los productos incluidos en un combo. */
+export function mergeComboProductIngredients(
+  comboItems: CatalogItem['comboItems'] | undefined,
+  catalog: CatalogItem[],
+): string[] {
+  const refs = comboItems;
+  if (!Array.isArray(refs) || refs.length === 0) return [];
+  const byId = new Map(catalog.map((c) => [c._id, c]));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of refs) {
+    const comp = byId.get(String(ref.productId || '').trim());
+    if (!comp) continue;
+    const text =
+      typeof comp.customFields?.ingredients === 'string' ? comp.customFields.ingredients : '';
+    for (const name of parseIngredientsText(text)) {
+      const key = ingredientNameKey(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
+}
 
 export function parseCatalogIngredients(
   item: CatalogItem,
@@ -720,14 +769,31 @@ export function parseCatalogIngredients(
   options?: ParseCatalogResolveOptions,
 ): string[] {
   const templateKey = resolveTpvCategoryTemplateKey(item, brands);
+  const brandIds = productBrandIdsFromItem(item);
 
   const fromProduct = parseIngredientsText(
     typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '',
   );
   if (fromProduct.length > 0) return fromProduct;
-  if (options?.productIngredientsOnly) return [];
 
-  const brandIds = productBrandIdsFromItem(item);
+  if (options?.productIngredientsOnly) {
+    if (options.tpvFallbackWhenEmpty) {
+      const catalog = options.catalogItems;
+      if (catalog?.length) {
+        const fromCombo = mergeComboComponentIngredients(item, catalog);
+        if (fromCombo.length > 0) return fromCombo;
+      }
+      if (templateKey && storeIngredients && storeIngredients.length > 0) {
+        const fromMaster = tpvBaseIngredientNames(storeIngredients, brandIds, templateKey);
+        if (fromMaster.length > 0) return fromMaster;
+      }
+      if (templateKey && templates?.[templateKey]) {
+        const fromTemplate = parseIngredientsText(templates[templateKey]?.ingredients);
+        if (fromTemplate.length > 0) return fromTemplate;
+      }
+    }
+    return [];
+  }
 
   if (templateKey && legacyBrandIngredients) {
     for (const brandId of brandIds) {

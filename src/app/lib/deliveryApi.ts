@@ -190,6 +190,8 @@ export interface CatalogComboRef {
   productId: string;
   productName: string;
   quantity: number;
+  /** Tipo de componente: pizza, bebida, postre… */
+  slotKind?: 'main' | 'drink' | 'dessert' | 'side' | 'other';
 }
 
 export interface CatalogSalesChannel {
