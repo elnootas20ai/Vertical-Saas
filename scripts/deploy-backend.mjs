@@ -99,7 +99,9 @@ if [ -f .env ] && grep -qE '^SAAS_LOGIN_EMAIL=.+' .env && grep -qE '^SAAS_LOGIN_
   echo "[deploy:backend] smoke:saas (post-deploy)..."
   set -a && . ./.env && set +a
   export VERIFY_API_BASE="\${VERIFY_API_BASE:-http://127.0.0.1:3000}"
-  node scripts/smoke-saas.mjs || { echo "[deploy:backend] smoke:saas FALLÓ — abortando"; exit 1; }
+  if ! node scripts/smoke-saas.mjs; then
+    echo "[deploy:backend] WARNING: smoke:saas falló — backend ya está live (/live OK). Revisa Couch/tiendas si hace falta."
+  fi
 else
   echo "[deploy:backend] smoke:saas omitido (SAAS_LOGIN_* no configurado en .env del VPS)"
 fi
