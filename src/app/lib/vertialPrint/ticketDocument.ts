@@ -1,5 +1,14 @@
 import type { DeliveryTicketPrintOptions, DeliveryTicketVariant } from '../deliveryTicketTypes';
-import { resolveDeliveryOrderChargeTotal } from '../deliveryTicketHelpers';
+import { resolveDeliveryOrderChargeTotal, orderItemCustomizationParts } from '../deliveryTicketHelpers';
+
+export interface TicketLine {
+  qty: number;
+  name: string;
+  total: number;
+  note?: string;
+  added?: string[];
+  removed?: string[];
+}
 
 export interface TicketDocument {
   variant: DeliveryTicketVariant;
@@ -17,7 +26,7 @@ export interface TicketDocument {
   customerAddress: string;
   deliveryTypeLabel: string;
   cashierName: string;
-  lines: Array<{ qty: number; name: string; total: number; notes?: string }>;
+  lines: TicketLine[];
   base: number;
   vat: number;
   vatRate: number;
@@ -76,12 +85,17 @@ export function buildTicketDocument({
     ? paymentMethodLabel || 'Cobrado'
     : (variant === 'customer' ? 'Pendiente' : '-');
 
-  const lines = (order.items || []).map((item) => ({
-    qty: Number(item.quantity || 0),
-    name: item.name || '',
-    total: Number(item.total || 0),
-    notes: item.notes || '',
-  }));
+  const lines: TicketLine[] = (order.items || []).map((item) => {
+    const parts = orderItemCustomizationParts(item);
+    return {
+      qty: Number(item.quantity || 0),
+      name: item.name || '',
+      total: Number(item.total || 0),
+      note: parts.note || undefined,
+      added: parts.added.length > 0 ? parts.added : undefined,
+      removed: parts.removed.length > 0 ? parts.removed : undefined,
+    };
+  });
 
   const shared = {
     variant,

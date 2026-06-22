@@ -4,6 +4,58 @@ import type {
   DeliveryTicketVariant,
   DeliveryOrderLike,
 } from './deliveryTicketTypes';
+import type { DeliveryOrderItem } from './deliveryApi';
+
+/** Líneas de personalización guardadas en el ítem (+ extras, - sin ingrediente). */
+export function orderItemCustomizationDetail(
+  item: Pick<DeliveryOrderItem, 'extras' | 'ingredients'>,
+): string[] {
+  if (Array.isArray(item.extras) && item.extras.length > 0) {
+    return item.extras.map((e) => String(e || '').trim()).filter(Boolean);
+  }
+  if (!Array.isArray(item.ingredients)) return [];
+  return item.ingredients
+    .filter((ing) => String(ing.quantity || '').toLowerCase() === 'sin')
+    .map((ing) => `- sin ${ing.name}`);
+}
+
+export type OrderItemCustomizationParts = {
+  added: string[];
+  removed: string[];
+  note: string;
+};
+
+/** Desglose para UI e impresión (extras, sin ingredientes, nota cocina). */
+export function orderItemCustomizationParts(
+  item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
+): OrderItemCustomizationParts {
+  const added: string[] = [];
+  const removed: string[] = [];
+  for (const line of orderItemCustomizationDetail(item)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('+')) {
+      added.push(trimmed.slice(1).trim());
+    } else if (/^-\s*sin\s/i.test(trimmed)) {
+      removed.push(trimmed.replace(/^-\s*sin\s*/i, '').trim());
+    } else if (trimmed.startsWith('-')) {
+      removed.push(trimmed.slice(1).trim());
+    }
+  }
+  return { added, removed, note: String(item.notes || '').trim() };
+}
+
+/** Notas de cocina / detalle: nota del ítem + quitar + extras. */
+export function orderItemKitchenNotes(
+  item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
+): string {
+  const { added, removed, note } = orderItemCustomizationParts(item);
+  const lines = [
+    ...added.map((n) => `+ ${n}`),
+    ...removed.map((n) => `- sin ${n}`),
+    note,
+  ].filter(Boolean);
+  return lines.join(' · ');
+}
 
 type BusinessLike = {
   name?: string;

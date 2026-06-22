@@ -44,6 +44,19 @@ function row(left: string, right: string, width = 42): string {
   return `${l}${' '.repeat(space)}${r}`.slice(0, width);
 }
 
+function pushLineDetail(chunks: Uint8Array[], line: TicketDocument['lines'][number], width: number) {
+  chunks.push(textLine(`${line.qty}x ${line.name}`, width));
+  for (const name of line.added || []) {
+    chunks.push(textLine(`  + ${name}`, width));
+  }
+  for (const name of line.removed || []) {
+    chunks.push(textLine(`  SIN ${name}`, width));
+  }
+  if (line.note) {
+    chunks.push(textLine(`  NOTA: ${line.note}`, width));
+  }
+}
+
 export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 80): Uint8Array {
   const width = paperWidthMm === 58 ? 32 : 42;
   const chunks: Uint8Array[] = [
@@ -77,8 +90,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine('--------------------------------', width));
     for (const line of doc.lines) {
-      chunks.push(textLine(`${line.qty}x ${line.name}`, width));
-      if (line.notes) chunks.push(textLine(`  > ${line.notes}`, width));
+      pushLineDetail(chunks, line, width);
     }
     if (doc.orderNotes) {
       chunks.push(textLine('--------------------------------', width));
@@ -90,7 +102,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     if (doc.customerAddress) chunks.push(textLine(doc.customerAddress, width));
     chunks.push(textLine('--------------------------------', width));
     for (const line of doc.lines) {
-      chunks.push(textLine(`${line.qty}x ${line.name}`, width));
+      pushLineDetail(chunks, line, width);
     }
     chunks.push(
       textLine('--------------------------------', width),
@@ -110,6 +122,15 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
 
     for (const line of doc.lines) {
       chunks.push(textLine(row(`${line.qty}x ${line.name}`, money(line.total), width), width));
+      for (const name of line.added || []) {
+        chunks.push(textLine(`  + ${name}`, width));
+      }
+      for (const name of line.removed || []) {
+        chunks.push(textLine(`  SIN ${name}`, width));
+      }
+      if (line.note) {
+        chunks.push(textLine(`  NOTA: ${line.note}`, width));
+      }
     }
 
     chunks.push(

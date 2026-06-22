@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Minus, MessageSquare, Pizza, ShoppingBag, Search } from 'lucide-react';
+import { X, Plus, Minus, MessageSquare, Pizza } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
   type CartLineCustomization,
@@ -98,7 +98,6 @@ export function TpvItemCustomizeModal({
   const [removed, setRemoved] = useState<string[]>(initial?.removedIngredients || []);
   const [added, setAdded] = useState<CatalogSupplement[]>(initial?.addedSupplements || []);
   const [notes, setNotes] = useState(initial?.notes || '');
-  const [extraSearch, setExtraSearch] = useState('');
   const [activeTab, setActiveTab] = useState<CustomizeTab>(() =>
     defaultTabForItem(customizable, ingredients.length, supplements.length),
   );
@@ -107,7 +106,6 @@ export function TpvItemCustomizeModal({
     setRemoved(initial?.removedIngredients || []);
     setAdded(initial?.addedSupplements || []);
     setNotes(initial?.notes || '');
-    setExtraSearch('');
     setActiveTab(defaultTabForItem(customizable, ingredients.length, supplements.length));
   }, [item._id, initial, customizable, ingredients.length, supplements.length]);
 
@@ -120,12 +118,6 @@ export function TpvItemCustomizeModal({
   const basePrice = Number(item.unitPrice || 0);
   const extrasTotal = added.reduce((sum, s) => sum + Number(s.price || 0), 0);
   const unitTotal = cartLineUnitPrice(basePrice, customization);
-
-  const filteredSupplements = useMemo(() => {
-    const q = extraSearch.trim().toLowerCase();
-    if (!q) return supplements;
-    return supplements.filter((sup) => sup.name.toLowerCase().includes(q));
-  }, [supplements, extraSearch]);
 
   const toggleIngredient = (name: string) => {
     setRemoved((prev) =>
@@ -178,7 +170,7 @@ export function TpvItemCustomizeModal({
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full sm:max-w-2xl max-h-[94dvh] overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
+        className="relative w-full sm:max-w-3xl max-h-[94dvh] overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-customize-title"
@@ -303,15 +295,12 @@ export function TpvItemCustomizeModal({
           )}
 
           {customizable && activeTab === 'extras' && (
-            <section className="space-y-4">
-              <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 px-4 py-3">
-                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
-                  Extras de pago
+            <section className="space-y-3">
+              {addedCount > 0 && (
+                <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 px-0.5">
+                  {addedCount} extra(s) · +{formatPrice(extrasTotal)}
                 </p>
-                <p className="text-xs text-emerald-800/80 dark:text-emerald-300/80 mt-1">
-                  Toca para añadir. Cada extra suma al precio (se muestra con <strong>+</strong>).
-                </p>
-              </div>
+              )}
               {supplements.length === 0 ? (
                 <div className="rounded-xl border-2 border-dashed border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-6 text-center space-y-3">
                   <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
@@ -322,61 +311,38 @@ export function TpvItemCustomizeModal({
                     <strong>naranja</strong> (bacon, extra queso, piña…), pon el precio en el paso 1 y pulsa{' '}
                     <strong>Guardar cambios</strong>.
                   </p>
-                  <p className="text-xs text-amber-700/80 dark:text-amber-400/80">
-                    Si ya los marcaste, recarga el TPV o vuelve a abrir esta pantalla.
-                  </p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  {supplements.length > 6 && (
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="search"
-                        value={extraSearch}
-                        onChange={(e) => setExtraSearch(e.target.value)}
-                        placeholder="Buscar extra…"
-                        className="w-full pl-9 pr-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm focus:border-emerald-500 outline-none"
-                      />
-                    </div>
-                  )}
-                  {filteredSupplements.length === 0 ? (
-                    <p className="text-sm text-gray-500 text-center py-6">Ningún extra coincide con la búsqueda.</p>
-                  ) : (
-                    filteredSupplements.map((sup) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                  {supplements.map((sup) => {
                     const active = added.some((s) => s.id === sup.id);
                     return (
                       <button
                         key={sup.id}
                         type="button"
                         onClick={() => toggleSupplement(sup)}
-                        className={`w-full flex items-center justify-between gap-3 px-4 py-4 rounded-xl border-2 text-left transition-all active:scale-[0.99] min-h-[56px] ${
+                        className={`min-h-[52px] px-2 py-2 rounded-xl border-2 transition-all active:scale-[0.97] touch-manipulation ${
                           active
-                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-md ring-2 ring-emerald-500/20'
-                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-emerald-300 shadow-sm'
+                            ? 'border-emerald-500 bg-emerald-500 text-white shadow-md'
+                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/30'
                         }`}
                       >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <span
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                              active
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-500'
-                            }`}
-                          >
-                            {active ? <Plus className="w-4 h-4" /> : <ShoppingBag className="w-4 h-4" />}
-                          </span>
-                          <span className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        <span className="flex flex-col items-center justify-center gap-0.5 w-full">
+                          {active && <Plus className="w-3.5 h-3.5 shrink-0 opacity-90" />}
+                          <span className="text-xs sm:text-sm font-semibold text-center leading-tight line-clamp-2">
                             {sup.name}
                           </span>
-                        </span>
-                        <span className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400 shrink-0">
-                          +{formatPrice(sup.price)}
+                          <span
+                            className={`text-[10px] font-bold tabular-nums ${
+                              active ? 'text-white/90' : 'text-emerald-700 dark:text-emerald-400'
+                            }`}
+                          >
+                            +{formatPrice(sup.price)}
+                          </span>
                         </span>
                       </button>
                     );
-                    })
-                  )}
+                  })}
                 </div>
               )}
             </section>

@@ -11,16 +11,39 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:12px;font-size:12px;color:#000}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:12px;font-size:12px;color:#000;line-height:1.35}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:8px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:14px;font-weight:bold;padding-top:4px}
 .f{margin-top:16px;font-size:10px;text-align:center;color:#666;line-height:1.4}
 .small{font-size:10px;color:#444}
-.note{color:#b45309;font-size:10px}
+.note{color:#b45309;font-size:10px;font-weight:bold}
+.add{color:#047857;font-size:10px;font-weight:bold}
+.rem{color:#b91c1c;font-size:10px;font-weight:bold;text-decoration:line-through}
+.item{padding:6px 0;border-bottom:1px dotted #ccc}
+.item:last-child{border-bottom:none}
 .big{font-size:14px;font-weight:bold}
+.order-note{background:#fef3c7;border:1px solid #f59e0b;padding:6px 8px;margin-top:8px;font-weight:bold;color:#92400e}
 @media print{body{margin:0}}
 `;
+
+function buildLineDetailHtml(line: TicketDocument['lines'][number]): string {
+  const bits: string[] = [];
+  if (line.added?.length) {
+    for (const name of line.added) {
+      bits.push(`<div class="add">+ ${escapeHtml(name)}</div>`);
+    }
+  }
+  if (line.removed?.length) {
+    for (const name of line.removed) {
+      bits.push(`<div class="rem">SIN ${escapeHtml(name)}</div>`);
+    }
+  }
+  if (line.note) {
+    bits.push(`<div class="note">NOTA: ${escapeHtml(line.note)}</div>`);
+  }
+  return bits.length > 0 ? `<div style="margin-top:3px;padding-left:8px">${bits.join('')}</div>` : '';
+}
 
 function buildHeaderHtml(doc: TicketDocument): string {
   return `<div class="c">
@@ -39,8 +62,8 @@ function buildHeaderHtml(doc: TicketDocument): string {
 
 function buildKitchenTicketHtml(doc: TicketDocument): string {
   const rows = doc.lines.map((item) => {
-    const note = item.notes ? `<br/><span class="note">→ ${escapeHtml(item.notes)}</span>` : '';
-    return `<tr><td style="padding:4px 0"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${note}</td></tr>`;
+    const detail = buildLineDetailHtml(item);
+    return `<div class="item"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</div>`;
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
@@ -54,16 +77,17 @@ ${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
 ${doc.customerAddress ? `<p>${escapeHtml(doc.customerAddress)}</p>` : ''}
 ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
-<table>${rows}</table>
-${doc.orderNotes ? `<div class="hr"></div><p class="note b">NOTA: ${escapeHtml(doc.orderNotes)}</p>` : ''}
+${rows}
+${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}
 <div class="f">${escapeHtml(doc.footer)}</div>
 </body></html>`;
 }
 
 function buildDeliverySlipHtml(doc: TicketDocument): string {
-  const rows = doc.lines.map((item) =>
-    `<tr><td style="padding:2px 0">${item.qty}x ${escapeHtml(item.name)}</td></tr>`,
-  ).join('');
+  const rows = doc.lines.map((item) => {
+    const detail = buildLineDetailHtml(item);
+    return `<div class="item"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</div>`;
+  }).join('');
 
   return `<!DOCTYPE html><html><head><title>Reparto ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}</style></head><body>
@@ -74,19 +98,20 @@ ${buildHeaderHtml(doc)}
 ${doc.customerPhone ? `<p class="big">Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
 ${doc.customerAddress ? `<p class="big">${escapeHtml(doc.customerAddress)}</p>` : ''}
 <div class="hr"></div>
-<table>${rows}</table>
+${rows}
 <div class="hr"></div>
 <table class="t"><tr><td>TOTAL</td><td style="text-align:right">${doc.total.toFixed(2)}€</td></tr></table>
 <p>${escapeHtml(doc.paymentStatusLabel)}${doc.paymentLabel && doc.paymentLabel !== '-' ? ` · ${escapeHtml(doc.paymentLabel)}` : ''}</p>
-${doc.orderNotes ? `<p class="note">NOTA: ${escapeHtml(doc.orderNotes)}</p>` : ''}
+${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}
 <div class="f">${escapeHtml(doc.footer)}</div>
 </body></html>`;
 }
 
 function buildCustomerTicketHtml(doc: TicketDocument): string {
-  const rows = doc.lines.map((item) =>
-    `<tr><td style="padding:2px 0">${item.qty}x ${escapeHtml(item.name)}</td><td style="text-align:right;padding:2px 0">${item.total.toFixed(2)}€</td></tr>`,
-  ).join('');
+  const rows = doc.lines.map((item) => {
+    const detail = buildLineDetailHtml(item);
+    return `<tr><td style="padding:4px 0;vertical-align:top"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</td><td style="text-align:right;padding:4px 0;vertical-align:top">${item.total.toFixed(2)}€</td></tr>`;
+  }).join('');
 
   return `<!DOCTYPE html><html><head><title>${doc.isRefund ? 'Devolución' : 'Ticket'} ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}</style></head><body>

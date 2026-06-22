@@ -36,6 +36,7 @@ import {
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
+import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
@@ -660,183 +661,174 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-5 py-4 flex items-center justify-between rounded-t-2xl z-10">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-              Pedido #{order.orderNumber}
-            </h2>
-            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold mt-1 ${cfg.bg} ${cfg.color}`}>
-              {cfg.icon} {displayLabel}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Espera:{' '}
-              <span className={`font-bold tabular-nums ${timerTone(orderWaitMinutes(order))}`}>
-                {formatElapsed(orderWaitMinutes(order))}
-              </span>
-              {order.departedAt && (
-                <span className="text-cyan-600 dark:text-cyan-400 ml-2">
-                  · En ruta {formatElapsed(elapsedMinutes(order.departedAt))}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div className="relative flex flex-col w-full max-w-3xl max-h-[88dvh] bg-gray-50 dark:bg-gray-950 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden">
+        <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Detalle del pedido</p>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
+                  #{order.orderNumber}
+                </h2>
+                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${cfg.bg} ${cfg.color}`}>
+                  {cfg.icon} {displayLabel}
                 </span>
-              )}
-            </p>
-            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold mt-1 ml-1 ${typeBadge.className}`}>
-              {typeBadge.icon} {typeBadge.label}
+                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${typeBadge.className}`}>
+                  {typeBadge.icon} {typeBadge.label}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                  Espera{' '}
+                  <span className={`ml-1 tabular-nums font-bold ${timerTone(orderWaitMinutes(order))}`}>
+                    {formatElapsed(orderWaitMinutes(order))}
+                  </span>
+                </span>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 touch-manipulation"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
         </div>
 
-        <div className="p-5 space-y-4">
-          {order.customerName && (
-            <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl">
-              <User className="w-5 h-5 text-gray-400" />
-              <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.customerName}</p>
-                {order.customerPhone && <p className="text-xs text-gray-500">{order.customerPhone}</p>}
-                {order.customerAddress && <p className="text-xs text-gray-500 mt-0.5">{order.customerAddress}</p>}
-              </div>
-            </div>
-          )}
-
-          {order.takenByName && (
-            <div className="flex items-center gap-3 p-3 bg-violet-50 dark:bg-violet-900/20 rounded-xl">
-              <span className="w-9 h-9 rounded-full bg-violet-600 text-white text-sm font-bold flex items-center justify-center shrink-0">
-                {getWorkerInitials(order.takenByName)}
-              </span>
-              <div>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Pedido cogido por</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{order.takenByName}</p>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Artículos</h3>
-            <div className="space-y-2">
-              {order.items.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                  <div>
-                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {item.quantity}x {item.name}
-                    </span>
-                    {item.notes && <p className="text-xs text-amber-600 mt-0.5">{item.notes}</p>}
-                  </div>
-                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                    {formatCurrency(item.unitPrice * item.quantity)}
-                  </span>
+        <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 py-3 overflow-hidden">
+          <div className="shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {order.customerName && (
+              <div className="flex items-start gap-2.5 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 min-w-0">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-50 dark:bg-cyan-950/40 shrink-0">
+                  <User className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">{order.customerName}</p>
+                  {order.customerPhone && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate mt-0.5">{order.customerPhone}</p>
+                  )}
+                  {order.customerAddress && (
+                    <p className="text-xs text-gray-500 leading-snug line-clamp-2 mt-0.5">{order.customerAddress}</p>
+                  )}
                 </div>
+              </div>
+            )}
+            {order.takenByName && (
+              <div className="flex items-center gap-2.5 px-3 py-3 bg-violet-50 dark:bg-violet-950/30 rounded-xl border border-violet-200/70 dark:border-violet-900 min-w-0">
+                <span className="w-9 h-9 rounded-full bg-violet-600 text-white text-sm font-bold flex items-center justify-center shrink-0">
+                  {getWorkerInitials(order.takenByName)}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-violet-600/80 dark:text-violet-400">Pedido cogido por</p>
+                  <p className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">{order.takenByName}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
+            <h3 className="shrink-0 text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+              Artículos · {order.items.length}
+            </h3>
+            <div
+              className={`max-h-[min(280px,32dvh)] overflow-y-auto grid gap-3 content-start ${
+                order.items.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'
+              }`}
+            >
+              {order.items.map((item) => (
+                <OrderItemDetailCard key={item.id} item={item} formatPrice={formatCurrency} variant="tablet" />
               ))}
             </div>
           </div>
 
           {order.notes && (
-            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
-              <p className="text-sm text-amber-800 dark:text-amber-300">{order.notes}</p>
+            <div className="shrink-0 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-300/70 dark:border-amber-800 rounded-xl">
+              <p className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-400">Nota del pedido</p>
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-100 leading-snug">{order.notes}</p>
             </div>
           )}
 
-          <div className="flex items-center justify-between p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
-              {order.ticketNumber && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">
-                  Ticket {order.ticketNumber}
+          <div className="shrink-0 rounded-xl border border-emerald-200/80 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
+            <div className="flex items-end justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
+                  {order.ticketNumber ? `Ticket ${order.ticketNumber}` : 'Total del pedido'}
                 </p>
-              )}
-              {order.paymentStatus === 'paid' && order.paymentMethod && (
-                <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
-                  Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
-                </p>
-              )}
-              {order.paymentStatus !== 'paid' && order.paymentMethod && (
-                <p className="text-xs text-cyan-700 dark:text-cyan-300 font-medium mt-0.5">
-                  Pago previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
-                </p>
-              )}
+                {order.paymentMethod && (
+                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 mt-0.5">
+                    {order.paymentStatus === 'paid' ? 'Cobrado' : 'Pago previsto'} ·{' '}
+                    {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+                  </p>
+                )}
+              </div>
+              <p className="text-3xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums leading-none shrink-0">
+                {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
+              </p>
             </div>
-            <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-              {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
-            </span>
-          </div>
-
-          {currentBusiness && (
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Imprimir</h3>
+            {currentBusiness && (
               <OrderTicketButtons
                 order={order}
                 business={businessTicketInfoFrom(currentBusiness)}
                 salesPointName={order.salesPointName}
                 cashierName={order.takenByName}
-                layout="grid"
+                layout="tablet"
               />
-            </div>
-          )}
+            )}
+          </div>
 
           {canCorrectPayment && (
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                Corregir método de pago
-              </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                Si no cuadra con caja (tarjeta, efectivo…). Actualiza el pedido y el movimiento en caja.
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  { method: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
-                  { method: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                  { method: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                ]).map(({ method, label, icon: Icon }) => {
-                  const active = currentPayment === method;
-                  return (
-                    <button
-                      key={method}
-                      type="button"
-                      disabled={correctingPayment || active}
-                      onClick={() => onCorrectPayment?.(order, method)}
-                      className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-bold transition-colors disabled:opacity-50 ${
-                        active
-                          ? 'border-gray-900 dark:border-gray-200 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
-                      }`}
-                    >
-                      {correctingPayment ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <Icon className="w-5 h-5" />
-                      )}
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="shrink-0 grid grid-cols-3 gap-2">
+              {([
+                { method: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                { method: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                { method: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+              ]).map(({ method, label, icon: Icon }) => {
+                const active = currentPayment === method;
+                return (
+                  <button
+                    key={method}
+                    type="button"
+                    disabled={correctingPayment || active}
+                    onClick={() => onCorrectPayment?.(order, method)}
+                    className={`flex flex-col items-center gap-0.5 py-2 px-2 rounded-lg border text-xs font-bold disabled:opacity-50 touch-manipulation ${
+                      active
+                        ? 'border-gray-900 bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                        : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    {correctingPayment ? <Loader2 className="w-4 h-4 animate-spin" /> : <Icon className="w-4 h-4" />}
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           )}
+        </div>
 
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 flex gap-2 rounded-b-2xl">
           {nextLabel && (
             <button
               type="button"
               onClick={() => onAdvance(order)}
               disabled={advancing}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-all disabled:opacity-50 shadow-lg"
+              className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold disabled:opacity-50 touch-manipulation shadow-md"
             >
               {advancing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
               {nextLabel}
             </button>
           )}
-
           <button
             type="button"
             onClick={() => onDelete(order)}
             disabled={advancing}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50"
+            aria-label="Eliminar pedido"
+            className={`flex items-center justify-center gap-1.5 rounded-xl border-2 border-red-300 dark:border-red-900/60 text-red-600 dark:text-red-400 font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 touch-manipulation ${
+              nextLabel ? 'px-4 py-3 shrink-0' : 'flex-1 py-3 text-base'
+            }`}
           >
-            <Trash2 className="w-4 h-4" />
-            Eliminar pedido
+            <Trash2 className="w-5 h-5" />
+            {!nextLabel && 'Eliminar pedido'}
           </button>
         </div>
       </div>
