@@ -90,13 +90,22 @@ export function evaluateTpvRegisterLoadGate(params: {
     scopeBusinessId,
   } = params;
 
+  const hasIds = Boolean(dataUserId && scopeBusinessId);
+
+  // Tablet: el código de tienda ya fija empresa y titular; no esperar al selector global.
+  if (isTabletSession) {
+    return {
+      canLoad: hasIds,
+      shouldClearLoading: !hasIds,
+    };
+  }
+
   if (businessLoading) {
     return { canLoad: false, shouldClearLoading: false };
   }
 
-  const hasIds = Boolean(dataUserId && scopeBusinessId);
-  const canLoad = isTabletSession ? hasIds : businessesFetchSettled && hasIds;
-  const shouldClearLoading = !canLoad && (businessesFetchSettled || isTabletSession) && !hasIds;
+  const canLoad = businessesFetchSettled && hasIds;
+  const shouldClearLoading = !canLoad && businessesFetchSettled && !hasIds;
 
   return { canLoad, shouldClearLoading };
 }

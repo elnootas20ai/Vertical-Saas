@@ -99,12 +99,42 @@ export function resolveTpvCategoryTemplateKey(
   const name = String(item.name || '').toLowerCase();
   if (/hamburguesa|burger/.test(cat) || /hamburguesa|burger/.test(name)) return 'hamburguesas';
   if (/pizza/.test(cat) || /pizza/.test(name)) return 'pizzas';
+  const fromCatalogCategory = resolveTpvCategoryFromItemCatalogCategory(
+    String(item.category || ''),
+    productBrandIdsFromItem(item),
+    brands,
+  );
+  if (fromCatalogCategory) return fromCatalogCategory;
   if (/bebida|postre|complemento|entrante|ensalada|bebidas|postres/.test(cat)) return null;
   if (/combo/.test(cat)) {
     const fromBrand = resolveTpvCategoryFromBrands(productBrandIdsFromItem(item), brands);
     if (fromBrand) return fromBrand;
   }
   return resolveTpvCategoryFromBrands(productBrandIdsFromItem(item), brands);
+}
+
+/** Categoría del catálogo (p. ej. «Al Dulce») → pizza/burger según la línea comercial. */
+function resolveTpvCategoryFromItemCatalogCategory(
+  category: string,
+  productBrandIds: string[],
+  brands?: TpvBrandHint[],
+): TpvCategoryTemplateKey | null {
+  if (!brands?.length || !String(category || '').trim()) return null;
+  const folded = foldCategoryKey(category);
+  const keys = new Set<TpvCategoryTemplateKey>();
+  const brandScope =
+    productBrandIds.length > 0
+      ? brands.filter((b) => productBrandIds.includes(b._id))
+      : brands;
+  for (const brand of brandScope) {
+    const brandCats = (brand.catalogCategories ?? []).map((c) => foldCategoryKey(c));
+    if (!brandCats.includes(folded)) continue;
+    for (const key of resolveBrandTpvCategoryKeys(brand)) keys.add(key);
+  }
+  if (keys.size === 1) return [...keys][0];
+  if (keys.has('pizzas') && !keys.has('hamburguesas')) return 'pizzas';
+  if (keys.has('hamburguesas') && !keys.has('pizzas')) return 'hamburguesas';
+  return null;
 }
 
 /** Producto/combo configurable en TPV (quitar ingredientes, extras globales). */
@@ -449,6 +479,32 @@ function mergeLegacyExtrasIntoStoreIngredients(
     }
   }
 
+  const templates = normalizeTpvCategoryTemplates(config.tpvCategoryTemplates);
+  for (const part of ['pizzas', 'hamburguesas'] as TpvCategoryTemplateKey[]) {
+    for (const sup of templates[part]?.supplements || []) {
+      const key = ingredientRowKey(sup.name, []);
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.role = 'extra';
+        existing.escandalloOnly = false;
+        const parts = new Set(normalizeProductParts(existing.productParts));
+        parts.add(part);
+        existing.productParts = [...parts];
+        if (!existing.extraPrices || Object.keys(existing.extraPrices).length === 0) {
+          existing.extraPrices = { '': sup.price };
+        }
+        continue;
+      }
+      byKey.set(key, {
+        id: sup.id || `extra-${ingredientNameKey(sup.name).replace(/\s+/g, '-')}`,
+        name: sup.name,
+        role: 'extra',
+        productParts: [part],
+        extraPrices: { '': sup.price },
+      });
+    }
+  }
+
   return normalizeStoreIngredients([...byKey.values()]);
 }
 
@@ -526,12 +582,9 @@ export function parseStoreIngredientExtras(
     return out;
   };
 
-  const strict = collect(false, false);
-  if (strict.length > 0) return strict;
-  const noBrand = collect(true, false);
-  if (noBrand.length > 0) return noBrand;
-  const noPart = collect(false, true);
-  if (noPart.length > 0) return noPart;
+  // TPV: todos los extras del tipo (pizza/hamburguesa), sin filtrar por marca.
+  const forProductType = collect(true, false);
+  if (forProductType.length > 0) return forProductType;
   return collect(true, true);
 }
 
@@ -856,7 +909,14 @@ export function parseCatalogSupplements(
   }
 
   if (templates?.[key]) {
-    return parseSupplementsArray(templates[key]?.supplements);
+    const fromTemplate = parseSupplementsArray(templates[key]?.supplements);
+    if (fromTemplate.length > 0) {
+      const fallbackPrice = normalizeTpvDefaultExtraPrice(defaultExtraPrice) ?? 0;
+      return fromTemplate.map((sup) => ({
+        ...sup,
+        price: sup.price > 0 ? sup.price : fallbackPrice,
+      }));
+    }
   }
   return [];
 }

@@ -5,6 +5,7 @@ import {
   sanitizeClientSummary,
   listClientsByUser,
   findDuplicateClients,
+  listBusinessesByUser,
   ensureDatabase,
   getDocument,
   putDocument,
@@ -30,6 +31,41 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+function resolveQueryBusinessId(req) {
+  return normalizeBusinessScopeId(req.query?.businessId || req.query?.business_id || '');
+}
+
+async function countActiveBusinesses(req, userId) {
+  const businesses = await listBusinessesByUser(req, userId);
+  return businesses.filter((b) => !b?.deletedAt).length;
+}
+
+async function resolveClientListOptions(req, userId, businessId) {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return {};
+  const count = await countActiveBusinesses(req, userId);
+  return { businessId: bid, legacySingleBusiness: count <= 1 };
+}
+
+async function resolveCreateBusinessId(req, userId, client = {}) {
+  const explicit = normalizeBusinessScopeId(
+    client?.businessId || client?.business_id || req.query?.businessId || req.body?.businessId,
+  );
+  if (explicit) return explicit;
+  const businesses = await listBusinessesByUser(req, userId);
+  const active = businesses.filter((b) => !b?.deletedAt);
+  if (active.length === 1) {
+    const only = active[0];
+    return normalizeBusinessScopeId(only.business_id || only.businessId || only._id);
+  }
+  if (active.length === 0) return '';
+  return null;
+}
+
 async function ensureClientOwner(req, userId, clientId) {
   const db = getClientsDbName();
   await ensureDatabase(req, db);
@@ -48,7 +84,9 @@ export async function listClients(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const raw = await listClientsByUser(req, userId);
+    const businessId = resolveQueryBusinessId(req);
+    const listOptions = await resolveClientListOptions(req, userId, businessId);
+    const raw = await listClientsByUser(req, userId, listOptions);
     const useLite = req.query.lite === '1' || req.query.lite === 'true';
     const sanitizer = useLite ? sanitizeClientSummary : sanitizeClient;
     const query = { ...req.query };
@@ -84,9 +122,19 @@ export async function createClient(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const businessId = await resolveCreateBusinessId(req, userId, client);
+    if (businessId === null) {
+      return badRequest(res, 'Falta businessId (empresa activa)');
+    }
+
     const db = getClientsDbName();
     await ensureDatabase(req, db);
-    const doc = buildClientDocument(userId, client);
+    const listOptions = await resolveClientListOptions(req, userId, businessId);
+    const doc = buildClientDocument(userId, {
+      ...client,
+      businessId,
+      business_id: businessId,
+    });
     const saved = await putDocument(req, db, doc._id, doc);
 
     await logAccountActivity(req, {
@@ -105,7 +153,7 @@ export async function createClient(req, res) {
     if (doc.address && !doc.postalCode) warnings.push({ field: 'postalCode', message: 'Código postal no especificado' });
     if (!doc.email) warnings.push({ field: 'email', message: 'Sin email — no se podrán enviar comunicaciones' });
 
-    const duplicates = await findDuplicateClients(req, userId, doc).catch(() => []);
+    const duplicates = await findDuplicateClients(req, userId, doc, listOptions).catch(() => []);
     return res.status(201).json({ ok: true, client: sanitizeClient({ ...doc, _rev: saved.rev }), duplicates, warnings });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear cliente' });
@@ -710,7 +758,9 @@ export async function searchByPhone(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const clients = await searchClientsByPhone(req, userId, q, limit);
+    const businessId = resolveQueryBusinessId(req);
+    const listOptions = await resolveClientListOptions(req, userId, businessId);
+    const clients = await searchClientsByPhone(req, userId, q, limit, listOptions);
     return res.json({ ok: true, clients: clients.map((c) => sanitizeClient(c)).filter(Boolean) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al buscar clientes' });
@@ -728,15 +778,20 @@ export async function checkClientDuplicates(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const businessId = normalizeBusinessScopeId(
+      client?.businessId || client?.business_id || req.query?.businessId || req.body?.businessId,
+    );
+    const listOptions = await resolveClientListOptions(req, userId, businessId);
+
     if (field && value) {
       const allowed = ['phone', 'email', 'dni'];
       if (!allowed.includes(field)) return badRequest(res, `Campo no válido: ${field}. Usa: ${allowed.join(', ')}`);
-      const duplicates = await findDuplicateClients(req, userId, { [field]: value });
+      const duplicates = await findDuplicateClients(req, userId, { [field]: value, businessId }, listOptions);
       return res.json({ ok: true, duplicates, matchedField: field });
     }
 
     if (client && typeof client === 'object') {
-      const duplicates = await findDuplicateClients(req, userId, client);
+      const duplicates = await findDuplicateClients(req, userId, client, listOptions);
       return res.json({ ok: true, duplicates });
     }
 
@@ -764,6 +819,11 @@ export async function bulkCreateClients(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    const scopeBusinessId = await resolveCreateBusinessId(req, userId, req.body || {});
+    if (scopeBusinessId === null) {
+      return badRequest(res, 'Falta businessId (empresa activa)');
+    }
+
     const db = getClientsDbName();
     await ensureDatabase(req, db);
 
@@ -776,8 +836,9 @@ export async function bulkCreateClients(req, res) {
         errors.push({ client, error: 'Nombre y teléfono son obligatorios' });
         continue;
       }
+      const bid = normalizeBusinessScopeId(client.businessId || client.business_id || scopeBusinessId);
       pending.push({
-        doc: buildClientDocument(userId, client),
+        doc: buildClientDocument(userId, { ...client, businessId: bid, business_id: bid }),
         sourceClient: client,
       });
     }
@@ -818,6 +879,94 @@ export async function bulkCreateClients(req, res) {
     return res.status(201).json({ ok: true, clients: created, errors, total: created.length });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error en importación masiva' });
+  }
+}
+
+/** Copia clientes de otra empresa (nuevos IDs; no enlaza registros). */
+export async function importClientsFromBusiness(req, res) {
+  try {
+    const { userId } = req.params;
+    const { sourceBusinessId, targetBusinessId } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const sourceId = normalizeBusinessScopeId(sourceBusinessId);
+    const targetId = normalizeBusinessScopeId(targetBusinessId);
+    if (!sourceId || !targetId) return badRequest(res, 'Faltan sourceBusinessId y targetBusinessId');
+    if (sourceId === targetId) return badRequest(res, 'Origen y destino deben ser empresas distintas');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const sourceOptions = await resolveClientListOptions(req, userId, sourceId);
+    const sourceClients = await listClientsByUser(req, userId, sourceOptions);
+    if (sourceClients.length === 0) {
+      return res.json({ ok: true, clients: [], total: 0, skipped: 0 });
+    }
+
+    const targetOptions = await resolveClientListOptions(req, userId, targetId);
+    const db = getClientsDbName();
+    await ensureDatabase(req, db);
+
+    const created = [];
+    const skipped = [];
+    const { batchSize } = resolveBulkImportLimits();
+
+    const pending = [];
+    for (const src of sourceClients) {
+      const candidate = buildClientDocument(userId, {
+        name: src.name,
+        phone: src.phone,
+        phonePrefix: src.phonePrefix,
+        email: src.email,
+        dni: src.dni,
+        address: src.address,
+        city: src.city,
+        postalCode: src.postalCode,
+        addresses: src.addresses,
+        notes: src.notes,
+        tags: src.tags,
+        clientType: src.clientType,
+        status: src.status,
+        businessId: targetId,
+        business_id: targetId,
+      });
+      const dupes = await findDuplicateClients(req, userId, candidate, targetOptions).catch(() => []);
+      if (dupes.length > 0) {
+        skipped.push({ name: src.name, phone: src.phone, reason: 'duplicate_in_target' });
+        continue;
+      }
+      pending.push(candidate);
+    }
+
+    for (const chunk of chunkDocs(pending, batchSize)) {
+      const results = await bulkPutDocuments(req, db, chunk);
+      results.forEach((result, idx) => {
+        const doc = chunk[idx];
+        if (result?.ok) {
+          created.push(sanitizeClient({ ...doc, _rev: result.rev }));
+        }
+      });
+    }
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'client',
+      action: `Importó ${created.length} clientes entre empresas`,
+      entityId: targetId,
+      entityLabel: 'Importación entre empresas',
+      metadata: { sourceBusinessId: sourceId, targetBusinessId: targetId, created: created.length, skipped: skipped.length },
+    });
+
+    return res.status(201).json({
+      ok: true,
+      clients: created,
+      total: created.length,
+      skipped,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al importar clientes' });
   }
 }
 

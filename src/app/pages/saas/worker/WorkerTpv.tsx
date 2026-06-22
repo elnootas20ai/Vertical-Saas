@@ -32,6 +32,7 @@ import { ButcherTpvPage } from '../ButcherTpvPage';
 import { EventsWorkstationPage } from '../EventsWorkstationPage';
 import { HairSalonWorkstationPage } from '../HairSalonWorkstationPage';
 import { Layout } from '../../../components/saas/Layout';
+import { TpvChromeScope } from '../../../context/TpvChromeContext';
 import {
   Monitor,
   Truck,
@@ -113,19 +114,20 @@ function WorkerTpvShell({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
-      <TpvOfflineBanner />
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <TpvRegisterGate fillParent>
-          {stockOpen ? (
-            <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
-          ) : (
-            children
-          )}
-        </TpvRegisterGate>
+    <TpvChromeScope bottomBar={!stockOpen ? <WorkerTpvBottomBar /> : null}>
+      <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+        <TpvOfflineBanner />
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <TpvRegisterGate fillParent>
+            {stockOpen ? (
+              <WorkerTpvStockReview onBack={() => setStockOpen(false)} />
+            ) : (
+              children
+            )}
+          </TpvRegisterGate>
+        </div>
       </div>
-      {!stockOpen && <WorkerTpvBottomBar />}
-    </div>
+    </TpvChromeScope>
   );
 }
 

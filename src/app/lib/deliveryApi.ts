@@ -1054,16 +1054,24 @@ export {
   validateStoreDisplayName,
 };
 
-export async function listPointsOfSaleRequest(userId: string): Promise<PointOfSale[]> {
+export async function listPointsOfSaleRequest(
+  userId: string,
+  options?: { includeInactive?: boolean },
+): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
+  const query = options?.includeInactive ? '?includeInactive=1' : '';
   const payload = await request<{ ok: boolean; pointsOfSale: PointOfSale[] }>(
-    `/api/delivery/points-of-sale/${encodeURIComponent(id)}`,
+    `/api/delivery/points-of-sale/${encodeURIComponent(id)}${query}`,
   );
   return payload.pointsOfSale || [];
 }
 
 /** Un PDV activo por `workCenterId` y por nombre (evita duplicados tras crear centro + PDV). */
-export function dedupePointsOfSale(pdvs: PointOfSale[]): PointOfSale[] {
+export function dedupePointsOfSale(
+  pdvs: PointOfSale[],
+  options?: { includeInactive?: boolean },
+): PointOfSale[] {
+  const includeInactive = options?.includeInactive === true;
   const byWc = new Map<string, PointOfSale>();
   const byName = new Map<string, PointOfSale>();
   const rest: PointOfSale[] = [];
@@ -1072,7 +1080,7 @@ export function dedupePointsOfSale(pdvs: PointOfSale[]): PointOfSale[] {
     String(b.updatedAt || b.createdAt || '') >= String(a.updatedAt || a.createdAt || '') ? b : a;
 
   for (const p of pdvs) {
-    if (p.active === false) continue;
+    if (!includeInactive && p.active === false) continue;
     const wcId = String(p.workCenterId || '').trim();
     const nameKey = p.name.trim().toLowerCase();
     if (wcId) {
@@ -1154,6 +1162,21 @@ function ensurePdvHasDefaultTerminal(pdv: PointOfSale): { pdv: PointOfSale; chan
   };
 }
 
+async function ensurePdvHasTabletCode(userId: string, pdv: PointOfSale): Promise<PointOfSale> {
+  if (String(pdv.terminalCode || '').trim()) return pdv;
+  const normId = normalizeUserId(userId);
+  try {
+    const result = await request<{ ok: boolean; pointOfSale: PointOfSale }>(
+      `/api/delivery/points-of-sale/${encodeURIComponent(normId)}/${encodeURIComponent(pdv._id)}/regenerate-terminal-code`,
+      { method: 'POST' },
+    );
+    if (!result.pointOfSale) return pdv;
+    return result.pointOfSale;
+  } catch {
+    return pdv;
+  }
+}
+
 /**
  * Crea o enlaza el PDV de caja (delivery) para un centro de trabajo retail.
  * Idempotente: no duplica si ya hay PDV con el mismo `workCenterId` o nombre huérfano.
@@ -1178,8 +1201,10 @@ export async function ensureDeliveryPdvForWorkCenter(
   if (!isRetailLike) return null;
   const pdvActive = wc.active !== false;
 
-  let pdvData = options?.existingPdvs ?? (await listPointsOfSaleRequest(id).catch(() => []));
-  pdvData = dedupePointsOfSale(pdvData);
+  let pdvData =
+    options?.existingPdvs ??
+    (await listPointsOfSaleRequest(id, { includeInactive: true }).catch(() => []));
+  pdvData = dedupePointsOfSale(pdvData, { includeInactive: true });
 
   const linked = pdvData.find((p) => String(p.workCenterId || '').trim() === wc._id);
   if (linked) {
@@ -1204,12 +1229,12 @@ export async function ensureDeliveryPdvForWorkCenter(
       pdvActive !== (linked.active !== false);
     if (metaChanged || withTerminal.changed) {
       try {
-        return await updatePointOfSaleRequest(id, next);
+        return await ensurePdvHasTabletCode(id, await updatePointOfSaleRequest(id, next));
       } catch {
-        return next;
+        return await ensurePdvHasTabletCode(id, next);
       }
     }
-    return next;
+    return await ensurePdvHasTabletCode(id, next);
   }
 
   const nameLower = wc.name.trim().toLowerCase();
@@ -1224,14 +1249,17 @@ export async function ensureDeliveryPdvForWorkCenter(
   if (orphanIdx >= 0) {
     const orphan = pdvData[orphanIdx];
     try {
-      return await updatePointOfSaleRequest(id, {
-        ...orphan,
-        workCenterId: wc._id,
-        active: pdvActive,
-        address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
-      });
+      return await ensurePdvHasTabletCode(
+        id,
+        await updatePointOfSaleRequest(id, {
+          ...orphan,
+          workCenterId: wc._id,
+          active: pdvActive,
+          address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
+        }),
+      );
     } catch {
-      return orphan;
+      return await ensurePdvHasTabletCode(id, orphan);
     }
   }
 
@@ -1243,26 +1271,29 @@ export async function ensureDeliveryPdvForWorkCenter(
       : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
-    return await createPointOfSaleRequest(id, {
-      name: pdvName,
-      ...(explicitCode ? { code: explicitCode } : {}),
-      ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
-      address: addr,
-      active: pdvActive,
-      workCenterId: wc._id,
-      terminals: [
-        {
-          id: termId,
-          code: 'TPV-1',
-          name: 'Terminal principal',
-          datafonName: '',
-          printerName: '',
-          scaleDeviceId: '',
-          scaleName: '',
-          active: true,
-        },
-      ],
-    });
+    return await ensurePdvHasTabletCode(
+      id,
+      await createPointOfSaleRequest(id, {
+        name: pdvName,
+        ...(explicitCode ? { code: explicitCode } : {}),
+        ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
+        address: addr,
+        active: pdvActive,
+        workCenterId: wc._id,
+        terminals: [
+          {
+            id: termId,
+            code: 'TPV-1',
+            name: 'Terminal principal',
+            datafonName: '',
+            printerName: '',
+            scaleDeviceId: '',
+            scaleName: '',
+            active: true,
+          },
+        ],
+      }),
+    );
   } catch (err) {
     throw err instanceof Error ? err : new Error('No se pudo crear el punto de venta');
   }
@@ -1281,10 +1312,13 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
     business?: { members?: { user_id?: string }[]; business_id?: string; id?: string } | null;
     /** Centros ya filtrados por empresa (evita perder legacy sin businessId). */
     workCenters?: WorkCenter[];
+    /** Conservar PDV de tiendas inactivas (Ajustes → Tiendas). */
+    includeInactive?: boolean;
   },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
-  let pdvData = dedupePointsOfSale([...existingPdvs]);
+  const dedupeOpts = options?.includeInactive ? { includeInactive: true as const } : undefined;
+  let pdvData = dedupePointsOfSale([...existingPdvs], dedupeOpts);
   let wcs: WorkCenter[] = [];
   try {
     if (options?.workCenters?.length) {
@@ -1321,7 +1355,7 @@ export async function mergePointsOfSaleWithRetailWorkCenters(
       const idx = pdvData.findIndex((p) => p._id === ensured._id);
       if (idx >= 0) pdvData[idx] = ensured;
       else pdvData.push(ensured);
-      pdvData = dedupePointsOfSale(pdvData);
+      pdvData = dedupePointsOfSale(pdvData, dedupeOpts);
     } catch {
       // Un local con error de enlace no debe vaciar el listado de tiendas.
       continue;
@@ -1358,6 +1392,16 @@ export async function updatePointOfSaleRequest(userId: string, pdv: PointOfSale)
   const result = await request<{ ok: boolean; pointOfSale: PointOfSale }>(
     `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdv._id)}`,
     { method: 'PUT', body: JSON.stringify({ pointOfSale: pdv }) },
+  );
+  if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
+  return result.pointOfSale;
+}
+
+export async function regenerateTerminalCodeRequest(userId: string, pdvId: string): Promise<PointOfSale> {
+  const id = normalizeUserId(userId);
+  const result = await request<{ ok: boolean; pointOfSale: PointOfSale }>(
+    `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdvId)}/regenerate-terminal-code`,
+    { method: 'POST' },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
   return result.pointOfSale;
@@ -1989,6 +2033,7 @@ export interface OpsCenterData {
 
 export interface OpsCenterFilters {
   salesPointId?: string;
+  businessId?: string;
   channel?: string;
   timeSlot?: string;
   date?: string;
@@ -2006,6 +2051,7 @@ export async function getOpsCenterRequest(userId: string, filters?: OpsCenterFil
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
   if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
+  if (filters?.businessId) params.set('businessId', filters.businessId);
   if (filters?.channel) params.set('channel', filters.channel);
   if (filters?.timeSlot) params.set('timeSlot', filters.timeSlot);
   params.set('date', filters?.date || localDateInputValue());

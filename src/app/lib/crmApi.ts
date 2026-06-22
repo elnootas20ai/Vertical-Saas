@@ -237,6 +237,8 @@ function normalizeClientRecord(value: unknown): Client | null {
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt as unknown as string) : undefined,
     branch_id: raw.branch_id ? String(raw.branch_id) : undefined,
     workCenterId: raw.workCenterId ? String(raw.workCenterId) : undefined,
+    businessId: raw.businessId ? String(raw.businessId) : (raw.business_id ? String(raw.business_id) : undefined),
+    business_id: raw.business_id ? String(raw.business_id) : (raw.businessId ? String(raw.businessId) : undefined),
   };
 }
 
@@ -253,14 +255,18 @@ export async function bulkCreateClientsInChunks(
   userId: string,
   clients: Client[],
   onProgress?: (done: number, total: number) => void,
+  options?: { businessId?: string },
 ): Promise<{ created: Client[]; errors: unknown[] }> {
   const created: Client[] = [];
   const errors: unknown[] = [];
   const total = clients.length;
+  const businessId = options?.businessId?.trim();
 
   for (let i = 0; i < clients.length; i += CRM_BULK_CHUNK_SIZE) {
-    const chunk = clients.slice(i, i + CRM_BULK_CHUNK_SIZE);
-    const result = await bulkCreateClientsV2Request(userId, chunk);
+    const chunk = clients.slice(i, i + CRM_BULK_CHUNK_SIZE).map((c) => (
+      businessId ? { ...c, businessId, business_id: businessId } : c
+    ));
+    const result = await bulkCreateClientsV2Request(userId, chunk, { businessId });
     created.push(...result.created);
     errors.push(...result.errors);
     onProgress?.(Math.min(i + chunk.length, total), total);
@@ -360,6 +366,7 @@ export async function listClientsPageRequest(
     lite?: boolean;
     branchId?: string;
     workCenterId?: string;
+    businessId?: string;
     signal?: AbortSignal;
   } = {},
 ): Promise<{ clients: Client[]; meta: ClientsListMeta }> {
@@ -371,6 +378,7 @@ export async function listClientsPageRequest(
   if (options.search?.trim()) params.set('search', options.search.trim());
   if (options.sort) params.set('sort', options.sort);
   if (options.lite !== false) params.set('lite', '1');
+  if (options.businessId?.trim()) params.set('businessId', options.businessId.trim());
   if (options.branchId && options.branchId !== 'all') {
     params.set('filter[branch_id]', options.branchId);
   }
@@ -394,6 +402,7 @@ export async function listClientsPageRequest(
 export async function fetchAllClientsForExport(
   userId: string,
   onProgress?: (done: number, total: number) => void,
+  businessId?: string,
 ): Promise<Client[]> {
   const pageSize = 500;
   let skip = 0;
@@ -401,7 +410,12 @@ export async function fetchAllClientsForExport(
   let total = 0;
 
   while (true) {
-    const { clients, meta } = await listClientsPageRequest(userId, { limit: pageSize, skip, lite: true });
+    const { clients, meta } = await listClientsPageRequest(userId, {
+      limit: pageSize,
+      skip,
+      lite: true,
+      businessId,
+    });
     if (skip === 0) total = meta.total;
     all = all.concat(clients);
     onProgress?.(all.length, total);
@@ -424,11 +438,19 @@ export async function getClientDetailRequest(userId: string, clientId: string): 
 }
 
 /** @deprecated Prefer listClientsPageRequest for large datasets. */
-export async function listClientsRequest(userId: string, options?: { all?: boolean }): Promise<Client[]> {
+export async function listClientsRequest(
+  userId: string,
+  options?: { all?: boolean; businessId?: string },
+): Promise<Client[]> {
   if (options?.all) {
-    return fetchAllClientsForExport(userId);
+    return fetchAllClientsForExport(userId, undefined, options.businessId);
   }
-  const { clients } = await listClientsPageRequest(userId, { limit: 100, skip: 0, lite: true });
+  const { clients } = await listClientsPageRequest(userId, {
+    limit: 100,
+    skip: 0,
+    lite: true,
+    businessId: options?.businessId,
+  });
   return clients;
 }
 
@@ -449,14 +471,40 @@ export async function createClientRequest(
   };
 }
 
+export async function importClientsFromBusinessRequest(
+  userId: string,
+  sourceBusinessId: string,
+  targetBusinessId: string,
+): Promise<{ clients: Client[]; total: number; skipped: Array<{ name?: string; phone?: string; reason?: string }> }> {
+  const result = await request<{
+    ok: boolean;
+    clients: unknown[];
+    total: number;
+    skipped?: Array<{ name?: string; phone?: string; reason?: string }>;
+  }>(
+    `/api/clients/${encodeURIComponent(userId)}/import-from-business`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sourceBusinessId, targetBusinessId }),
+    },
+  );
+  return {
+    clients: (result.clients || []).map(normalizeClientRecord).filter((c): c is Client => Boolean(c)),
+    total: result.total || 0,
+    skipped: result.skipped || [],
+  };
+}
+
 /** Busca clientes por dígitos de teléfono y/o por nombre (substring, sin acentos en servidor). */
 export async function searchClientsByPhoneRequest(
   userId: string,
   query: string,
   limit = 5,
   signal?: AbortSignal,
+  businessId?: string,
 ): Promise<Client[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
+  if (businessId?.trim()) params.set('businessId', businessId.trim());
   const payload = await request<{ ok: boolean; clients: unknown[] }>(
     `/api/clients/${encodeURIComponent(userId)}/search-by-phone?${params.toString()}`,
     signal ? { signal } : undefined,
@@ -690,10 +738,20 @@ export async function bulkCreateLeadsV2Request(userId: string, leads: Lead[]): P
   };
 }
 
-export async function bulkCreateClientsV2Request(userId: string, clients: Client[]): Promise<{ created: Client[]; errors: unknown[] }> {
+export async function bulkCreateClientsV2Request(
+  userId: string,
+  clients: Client[],
+  options?: { businessId?: string },
+): Promise<{ created: Client[]; errors: unknown[] }> {
   const result = await request<{ ok: boolean; clients: unknown[]; errors: unknown[] }>(
     `/api/clients/${encodeURIComponent(userId)}/bulk`,
-    { method: 'POST', body: JSON.stringify({ clients }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        clients,
+        ...(options?.businessId?.trim() ? { businessId: options.businessId.trim() } : {}),
+      }),
+    },
   );
   return {
     created: (result.clients || []).map(normalizeClientRecord).filter((c): c is Client => Boolean(c)),

@@ -234,7 +234,7 @@ export function WorkerTpvStaffConsumption({
           <button
             type="button"
             onClick={onBack}
-            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="Volver"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -254,7 +254,7 @@ export function WorkerTpvStaffConsumption({
         />
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-0 lg:gap-4 p-4 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[1fr_320px] gap-0 md:gap-4 p-4 overflow-hidden">
         <div className="min-h-0 flex flex-col overflow-hidden">
           <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -263,7 +263,7 @@ export function WorkerTpvStaffConsumption({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar bebida, menú…"
-              className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm"
+              className="w-full pl-10 pr-3 py-2.5 min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm"
             />
           </div>
 
@@ -317,7 +317,7 @@ export function WorkerTpvStaffConsumption({
                     key={item._id}
                     type="button"
                     onClick={() => addToCart(item)}
-                    className={`text-left rounded-2xl border p-3 transition-colors ${
+                    className={`text-left rounded-2xl border p-3 min-h-[88px] transition-colors touch-manipulation ${
                       inCart
                         ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30'
                         : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-violet-300'
@@ -351,7 +351,7 @@ export function WorkerTpvStaffConsumption({
           )}
         </div>
 
-        <div className="shrink-0 lg:shrink flex flex-col rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden max-h-[42vh] lg:max-h-none">
+        <div className="shrink-0 md:shrink flex flex-col rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden max-h-[42vh] md:max-h-none">
           <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center gap-2">
             <Receipt className="w-4 h-4 text-violet-600" />
             <span className="text-sm font-bold text-gray-900 dark:text-gray-100">Tu consumo</span>
@@ -373,7 +373,7 @@ export function WorkerTpvStaffConsumption({
                     <button
                       type="button"
                       onClick={() => updateQty(line.item._id, -1)}
-                      className="p-1 rounded-lg bg-gray-100 dark:bg-gray-800"
+                      className="p-2 min-h-[36px] min-w-[36px] rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center touch-manipulation"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
@@ -381,7 +381,7 @@ export function WorkerTpvStaffConsumption({
                     <button
                       type="button"
                       onClick={() => updateQty(line.item._id, 1)}
-                      className="p-1 rounded-lg bg-gray-100 dark:bg-gray-800"
+                      className="p-2 min-h-[36px] min-w-[36px] rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center touch-manipulation"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
@@ -404,7 +404,7 @@ export function WorkerTpvStaffConsumption({
                 type="button"
                 disabled={cart.length === 0}
                 onClick={() => setPaymentMode('cash_now')}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-bold transition-colors ${
+                className={`flex flex-col items-center gap-1.5 p-3 min-h-[72px] rounded-xl border-2 text-xs font-bold transition-colors touch-manipulation ${
                   paymentMode === 'cash_now'
                     ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
                     : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
@@ -417,7 +417,7 @@ export function WorkerTpvStaffConsumption({
                 type="button"
                 disabled={cart.length === 0}
                 onClick={() => setPaymentMode('payroll_deduction')}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-bold transition-colors ${
+                className={`flex flex-col items-center gap-1.5 p-3 min-h-[72px] rounded-xl border-2 text-xs font-bold transition-colors touch-manipulation ${
                   paymentMode === 'payroll_deduction'
                     ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300'
                     : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'

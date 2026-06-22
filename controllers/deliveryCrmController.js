@@ -10,14 +10,41 @@ import {
   getClientsDbName,
   listDeliveryOrdersByUser,
   listClientsByUser,
+  listBusinessesByUser,
+  listScopedPointsOfSaleForBusiness,
   sanitizeDeliveryOrder,
   sanitizeClient,
 } from '../services/couchdb.js';
+import { orderMatchesBusinessPdvs } from './deliveryController.js';
 
 const DELIVERY_CRM_DB = 'delivery-crm';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+async function resolveDeliveryCrmScope(req, userId) {
+  const businessId = normalizeBusinessScopeId(req.query?.businessId || req.query?.business_id || '');
+  if (!businessId) return { businessId: '', listOptions: {}, businessPdvs: null };
+  const businesses = await listBusinessesByUser(req, userId);
+  const count = businesses.filter((b) => !b?.deletedAt).length;
+  const listOptions = { businessId, legacySingleBusiness: count <= 1 };
+  const businessPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessId, {
+    includeInactive: true,
+  });
+  return { businessId, listOptions, businessPdvs };
+}
+
+async function filterOrdersForBusinessScope(req, userId, orders, scope) {
+  if (!scope.businessId) return orders;
+  if (scope.businessPdvs && scope.businessPdvs.length > 0) {
+    return orders.filter((o) => orderMatchesBusinessPdvs(o, scope.businessPdvs));
+  }
+  return [];
 }
 
 // ─── ANALYTICS: métricas cruzadas pedidos × clientes ─────────────────────────
@@ -30,10 +57,12 @@ export async function getDeliveryCrmDashboard(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const [orders, clients] = await Promise.all([
+    const scope = await resolveDeliveryCrmScope(req, userId);
+    const [allOrders, clients] = await Promise.all([
       listDeliveryOrdersByUser(req, userId),
-      listClientsByUser(req, userId),
+      listClientsByUser(req, userId, scope.listOptions),
     ]);
+    const orders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
 
     const delivered = orders.filter((o) => o.status === 'delivered');
     const now = new Date();
@@ -122,10 +151,12 @@ export async function listDeliveryCrmClients(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const [orders, clients] = await Promise.all([
+    const scope = await resolveDeliveryCrmScope(req, userId);
+    const [allOrders, clients] = await Promise.all([
       listDeliveryOrdersByUser(req, userId),
-      listClientsByUser(req, userId),
+      listClientsByUser(req, userId, scope.listOptions),
     ]);
+    const orders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
 
     const delivered = orders.filter((o) => o.status === 'delivered');
     const now = new Date();
@@ -212,8 +243,10 @@ export async function getClientDeliveryHistory(req, res) {
     const { userId, clientId } = req.params;
     if (!userId || !clientId) return badRequest(res, 'Falta userId o clientId');
 
-    const orders = await listDeliveryOrdersByUser(req, userId);
-    const clientOrders = orders
+    const scope = await resolveDeliveryCrmScope(req, userId);
+    const allOrders = await listDeliveryOrdersByUser(req, userId);
+    const scopedOrders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
+    const clientOrders = scopedOrders
       .filter((o) => o.clientId === clientId)
       .map(sanitizeDeliveryOrder)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -378,10 +411,12 @@ export async function getDeliveryCrmAlerts(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const [orders, clients] = await Promise.all([
+    const scope = await resolveDeliveryCrmScope(req, userId);
+    const [allOrders, clients] = await Promise.all([
       listDeliveryOrdersByUser(req, userId),
-      listClientsByUser(req, userId),
+      listClientsByUser(req, userId, scope.listOptions),
     ]);
+    const orders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
 
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString();
@@ -399,7 +434,6 @@ export async function getDeliveryCrmAlerts(req, res) {
 
     const alerts = [];
 
-    // VIP sin compra reciente
     for (const c of clients) {
       const sc = sanitizeClient(c);
       const co = ordersByClient[sc.id] || [];
@@ -413,7 +447,7 @@ export async function getDeliveryCrmAlerts(req, res) {
           id: `vip-inactive-${sc.id}`,
           type: 'vip_no_purchase',
           severity: 'warning',
-          title: `Cliente VIP sin compra reciente`,
+          title: 'Cliente VIP sin compra reciente',
           description: `${sc.name} no realiza un pedido desde ${new Date(last.createdAt).toLocaleDateString('es-ES')}`,
           clientId: sc.id,
           clientName: sc.name,
@@ -424,7 +458,6 @@ export async function getDeliveryCrmAlerts(req, res) {
       }
     }
 
-    // Zonas con caída de ventas
     const zoneRecent = {};
     const zonePrev = {};
     for (const o of delivered) {
@@ -444,7 +477,7 @@ export async function getDeliveryCrmAlerts(req, res) {
           id: `zone-drop-${zone}`,
           type: 'zone_sales_drop',
           severity: 'warning',
-          title: `Caída de ventas en zona`,
+          title: 'Caída de ventas en zona',
           description: `La zona "${zone}" ha bajado un ${drop}% en ventas respecto al mes anterior`,
           zone,
           recentRevenue: Math.round(recent * 100) / 100,
@@ -454,7 +487,6 @@ export async function getDeliveryCrmAlerts(req, res) {
       }
     }
 
-    // Clientes con incidencias repetidas
     for (const c of clients) {
       const sc = sanitizeClient(c);
       const co = ordersByClient[sc.id] || [];
@@ -464,7 +496,7 @@ export async function getDeliveryCrmAlerts(req, res) {
           id: `repeat-incidents-${sc.id}`,
           type: 'repeat_incidents',
           severity: incidents.length >= 3 ? 'warning' : 'info',
-          title: `Cliente con incidencias repetidas`,
+          title: 'Cliente con incidencias repetidas',
           description: `${sc.name} acumula ${incidents.length} incidencias en sus pedidos`,
           clientId: sc.id,
           clientName: sc.name,
@@ -474,7 +506,6 @@ export async function getDeliveryCrmAlerts(req, res) {
       }
     }
 
-    // Clientes inactivos (sin pedido en 90+ días)
     for (const c of clients) {
       const sc = sanitizeClient(c);
       const co = ordersByClient[sc.id] || [];
@@ -487,7 +518,7 @@ export async function getDeliveryCrmAlerts(req, res) {
           id: `inactive-${sc.id}`,
           type: 'inactive_client',
           severity: 'info',
-          title: `Cliente inactivo`,
+          title: 'Cliente inactivo',
           description: `${sc.name} lleva más de 90 días sin pedir (último pedido: ${new Date(last.createdAt).toLocaleDateString('es-ES')})`,
           clientId: sc.id,
           clientName: sc.name,

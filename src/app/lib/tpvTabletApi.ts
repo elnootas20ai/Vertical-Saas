@@ -77,15 +77,3 @@ export async function tpvTabletSwitchRequest(
   if (result.accessToken) cacheAccessToken(result.accessToken);
   return result;
 }
-
-export async function regenerateTerminalCodeRequest(
-  userId: string,
-  pdvId: string,
-): Promise<PointOfSale> {
-  const result = await apiRequest<{ pointOfSale: PointOfSale }>(
-    `/api/delivery/points-of-sale/${encodeURIComponent(userId)}/${encodeURIComponent(pdvId)}/regenerate-terminal-code`,
-    { method: 'POST' },
-  );
-  if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
-  return result.pointOfSale;
-}

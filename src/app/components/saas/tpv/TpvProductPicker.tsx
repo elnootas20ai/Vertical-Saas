@@ -72,7 +72,7 @@ const ProductTile = memo(function ProductTile({
         type="button"
         disabled={disabled}
         onClick={onAdd}
-        className="flex flex-col flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:cursor-not-allowed"
+        className="flex flex-col flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 disabled:cursor-not-allowed touch-manipulation"
       >
         <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 overflow-hidden">
           {hasImage ? (
@@ -96,11 +96,11 @@ const ProductTile = memo(function ProductTile({
             </span>
           )}
         </div>
-        <div className="px-1.5 py-1.5 min-h-[2.6rem] flex flex-col justify-between gap-0.5">
-          <p className="text-[10px] leading-tight font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
+        <div className="px-1.5 py-1.5 min-h-[2.75rem] flex flex-col justify-between gap-0.5">
+          <p className="text-[11px] md:text-xs leading-tight font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
             {item.name}
           </p>
-          <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 tabular-nums">
+          <p className="text-[11px] font-bold text-gray-600 dark:text-gray-400 tabular-nums">
             {price > 0 ? formatPrice(price) : '—'}
           </p>
         </div>
@@ -111,20 +111,20 @@ const ProductTile = memo(function ProductTile({
           <button
             type="button"
             onClick={onRemove}
-            className="flex-1 h-7 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="flex-1 min-h-[36px] h-9 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation"
             aria-label="Quitar"
           >
-            <Minus className="w-3 h-3" />
+            <Minus className="w-3.5 h-3.5" />
           </button>
-          <span className="text-[10px] font-bold tabular-nums px-1">{qty}</span>
+          <span className="text-xs font-bold tabular-nums px-1">{qty}</span>
           <button
             type="button"
             onClick={onAdd}
             disabled={disabled}
-            className="flex-1 h-7 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+            className="flex-1 min-h-[36px] h-9 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 touch-manipulation"
             aria-label="Añadir"
           >
-            <Plus className="w-3 h-3" />
+            <Plus className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -151,7 +151,7 @@ function SearchResultRow({
       type="button"
       disabled={disabled}
       onClick={onAdd}
-      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition-colors ${
+      className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg border text-left transition-colors touch-manipulation ${
         qty > 0
           ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
           : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-300 dark:hover:border-indigo-600'
@@ -238,7 +238,7 @@ export function TpvProductPicker({
     isSearchMode && filteredProducts.length >= TPV_PRODUCT_SEARCH_LIMIT;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 min-h-[min(68vh,640px)]">
+    <div className="flex flex-col md:flex-row gap-3 min-h-[min(68vh,640px)] md:min-h-0 md:h-full">
       <div className="flex-1 flex flex-col min-h-0 min-w-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         <div className="shrink-0 px-2.5 pt-2.5 pb-2 border-b border-gray-100 dark:border-gray-800">
           <div className="relative">
@@ -252,7 +252,7 @@ export function TpvProductPicker({
               }}
               placeholder="Nombre, categoría, SKU o código…"
               autoComplete="off"
-              className="w-full h-9 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className="w-full h-10 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
           </div>
         </div>
@@ -275,7 +275,7 @@ export function TpvProductPicker({
                         onSelectedSectionChange(section.id);
                         onSelectedCategoryChange(null);
                       }}
-                      className={`shrink-0 min-w-[5rem] max-w-[8rem] px-2 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate ${
+                      className={`shrink-0 min-w-[5.5rem] max-w-[9rem] px-2.5 py-2.5 min-h-[44px] rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate touch-manipulation ${
                         active
                           ? 'text-white shadow-sm'
                           : 'bg-white/70 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800'
@@ -448,8 +448,8 @@ export function TpvProductPicker({
             </div>
           ) : (
             <div
-              className="grid gap-1.5"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(4.75rem, 1fr))' }}
+              className="grid gap-2"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(5.25rem, 1fr))' }}
             >
               {filteredProducts.map((item) => {
                 const qty = getCartQty(item._id);
@@ -472,7 +472,7 @@ export function TpvProductPicker({
         </div>
       </div>
 
-      <aside className="lg:w-[16.5rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[12rem] lg:min-h-0 lg:sticky lg:top-16 lg:self-start lg:max-h-[calc(100vh-5rem)]">
+      <aside className="md:w-[17rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[14rem] md:min-h-0 md:sticky md:top-14 md:self-start md:max-h-[calc(100dvh-8rem)]">
         {cartPanel}
       </aside>
     </div>

@@ -71,6 +71,18 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(r.shouldClearLoading).toBe(false);
   });
 
+  it('evaluateTpvRegisterLoadGate: tablet carga aunque businessLoading sea true', () => {
+    const r = evaluateTpvRegisterLoadGate({
+      businessLoading: true,
+      businessesFetchSettled: false,
+      isTabletSession: true,
+      dataUserId: 'owner-1',
+      scopeBusinessId: 'biz-1',
+    });
+    expect(r.canLoad).toBe(true);
+    expect(r.shouldClearLoading).toBe(false);
+  });
+
   it('evaluateTpvRegisterLoadGate: gerente espera businessesFetchSettled', () => {
     expect(
       evaluateTpvRegisterLoadGate({

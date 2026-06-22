@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Minus, MessageSquare, Pizza, ShoppingBag } from 'lucide-react';
+import { X, Plus, Minus, MessageSquare, Pizza, ShoppingBag, Search } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
   type CartLineCustomization,
@@ -98,6 +98,7 @@ export function TpvItemCustomizeModal({
   const [removed, setRemoved] = useState<string[]>(initial?.removedIngredients || []);
   const [added, setAdded] = useState<CatalogSupplement[]>(initial?.addedSupplements || []);
   const [notes, setNotes] = useState(initial?.notes || '');
+  const [extraSearch, setExtraSearch] = useState('');
   const [activeTab, setActiveTab] = useState<CustomizeTab>(() =>
     defaultTabForItem(customizable, ingredients.length, supplements.length),
   );
@@ -106,6 +107,7 @@ export function TpvItemCustomizeModal({
     setRemoved(initial?.removedIngredients || []);
     setAdded(initial?.addedSupplements || []);
     setNotes(initial?.notes || '');
+    setExtraSearch('');
     setActiveTab(defaultTabForItem(customizable, ingredients.length, supplements.length));
   }, [item._id, initial, customizable, ingredients.length, supplements.length]);
 
@@ -118,6 +120,12 @@ export function TpvItemCustomizeModal({
   const basePrice = Number(item.unitPrice || 0);
   const extrasTotal = added.reduce((sum, s) => sum + Number(s.price || 0), 0);
   const unitTotal = cartLineUnitPrice(basePrice, customization);
+
+  const filteredSupplements = useMemo(() => {
+    const q = extraSearch.trim().toLowerCase();
+    if (!q) return supplements;
+    return supplements.filter((sup) => sup.name.toLowerCase().includes(q));
+  }, [supplements, extraSearch]);
 
   const toggleIngredient = (name: string) => {
     setRemoved((prev) =>
@@ -135,6 +143,7 @@ export function TpvItemCustomizeModal({
   const categoryLabel = String(item.category || '').trim() || 'Producto';
   const removedCount = removed.length;
   const addedCount = added.length;
+  const hasConfiguredExtras = supplements.length > 0;
 
   const tabBtn = (tab: CustomizeTab, label: string, hint: string, badge?: number) => {
     const active = activeTab === tab;
@@ -166,10 +175,10 @@ export function TpvItemCustomizeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6">
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full max-w-2xl max-h-[94vh] overflow-hidden bg-white dark:bg-gray-900 rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700"
+        className="relative w-full sm:max-w-2xl max-h-[94dvh] overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-customize-title"
@@ -221,7 +230,7 @@ export function TpvItemCustomizeModal({
             {tabBtn(
               'extras',
               'Extras',
-              'Añadir con suplemento +',
+              hasConfiguredExtras ? 'Añadir con suplemento +' : 'Sin extras configurados',
               addedCount,
             )}
             {tabBtn('notes', 'Notas', 'Indicaciones cocina')}
@@ -304,12 +313,37 @@ export function TpvItemCustomizeModal({
                 </p>
               </div>
               {supplements.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                  No hay extras configurados. Añádelos en Catálogo → pestaña Ingredientes TPV.
-                </p>
+                <div className="rounded-xl border-2 border-dashed border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-6 text-center space-y-3">
+                  <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                    Aún no hay extras de pago
+                  </p>
+                  <p className="text-sm text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                    Ve a <strong>Catálogo → Ingredientes TPV</strong>, paso <strong>3</strong>: toca los ingredientes en{' '}
+                    <strong>naranja</strong> (bacon, extra queso, piña…), pon el precio en el paso 1 y pulsa{' '}
+                    <strong>Guardar cambios</strong>.
+                  </p>
+                  <p className="text-xs text-amber-700/80 dark:text-amber-400/80">
+                    Si ya los marcaste, recarga el TPV o vuelve a abrir esta pantalla.
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-2.5">
-                  {supplements.map((sup) => {
+                  {supplements.length > 6 && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="search"
+                        value={extraSearch}
+                        onChange={(e) => setExtraSearch(e.target.value)}
+                        placeholder="Buscar extra…"
+                        className="w-full pl-9 pr-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm focus:border-emerald-500 outline-none"
+                      />
+                    </div>
+                  )}
+                  {filteredSupplements.length === 0 ? (
+                    <p className="text-sm text-gray-500 text-center py-6">Ningún extra coincide con la búsqueda.</p>
+                  ) : (
+                    filteredSupplements.map((sup) => {
                     const active = added.some((s) => s.id === sup.id);
                     return (
                       <button
@@ -341,7 +375,8 @@ export function TpvItemCustomizeModal({
                         </span>
                       </button>
                     );
-                  })}
+                    })
+                  )}
                 </div>
               )}
             </section>

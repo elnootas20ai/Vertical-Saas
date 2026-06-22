@@ -81,22 +81,27 @@ export function seedRetailScopeCacheFromTabletLogin(params: {
   const pdv = params.pointOfSale;
   if (!bid || !pdv?._id) return;
 
-  const wcId = String(params.workCenterId || pdv.workCenterId || '').trim();
-  const retailWorkCenters: WorkCenter[] = wcId
-    ? [
-        {
-          _id: wcId,
-          name: pdv.name || 'Tienda',
-          centerType: 'punto_de_venta',
-          businessId: bid,
-          active: true,
-        } as WorkCenter,
-      ]
-    : [];
+  const wcId =
+    String(params.workCenterId || pdv.workCenterId || '').trim() ||
+    `wc-tablet-${pdv._id}`;
+  const pdvForCache: PointOfSale = {
+    ...pdv,
+    workCenterId: String(pdv.workCenterId || wcId).trim(),
+    active: pdv.active !== false,
+  };
+  const retailWorkCenters: WorkCenter[] = [
+    {
+      _id: wcId,
+      name: pdv.name || 'Tienda',
+      centerType: 'punto_de_venta',
+      businessId: bid,
+      active: true,
+    } as WorkCenter,
+  ];
 
   writeRetailScopeCache(bid, {
     retailWorkCenters,
-    allPointsOfSale: [pdv],
+    allPointsOfSale: [pdvForCache],
   });
 }
 

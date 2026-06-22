@@ -2733,26 +2733,7 @@ export function CatalogPage() {
             onChange={(e) => setSearchCatalog(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <ActivationFieldWrap
-            fieldKey="catalog-import"
-            activeKey={
-              activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
-                ? activationFocus
-                : null
-            }
-          >
-            <AddButtonDropdown
-              label="Nuevo artículo"
-              onQuickAdd={openNewCatalogItemManual}
-              onAIAdd={() => setShowAIModal(true)}
-              onImport={() => setShowImportModal(true)}
-              quickAddLabel="Añadir manualmente"
-              quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
-              aiAddLabel="Crear con IA"
-              aiAddDesc="Describe productos en texto y se importan al catálogo"
-            />
-          </ActivationFieldWrap>
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
             onClick={() => setShowImportModal(true)}
@@ -2813,6 +2794,25 @@ export function CatalogPage() {
               Gestionar
             </button>
           )}
+          <ActivationFieldWrap
+            fieldKey="catalog-import"
+            activeKey={
+              activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
+                ? activationFocus
+                : null
+            }
+          >
+            <AddButtonDropdown
+              label="Nuevo artículo"
+              onQuickAdd={openNewCatalogItemManual}
+              onAIAdd={() => setShowAIModal(true)}
+              onImport={() => setShowImportModal(true)}
+              quickAddLabel="Añadir manualmente"
+              quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
+              aiAddLabel="Crear con IA"
+              aiAddDesc="Describe productos en texto y se importan al catálogo"
+            />
+          </ActivationFieldWrap>
         </div>
       </div>
 

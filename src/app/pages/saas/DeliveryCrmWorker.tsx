@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   listCrmClientsRequest,
   getClientOrdersRequest,
@@ -28,6 +30,8 @@ const FREQUENCY_LABELS: Record<string, string> = {
 
 export function DeliveryCrmWorker() {
   const { user, isInitializing } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const userId = user?.user_id || user?.id || '';
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<DeliveryCrmClient[]>([]);
@@ -44,14 +48,14 @@ export function DeliveryCrmWorker() {
     }
     setLoading(true);
     try {
-      const data = await listCrmClientsRequest(uid);
+      const data = await listCrmClientsRequest(uid, businessId || undefined);
       setClients(data);
     } catch {
       toast.error('Error cargando clientes');
     } finally {
       setLoading(false);
     }
-  }, [user?.user_id, user?.id]);
+  }, [user?.user_id, user?.id, businessId]);
 
   useEffect(() => {
     if (isInitializing) return;
@@ -70,7 +74,7 @@ export function DeliveryCrmWorker() {
     setSelectedClient(client);
     setLoadingOrders(true);
     if (userId) {
-      const orders = await getClientOrdersRequest(userId, client.id);
+      const orders = await getClientOrdersRequest(userId, client.id, businessId || undefined);
       setClientOrders(orders);
     }
     setLoadingOrders(false);

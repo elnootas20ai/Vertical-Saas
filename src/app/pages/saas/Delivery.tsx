@@ -6,6 +6,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import type { Client } from '../../context/AppContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
@@ -173,6 +174,8 @@ function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems, act
   isOpen: boolean; onClose: () => void; onCreate: (d: Partial<DeliveryOrder>) => void; catalogItems: CatalogItem[];
   activePdv?: { pdvId: string; label: string } | null;
 }) {
+  const { currentBusiness } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const [step, setStep] = useState(1);
   const initialData: WizardData = {
     orderType: 'domicilio', clientId: '', customerName: '', customerPhone: '',
@@ -194,6 +197,7 @@ function CreateOrderModal({ userId, isOpen, onClose, onCreate, catalogItems, act
   const { results, isSearching, selectedClient, selectClient, clearSelection } = useClientPhoneSearch({
     userId,
     phone: clientLookup,
+    businessId: businessId || undefined,
     enabled: isOpen && !!userId && step === 1 && phoneEditing,
     matchByName: true,
     minQueryLength: 2,

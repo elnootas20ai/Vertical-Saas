@@ -36,7 +36,11 @@ import {
   sanitizePointOfSale,
   listPointsOfSaleByUser,
   listScopedPointsOfSaleForUser,
+  listScopedPointsOfSaleForBusiness,
   dedupeActivePointsOfSale,
+  dedupeLinkedPointsOfSale,
+  listActiveWorkCenterIds,
+  filterPointsOfSaleLinkedToWorkCenters,
   findActivePointOfSaleForWorkCenter,
   findOrphanPointOfSaleByName,
   generateTerminalCode,
@@ -134,7 +138,7 @@ function badRequest(res, error) {
 }
 
 /** PDV principal (más antiguo activo): pedidos legacy sin salesPointId solo cuentan aquí. */
-function pickPrimaryPdvId(pdvs) {
+export function pickPrimaryPdvId(pdvs) {
   const active = (pdvs || []).filter((p) => p && p.active !== false);
   if (!active.length) return null;
   const sorted = [...active].sort((a, b) => {
@@ -146,7 +150,7 @@ function pickPrimaryPdvId(pdvs) {
   return sorted[0]._id || null;
 }
 
-function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName) {
+export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName) {
   const filterId = String(pdvId || '').trim();
   if (!filterId) return true;
   const oid = String(order.salesPointId || '').trim();
@@ -2403,7 +2407,16 @@ export async function listPointsOfSale(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let pdvs = await listScopedPointsOfSaleForUser(req, userId);
+    const includeInactive =
+      req.query.includeInactive === 'true' || req.query.includeInactive === '1';
+    let pdvs;
+    if (includeInactive) {
+      const all = dedupeLinkedPointsOfSale(await listPointsOfSaleByUser(req, userId));
+      const workCenterIds = await listActiveWorkCenterIds(req);
+      pdvs = filterPointsOfSaleLinkedToWorkCenters(all, workCenterIds);
+    } else {
+      pdvs = await listScopedPointsOfSaleForUser(req, userId);
+    }
     pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));
     // Trabajadores con PDV asignado en empleo: solo ven ese centro (id PDV o workCenter enlazado).
     if (req.callerIsWorker) {
@@ -2955,6 +2968,34 @@ function isInTimeSlot(dateStr, slot) {
   return hhmm >= slot.start && hhmm <= slot.end;
 }
 
+export function orderMatchesBusinessPdvs(order, pdvs) {
+  if (!Array.isArray(pdvs) || pdvs.length === 0) return false;
+  const primaryPdvId = pickPrimaryPdvId(pdvs);
+  for (const p of pdvs) {
+    if (orderMatchesPdvScope(order, p._id, primaryPdvId, p.name)) return true;
+  }
+  return false;
+}
+
+function scopeTpvSessionsForOps(tpvSessions, salesPointId, businessPdvs = null) {
+  const pdv = salesPointId ? String(salesPointId).trim() : '';
+  if (pdv) {
+    return (tpvSessions || []).filter((s) => String(s.pointOfSaleId || '').trim() === pdv);
+  }
+  if (Array.isArray(businessPdvs) && businessPdvs.length > 0) {
+    const ids = new Set(businessPdvs.map((p) => String(p._id || '').trim()).filter(Boolean));
+    return (tpvSessions || []).filter((s) => ids.has(String(s.pointOfSaleId || '').trim()));
+  }
+  return tpvSessions || [];
+}
+
+function scopePointsOfSaleForOps(pointsOfSale, salesPointId, businessPdvs = null) {
+  if (Array.isArray(businessPdvs) && businessPdvs.length > 0) return businessPdvs;
+  const pdv = salesPointId ? String(salesPointId).trim() : '';
+  if (!pdv) return pointsOfSale;
+  return (pointsOfSale || []).filter((p) => p && p._id === pdv);
+}
+
 function buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale = [], deliveryAlertCfg = null, cashCfg = null, targetDate = null) {
   const alerts = [];
   const now = new Date().toISOString();
@@ -3109,11 +3150,27 @@ export async function getOpsCenter(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const { salesPointId, channel, timeSlot, date: dateParam } = req.query;
+    const { salesPointId: salesPointIdRaw, channel, timeSlot, date: dateParam } = req.query;
+    const businessIdQuery = String(req.query.businessId || req.query.business_id || '')
+      .replace(/^business:/, '')
+      .trim();
     const targetDate = dateParam || new Date().toISOString().slice(0, 10);
 
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
+
+    let businessPdvs = null;
+    if (businessIdQuery) {
+      businessPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessIdQuery, {
+        includeInactive: true,
+      });
+    }
+
+    let salesPointId = salesPointIdRaw;
+    if (salesPointId && businessPdvs && businessPdvs.length > 0) {
+      const pdvOk = businessPdvs.some((p) => p._id === String(salesPointId).trim());
+      if (!pdvOk) salesPointId = null;
+    }
 
     const configId = `dlvconf-${userId}`;
     let configDoc;
@@ -3134,12 +3191,14 @@ export async function getOpsCenter(req, res) {
     let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
 
     if (salesPointId) {
-      const pdvs = await listScopedPointsOfSaleForUser(req, userId);
+      const pdvs = businessPdvs || (await listScopedPointsOfSaleForUser(req, userId));
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       const pdv = String(salesPointId).trim();
       const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
       const pdvName = String(pdvDoc?.name || '').trim();
       dayOrders = dayOrders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName));
+    } else if (businessPdvs && businessPdvs.length > 0) {
+      dayOrders = dayOrders.filter((o) => orderMatchesBusinessPdvs(o, businessPdvs));
     }
     if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
     if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
@@ -3165,29 +3224,40 @@ export async function getOpsCenter(req, res) {
       .map(o => o.createdAt && o.deliveredAt ? (new Date(o.deliveredAt) - new Date(o.createdAt)) / 60000 : null)
       .filter(Boolean);
     const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
-    const businessOp = account.businessId ? await getBusinessAlertsOperational(req, account.businessId) : null;
+    const businessOp = businessIdQuery
+      ? await getBusinessAlertsOperational(req, businessIdQuery)
+      : (account.businessId ? await getBusinessAlertsOperational(req, account.businessId) : null);
     const deliveryAlertCfg = resolveDeliveryAlertConfig(account, businessOp);
     const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
     const delayThreshold = deliveryAlertCfg.delayThresholds?.delivery || config.delayThresholdMinutes || 40;
     const deliveredOnTime = deliveryTimes.filter(t => t <= delayThreshold).length;
     const deliveredLate = deliveryTimes.filter(t => t > delayThreshold).length;
 
-    const [tpvSessions, driverSessions, pointsOfSale] = await Promise.all([
+    const [tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
       listTpvRegisterSessionsByUser(req, userId),
       listDriverCashSessionsByUser(req, userId),
       listScopedPointsOfSaleForUser(req, userId).catch(() => []),
     ]);
-    let openTpv = tpvSessions.filter(s => s.status === 'open');
-    if (salesPointId) {
-      const pdv = String(salesPointId).trim();
-      openTpv = openTpv.filter((s) => String(s.pointOfSaleId || '') === pdv);
-    }
+    const pointsOfSale = businessPdvs || pointsOfSaleAll;
+    const scopedTpvSessions = scopeTpvSessionsForOps(tpvSessions, salesPointId, businessPdvs);
+    const scopedPointsOfSale = scopePointsOfSaleForOps(pointsOfSale, salesPointId, businessPdvs);
+    let openTpv = scopedTpvSessions.filter(s => s.status === 'open');
     const openDriverSessions = driverSessions.filter(s => s.status === 'open');
 
     let catalogItems = [];
     try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
 
-    const alerts = buildAlerts(orders, tpvSessions, driverSessions, catalogItems, config, pointsOfSale, deliveryAlertCfg, cashCfg, targetDate);
+    const alerts = buildAlerts(
+      orders,
+      scopedTpvSessions,
+      driverSessions,
+      catalogItems,
+      config,
+      scopedPointsOfSale,
+      deliveryAlertCfg,
+      cashCfg,
+      targetDate,
+    );
 
     const inKitchen = orders.filter(o => o.status === 'cocina');
     const kitchenOldest = inKitchen.reduce((max, o) => Math.max(max, minutesSince(o.createdAt)), 0);
@@ -3221,13 +3291,13 @@ export async function getOpsCenter(req, res) {
       accumulateDeliveredOrderLines(o, revenueByBrand, revenueByCategory);
     }
 
-    const pdvs = await listScopedPointsOfSaleForUser(req, userId);
+    const pdvs = pointsOfSale;
 
     let brandLabels = {};
-    const businessId = String(account.business_id || account.businessId || '').trim();
-    if (businessId) {
+    const brandBusinessId = businessIdQuery || String(account.business_id || account.businessId || '').trim();
+    if (brandBusinessId) {
       try {
-        const brands = await listBrandsByBusiness(req, businessId);
+        const brands = await listBrandsByBusiness(req, brandBusinessId);
         brandLabels = Object.fromEntries(
           (brands || []).map((b) => [String(b._id || b.id || ''), String(b.name || '').trim()]).filter(([id]) => id),
         );
@@ -3239,7 +3309,12 @@ export async function getOpsCenter(req, res) {
     return res.json({
       ok: true,
       date: targetDate,
-      filters: { salesPointId: salesPointId || null, channel: channel || null, timeSlot: timeSlot || null },
+      filters: {
+        salesPointId: salesPointId || null,
+        channel: channel || null,
+        timeSlot: timeSlot || null,
+        businessId: businessIdQuery || null,
+      },
       config,
       kpis: {
         totalOrders: orders.length,
@@ -3262,17 +3337,17 @@ export async function getOpsCenter(req, res) {
           return s + (sess.initialCashAmount || 0) + txTotal;
         }, 0),
         pendingClose: openTpv.filter(s => minutesSince(s.openedAt) / 60 > 14).length,
-        pendingValidation: tpvSessions.filter(s => s.status === 'closed' && s.closingValidationStatus === 'pending').length,
+        pendingValidation: scopedTpvSessions.filter(s => s.status === 'closed' && s.closingValidationStatus === 'pending').length,
         todayTotalSales: (() => {
           const todayStr = new Date().toISOString().slice(0, 10);
-          return tpvSessions.filter(s => s.openedAt?.startsWith(todayStr)).reduce((sum, s) => {
+          return scopedTpvSessions.filter(s => s.openedAt?.startsWith(todayStr)).reduce((sum, s) => {
             return sum + (s.transactions || []).filter(t => t.type === 'sale').reduce((ts, t) => ts + (t.amount || 0), 0);
           }, 0);
         })(),
         todaySalesByMethod: (() => {
           const todayStr = new Date().toISOString().slice(0, 10);
           const result = { efectivo: 0, tarjeta: 0, bizum: 0, online: 0, otro: 0 };
-          for (const s of tpvSessions.filter(s => s.openedAt?.startsWith(todayStr))) {
+          for (const s of scopedTpvSessions.filter(s => s.openedAt?.startsWith(todayStr))) {
             for (const t of (s.transactions || []).filter(t => t.type === 'sale')) {
               result[t.paymentMethod] = (result[t.paymentMethod] || 0) + (t.amount || 0);
             }
@@ -3281,10 +3356,10 @@ export async function getOpsCenter(req, res) {
         })(),
         todayDiscrepancy: (() => {
           const todayStr = new Date().toISOString().slice(0, 10);
-          return tpvSessions.filter(s => s.status === 'closed' && s.closedAt?.startsWith(todayStr)).reduce((sum, s) => sum + (s.difference || 0), 0);
+          return scopedTpvSessions.filter(s => s.status === 'closed' && s.closedAt?.startsWith(todayStr)).reduce((sum, s) => sum + (s.difference || 0), 0);
         })(),
-        openIncidentCount: tpvSessions.reduce((sum, s) => sum + (s.incidents || []).filter(i => !i.resolvedAt).length, 0),
-        recentCashMovements: collectOpsCashMovements(tpvSessions, targetDate, salesPointId),
+        openIncidentCount: scopedTpvSessions.reduce((sum, s) => sum + (s.incidents || []).filter(i => !i.resolvedAt).length, 0),
+        recentCashMovements: collectOpsCashMovements(scopedTpvSessions, targetDate, salesPointId),
       },
       kitchenStatus: {
         ordersInKitchen: inKitchen.length,

@@ -9,14 +9,22 @@ export {
   clockinValidForRegisterSession,
 } from './clockinHistoryUtils';
 export type { TpvClockedInWorker } from './tpvActiveStaff';
+import {
+  buildTpvActiveStaff,
+  clockinIdsMatch,
+  getWorkerInitials,
+  pickDefaultOrderTaker,
+  pickDefaultOrderTakerForSession,
+  type TpvClockedInWorker,
+} from './tpvActiveStaff';
+
 export {
   buildTpvActiveStaff,
   clockinIdsMatch,
   getWorkerInitials,
   pickDefaultOrderTaker,
   pickDefaultOrderTakerForSession,
-} from './tpvActiveStaff';
-import type { TpvClockedInWorker } from './tpvActiveStaff';
+};
 
 export function isMemberAssignedToStore(
   member: AuthUser,

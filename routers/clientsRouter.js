@@ -3,6 +3,7 @@ import {
   listClients, createClient, updateClient, removeClient,
   checkClientDuplicates, getClientCLV,
   bulkCreateClients, mergeClient,
+  importClientsFromBusiness,
   getClientDetail,
   getClientInvoices,
   updateClientContacts,
@@ -20,6 +21,7 @@ clientsRouter.get('/:userId', listClients);
 clientsRouter.get('/:userId/search-by-phone', searchByPhone);
 clientsRouter.post('/:userId', createClient);
 clientsRouter.post('/:userId/bulk', bulkCreateClients);
+clientsRouter.post('/:userId/import-from-business', importClientsFromBusiness);
 clientsRouter.post('/:userId/check-duplicates', checkClientDuplicates);
 clientsRouter.post('/:userId/merge', mergeClient);
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
@@ -16,7 +16,6 @@ import {
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
 import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
-import { readRetailScopeCache } from '../../../lib/retailScopeCache';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -45,6 +44,7 @@ import {
   isPdvCodeAlreadyUsed,
   PDV_RETAIL_LIMITS,
   pointOfSaleDisplayLabel,
+  regenerateTerminalCodeRequest,
   sanitizePdvCodeInput,
   sanitizeRetailTextField,
   sanitizeRetailTextFieldInput,
@@ -99,7 +99,6 @@ import {
   ExternalLink,
   Loader2,
 } from 'lucide-react';
-import { regenerateTerminalCodeRequest } from '../../../lib/tpvTabletApi';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
@@ -1539,18 +1538,6 @@ export function SalesPointsTab() {
     setDeliveryPdvsByWorkCenter(byWc);
   }, []);
 
-  useLayoutEffect(() => {
-    if (!businessScopeId) return;
-    const cached = readRetailScopeCache(businessScopeId);
-    if (!cached) return;
-    applyDeliveryStoresState({
-      dataUserId: dataUserId || '',
-      workCenters: cached.retailWorkCenters,
-      pointsOfSale: cached.allPointsOfSale,
-    });
-    setLoading(false);
-  }, [businessScopeId, dataUserId, applyDeliveryStoresState]);
-
   const loadData = useCallback(async (options?: { skipPdvMerge?: boolean }) => {
     if (loadInflightRef.current) {
       return loadInflightRef.current;
@@ -1575,13 +1562,13 @@ export function SalesPointsTab() {
       }
 
       const seq = ++loadSeqRef.current;
-      const hadCache = Boolean(bid && readRetailScopeCache(bid));
-      if (!hadCache) setLoading(true);
+      setLoading(true);
 
-      const skipPdvMerge = options?.skipPdvMerge ?? true;
+      const skipPdvMerge = options?.skipPdvMerge === true;
       try {
         const state = await loadDeliveryStores(userNow, bizNow, {
           skipPdvMerge,
+          includeInactivePdvs: true,
           accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
         });
         if (seq !== loadSeqRef.current) return;
@@ -1629,7 +1616,10 @@ export function SalesPointsTab() {
   }, [loadData]);
 
   const handleEnsurePdvTabletCode = async (wc: WorkCenter) => {
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      toast.error('No se pudo identificar la cuenta. Recarga la página.');
+      return;
+    }
     setRegeneratingTerminal(wc._id);
     try {
       let pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
@@ -1665,7 +1655,7 @@ export function SalesPointsTab() {
       clearDeliveryStoresSessionCache(resolveBusinessScopeId(currentBusiness ?? null));
       notifyDeliveryWorkCentersChanged(resolveBusinessScopeId(currentBusiness ?? null));
       toast.success(`Código tablet listo: ${pdv.terminalCode}`);
-      void loadData({ skipPdvMerge: true });
+      void loadData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo enlazar la caja del local');
     } finally {
@@ -2076,6 +2066,7 @@ export function SalesPointsTab() {
               name,
               address: createdPdv.address,
               workCenterId: created._id,
+              terminalCode: createdPdv.terminalCode,
             },
           }));
         }

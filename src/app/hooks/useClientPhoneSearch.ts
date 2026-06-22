@@ -14,6 +14,7 @@ export interface ClientPhoneSearchResult {
 export function useClientPhoneSearch(params: {
   userId: string;
   phone: string;
+  businessId?: string;
   enabled?: boolean;
   debounceMs?: number;
   /** Solo dígitos; usado cuando matchByName es false (comportamiento clásico). */
@@ -28,6 +29,7 @@ export function useClientPhoneSearch(params: {
   const {
     userId,
     phone,
+    businessId,
     enabled = true,
     debounceMs = 300,
     minDigits = 3,
@@ -61,7 +63,13 @@ export function useClientPhoneSearch(params: {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const clients = await searchClientsByPhoneRequest(userId, queryForApi, 8, controller.signal);
+        const clients = await searchClientsByPhoneRequest(
+          userId,
+          queryForApi,
+          8,
+          controller.signal,
+          businessId,
+        );
         if (!controller.signal.aborted) {
           setResults(clients);
           setIsSearching(false);
@@ -78,7 +86,7 @@ export function useClientPhoneSearch(params: {
       if (timerRef.current) clearTimeout(timerRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [shouldSearch, queryForApi, userId, debounceMs, selectedClient]);
+  }, [shouldSearch, queryForApi, userId, businessId, debounceMs, selectedClient]);
 
   const selectClient = useCallback((client: Client) => {
     setSelectedClient(client);

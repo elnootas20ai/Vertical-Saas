@@ -166,11 +166,12 @@ export interface DeliveryOrderBrief {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
-export async function getDashboardRequest(userId: string): Promise<DeliveryCrmDashboard | null> {
+export async function getDashboardRequest(userId: string, businessId?: string): Promise<DeliveryCrmDashboard | null> {
   try {
     const uid = normalizeUserId(userId);
+    const qs = businessId?.trim() ? `?businessId=${encodeURIComponent(businessId.trim())}` : '';
     const data = await request<{ ok: boolean; dashboard: DeliveryCrmDashboard }>(
-      `/api/delivery-crm/dashboard/${encodeURIComponent(uid)}`
+      `/api/delivery-crm/dashboard/${encodeURIComponent(uid)}${qs}`,
     );
     return data.ok ? data.dashboard : null;
   } catch { return null; }
@@ -178,21 +179,27 @@ export async function getDashboardRequest(userId: string): Promise<DeliveryCrmDa
 
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
-export async function listCrmClientsRequest(userId: string): Promise<DeliveryCrmClient[]> {
+export async function listCrmClientsRequest(userId: string, businessId?: string): Promise<DeliveryCrmClient[]> {
   try {
     const uid = normalizeUserId(userId);
+    const qs = businessId?.trim() ? `?businessId=${encodeURIComponent(businessId.trim())}` : '';
     const data = await request<{ ok: boolean; clients: DeliveryCrmClient[] }>(
-      `/api/delivery-crm/clients/${encodeURIComponent(uid)}`
+      `/api/delivery-crm/clients/${encodeURIComponent(uid)}${qs}`,
     );
     return data.ok ? data.clients : [];
   } catch { return []; }
 }
 
-export async function getClientOrdersRequest(userId: string, clientId: string): Promise<DeliveryOrderBrief[]> {
+export async function getClientOrdersRequest(
+  userId: string,
+  clientId: string,
+  businessId?: string,
+): Promise<DeliveryOrderBrief[]> {
   try {
     const uid = normalizeUserId(userId);
+    const qs = businessId?.trim() ? `?businessId=${encodeURIComponent(businessId.trim())}` : '';
     const data = await request<{ ok: boolean; orders: DeliveryOrderBrief[] }>(
-      `/api/delivery-crm/clients/${encodeURIComponent(uid)}/${encodeURIComponent(clientId)}/orders`
+      `/api/delivery-crm/clients/${encodeURIComponent(uid)}/${encodeURIComponent(clientId)}/orders${qs}`,
     );
     return data.ok ? data.orders : [];
   } catch { return []; }
@@ -200,11 +207,15 @@ export async function getClientOrdersRequest(userId: string, clientId: string): 
 
 // ─── Alerts ──────────────────────────────────────────────────────────────────
 
-export async function getAlertsRequest(userId: string): Promise<{ alerts: DeliveryCrmAlert[]; summary: DeliveryCrmAlertsSummary } | null> {
+export async function getAlertsRequest(
+  userId: string,
+  businessId?: string,
+): Promise<{ alerts: DeliveryCrmAlert[]; summary: DeliveryCrmAlertsSummary } | null> {
   try {
     const uid = normalizeUserId(userId);
+    const qs = businessId?.trim() ? `?businessId=${encodeURIComponent(businessId.trim())}` : '';
     const data = await request<{ ok: boolean; alerts: DeliveryCrmAlert[]; summary: DeliveryCrmAlertsSummary }>(
-      `/api/delivery-crm/alerts/${encodeURIComponent(uid)}`
+      `/api/delivery-crm/alerts/${encodeURIComponent(uid)}${qs}`,
     );
     return data.ok ? { alerts: data.alerts, summary: data.summary } : null;
   } catch { return null; }

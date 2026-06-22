@@ -1198,12 +1198,17 @@ export function DeliveryOpsCenter() {
   const [lastUp, setLastUp] = useState<Date | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  /** PDV visibles en Ops: primero los de la empresa activa (scope global), luego respuesta API. */
+  const opsPdvs = useMemo(() => {
+    const fromScope = (activeStoreScope.pointsOfSale ?? []).filter((p) => p.active !== false);
+    if (fromScope.length > 0) return fromScope;
+    return (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
+  }, [activeStoreScope.pointsOfSale, data?.pointsOfSale]);
+
   /** Un solo PDV activo: fijamos el filtro para que la vista y la API queden ancladas a esa tienda (p. ej. gerente con una sede). */
   const singleActivePdvId = useMemo(() => {
-    const list = data?.pointsOfSale || [];
-    const active = list.filter((p) => p.active !== false);
-    return active.length === 1 ? active[0]._id : null;
-  }, [data?.pointsOfSale]);
+    return opsPdvs.length === 1 ? opsPdvs[0]._id : null;
+  }, [opsPdvs]);
 
   useEffect(() => {
     if (!singleActivePdvId) return;
@@ -1347,11 +1352,16 @@ export function DeliveryOpsCenter() {
   const load = useCallback(async () => {
     if (!authUserId) return;
     try {
-      const effectiveFilters = { ...filters, date: filters.date || localDateInputValue() };
+      const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
+      const effectiveFilters = {
+        ...filters,
+        date: filters.date || localDateInputValue(),
+        ...(businessId ? { businessId } : {}),
+      };
       const r = await getOpsCenterRequest(authUserId, effectiveFilters);
       setData(r); setLastUp(new Date());
     } catch (e) { console.error('ops-center error', e); } finally { setLoading(false); }
-  }, [authUserId, filters]);
+  }, [authUserId, filters, currentBusiness?.business_id, currentBusiness?.id]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1548,7 +1558,7 @@ export function DeliveryOpsCenter() {
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">
 
-            <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={data?.pointsOfSale || []} sticky={false} />
+            <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={opsPdvs} sticky={false} />
 
             <div className="[&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
               <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />

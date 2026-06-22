@@ -22,7 +22,7 @@ import {
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
-import { TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
+import { useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import {
@@ -72,6 +72,7 @@ import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOf
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
+import { useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 
 type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otro';
 
@@ -434,7 +435,7 @@ function OrderCard({
             onClick={() => onAdvance(order)}
             disabled={advancing}
             title={nextLabel}
-            className="shrink-0 self-center flex flex-col items-center justify-center gap-0.5 min-w-[3.25rem] px-2 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-all disabled:opacity-50"
+            className="shrink-0 self-center flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] min-h-[44px] px-2 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-all disabled:opacity-50 touch-manipulation"
           >
             {advancing ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -479,7 +480,7 @@ function OrderLane({
   advancingId: string | null;
 }) {
   return (
-    <section className={`flex flex-col min-h-[220px] lg:min-h-0 flex-1 rounded-2xl border-2 ${borderClass} bg-white dark:bg-gray-900 overflow-hidden shadow-sm`}>
+    <section className={`flex flex-col min-h-[220px] md:min-h-0 flex-1 rounded-2xl border-2 ${borderClass} bg-white dark:bg-gray-900 overflow-hidden shadow-sm`}>
       <header className={`shrink-0 px-3 py-2.5 border-b flex items-center justify-between gap-2 ${headerClass}`}>
         <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-gray-100 min-w-0">
           <span className="shrink-0">{icon}</span>
@@ -872,16 +873,19 @@ export function WorkerTpvDelivery({
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(false);
 
+  useTpvSuppressBottomBar(view !== 'board');
+
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = resolveBusinessScopeId(currentBusiness);
   const registerLive = useTpvRegisterIfOpen();
   const stickyRegisterRef = useRef<TpvRegisterContextType | null>(null);
-  if (registerLive && isTpvRegisterSessionOpen(registerLive.session)) {
-    stickyRegisterRef.current = registerLive;
-  }
-  const register =
-    registerLive ??
-    (view === 'new-order' || view === 'staff-consumption' ? stickyRegisterRef.current : null);
+  useEffect(() => {
+    if (registerLive && isTpvRegisterSessionOpen(registerLive.session)) {
+      stickyRegisterRef.current = registerLive;
+    }
+  }, [registerLive]);
+  const register = registerLive ?? stickyRegisterRef.current;
+  const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
@@ -1276,12 +1280,21 @@ export function WorkerTpvDelivery({
 
   const visibleCount = assemblyOrders.length + deliveryOrders.length;
 
-  if (view === 'new-order' || view === 'staff-consumption') {
-    if (!register) {
+  if (view === 'new-order') {
+    return (
+      <TpvRapidoOrderFlow
+        tabletMode
+        onBack={backToBoard}
+      />
+    );
+  }
+
+  if (view === 'staff-consumption') {
+    if (!registerOpen || !register) {
       return (
         <div className="flex flex-col items-center justify-center gap-4 p-8 min-h-[40vh] text-center">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            Abre la caja de la tienda antes de usar el TPV.
+            Abre la caja de la tienda antes de registrar consumo del equipo.
           </p>
           <button
             type="button"
@@ -1293,27 +1306,14 @@ export function WorkerTpvDelivery({
         </div>
       );
     }
-    if (view === 'staff-consumption') {
-      return (
-        <TpvRegisterProvider value={register}>
-          <WorkerTpvStaffConsumption
-            userId={userId}
-            onBack={backToBoard}
-            register={register}
-            salesPointId={scopedPdvId}
-            salesPointName={scopedPdvName}
-          />
-        </TpvRegisterProvider>
-      );
-    }
     return (
-      <TpvRegisterProvider value={register}>
-        <TpvRapidoOrderFlow
-          tabletMode
-          onBack={backToBoard}
-          registerOverride={register}
-        />
-      </TpvRegisterProvider>
+      <WorkerTpvStaffConsumption
+        userId={userId}
+        onBack={backToBoard}
+        register={register}
+        salesPointId={scopedPdvId}
+        salesPointName={scopedPdvName}
+      />
     );
   }
 
@@ -1373,7 +1373,9 @@ export function WorkerTpvDelivery({
           <button
             type="button"
             onClick={() => setView('new-order')}
-            className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25 transition-colors"
+            disabled={!registerOpen}
+            title={registerOpen ? undefined : 'Abre la caja de la tienda antes de crear pedidos'}
+            className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-emerald-600/45 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25 transition-colors touch-manipulation"
           >
             <Plus className="w-5 h-5" strokeWidth={2.5} />
             Nuevo pedido
@@ -1382,7 +1384,9 @@ export function WorkerTpvDelivery({
             <button
               type="button"
               onClick={() => setView('staff-consumption')}
-              className="w-full flex items-center justify-center gap-2.5 py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 text-white font-bold text-sm sm:text-base shadow-lg shadow-violet-900/25 transition-colors"
+              disabled={!registerOpen}
+              title={registerOpen ? undefined : 'Abre la caja de la tienda antes de registrar consumo'}
+              className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 disabled:bg-violet-600/45 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base shadow-lg shadow-violet-900/25 transition-colors touch-manipulation"
             >
               <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
               Consumo equipo
@@ -1397,7 +1401,7 @@ export function WorkerTpvDelivery({
               key={f.id}
               type="button"
               onClick={() => setFulfillmentFilter(f.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold transition-all touch-manipulation ${
                 fulfillmentFilter === f.id
                   ? f.id === 'recogida'
                     ? 'bg-violet-600 text-white shadow-sm'
@@ -1428,7 +1432,7 @@ export function WorkerTpvDelivery({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar nº pedido, cliente..."
-            className="w-full pl-9 pr-8 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+            className="w-full pl-9 pr-8 py-2.5 min-h-[44px] rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
           />
           {search && (
             <button type="button" onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -1491,7 +1495,7 @@ export function WorkerTpvDelivery({
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-3 h-full min-h-0">
+          <div className="flex flex-col md:flex-row gap-3 h-full min-h-0">
             <OrderLane
               title="Montaje"
               icon={<Package className="w-4 h-4 text-indigo-600" />}

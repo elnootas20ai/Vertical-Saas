@@ -31,6 +31,8 @@ import { DuplicatesMergeModal } from '../../components/saas/DuplicatesMergeModal
 import { SegmentBuilder, applySegmentFilters, type FilterCondition } from '../../components/saas/SegmentBuilder';
 import { useColumnPreferences, type ColumnDef } from '../../hooks/useColumnPreferences';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import type { Client as AppContextClient } from '../../context/AppContext';
 import { ColumnCustomizer } from '../../components/saas/ColumnCustomizer';
 import {
@@ -52,6 +54,7 @@ import {
   saveSlaConfigRequest,
   fetchAllClientsForExport,
   listClientsPageRequest,
+  importClientsFromBusinessRequest,
   type AssignmentRule,
   type SlaConfig,
 } from '../../lib/crmApi';
@@ -1502,9 +1505,25 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     deleteClient,
   } = useApp();
   const { user: authUser } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const invoicesStorageKey = user?.id ? `vertial-crm-invoices:${user.id}` : 'vertial-crm-invoices:guest';
+
+  const businessScopeId = useMemo(
+    () => resolveBusinessScopeId(currentBusiness),
+    [currentBusiness],
+  );
+  const clientsDataUserId = useMemo(
+    () => resolveBusinessDataUserId(authUser, currentBusiness),
+    [authUser, currentBusiness],
+  );
+  const otherBusinesses = useMemo(
+    () => (businesses || []).filter((b) => {
+      const bid = resolveBusinessScopeId(b);
+      return bid && bid !== businessScopeId;
+    }),
+    [businesses, businessScopeId],
+  );
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
@@ -1531,6 +1550,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [showLeadDrawer,          setShowLeadDrawer]          = useState(false);
   const [showNewLeadModal,        setShowNewLeadModal]        = useState(false);
   const [showAddClientModal,      setShowAddClientModal]      = useState(false);
+  const [showImportFromBusiness,  setShowImportFromBusiness]  = useState(false);
+  const [importSourceBusinessId,  setImportSourceBusinessId]  = useState('');
+  const [importingFromBusiness,   setImportingFromBusiness]   = useState(false);
   const [showConvertModal,        setShowConvertModal]        = useState(false);
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
   const [crmImportMode,           setCrmImportMode]           = useState<'leads' | 'clients' | null>(null);
@@ -1564,20 +1586,24 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
 
-  const useServerClients = Boolean(authUser?.user_id);
+  const useServerClients = Boolean(clientsDataUserId);
   const useSegmentMode = useServerClients && segmentConditions.length > 0 && activeTab === 'clients';
   const [segmentAllClients, setSegmentAllClients] = useState<AppContextClient[]>([]);
   const [loadingSegmentClients, setLoadingSegmentClients] = useState(false);
 
   useEffect(() => {
-    if (!useSegmentMode || !authUser?.user_id) {
+    if (!useSegmentMode || !clientsDataUserId) {
       setSegmentAllClients([]);
       setLoadingSegmentClients(false);
       return;
     }
     let cancelled = false;
     setLoadingSegmentClients(true);
-    fetchAllClientsForExport(authUser.user_id)
+    fetchAllClientsForExport(
+      clientsDataUserId,
+      undefined,
+      isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+    )
       .then((all) => {
         if (!cancelled) setSegmentAllClients(all);
       })
@@ -1585,7 +1611,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         if (!cancelled) setLoadingSegmentClients(false);
       });
     return () => { cancelled = true; };
-  }, [useSegmentMode, authUser?.user_id, segmentConditions.length]);
+  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, isDeliveryBusiness, businessScopeId]);
 
   const [invoiceClientOptions, setInvoiceClientOptions] = useState<Client[]>([]);
 
@@ -1608,7 +1634,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     pagination: serverClientsPagination,
     refresh: refreshPaginatedClients,
   } = usePaginatedClients({
-    userId: authUser?.user_id,
+    userId: clientsDataUserId,
+    businessId: isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
     enabled: useServerClients && activeTab === 'clients' && !useSegmentMode,
     search: debouncedSearch,
     sort: cSort,
@@ -1624,9 +1651,14 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [clientsTotalCount, useServerClients, useSegmentMode, refreshPaginatedClients]);
 
   useEffect(() => {
-    if (activeTab !== 'billing' || !authUser?.user_id) return;
+    if (activeTab !== 'billing' || !clientsDataUserId) return;
     let cancelled = false;
-    listClientsPageRequest(authUser.user_id, { limit: 200, skip: 0, lite: true })
+    listClientsPageRequest(clientsDataUserId, {
+      limit: 200,
+      skip: 0,
+      lite: true,
+      businessId: isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+    })
       .then(({ clients }) => {
         if (!cancelled) {
           setInvoiceClientOptions(clients.map((c, i) => mapContextClientToPage(c, i)));
@@ -1634,7 +1666,40 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeTab, authUser?.user_id]);
+  }, [activeTab, clientsDataUserId, isDeliveryBusiness, businessScopeId]);
+
+  const withBusinessScope = useCallback(
+    <T extends Record<string, unknown>>(payload: T): T => {
+      if (!isDeliveryBusiness || !businessScopeId) return payload;
+      return { ...payload, businessId: businessScopeId, business_id: businessScopeId };
+    },
+    [isDeliveryBusiness, businessScopeId],
+  );
+
+  const handleImportClientsFromBusiness = useCallback(async () => {
+    if (!clientsDataUserId || !businessScopeId || !importSourceBusinessId) return;
+    setImportingFromBusiness(true);
+    try {
+      const result = await importClientsFromBusinessRequest(
+        clientsDataUserId,
+        importSourceBusinessId,
+        businessScopeId,
+      );
+      const skipped = result.skipped?.length || 0;
+      toast.success(
+        skipped > 0
+          ? `${result.total} cliente(s) copiados (${skipped} omitidos por duplicado en esta empresa)`
+          : `${result.total} cliente(s) importados de otra empresa`,
+      );
+      setShowImportFromBusiness(false);
+      setImportSourceBusinessId('');
+      void refreshPaginatedClients();
+    } catch {
+      toast.error('No se pudieron importar los clientes');
+    } finally {
+      setImportingFromBusiness(false);
+    }
+  }, [clientsDataUserId, businessScopeId, importSourceBusinessId, refreshPaginatedClients]);
 
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [assignmentRules, setAssignmentRules] = useState<AssignmentRule[]>([]);
@@ -2280,7 +2345,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   };
 
   const handleAddClient = async (client: Client) => {
-    await addClient({
+    await addClient(withBusinessScope({
       name: client.name,
       phone: client.phone,
       email: client.email,
@@ -2298,7 +2363,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       documentsCount: client.documentsCount,
       interactions: [],
       documentsList: [],
-    });
+    }));
   };
 
   const handleConvertLeadToClient = async (data: any) => {
@@ -2306,7 +2371,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       return;
     }
 
-    const createdClient = await addClient({
+    const createdClient = await addClient(withBusinessScope({
       name: data.name || leadToConvert.name,
       phone: data.phone || leadToConvert.phone,
       email: data.email || leadToConvert.email,
@@ -2336,7 +2401,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         },
       ],
       documentsList: [],
-    });
+    }));
 
     if (!createdClient) {
       return;
@@ -2764,6 +2829,18 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
 
         <div className={`flex items-center gap-2 flex-shrink-0 ${isDeliveryBusiness ? 'ml-auto' : ''}`}>
+          {isDeliveryBusiness && otherBusinesses.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
+                setShowImportFromBusiness(true);
+              }}
+              className="px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:border-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-all"
+            >
+              Importar de otra empresa
+            </button>
+          )}
           <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
             <AddButtonDropdown
               label="Cliente"
@@ -3798,8 +3875,51 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         onClose={() => setCrmImportMode(null)}
         initialMode={crmImportMode ?? undefined}
         exportUserId={authUser?.user_id}
+        exportBusinessId={isDeliveryBusiness && businessScopeId ? businessScopeId : undefined}
+        importBusinessId={isDeliveryBusiness && businessScopeId ? businessScopeId : undefined}
         includeResponsible={!isDeliveryBusiness}
       />
+      {showImportFromBusiness && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-5 space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Importar clientes de otra empresa</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Se copiarán como clientes nuevos en {currentBusiness?.name || 'esta empresa'}. No se enlazan registros.
+              </p>
+            </div>
+            <select
+              value={importSourceBusinessId}
+              onChange={(e) => setImportSourceBusinessId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+            >
+              {otherBusinesses.map((b) => {
+                const bid = resolveBusinessScopeId(b);
+                return (
+                  <option key={bid} value={bid}>{b.name || bid}</option>
+                );
+              })}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowImportFromBusiness(false)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-300"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={importingFromBusiness || !importSourceBusinessId}
+                onClick={() => void handleImportClientsFromBusiness()}
+                className="px-4 py-2 rounded-xl text-sm font-semibold bg-violet-600 text-white disabled:opacity-50"
+              >
+                {importingFromBusiness ? 'Importando…' : 'Importar copia'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <AIAddModal
         isOpen={showAIClientModal}
         onClose={() => setShowAIClientModal(false)}
@@ -3810,7 +3930,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           let created = 0;
           for (const entry of entries) {
             try {
-              await addClient({
+              await addClient(withBusinessScope({
                 name: String(entry.name || ''),
                 phone: String(entry.phone || ''),
                 email: String(entry.email || ''),
@@ -3823,7 +3943,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                 responsible: '',
                 interactions: [],
                 documentsList: [],
-              });
+              }));
               created++;
             } catch { /* skip failed */ }
           }

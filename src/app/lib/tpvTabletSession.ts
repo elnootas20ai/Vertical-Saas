@@ -1,3 +1,5 @@
+import type { PointOfSale } from './deliveryApi';
+
 /** Vertical fijado por el código tablet TPV (hoy solo delivery). */
 export type TpvTabletVertical = 'delivery';
 
@@ -89,4 +91,43 @@ export function resolveTpvTabletWorkerPath(): string {
   if (!binding) return TPV_TABLET_DELIVERY_PATH;
   if (binding.tpvVertical === TPV_TABLET_VERTICAL_DELIVERY) return TPV_TABLET_DELIVERY_PATH;
   return TPV_TABLET_DELIVERY_PATH;
+}
+
+/** PDV mínimo desde el binding tablet (cuando el fetch de tiendas aún no devolvió el local). */
+export function buildTabletBindingPdvStub(binding: TpvTabletBinding): PointOfSale {
+  const pdvId = String(binding.pdvId).trim();
+  const wcId = String(binding.workCenterId || '').trim() || `wc-tablet-${pdvId}`;
+  const now = new Date().toISOString();
+  return {
+    _id: pdvId,
+    id: pdvId,
+    type: 'point_of_sale',
+    user_id: binding.dataUserId,
+    workCenterId: wcId,
+    name: binding.pdvName || binding.businessName || 'Tienda',
+    code: binding.terminalCode,
+    terminalCode: binding.terminalCode,
+    address: '',
+    terminals: [
+      {
+        id: `tablet-${pdvId}`,
+        name: 'Tablet',
+        code: 'TABLET',
+        active: true,
+      },
+    ],
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function mergeTabletBindingPdv(
+  pointsOfSale: PointOfSale[],
+  binding: TpvTabletBinding | null | undefined,
+): PointOfSale[] {
+  if (!binding?.pdvId) return pointsOfSale;
+  const pick = String(binding.pdvId).trim();
+  if (pointsOfSale.some((p) => p._id === pick)) return pointsOfSale;
+  return [...pointsOfSale, buildTabletBindingPdvStub(binding)];
 }

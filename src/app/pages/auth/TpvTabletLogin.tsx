@@ -109,11 +109,14 @@ export function TpvTabletLogin() {
       );
     }
 
-    navigate(TPV_TABLET_DELIVERY_PATH, { replace: true });
-
-    void reloadBusinesses().then(() => {
+    try {
+      await reloadBusinesses();
       if (business?.business_id) switchBusiness(business.business_id);
-    });
+    } catch {
+      // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
+    }
+
+    navigate(TPV_TABLET_DELIVERY_PATH, { replace: true });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { useApp } from '../../context/AppContext';
 import {
   getDashboardRequest,
@@ -128,6 +130,8 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'amber' }: {
 
 export function DeliveryCrm() {
   const { user, isInitializing } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const userId = user?.user_id || user?.id || '';
   const { addClient } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
@@ -190,10 +194,10 @@ export function DeliveryCrm() {
     setLoading(true);
     try {
       const [dash, cls, camps, alertData] = await Promise.all([
-        getDashboardRequest(uid),
-        listCrmClientsRequest(uid),
+        getDashboardRequest(uid, businessId || undefined),
+        listCrmClientsRequest(uid, businessId || undefined),
         listCampaignsRequest(uid),
-        getAlertsRequest(uid),
+        getAlertsRequest(uid, businessId || undefined),
       ]);
       if (dash) setDashboard(dash);
       setClients(cls);
@@ -207,12 +211,33 @@ export function DeliveryCrm() {
     } finally {
       setLoading(false);
     }
-  }, [user?.user_id, user?.id]);
+  }, [user?.user_id, user?.id, businessId]);
 
   useEffect(() => {
     if (isInitializing) return;
     void loadAll();
   }, [isInitializing, loadAll]);
+
+  const clientBusinessPayload = useCallback(
+    (entry: Record<string, unknown>) => ({
+      name: String(entry.name || '').trim(),
+      phone: String(entry.phone || '').trim(),
+      email: String(entry.email || ''),
+      dni: '',
+      address: String(entry.street || entry.address || '').trim(),
+      city: String(entry.city || '').trim(),
+      postalCode: '',
+      status: 'active' as const,
+      responsible: '',
+      notes: String(entry.notes || ''),
+      tags: [] as string[],
+      consents: { dataProcessing: false, commercial: false, thirdParty: false },
+      interactions: [],
+      documentsList: [],
+      ...(businessId ? { businessId, business_id: businessId } : {}),
+    }),
+    [businessId],
+  );
 
   const createClientsFromEntries = useCallback(
     async (entries: Array<Record<string, unknown>>) => {
@@ -224,22 +249,7 @@ export function DeliveryCrm() {
         const phoneDigits = String(entry.phone || '').replace(/\D/g, '');
         if (!name || phoneDigits.length < 9 || !street || !city) continue;
         try {
-          await addClient({
-            name,
-            phone: String(entry.phone || '').trim(),
-            email: String(entry.email || ''),
-            dni: '',
-            address: street,
-            city,
-            postalCode: '',
-            status: 'active',
-            responsible: '',
-            notes: String(entry.notes || ''),
-            tags: [],
-            consents: { dataProcessing: false, commercial: false, thirdParty: false },
-            interactions: [],
-            documentsList: [],
-          });
+          await addClient(clientBusinessPayload(entry));
           created += 1;
         } catch {
           // Continue with remaining rows; individual failures should not stop import batch.
@@ -248,7 +258,7 @@ export function DeliveryCrm() {
       if (created > 0) await loadAll();
       return created;
     },
-    [addClient, loadAll],
+    [addClient, loadAll, clientBusinessPayload],
   );
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
@@ -267,7 +277,7 @@ export function DeliveryCrm() {
     setSelectedClient(client);
     setLoadingOrders(true);
     if (userId) {
-      const orders = await getClientOrdersRequest(userId, client.id);
+      const orders = await getClientOrdersRequest(userId, client.id, businessId || undefined);
       setClientOrders(orders);
     }
     setLoadingOrders(false);

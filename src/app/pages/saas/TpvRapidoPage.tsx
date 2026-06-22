@@ -66,6 +66,7 @@ import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/C
 import { WorkerTpvDelivery } from './worker/WorkerTpvDelivery';
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
+import { TpvChromeScope } from '../../context/TpvChromeContext';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import {
@@ -306,34 +307,35 @@ function TpvRapidoCeoBoard() {
   }
 
   return (
-    <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
-      <TpvOfflineBanner />
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <TpvRegisterGate
-          fillParent
-          initialManagerPdvId={selectedPdvId}
-          onManagerStoreCleared={handleChangeStore}
-        >
-          {stockOpen ? (
-            <WorkerTpvStockReview
-              onBack={() => setStockOpen(false)}
-              scopeOverride={{
-                dataUserId,
-                storeLabel: selectedPdvName,
-                pdvId: selectedPdvId,
-              }}
-            />
-          ) : (
-            <WorkerTpvDelivery
-              ceoMode
-              forcedPdvId={selectedPdvId}
-              onChangeStore={handleChangeStore}
-            />
-          )}
-        </TpvRegisterGate>
+    <TpvChromeScope bottomBar={!stockOpen ? <WorkerTpvBottomBar ceoMode /> : null}>
+      <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+        <TpvOfflineBanner />
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+          <TpvRegisterGate
+            fillParent
+            initialManagerPdvId={selectedPdvId}
+            onManagerStoreCleared={handleChangeStore}
+          >
+            {stockOpen ? (
+              <WorkerTpvStockReview
+                onBack={() => setStockOpen(false)}
+                scopeOverride={{
+                  dataUserId,
+                  storeLabel: selectedPdvName,
+                  pdvId: selectedPdvId,
+                }}
+              />
+            ) : (
+              <WorkerTpvDelivery
+                ceoMode
+                forcedPdvId={selectedPdvId}
+                onChangeStore={handleChangeStore}
+              />
+            )}
+          </TpvRegisterGate>
+        </div>
       </div>
-      {!stockOpen && <WorkerTpvBottomBar ceoMode />}
-    </div>
+    </TpvChromeScope>
   );
 }
 
@@ -367,7 +369,6 @@ export function TpvRapidoOrderFlow({
   const goBack = onBack ?? (() => navigate('/saas/delivery-ops'));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
-  const userId = resolveBusinessDataUserId(user, currentBusiness);
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const isDeliveryBusiness = useMemo(
     () => shouldUseDeliveryStores(
@@ -376,6 +377,13 @@ export function TpvRapidoOrderFlow({
     ),
     [currentBusiness, user?.onboarding, tabletBinding?.businessId],
   );
+  const userId = useMemo(() => {
+    const resolved = resolveBusinessDataUserId(user, currentBusiness);
+    if (resolved) return resolved;
+    return String(tabletBinding?.dataUserId || '').trim();
+  }, [user, currentBusiness, tabletBinding?.dataUserId]);
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const clientSearchBusinessId = isDeliveryBusiness ? (businessId || undefined) : undefined;
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
@@ -400,6 +408,7 @@ export function TpvRapidoOrderFlow({
     useClientPhoneSearch({
       userId,
       phone: phoneInput,
+      businessId: clientSearchBusinessId,
       enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
@@ -486,7 +495,6 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
-  const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '');
   const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId);
 
   const reloadDeliveryCustomization = useCallback(() => {
@@ -1089,6 +1097,7 @@ export function TpvRapidoOrderFlow({
       const clientData: Omit<Client, 'id' | 'createdAt'> = {
         type: 'client',
         user_id: userId,
+        ...(businessId ? { businessId, business_id: businessId } : {}),
         clientType: 'particular',
         name: newClientName.trim(),
         phone: newClientPhone.replace(/\D/g, '') || newClientPhone.trim(),
@@ -1454,7 +1463,7 @@ export function TpvRapidoOrderFlow({
   // ─── Success screen ───────────────────────────────────────────────────────
   if (createdOrder) {
     return (
-      <TpvFullscreenShell onBack={goBack} embedded>
+      <TpvFullscreenShell onBack={goBack} embedded tabletMode={tabletMode}>
         <div className="max-w-[820px] mx-auto py-10">
           <div className="flex flex-col items-center text-center gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="w-20 h-20 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
@@ -1488,13 +1497,13 @@ export function TpvRapidoOrderFlow({
               )}
               <button
                 onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery'))}
-                className="px-6 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                className="px-6 min-h-[48px] py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation"
               >
                 {tabletMode ? 'Volver al tablero' : 'Ver pedido'}
               </button>
               <button
                 onClick={handleReset}
-                className="px-6 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                className="px-6 min-h-[48px] py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors touch-manipulation"
               >
                 Crear otro pedido
               </button>
@@ -1586,7 +1595,7 @@ export function TpvRapidoOrderFlow({
   };
 
   const stickyFooter = (
-    <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg">
+    <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-4 py-3`}>
         <div className="flex items-center justify-end gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
           {cartCount > 0 && (
@@ -1605,7 +1614,7 @@ export function TpvRapidoOrderFlow({
           <button
             type="button"
             onClick={handleReset}
-            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+            className={`px-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[48px] py-3' : 'py-2.5'}`}
           >
             Cancelar
           </button>
@@ -1613,7 +1622,7 @@ export function TpvRapidoOrderFlow({
             type="button"
             onClick={goToPreviousStep}
             disabled={currentStep === 'client'}
-            className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`px-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[48px] py-3' : 'py-2.5'}`}
           >
             Atrás
           </button>
@@ -1621,7 +1630,7 @@ export function TpvRapidoOrderFlow({
             type="button"
             onClick={handleFooterPrimary}
             disabled={footerPrimaryDisabled}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className={`flex-1 px-4 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[48px] py-3 text-base' : 'py-2.5 text-sm'}`}
           >
             {footerPrimaryLabel}
           </button>
@@ -1634,6 +1643,7 @@ export function TpvRapidoOrderFlow({
     <TpvFullscreenShell
       onBack={goBack}
       embedded
+      tabletMode={tabletMode}
       topSlot={tpvTopActions}
       footerSlot={stickyFooter}
     >
@@ -1804,7 +1814,7 @@ export function TpvRapidoOrderFlow({
                   setDeliveryType('recogida');
                   completeStep('delivery');
                 }}
-                className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${
+                className={`flex flex-col items-center gap-3 p-6 min-h-[88px] rounded-2xl border-2 transition-all touch-manipulation ${
                   deliveryType === 'recogida'
                     ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
@@ -1819,7 +1829,7 @@ export function TpvRapidoOrderFlow({
                   const primary = deliveryAddresses.find((a) => isPrimaryClientAddress(a, deliveryAddresses));
                   if (primary) setSelectedAddressId(primary.id);
                 }}
-                className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${
+                className={`flex flex-col items-center gap-3 p-6 min-h-[88px] rounded-2xl border-2 transition-all touch-manipulation ${
                   deliveryType === 'domicilio'
                     ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
                     : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
@@ -2034,7 +2044,7 @@ export function TpvRapidoOrderFlow({
               hasPricedProducts={hasPricedProducts}
               onImportCatalog={() => navigate('/saas/catalog')}
               cartPanel={(
-                <div className={`flex flex-col h-full min-h-[12rem] lg:min-h-0 p-3 ${cartShake ? 'animate-shake' : ''}`}>
+                <div className={`flex flex-col h-full min-h-[14rem] md:min-h-0 p-3 ${cartShake ? 'animate-shake' : ''}`}>
                   <div className="flex items-center justify-between mb-2 shrink-0">
                     <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
                       Pedido
@@ -2213,7 +2223,7 @@ export function TpvRapidoOrderFlow({
                         <button
                           type="button"
                           onClick={() => completeStep('products')}
-                          className="w-full mt-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors"
+                          className="w-full mt-3 min-h-[44px] py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors touch-manipulation"
                         >
                           Continuar al pago
                         </button>
@@ -2250,7 +2260,7 @@ export function TpvRapidoOrderFlow({
                   key={key}
                   type="button"
                   onClick={() => setPaymentMethod(key)}
-                  className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                  className={`flex flex-col items-center gap-2 p-4 min-h-[80px] rounded-xl border-2 transition-all touch-manipulation ${
                     paymentMethod === key
                       ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
                       : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
@@ -2380,6 +2390,7 @@ function TpvFullscreenShell({
   topSlot,
   footerSlot,
   embedded = false,
+  tabletMode = false,
 }: {
   children: ReactNode;
   onBack: () => void;
@@ -2387,14 +2398,15 @@ function TpvFullscreenShell({
   footerSlot?: ReactNode;
   /** Dentro del gate TPV (tablet): no cubrir la barra verde de caja con fixed. */
   embedded?: boolean;
+  tabletMode?: boolean;
 }) {
   const header = (
-    <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
+    <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 pt-[max(0px,env(safe-area-inset-top))]">
       <div className="max-w-[1320px] mx-auto px-3 py-2.5 flex items-center gap-2">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+          className={`inline-flex items-center gap-1.5 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2' : 'py-1.5'}`}
         >
           <ArrowLeft className="w-4 h-4" />
           Volver

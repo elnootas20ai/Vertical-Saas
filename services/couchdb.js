@@ -3247,6 +3247,19 @@ function sanitizeContactPerson(contact) {
   };
 }
 
+function normalizeClientBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+/** Cliente visible para la empresa activa. Sin business_id → legacy, visible en todas las empresas del titular. */
+export function clientMatchesBusinessScope(doc, businessId, _options = {}) {
+  const bid = normalizeClientBusinessScopeId(businessId);
+  if (!bid) return true;
+  const docBid = normalizeClientBusinessScopeId(doc?.businessId || doc?.business_id);
+  if (!docBid) return true;
+  return docBid === bid;
+}
+
 export function buildClientDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || data.id || `client-${uuidv4()}`;
@@ -3268,6 +3281,12 @@ export function buildClientDocument(userId, data = {}, existing = null) {
     type: 'client',
     id,
     user_id: userId,
+    business_id: normalizeClientBusinessScopeId(
+      data.businessId || data.business_id || existing?.businessId || existing?.business_id,
+    ),
+    businessId: normalizeClientBusinessScopeId(
+      data.businessId || data.business_id || existing?.businessId || existing?.business_id,
+    ),
     clientType: normalizeClientType(data.clientType || data.tipo || existing?.clientType),
     name: String(data.name || '').trim(),
     phone: String(data.phone || '').trim(),
@@ -3328,6 +3347,8 @@ export function sanitizeClient(client) {
     _rev: client._rev,
     type: 'client',
     user_id: client.user_id || '',
+    business_id: normalizeClientBusinessScopeId(client.businessId || client.business_id),
+    businessId: normalizeClientBusinessScopeId(client.businessId || client.business_id),
     id: client._id,
     clientType: client.clientType || 'particular',
     name: client.name || '',
@@ -3397,6 +3418,8 @@ export function sanitizeClientSummary(client) {
     _rev: client._rev,
     type: 'client',
     user_id: client.user_id || '',
+    business_id: normalizeClientBusinessScopeId(client.businessId || client.business_id),
+    businessId: normalizeClientBusinessScopeId(client.businessId || client.business_id),
     id: client._id,
     clientType: client.clientType || 'particular',
     name: client.name || '',
@@ -3429,13 +3452,17 @@ export function sanitizeClientSummary(client) {
   };
 }
 
-export async function listClientsByUser(req, userId) {
+export async function listClientsByUser(req, userId, options = {}) {
   const db = getClientsDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === userId)
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const base = docs
+    .filter((doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === userId);
+  const bid = normalizeClientBusinessScopeId(options.businessId);
+  const scoped = bid
+    ? base.filter((doc) => clientMatchesBusinessScope(doc, bid, options))
+    : base;
+  return scoped.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
 function foldSearchText(s) {
@@ -3543,7 +3570,7 @@ function clientPhoneDigitHaystacks(doc) {
 }
 
 /** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
-export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) {
+export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
   const db = getClientsDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
@@ -3552,10 +3579,12 @@ export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20) 
   const qFold = foldSearchText(raw);
   const qDigits = raw.replace(/\D/g, '');
   const preferPhone = clientSearchPrefersPhone(raw, qDigits);
+  const bid = normalizeClientBusinessScopeId(options.businessId);
 
   return docs
     .map((d) => {
       if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return null;
+      if (bid && !clientMatchesBusinessScope(d, bid, options)) return null;
       const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
       return score > 0 ? { doc: d, score } : null;
     })
@@ -3686,8 +3715,14 @@ export async function listClientPromotionsByClient(req, userId, clientId) {
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
-export async function findDuplicateClients(req, userId, candidateData) {
-  const clients = await listClientsByUser(req, userId);
+export async function findDuplicateClients(req, userId, candidateData, options = {}) {
+  const businessId = normalizeClientBusinessScopeId(
+    candidateData?.businessId || candidateData?.business_id || options.businessId,
+  );
+  const clients = await listClientsByUser(req, userId, {
+    businessId,
+    legacySingleBusiness: options.legacySingleBusiness,
+  });
   const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-9);
   const normStr = (s) => String(s || '').trim().toLowerCase();
 
@@ -6019,6 +6054,47 @@ function pickNewerPointOfSaleDoc(a, b) {
   return String(b.updatedAt || b.createdAt || '') >= String(a.updatedAt || a.createdAt || '') ? b : a;
 }
 
+/** Un PDV por `workCenterId` (incluye inactivos); huérfanos por nombre. Para Ajustes → Tiendas. */
+export function dedupeLinkedPointsOfSale(docs) {
+  if (!Array.isArray(docs)) return [];
+  const byWc = new Map();
+  const byName = new Map();
+  const rest = [];
+
+  for (const p of docs) {
+    if (!p || p.deletedAt) continue;
+    const wcId = String(p.workCenterId || '').trim();
+    const nameKey = String(p.name || '').trim().toLowerCase();
+    if (wcId) {
+      const prev = byWc.get(wcId);
+      byWc.set(wcId, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+      continue;
+    }
+    if (nameKey) {
+      const prev = byName.get(nameKey);
+      byName.set(nameKey, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+      continue;
+    }
+    rest.push(p);
+  }
+
+  const linkedNames = new Set(
+    [...byWc.values()].map((p) => String(p.name || '').trim().toLowerCase()).filter(Boolean),
+  );
+  const orphanByName = [...byName.values()].filter(
+    (p) => !linkedNames.has(String(p.name || '').trim().toLowerCase()),
+  );
+
+  const byId = new Map();
+  for (const p of [...byWc.values(), ...orphanByName, ...rest]) {
+    const id = String(p._id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id);
+    byId.set(id, prev ? pickNewerPointOfSaleDoc(prev, p) : p);
+  }
+  return [...byId.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
 /** Un PDV activo por `workCenterId`; huérfanos por nombre (misma regla que el front). */
 export function dedupeActivePointsOfSale(docs) {
   if (!Array.isArray(docs)) return [];
@@ -6105,6 +6181,49 @@ export async function listActiveWorkCenterIds(req) {
       .map((d) => String(d._id || '').trim())
       .filter(Boolean),
   );
+}
+
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+function workCenterDocMatchesUser(doc, userId) {
+  const uid = String(userId || '').trim();
+  if (!uid) return true;
+  const docUser = String(doc?.user_id || '').trim();
+  if (!docUser) return true;
+  const norm = (v) => (v.startsWith('account:') ? v.slice('account:'.length) : v);
+  return docUser === uid || norm(docUser) === norm(uid);
+}
+
+/** Centros de trabajo de una empresa (Ajustes → Tiendas). */
+export async function listWorkCenterIdsForBusiness(req, userId, businessId) {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return new Set();
+  const db = getWorkCentersDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  const ids = new Set();
+  for (const d of docs) {
+    if (d?.type !== 'sales_point' || d?.deletedAt) continue;
+    if (!workCenterDocMatchesUser(d, userId)) continue;
+    const wb = normalizeBusinessScopeId(d.businessId || d.business_id);
+    if (wb !== bid) continue;
+    const id = String(d._id || '').trim();
+    if (id) ids.add(id);
+  }
+  return ids;
+}
+
+/** PDV de caja enlazados solo a centros de la empresa indicada. */
+export async function listScopedPointsOfSaleForBusiness(req, userId, businessId, options = {}) {
+  const wcIds = await listWorkCenterIdsForBusiness(req, userId, businessId);
+  if (wcIds.size === 0) return [];
+  const includeInactive = options.includeInactive === true;
+  const pdvs = includeInactive
+    ? dedupeLinkedPointsOfSale(await listPointsOfSaleByUser(req, userId))
+    : dedupeActivePointsOfSale(await listPointsOfSaleByUser(req, userId));
+  return filterPointsOfSaleLinkedToWorkCenters(pdvs, wcIds);
 }
 
 /** Solo PDV enlazados a un centro que sigue existiendo (como en Ajustes → Tienda). */

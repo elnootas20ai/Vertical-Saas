@@ -5,6 +5,7 @@ import type { PaginationState } from './usePagination';
 
 export interface UsePaginatedClientsOptions {
   userId?: string;
+  businessId?: string;
   pageSize?: number;
   search?: string;
   sort?: string | null;
@@ -29,6 +30,7 @@ function sortToQuery(sort: { key: string; dir: 'asc' | 'desc' } | null | undefin
 export function usePaginatedClients(options: UsePaginatedClientsOptions) {
   const {
     userId,
+    businessId,
     pageSize = 20,
     search = '',
     sort = null,
@@ -75,6 +77,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         sort: sortQuery,
         branchId,
         workCenterId,
+        businessId,
         lite: true,
         signal: controller.signal,
       });
@@ -91,11 +94,11 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         setIsLoading(false);
       }
     }
-  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId]);
+  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId, businessId]);
 
   useEffect(() => {
     setPageRaw(1);
-  }, [search, sortQuery, branchId, workCenterId, pageSize, userId]);
+  }, [search, sortQuery, branchId, workCenterId, pageSize, userId, businessId]);
 
   useEffect(() => {
     void fetchPage(page);

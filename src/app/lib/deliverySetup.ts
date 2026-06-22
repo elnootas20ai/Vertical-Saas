@@ -317,6 +317,8 @@ export { isRetailWorkCenter, sanitizeRetailScopeSnapshot } from './retailScopeSa
 export type LoadDeliveryStoresOptions = {
   /** Tras crear/editar un PDV ya enlazado: evita re-sincronizar todos los centros (muy lento). */
   skipPdvMerge?: boolean;
+  /** Incluir PDV inactivos (p. ej. tienda desactivada) — necesario en Ajustes → Tiendas. */
+  includeInactivePdvs?: boolean;
   /** Cuántas empresas tiene la cuenta (para no mostrar todas las tiendas en cada una). */
   accountBusinessCount?: number;
   /** Centro asignado al trabajador (invitación): asegurar PDV aunque falte en el listado filtrado. */
@@ -367,16 +369,21 @@ export async function loadDeliveryStores(
   }
 
   const businessId = resolveBusinessScopeId(business);
+  const includeInactivePdvs = options?.includeInactivePdvs === true;
 
   const [allWorkCenters, rawPdvs] = await Promise.all([
     listWorkCentersForDelivery(dataUserId, business ?? null),
-    listPointsOfSaleRequest(dataUserId).catch(() => [] as PointOfSale[]),
+    listPointsOfSaleRequest(dataUserId, { includeInactive: includeInactivePdvs }).catch(
+      () => [] as PointOfSale[],
+    ),
   ]);
+
+  const dedupeOpts = includeInactivePdvs ? { includeInactive: true as const } : undefined;
 
   const scopedWorkCenters = alignRetailWorkCentersToActiveBusiness(
     allWorkCenters,
     business ?? null,
-    dedupePointsOfSale(rawPdvs),
+    dedupePointsOfSale(rawPdvs, dedupeOpts),
   );
 
   let workCenters = filterWorkCentersForBusinessScope(scopedWorkCenters, businessId, {
@@ -385,11 +392,16 @@ export async function loadDeliveryStores(
   workCenters = dedupeRetailWorkCentersForBusiness(workCenters);
 
   let pointsOfSale = options?.skipPdvMerge
-    ? dedupePointsOfSale(rawPdvs)
-    : await mergePointsOfSaleWithRetailWorkCenters(dataUserId, dedupePointsOfSale(rawPdvs), {
+    ? dedupePointsOfSale(rawPdvs, dedupeOpts)
+    : await mergePointsOfSaleWithRetailWorkCenters(dataUserId, dedupePointsOfSale(rawPdvs, dedupeOpts), {
         business: business ?? null,
+        workCenters,
+        includeInactive: includeInactivePdvs,
       });
-  const filteredByWc = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters));
+  const filteredByWc = dedupePointsOfSale(
+    filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters),
+    dedupeOpts,
+  );
   pointsOfSale = filteredByWc;
 
   return { dataUserId, workCenters, pointsOfSale };

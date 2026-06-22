@@ -15,6 +15,8 @@ import {
 import type { Client } from '../../context/AppContext';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'online' | '';
 
@@ -90,6 +92,8 @@ interface Props {
 }
 
 export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit, onClose }: Props) {
+  const { currentBusiness } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(INITIAL_DATA);
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -103,6 +107,7 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
   const { results, isSearching, selectedClient, selectClient, clearSelection } = useClientPhoneSearch({
     userId,
     phone: clientLookup,
+    businessId: businessId || undefined,
     enabled: step === 1 && phoneEditing,
     matchByName: true,
     minQueryLength: 2,

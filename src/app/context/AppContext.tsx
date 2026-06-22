@@ -412,6 +412,8 @@ export interface Client {
   commercialStatus?: string;
   responsible?: string;
   branch_id?: string;
+  businessId?: string;
+  business_id?: string;
   notes?: string;
   defaultPaymentMethod?: PaymentMethod | '';
   tags?: string[];

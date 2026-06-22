@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ChevronRight, UserCheck, FileWarning } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuthOptional } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import {
   HR_OWNED_FIELD_DEFS,
@@ -10,7 +10,8 @@ import {
 
 export function WorkerProfileCompletionBanner() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const auth = useAuthOptional();
+  const user = auth?.user;
 
   if (!user || !isWorkerAccount(user) || !isWorkerProfileSubject(user)) return null;
   if (!String(user.linkedBusinessId || '').trim()) return null;

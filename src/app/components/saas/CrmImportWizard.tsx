@@ -44,6 +44,10 @@ interface CrmImportWizardProps {
   includeResponsible?: boolean;
   /** Si se indica, exporta todos los clientes del servidor bajo demanda. */
   exportUserId?: string;
+  /** Scope de exportación por empresa (delivery multi-empresa). */
+  exportBusinessId?: string;
+  /** businessId al crear clientes importados. */
+  importBusinessId?: string;
   clientExportRows?: ClientExportRow[];
 }
 
@@ -85,6 +89,8 @@ export function CrmImportWizard({
   initialMode,
   includeResponsible = true,
   exportUserId,
+  exportBusinessId,
+  importBusinessId,
   clientExportRows = [],
 }: CrmImportWizardProps) {
   useModalClose(isOpen, onClose);
@@ -156,7 +162,7 @@ export function CrmImportWizard({
                   setExportingClients(true);
                   const toastId = toast.loading('Preparando exportación…');
                   try {
-                    const all = await fetchAllClientsForExport(uid);
+                    const all = await fetchAllClientsForExport(uid, undefined, exportBusinessId);
                     downloadClientsExport(
                       all.map((c) => ({
                         name: c.name,
@@ -421,6 +427,7 @@ export function CrmImportWizard({
             user.user_id,
             clientsToCreate,
             (done, total) => setImportProgress({ done, total }),
+            importBusinessId ? { businessId: importBusinessId } : undefined,
           );
           created = result.created.length;
           failed = clientsToCreate.length - created;
