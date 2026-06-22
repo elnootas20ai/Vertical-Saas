@@ -386,6 +386,17 @@ export async function filterDeliveryOrdersRequest(
   return { orders, total: payload.total ?? orders.length };
 }
 
+export async function getClientOrderHistoryRequest(
+  userId: string,
+  clientId: string,
+): Promise<DeliveryOrder[]> {
+  const id = normalizeUserId(userId);
+  const payload = await request<{ ok: boolean; orders: DeliveryOrder[] }>(
+    `/api/delivery/orders/${encodeURIComponent(id)}/client/${encodeURIComponent(clientId)}/history`,
+  );
+  return payload.orders || [];
+}
+
 export async function createDeliveryOrderRequest(userId: string, data: Partial<DeliveryOrder>): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(

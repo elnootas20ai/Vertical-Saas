@@ -36,6 +36,7 @@ import {
   WORKER_PAYROLL_SETUP_PATH,
   WORKER_UNLINKED_HOME_PATH,
 } from '../lib/workerProfileCompletion';
+import { DashboardViewProvider } from '../context/DashboardViewContext';
 
 
 
@@ -458,7 +459,9 @@ function SaasRootProviders() {
           <AppProvider>
             <ScrapyardProvider>
               <ActivationChecklistProvider>
-                <SaasContent />
+                <DashboardViewProvider>
+                  <SaasContent />
+                </DashboardViewProvider>
               </ActivationChecklistProvider>
             </ScrapyardProvider>
           </AppProvider>

@@ -16,6 +16,10 @@ import {
   sanitizeClient,
 } from '../services/couchdb.js';
 import { orderMatchesBusinessPdvs } from './deliveryController.js';
+import {
+  deliveryOrderMatchesClient,
+  isCancelledDeliveryOrder,
+} from '../shared/clients/deliveryClientMatch.js';
 
 const DELIVERY_CRM_DB = 'delivery-crm';
 
@@ -64,7 +68,7 @@ export async function getDeliveryCrmDashboard(req, res) {
     ]);
     const orders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
 
-    const delivered = orders.filter((o) => o.status === 'delivered');
+    const delivered = orders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString();
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000).toISOString();
@@ -158,13 +162,14 @@ export async function listDeliveryCrmClients(req, res) {
     ]);
     const orders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
 
-    const delivered = orders.filter((o) => o.status === 'delivered');
+    const delivered = orders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000).toISOString();
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000).toISOString();
 
     const ordersByClient = {};
     for (const o of orders) {
+      if (isCancelledDeliveryOrder(o)) continue;
       const cid = o.clientId || '';
       if (!cid) continue;
       if (!ordersByClient[cid]) ordersByClient[cid] = [];
@@ -173,8 +178,11 @@ export async function listDeliveryCrmClients(req, res) {
 
     const enrichedClients = clients.map((c) => {
       const sc = sanitizeClient(c);
-      const clientOrders = ordersByClient[sc.id] || [];
-      const deliveredOrders = clientOrders.filter((o) => o.status === 'delivered');
+      const phoneMatches = orders.filter(
+        (o) => !isCancelledDeliveryOrder(o) && deliveryOrderMatchesClient(o, sc.id, sc.phone),
+      );
+      const clientOrders = phoneMatches.length > 0 ? phoneMatches : (ordersByClient[sc.id] || []);
+      const deliveredOrders = clientOrders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
       const totalSpent = deliveredOrders.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
       const avgTicket = deliveredOrders.length ? totalSpent / deliveredOrders.length : 0;
       const lastOrder = clientOrders.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -244,14 +252,27 @@ export async function getClientDeliveryHistory(req, res) {
     if (!userId || !clientId) return badRequest(res, 'Falta userId o clientId');
 
     const scope = await resolveDeliveryCrmScope(req, userId);
+    const clientsDb = getClientsDbName();
+    await ensureDatabase(req, clientsDb);
+    let client = null;
+    try {
+      client = await getDocument(req, clientsDb, clientId);
+    } catch {
+      client = null;
+    }
+    if (!client || client.type !== 'client' || client.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+    }
+
     const allOrders = await listDeliveryOrdersByUser(req, userId);
     const scopedOrders = await filterOrdersForBusinessScope(req, userId, allOrders, scope);
     const clientOrders = scopedOrders
-      .filter((o) => o.clientId === clientId)
+      .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o))
       .map(sanitizeDeliveryOrder)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .filter(Boolean)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
-    return res.json({ ok: true, orders: clientOrders });
+    return res.json({ ok: true, orders: clientOrders, total: clientOrders.length });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error cargando historial' });
   }
@@ -423,7 +444,7 @@ export async function getDeliveryCrmAlerts(req, res) {
     const ninetyDaysAgo = new Date(now.getTime() - 90 * 86400000).toISOString();
     const prevThirtyStart = new Date(now.getTime() - 60 * 86400000).toISOString();
 
-    const delivered = orders.filter((o) => o.status === 'delivered');
+    const delivered = orders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
     const ordersByClient = {};
     for (const o of orders) {
       const cid = o.clientId || '';

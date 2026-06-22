@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { X, Plus, Minus, MessageSquare, Pizza } from 'lucide-react';
+import { X, Plus, Minus, MessageSquare, Pizza, Search } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
   type CartLineCustomization,
@@ -39,6 +39,12 @@ function defaultTabForItem(
   if (ingredientsCount > 0) return 'ingredients';
   if (supplementsCount > 0) return 'extras';
   return 'notes';
+}
+
+function matchesSearch(text: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return text.toLowerCase().includes(q);
 }
 
 export function TpvItemCustomizeModal({
@@ -101,13 +107,28 @@ export function TpvItemCustomizeModal({
   const [activeTab, setActiveTab] = useState<CustomizeTab>(() =>
     defaultTabForItem(customizable, ingredients.length, supplements.length),
   );
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     setRemoved(initial?.removedIngredients || []);
     setAdded(initial?.addedSupplements || []);
     setNotes(initial?.notes || '');
     setActiveTab(defaultTabForItem(customizable, ingredients.length, supplements.length));
+    setSearchQuery('');
   }, [item._id, initial, customizable, ingredients.length, supplements.length]);
+
+  useEffect(() => {
+    setSearchQuery('');
+  }, [activeTab]);
+
+  const filteredIngredients = useMemo(
+    () => ingredients.filter((name) => matchesSearch(name, searchQuery)),
+    [ingredients, searchQuery],
+  );
+  const filteredSupplements = useMemo(
+    () => supplements.filter((sup) => matchesSearch(sup.name, searchQuery)),
+    [supplements, searchQuery],
+  );
 
   const customization: CartLineCustomization = {
     removedIngredients: removed,
@@ -136,6 +157,10 @@ export function TpvItemCustomizeModal({
   const removedCount = removed.length;
   const addedCount = added.length;
   const hasConfiguredExtras = supplements.length > 0;
+  const showSearchBar =
+    customizable &&
+    ((activeTab === 'ingredients' && ingredients.length > 0) ||
+      (activeTab === 'extras' && supplements.length > 0));
 
   const tabBtn = (tab: CustomizeTab, label: string, hint: string, badge?: number) => {
     const active = activeTab === tab;
@@ -229,6 +254,33 @@ export function TpvItemCustomizeModal({
           </div>
         )}
 
+        {showSearchBar && (
+          <div className="shrink-0 px-4 pb-2">
+            <div className="relative">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={activeTab === 'ingredients' ? 'Buscar ingrediente…' : 'Buscar extra…'}
+                className="w-full pl-11 pr-10 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-base text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:border-emerald-500 outline-none touch-manipulation"
+                autoComplete="off"
+                enterKeyHint="search"
+              />
+              {searchQuery.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
+                  aria-label="Borrar búsqueda"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {!customizable && (
             <section>
@@ -263,9 +315,13 @@ export function TpvItemCustomizeModal({
                   ingredientes, o impórtalos en Excel (columna <strong>ingredientes</strong>). También puedes marcar
                   ingredientes incluidos (sin cobro) en Catálogo → <strong>Ingredientes TPV</strong>.
                 </p>
+              ) : filteredIngredients.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                  Ningún ingrediente coincide con «{searchQuery.trim()}».
+                </p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  {ingredients.map((name) => {
+                  {filteredIngredients.map((name) => {
                     const isRemoved = removed.includes(name);
                     return (
                       <button
@@ -312,9 +368,13 @@ export function TpvItemCustomizeModal({
                     <strong>Guardar cambios</strong>.
                   </p>
                 </div>
+              ) : filteredSupplements.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                  Ningún extra coincide con «{searchQuery.trim()}».
+                </p>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                  {supplements.map((sup) => {
+                  {filteredSupplements.map((sup) => {
                     const active = added.some((s) => s.id === sup.id);
                     return (
                       <button

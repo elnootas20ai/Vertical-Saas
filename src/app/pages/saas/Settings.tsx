@@ -95,6 +95,8 @@ import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { useTenantEntitlements } from '../../hooks/useTenantEntitlements';
+import { PortfolioPlanBanner } from '../../components/saas/PortfolioPlanBanner';
 import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -1657,6 +1659,7 @@ function TabBusinesses() {
     updateBusiness,
     deleteBusiness,
   } = useBusiness();
+  const entitlements = useTenantEntitlements();
 
   const activationFocus = useMemo(
     () => new URLSearchParams(location.search).get(ACTIVATION_FOCUS_PARAM),
@@ -1903,6 +1906,16 @@ function TabBusinesses() {
 
   return (
     <div className="space-y-6">
+      <PortfolioPlanBanner
+        planLabel={entitlements.planLabel}
+        planTier={entitlements.planTier}
+        maxBusinesses={entitlements.businesses}
+        currentBusinesses={businesses.length}
+        canUsePortfolioView={businesses.length > 1 && entitlements.businesses > 1}
+        portfolioLocked={businesses.length > 1 && entitlements.businesses <= 1}
+        variant="settings"
+      />
+
       {/* Header */}
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between mb-2">
@@ -1919,11 +1932,27 @@ function TabBusinesses() {
           </div>
           <button
             type="button"
-            onClick={() => { setShowForm(true); setEditingBusiness(null); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors"
+            onClick={() => {
+              if (!entitlements.canCreateBusiness) return;
+              setShowForm(true);
+              setEditingBusiness(null);
+            }}
+            disabled={!entitlements.canCreateBusiness}
+            title={
+              entitlements.canCreateBusiness
+                ? 'Crear nueva empresa'
+                : `Plan ${entitlements.planLabel}: máximo ${entitlements.businesses} empresa${entitlements.businesses !== 1 ? 's' : ''}`
+            }
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors ${
+              entitlements.canCreateBusiness
+                ? 'bg-blue-600 hover:bg-blue-700'
+                : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed text-gray-500 dark:text-gray-400'
+            }`}
           >
             <Plus className="w-4 h-4" />
-            Nueva empresa
+            {entitlements.canCreateBusiness
+              ? 'Nueva empresa'
+              : `Límite ${entitlements.businesses} empresa${entitlements.businesses !== 1 ? 's' : ''}`}
           </button>
         </div>
 

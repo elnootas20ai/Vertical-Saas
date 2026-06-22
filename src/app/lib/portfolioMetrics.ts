@@ -167,6 +167,78 @@ export function pickPrimaryPdvIdFromList(pdvIds: string[], createdAtById: Map<st
   return sorted[0] || null;
 }
 
+function normalizeFinanceBusinessId(value: unknown): string {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+/** Finanzas del mes filtradas por empresa (movimientos con businessId). */
+export function sumFinanceMonthForBusiness(
+  movements: {
+    date: string;
+    type: string;
+    totalAmount: number;
+    status?: string;
+    businessId?: string;
+  }[],
+  monthKey: string,
+  businessId: string,
+): PortfolioFinanceTotals {
+  const bid = normalizeFinanceBusinessId(businessId);
+  if (!bid) return sumFinanceMonth([], monthKey);
+  return sumFinanceMonth(
+    movements.filter((m) => normalizeFinanceBusinessId(m.businessId) === bid),
+    monthKey,
+  );
+}
+
+/** Suma finanzas por filas de empresa; con 1 empresa incluye movimientos legacy sin businessId. */
+export function consolidatePortfolioFinance(
+  movements: {
+    date: string;
+    type: string;
+    totalAmount: number;
+    status?: string;
+    businessId?: string;
+  }[],
+  monthKey: string,
+  businessIds: string[],
+): PortfolioFinanceTotals {
+  const totals: PortfolioFinanceTotals = {
+    incomeMonth: 0,
+    expensesMonth: 0,
+    profitMonth: 0,
+    ebitdaMonth: 0,
+    ebitdaMarginMonth: 0,
+    pendingAmount: 0,
+    cashBalance: 0,
+  };
+
+  for (const bid of businessIds) {
+    const row = sumFinanceMonthForBusiness(movements, monthKey, bid);
+    totals.incomeMonth += row.incomeMonth;
+    totals.expensesMonth += row.expensesMonth;
+    totals.profitMonth += row.profitMonth;
+    totals.pendingAmount += row.pendingAmount;
+  }
+
+  if (businessIds.length === 1) {
+    const legacy = sumFinanceMonth(
+      movements.filter((m) => !normalizeFinanceBusinessId(m.businessId)),
+      monthKey,
+    );
+    totals.incomeMonth += legacy.incomeMonth;
+    totals.expensesMonth += legacy.expensesMonth;
+    totals.profitMonth += legacy.profitMonth;
+    totals.pendingAmount += legacy.pendingAmount;
+  }
+
+  totals.incomeMonth = Math.round(totals.incomeMonth * 100) / 100;
+  totals.expensesMonth = Math.round(totals.expensesMonth * 100) / 100;
+  totals.profitMonth = Math.round(totals.profitMonth * 100) / 100;
+  totals.pendingAmount = Math.round(totals.pendingAmount * 100) / 100;
+  return totals;
+}
+
 export function sumFinanceMonth(
   movements: { date: string; type: string; totalAmount: number; status?: string }[],
   monthKey: string,

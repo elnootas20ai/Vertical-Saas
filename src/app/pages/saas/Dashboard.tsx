@@ -53,6 +53,8 @@ import {
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
+import { useDashboardView } from '../../context/DashboardViewContext';
+import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listFinanceMovements } from '../../lib/financeApi';
 import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
@@ -517,72 +519,35 @@ const FUNNEL_STAGE_KEYS = [
 // MAIN EXPORT: Dashboard router
 // ═══════════════════════════════════════════════════════════
 
-const DASH_GENERAL_KEY = 'vertial_dash_general';
-
-function preferGeneralDashboard(businessCount: number): boolean {
-  if (businessCount <= 1) return false;
-  try {
-    const stored = localStorage.getItem(DASH_GENERAL_KEY);
-    if (stored === '0') return false;
-    if (stored === '1') return true;
-    return true;
-  } catch {
-    return businessCount > 1;
-  }
-}
 
 export function Dashboard() {
-  const { businesses, switchBusiness, businessesFetchSettled } = useBusiness();
-  const [viewGeneral, setViewGeneral] = useState(() => preferGeneralDashboard(businesses.length));
+  const { businesses, businessesFetchSettled } = useBusiness();
+  const { isPortfolioView, selectBusinessFromPortfolio } = useDashboardView();
+  const portfolioPlan = usePortfolioPlanAccess();
 
-  useEffect(() => {
-    if (!businessesFetchSettled) return;
-    if (businesses.length <= 1) {
-      setViewGeneral(false);
-      return;
-    }
-    setViewGeneral(preferGeneralDashboard(businesses.length));
-  }, [businesses.length, businessesFetchSettled]);
-
-  if (viewGeneral && businesses.length > 1) {
+  if (!businessesFetchSettled) {
     return (
-      <GeneralDashboard
-        onSelectBusiness={(businessId) => {
-          void switchBusiness(businessId);
-          setViewGeneral(false);
-          try {
-            localStorage.setItem(DASH_GENERAL_KEY, '0');
-          } catch {
-            /* noop */
-          }
-        }}
-      />
+      <Layout title="Dashboard" subtitle="">
+        <div className="flex items-center justify-center py-24 text-gray-500">
+          <RefreshCw className="w-6 h-6 animate-spin mr-2" />
+          Cargando…
+        </div>
+      </Layout>
     );
   }
 
-  return (
-    <UnifiedDashboard
-      onSelectGeneral={
-        businesses.length > 1
-          ? () => {
-              setViewGeneral(true);
-              try {
-                localStorage.setItem(DASH_GENERAL_KEY, '1');
-              } catch {
-                /* noop */
-              }
-            }
-          : undefined
-      }
-    />
-  );
+  if (isPortfolioView && portfolioPlan.canUsePortfolioView) {
+    return <GeneralDashboard onSelectBusiness={selectBusinessFromPortfolio} />;
+  }
+
+  return <UnifiedDashboard />;
 }
 
 // ═══════════════════════════════════════════════════════════
 // UNIFIED DASHBOARD (works for all verticals)
 // ═══════════════════════════════════════════════════════════
 
-function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void }) {
+function UnifiedDashboard() {
   const navigate = useNavigate();
   const { vehicles, leads, sales, documents, isLoadingVehicles, isLoadingClients } = useApp();
   const { user: authUser } = useAuth();
@@ -978,7 +943,14 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
   const overallConversion = funnelTotal > 0 ? Math.round((wonCount / funnelTotal) * 100) : 0;
 
   return (
-    <Layout title="Dashboard" subtitle="Estado real de tu negocio">
+    <Layout
+      title={currentBusiness?.name || 'Dashboard'}
+      subtitle={
+        businesses.length > 1
+          ? `Dashboard de ${currentBusiness?.name || 'empresa'} · operativa y KPIs del mes`
+          : 'Estado real de tu negocio'
+      }
+    >
       {showPersonalize && (
         <PersonalizePanel config={widgetConfig} onUpdate={updateWidgetConfig} onClose={() => setShowPersonalize(false)} />
       )}
@@ -1010,15 +982,6 @@ function UnifiedDashboard({ onSelectGeneral }: { onSelectGeneral?: () => void })
             </button>
           </div>
           <div className="flex items-center gap-2">
-            {onSelectGeneral && (
-              <button
-                type="button"
-                onClick={onSelectGeneral}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-lg transition-all"
-              >
-                <Building2 className="w-3.5 h-3.5" /> Centro de control
-              </button>
-            )}
             <button
               onClick={() => setShowPersonalize(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-all"

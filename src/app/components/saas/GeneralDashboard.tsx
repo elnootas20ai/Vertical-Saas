@@ -35,6 +35,8 @@ import {
 } from '../../hooks/usePortfolioOverview';
 import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { TeamRrhhCompactRow } from './TeamRrhhDashboardWidget';
+import { PortfolioPlanBanner } from './PortfolioPlanBanner';
+import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -47,6 +49,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
 
   const { rows, totals, finance, loading, error, reload } = usePortfolioOverview(user, businesses);
   const { canViewEbitda, isBasicPlan, planLabel } = useDashboardPlanAccess();
+  const portfolioPlan = usePortfolioPlanAccess();
 
   const [businessFilter, setBusinessFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
@@ -132,10 +135,19 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
 
   return (
     <Layout
-      title="Centro de control"
-      subtitle="Todas tus empresas, marcas y tiendas en un solo lugar"
+      title="Visión general"
+      subtitle={`${businesses.length} empresas · resumen consolidado del mes`}
     >
       <div className="flex flex-col gap-6 -mt-1">
+        <PortfolioPlanBanner
+          planLabel={portfolioPlan.planLabel}
+          planTier={portfolioPlan.planTier}
+          maxBusinesses={portfolioPlan.maxBusinesses}
+          currentBusinesses={portfolioPlan.currentBusinesses}
+          canUsePortfolioView={portfolioPlan.canUsePortfolioView}
+          portfolioLocked={portfolioPlan.portfolioLocked}
+        />
+
         {/* Hero + toolbar */}
         <div className="relative overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-5 sm:p-6">
           <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(99,102,241,0.35),_transparent_50%)]" />
@@ -147,10 +159,10 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                   Portfolio multi-empresa
                 </div>
                 <h2 className="text-xl sm:text-2xl font-black tracking-tight">
-                  Vista completa del negocio
+                  Todas tus empresas de un vistazo
                 </h2>
                 <p className="text-sm text-slate-300 mt-1 max-w-xl">
-                  Empresas, marcas, tiendas e ingresos del mes en una sola vista.
+                  Finanzas, pedidos, equipo y tiendas. Pulsa una empresa arriba o «Entrar» para ver su dashboard.
                 </p>
               </div>
               <button
@@ -171,7 +183,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <div className="flex items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <Wallet className="w-4 h-4 text-indigo-500" />
-              Finanzas del mes (cuenta global)
+              Finanzas consolidadas del mes
             </h3>
             <button
               type="button"
@@ -205,17 +217,57 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           )}
         </section>
 
-        {/* KPIs operativos delivery + RRHH */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* Operativa delivery + RRHH (suma de empresas visibles) */}
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 px-0.5">
+            Operativa delivery y equipo
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${fmtEuro(filteredTotals.revenueToday)}`} />
           <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
           <StatCard label="En curso" value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Pedidos activos" />
           <StatCard label="Fichados ahora" value={String(filteredTotals.clockedInNow)} icon={<Clock className="w-4 h-4" />} tone="violet" sub="Equipo en turno" />
           <StatCard label="Vac. pendientes" value={String(filteredTotals.pendingVacations)} icon={<Users className="w-4 h-4" />} tone="rose" sub="Por revisar" />
           <StatCard label="Nóminas mes" value={String(filteredTotals.payslipsThisMonth)} icon={<FileText className="w-4 h-4" />} tone="slate" sub="Subidas este mes" />
+          </div>
         </div>
 
-        {/* Filters */}
+        {/* Comparativa rápida por empresa */}
+        {filteredRows.length > 1 && (
+          <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5 overflow-x-auto">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
+              Comparativa por empresa
+            </h3>
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                  <th className="pb-2 pr-3">Empresa</th>
+                  <th className="pb-2 pr-3 text-right">Ingresos fin.</th>
+                  <th className="pb-2 pr-3 text-right">Gastos fin.</th>
+                  <th className="pb-2 pr-3 text-right">Ingresos delivery</th>
+                  <th className="pb-2 pr-3 text-right">Pedidos</th>
+                  <th className="pb-2 text-right">En curso</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((r) => (
+                  <tr
+                    key={r.businessId}
+                    className="border-b border-gray-50 dark:border-gray-700/80 last:border-0 hover:bg-gray-50/80 dark:hover:bg-gray-900/40"
+                  >
+                    <td className="py-2.5 pr-3 font-semibold text-gray-900 dark:text-gray-100">{r.business.name}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtEuro(r.finance.incomeMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-rose-600 dark:text-rose-400">{fmtEuro(r.finance.expensesMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{fmtEuro(r.metrics.revenueMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{r.metrics.ordersMonth}</td>
+                    <td className="py-2.5 text-right tabular-nums">{r.metrics.activeOrders}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        )}
+
         <div className="sticky top-0 z-10 flex flex-col gap-3 p-4 rounded-2xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -259,6 +311,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <EmptyPortfolio onCreate={() => navigate('/saas/settings/empresas')} />
         ) : (
           <div className="flex flex-col gap-4">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 px-0.5">
+              Detalle por empresa
+            </h3>
             {filteredRows.map((row) => (
               <BusinessCard
                 key={row.businessId}
@@ -403,11 +458,10 @@ function BusinessCard({
 }) {
   const b = row.business;
   const m = row.metrics;
+  const f = row.finance;
   const typeLabel = BUSINESS_TYPE_LABELS[b.businessType as BusinessType] || b.businessType;
   const typeColor = BUSINESS_TYPE_COLORS[b.businessType] || 'bg-gray-100 text-gray-700';
   const revenue = m.revenueMonth;
-  const orders = m.ordersMonth;
-  const delivered = m.deliveredMonth;
   const channels = Object.entries(m.revenueByChannel).sort((a, b) => b[1] - a[1]);
 
   return (
@@ -443,9 +497,11 @@ function BusinessCard({
               )}
             </div>
             <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-600 dark:text-gray-400">
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtEuro(revenue)} ingresos</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtEuro(m.revenueMonth)} delivery</span>
               <span className="text-gray-300">·</span>
-              <span>{orders} pedidos · {delivered} entregados</span>
+              <span>{fmtEuro(f.incomeMonth)} ing. fin. · {fmtEuro(f.expensesMonth)} gastos</span>
+              <span className="text-gray-300">·</span>
+              <span>{m.ordersMonth} pedidos · {m.deliveredMonth} entregados</span>
               <span className="text-gray-300">·</span>
               <span>{row.brandCount} marcas · {row.storeCount} tiendas</span>
             </div>
@@ -472,9 +528,16 @@ function BusinessCard({
 
         {expanded && (
           <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700 space-y-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+              <MetricPill label="Ingresos fin." value={fmtEuro(f.incomeMonth)} highlight />
+              <MetricPill label="Gastos fin." value={fmtEuro(f.expensesMonth)} />
+              <MetricPill label="Resultado fin." value={fmtEuro(f.profitMonth)} highlight={f.profitMonth >= 0} />
+              <MetricPill label="Pendiente cobro" value={fmtEuro(f.pendingAmount)} />
+            </div>
+
             {row.isDelivery ? (
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                <MetricPill label="Ingresos" value={fmtEuro(revenue)} highlight />
+                <MetricPill label="Ingresos delivery" value={fmtEuro(revenue)} highlight />
                 <MetricPill label="Ticket medio" value={fmtEuro(m.avgTicketMonth)} />
                 <MetricPill label="Activos" value={String(m.activeOrders)} />
                 <MetricPill label="Cancelados" value={String(m.cancelledMonth)} />

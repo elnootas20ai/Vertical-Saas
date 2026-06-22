@@ -37,6 +37,10 @@ function getMember(business, userId) {
   return business.members.find((m) => m.user_id === userId) || null;
 }
 
+function getAuthUserId(req) {
+  return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+}
+
 function getSubordinateIds(business, orgchart, userId) {
   if (!orgchart?.nodes?.length || !orgchart?.edges?.length) return null;
   const userNode = orgchart.nodes.find((n) => n.data?.user_id === userId);
@@ -128,7 +132,7 @@ export async function generateAlerts(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -328,7 +332,7 @@ export async function listAlerts(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -374,7 +378,7 @@ export async function getAlertsSummary(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);
@@ -421,7 +425,7 @@ export async function acknowledgeAlert(req, res) {
     const { businessId } = req.params;
     if (!businessId) return badRequest(res, 'Falta businessId');
 
-    const requesterId = req.authUser?.user_id;
+    const requesterId = getAuthUserId(req);
     if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
 
     const business = await findBusinessById(req, businessId);

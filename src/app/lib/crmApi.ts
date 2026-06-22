@@ -437,6 +437,47 @@ export async function getClientDetailRequest(userId: string, clientId: string): 
   }
 }
 
+export type ClientDetailSummary = {
+  totalInvoiced: number;
+  totalOrders: number;
+  avgTicket: number;
+  lastPurchase: string | null;
+  totalDeliveryRevenue?: number;
+  deliveryOrders?: number;
+  favoriteDeliveryType?: string | null;
+  recentOrders?: ClientRecentOrderSummary[];
+};
+
+export type ClientRecentOrderSummary = {
+  id: string;
+  orderNumber: string;
+  createdAt: string;
+  status: string;
+  deliveryType: string;
+  channel: string;
+  totalAmount: number;
+  salesPointName: string;
+  itemCount: number;
+  paymentStatus: string;
+  customerAddress: string;
+};
+
+export async function getClientDetailBundleRequest(
+  userId: string,
+  clientId: string,
+): Promise<{ client: Client; summary: ClientDetailSummary } | null> {
+  try {
+    const result = await request<{ ok: boolean; client: unknown; summary: ClientDetailSummary }>(
+      `/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}`,
+    );
+    const client = normalizeClientRecord(result.client);
+    if (!client) return null;
+    return { client, summary: result.summary };
+  } catch {
+    return null;
+  }
+}
+
 /** @deprecated Prefer listClientsPageRequest for large datasets. */
 export async function listClientsRequest(
   userId: string,

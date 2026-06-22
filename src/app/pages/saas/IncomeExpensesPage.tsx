@@ -8,6 +8,7 @@ import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useFinanceUserId } from '../../hooks/useFinanceUserId';
+import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
 import {
   listFinanceMovements,
   createFinanceMovementInCouch,
@@ -547,6 +548,7 @@ export function IncomeExpensesPage() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const financeUserId = useFinanceUserId();
+  const { businessId, businessName, isMultiBusiness } = useActiveBusinessScope();
   const navigate = useNavigate();
   const [movements, setMovements] = useState<FinanceMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -569,7 +571,6 @@ export function IncomeExpensesPage() {
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const [filterWorkCenter, setFilterWorkCenter] = useState<string>('all');
 
-  const businessId = String(currentBusiness?.business_id || '');
   const businessWorkCenters = useMemo(
     () =>
       activeWorkCenters
@@ -583,7 +584,7 @@ export function IncomeExpensesPage() {
     setLoading(true);
     try {
       const [movs, suggestions] = await Promise.all([
-        listFinanceMovements(financeUserId),
+        listFinanceMovements(financeUserId, businessId || undefined),
         fetchReconciliationSuggestions(financeUserId).catch(() => []),
       ]);
       setMovements(movs);
@@ -593,7 +594,7 @@ export function IncomeExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [financeUserId]);
+  }, [financeUserId, businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useModalClose(showCreate, () => { setShowCreate(false); setEditingItem(null); });
@@ -606,7 +607,12 @@ export function IncomeExpensesPage() {
         setMovements(prev => prev.map(m => m._id === updated._id ? updated : m));
         toast.success('Movimiento actualizado');
       } else {
-        const created = await createFinanceMovementInCouch(financeUserId, { ...data, user_id: financeUserId });
+        const created = await createFinanceMovementInCouch(financeUserId, {
+          ...data,
+          user_id: financeUserId,
+          businessId: businessId || undefined,
+          businessName: businessName || undefined,
+        });
         setMovements(prev => [created, ...prev]);
         toast.success(data.type === 'cobro' ? 'Ingreso registrado' : 'Gasto registrado');
       }
@@ -730,8 +736,26 @@ export function IncomeExpensesPage() {
   }, []);
 
   return (
-    <Layout title="Ingresos y Gastos" subtitle="Control detallado de todos tus movimientos financieros">
+    <Layout
+      title="Ingresos y Gastos"
+      subtitle={
+        isMultiBusiness && businessName
+          ? `Control detallado · ${businessName}`
+          : 'Control detallado de todos tus movimientos financieros'
+      }
+    >
       <div className="space-y-5">
+        {isMultiBusiness && businessName && (
+          <div className="rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-emerald-50 px-4 py-3 dark:border-teal-800 dark:from-teal-950/40 dark:to-emerald-950/30">
+            <p className="text-sm font-semibold text-teal-900 dark:text-teal-100">
+              Viendo movimientos de <span className="text-teal-700 dark:text-teal-300">{businessName}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-teal-700/90 dark:text-teal-300">
+              Al cambiar de empresa arriba se recargan ingresos y gastos de esa empresa.
+            </p>
+          </div>
+        )}
+
         {/* ── KPIs ── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           <KpiCard
@@ -1119,7 +1143,7 @@ export function IncomeExpensesPage() {
         defaultType={defaultType}
         userId={user?.id}
         businessId={businessId}
-        businessName={currentBusiness?.name}
+        businessName={businessName || currentBusiness?.name}
         workCenters={businessWorkCenters}
       />
 

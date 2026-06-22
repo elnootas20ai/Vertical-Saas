@@ -20,9 +20,10 @@ import {
 import {
   applyTpvCashMetrics,
   computePortfolioMetrics,
+  consolidatePortfolioFinance,
   emptyPortfolioMetrics,
   pickPrimaryPdvIdFromList,
-  sumFinanceMonth,
+  sumFinanceMonthForBusiness,
   type PortfolioFinanceTotals,
   type PortfolioMetrics,
 } from '../lib/portfolioMetrics';
@@ -67,6 +68,7 @@ export type PortfolioBusiness = {
   pdvCount: number;
   pdvIds: string[];
   metrics: PortfolioMetrics;
+  finance: PortfolioFinanceTotals;
   isDelivery: boolean;
   team: TeamDashboardSnapshot;
 };
@@ -235,9 +237,20 @@ export function usePortfolioOverview(
         listFinanceMovements(ownerId).catch(() => []),
         listBankAccounts(ownerId).catch(() => []),
       ]);
-      const financeTotals = sumFinanceMonth(financeMovements, monthKey);
+      const financeTotals = consolidatePortfolioFinance(
+        financeMovements,
+        monthKey,
+        businesses.map((b) => b.business_id),
+      );
       financeTotals.cashBalance = getTotalBalance(bankAccounts);
-      const ebitdaTotals = computeEbitdaForMonth(financeMovements, monthKey, { level: 'all' });
+      const scopedForEbitda =
+        businesses.length > 1
+          ? financeMovements.filter((m) => {
+              const bid = String(m.businessId || '').replace(/^business:/, '').trim();
+              return bid && businesses.some((b) => b.business_id === bid);
+            })
+          : financeMovements;
+      const ebitdaTotals = computeEbitdaForMonth(scopedForEbitda, monthKey, { level: 'all' });
       financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
       financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
 
@@ -296,6 +309,12 @@ export function usePortfolioOverview(
             () => ({ ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: members.length }),
           );
 
+          const rowFinance = sumFinanceMonthForBusiness(
+            financeMovements,
+            monthKey,
+            s.business.business_id,
+          );
+
           return {
             businessId: s.business.business_id,
             business: s.business,
@@ -307,6 +326,7 @@ export function usePortfolioOverview(
             pdvCount: s.pdvIds.length,
             pdvIds: s.pdvIds,
             metrics,
+            finance: rowFinance,
             isDelivery: s.isDelivery,
             team,
           };

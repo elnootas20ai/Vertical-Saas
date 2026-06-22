@@ -43,10 +43,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-export async function listFinanceMovements(userId: string): Promise<FinanceMovementRecord[]> {
+export async function listFinanceMovements(
+  userId: string,
+  businessId?: string,
+): Promise<FinanceMovementRecord[]> {
   const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (businessId?.trim()) params.set('businessId', businessId.trim());
+  const qs = params.toString() ? `?${params}` : '';
   const payload = await request<{ ok: boolean; movements: unknown[] }>(
-    `/api/finance/${encodeURIComponent(id)}`,
+    `/api/finance/${encodeURIComponent(id)}${qs}`,
   );
 
   return (payload.movements || [])

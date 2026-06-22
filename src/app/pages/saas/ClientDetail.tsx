@@ -7,7 +7,7 @@ import { Layout } from '../../components/saas/Layout';
 import { Tabs } from '../../components/saas/Tabs';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
-import type { ConsentHistoryEntry, GdprRecord, LeadInteraction } from '../../context/AppContext';
+import type { ConsentHistoryEntry, GdprRecord, LeadInteraction, Client as AppContextClient } from '../../context/AppContext';
 import { computeLeadScore, getScoreColor, getScoreLabel } from '../../lib/leadScoring';
 import { InteractionTimeline, type TimelineEvent } from '../../components/saas/InteractionTimeline';
 import { useAuth } from '../../context/AuthContext';
@@ -17,9 +17,16 @@ import { ConfirmDestroyModal } from '../../components/saas/ConfirmDestroyModal';
 import { LEAD_STATUS_TOKEN, type LeadStatus } from '../../components/saas/DesignTokens';
 import { listUsersRequest, getAuthHeaders, type AuthUser } from '../../lib/authApi';
 import { getDniOrNieError } from '../../lib/dniCifValidator';
-import { sendAppointmentReminderRequest } from '../../lib/crmApi';
+import { sendAppointmentReminderRequest, getClientQuotesRequest, getClientDetailBundleRequest, type ClientQuote, type Client as CrmClient } from '../../lib/crmApi';
 import { getApiBase } from '../../lib/apiBase';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { getClientOrderHistoryRequest, type DeliveryOrder } from '../../lib/deliveryApi';
+import { DeliveryClientResumen, DeliveryClientPedidosTab } from '../../components/saas/crm/ClientDeliveryDetail';
+import { ClientDetailPlanBanner, ClientDetailLockedPanel } from '../../components/saas/crm/ClientDetailPlanUpgrade';
+import { useClientDetailPlanAccess } from '../../hooks/useClientDetailPlanAccess';
+import { getClientDetailFeature, type ClientDetailFeatureId } from '../../lib/clientDetailPlanCatalog';
+import { toast } from 'sonner';
 
 async function generatePortalLinkRequest(userId: string, clientId: string): Promise<string | null> {
   try {
@@ -64,11 +71,23 @@ async function fetchClientPromotions(userId: string, clientId: string): Promise<
 }
 
 async function fetchClientActivity(userId: string, clientId: string): Promise<ClientActivityItem[]> {
+  const bundle = await fetchClientActivityBundle(userId, clientId);
+  return bundle.activities;
+}
+
+async function fetchClientActivityBundle(
+  userId: string,
+  clientId: string,
+): Promise<{ activities: ClientActivityItem[]; kpis: ClientActivityKpis | null }> {
   try {
     const res = await fetch(`${getClientApiBase()}/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}/activity`, { headers: getClientApiHeaders() });
     const data = await res.json();
-    return data.ok ? (data.activities || []) : [];
-  } catch { return []; }
+    return data.ok
+      ? { activities: data.activities || [], kpis: data.kpis || null }
+      : { activities: [], kpis: null };
+  } catch {
+    return { activities: [], kpis: null };
+  }
 }
 
 async function saveClientContacts(userId: string, clientId: string, contacts: ContactPerson[]): Promise<ContactPerson[] | null> {
@@ -122,9 +141,8 @@ import {
   Upload, FolderOpen, Eye, FileCheck, Receipt, IdCard, FolderClosed, ChevronRight,
   BarChart3, Database, Users, Megaphone, Globe, Building2, UserCircle,
   Hash, Percent, Gift, ToggleLeft, ToggleRight, ClipboardList, PenLine, Send, Search,
-  ShoppingBag,
+  ShoppingBag, Lock,
 } from 'lucide-react';
-import { getClientQuotesRequest, type ClientQuote } from '../../lib/crmApi';
 import { listClientInvoicesRequest, type ClientInvoiceRecord } from '../../lib/clientInvoicesApi';
 import { SignatureRequestModal } from '../../components/saas/SignatureRequestModal';
 import { SignaturePanel } from '../../components/saas/SignaturePanel';
@@ -181,6 +199,14 @@ interface ClientActivityItem {
   autor?: string;
 }
 
+interface ClientActivityKpis {
+  totalRevenue: number;
+  totalOrders: number;
+  avgTicket: number;
+  totalDeliveryOrders?: number;
+  relationshipDays?: number;
+}
+
 interface ClientSummary {
   totalInvoiced: number;
   totalOrders: number;
@@ -234,6 +260,45 @@ const CLIENT_PREDEFINED_TAGS = [
   'empresa / flota', 'joven conductor', 'alta gama',
 ];
 
+const DELIVERY_CLIENT_TAGS = [
+  'cliente frecuente', 'vip', 'alergias', 'sin gluten', 'sin lactosa',
+  'empresa', 'pedido grande', 'domicilio habitual', 'solo recogida',
+];
+
+function mapStoredClientToDetail(found: CrmClient | AppContextClient): Client {
+  const location = resolveClientLocationFields(found);
+  return {
+    id: String(found.id),
+    name: String(found.name || ''),
+    dni: String(found.dni || ''),
+    phone: String(found.phone || ''),
+    email: String(found.email || ''),
+    address: location.address,
+    city: location.city,
+    postalCode: location.postalCode,
+    status: (found.status as Client['status']) || 'active',
+    responsible: String(found.responsible || 'Sin asignar'),
+    createdAt: found.createdAt instanceof Date ? found.createdAt.toISOString() : String(found.createdAt || ''),
+    clientType: String((found as Record<string, unknown>).clientType || 'particular'),
+    legalName: String((found as Record<string, unknown>).legalName || ''),
+    fiscalId: String((found as Record<string, unknown>).fiscalId || ''),
+    consents: found.consents || {
+      dataProcessing: false,
+      commercial: false,
+      thirdParty: false,
+    },
+    notes: String(found.notes || ''),
+    vehiclesPurchased: found.vehiclesPurchased || [],
+    vehiclesSold: found.vehiclesSold || [],
+    documentsCount: Number(found.documentsCount || found.documentsList?.length || 0),
+    interactions: found.interactions || [],
+    documentsList: found.documentsList || [],
+    contacts: (found as Record<string, unknown>).contacts as Client['contacts'] || [],
+    addresses: (found as Record<string, unknown>).addresses as Client['addresses'] || [],
+    socialLinks: (found as Record<string, unknown>).socialLinks as Client['socialLinks'] || [],
+  };
+}
+
 export function ClientDetail() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -243,6 +308,7 @@ export function ClientDetail() {
   const { currentBusiness } = useBusiness();
   const { user: authUser } = useAuth();
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const clientPlan = useClientDetailPlanAccess();
   const [activeTab, setActiveTab] = useState('resumen');
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
   const [showDeleteClientModal, setShowDeleteClientModal] = useState(false);
@@ -296,6 +362,7 @@ export function ClientDetail() {
   const [clientInvoices, setClientInvoices] = useState<ClientInvoiceRecord[]>([]);
   const [clientPromotions, setClientPromotions] = useState<ClientPromotion[]>([]);
   const [clientActivities, setClientActivities] = useState<ClientActivityItem[]>([]);
+  const [clientActivityKpis, setClientActivityKpis] = useState<ClientActivityKpis | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [loadingPromotions, setLoadingPromotions] = useState(false);
@@ -313,10 +380,105 @@ export function ClientDetail() {
   const [clientQuotes, setClientQuotes] = useState<ClientQuote[]>([]);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [detailListSearch, setDetailListSearch] = useState('');
+  const [fetchedClientRecord, setFetchedClientRecord] = useState<CrmClient | null>(null);
+  const [loadingClientRecord, setLoadingClientRecord] = useState(false);
+  const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([]);
+  const [loadingDeliveryOrders, setLoadingDeliveryOrders] = useState(false);
+
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(authUser, currentBusiness),
+    [authUser, currentBusiness],
+  );
 
   useEffect(() => {
     setDetailListSearch('');
   }, [activeTab]);
+
+  useEffect(() => {
+    setClientSummary(null);
+    setClientInvoices([]);
+    setClientPromotions([]);
+    setClientActivities([]);
+    setClientActivityKpis(null);
+    setClientQuotes([]);
+    setFetchedClientRecord(null);
+    setLoadingClientRecord(false);
+    setDeliveryOrders([]);
+    setLoadingDeliveryOrders(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (!dataUserId || !id || isDeliveryBusiness) return;
+
+    const inContext = clients.some((item) => item.id === id);
+    if (inContext) {
+      setFetchedClientRecord(null);
+      setLoadingClientRecord(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingClientRecord(true);
+
+    getClientDetailBundleRequest(dataUserId, id)
+      .then((bundle) => {
+        if (cancelled) return;
+        if (bundle?.client) {
+          setFetchedClientRecord(bundle.client);
+          if (bundle.summary) setClientSummary(bundle.summary);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingClientRecord(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUserId, id, clients, isDeliveryBusiness]);
+
+  useEffect(() => {
+    if (!dataUserId || !id || !isDeliveryBusiness) return;
+
+    let cancelled = false;
+    setLoadingClientRecord(true);
+    setLoadingSummary(true);
+    setLoadingDeliveryOrders(true);
+    setLoadingPromotions(true);
+    setLoadingActivities(true);
+
+    Promise.all([
+      getClientDetailBundleRequest(dataUserId, id),
+      getClientOrderHistoryRequest(dataUserId, id),
+      fetchClientPromotions(dataUserId, id),
+      fetchClientActivityBundle(dataUserId, id),
+    ])
+      .then(([bundle, orders, promos, activityBundle]) => {
+        if (cancelled) return;
+        if (bundle?.client) setFetchedClientRecord(bundle.client);
+        if (bundle?.summary) setClientSummary(bundle.summary);
+        setDeliveryOrders(orders || []);
+        setClientPromotions(promos || []);
+        setClientActivities(activityBundle.activities || []);
+        setClientActivityKpis(activityBundle.kpis);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDeliveryOrders([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoadingClientRecord(false);
+        setLoadingSummary(false);
+        setLoadingDeliveryOrders(false);
+        setLoadingPromotions(false);
+        setLoadingActivities(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dataUserId, id, isDeliveryBusiness]);
 
   useEffect(() => {
     listUsersRequest()
@@ -329,74 +491,49 @@ export function ClientDetail() {
   }, []);
 
   useEffect(() => {
-    if (!authUser?.user_id || !id) return;
-    const userId = authUser.user_id;
+    if (!dataUserId || !id || isDeliveryBusiness) return;
 
-    if (activeTab === 'resumen' && !clientSummary && !loadingSummary) {
+    const shouldLoadSummary = activeTab === 'resumen' && !clientSummary && !loadingSummary;
+
+    if (shouldLoadSummary) {
       setLoadingSummary(true);
-      fetchClientSummary(userId, id).then((data) => {
+      fetchClientSummary(dataUserId, id).then((data) => {
         if (data?.summary) setClientSummary(data.summary);
       }).finally(() => setLoadingSummary(false));
     }
+
     if (activeTab === 'facturas' && clientInvoices.length === 0 && !loadingInvoices) {
       setLoadingInvoices(true);
-      listClientInvoicesRequest(userId).then((all) => {
+      listClientInvoicesRequest(dataUserId).then((all) => {
         setClientInvoices(all.filter((inv) => inv.clientId === id));
       }).finally(() => setLoadingInvoices(false));
     }
     if (activeTab === 'promociones' && clientPromotions.length === 0 && !loadingPromotions) {
       setLoadingPromotions(true);
-      fetchClientPromotions(userId, id).then(setClientPromotions).finally(() => setLoadingPromotions(false));
+      fetchClientPromotions(dataUserId, id).then(setClientPromotions).finally(() => setLoadingPromotions(false));
     }
     if (activeTab === 'actividad' && clientActivities.length === 0 && !loadingActivities) {
       setLoadingActivities(true);
-      fetchClientActivity(userId, id).then(setClientActivities).finally(() => setLoadingActivities(false));
+      fetchClientActivityBundle(dataUserId, id).then((bundle) => {
+        setClientActivities(bundle.activities);
+        setClientActivityKpis(bundle.kpis);
+      }).finally(() => setLoadingActivities(false));
     }
     if (activeTab === 'presupuestos' && clientQuotes.length === 0 && !loadingQuotes) {
       setLoadingQuotes(true);
-      getClientQuotesRequest(userId, id).then(setClientQuotes).finally(() => setLoadingQuotes(false));
+      getClientQuotesRequest(dataUserId, id).then(setClientQuotes).finally(() => setLoadingQuotes(false));
     }
-  }, [activeTab, authUser?.user_id, id]);
+  }, [activeTab, dataUserId, id, isDeliveryBusiness]);
 
   const client = useMemo<Client | null>(() => {
-    const found = clients.find((item) => item.id === id);
+    const found = (isDeliveryBusiness && fetchedClientRecord)
+      ? fetchedClientRecord
+      : (clients.find((item) => item.id === id) ?? fetchedClientRecord);
     if (!found) {
       return null;
     }
-
-    const location = resolveClientLocationFields(found);
-
-    return {
-      id: found.id,
-      name: found.name,
-      dni: found.dni || '',
-      phone: found.phone,
-      email: found.email,
-      address: location.address,
-      city: location.city,
-      postalCode: location.postalCode,
-      status: found.status,
-      responsible: found.responsible || 'Sin asignar',
-      createdAt: found.createdAt instanceof Date ? found.createdAt.toISOString() : String(found.createdAt),
-      clientType: (found as any).clientType || 'particular',
-      legalName: (found as any).legalName || '',
-      fiscalId: (found as any).fiscalId || '',
-      consents: found.consents || {
-        dataProcessing: false,
-        commercial: false,
-        thirdParty: false,
-      },
-      notes: found.notes || '',
-      vehiclesPurchased: found.vehiclesPurchased || [],
-      vehiclesSold: found.vehiclesSold || [],
-      documentsCount: found.documentsCount || found.documentsList?.length || 0,
-      interactions: found.interactions || [],
-      documentsList: found.documentsList || [],
-      contacts: (found as any).contacts || [],
-      addresses: (found as any).addresses || [],
-      socialLinks: (found as any).socialLinks || [],
-    };
-  }, [clients, id]);
+    return mapStoredClientToDetail(found);
+  }, [clients, id, fetchedClientRecord, isDeliveryBusiness]);
 
   useEffect(() => {
     if (!client) {
@@ -572,6 +709,17 @@ export function ClientDetail() {
     );
   }
 
+  if (loadingClientRecord) {
+    return (
+      <Layout title="Cliente" subtitle="">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-12 text-center">
+          <div className="inline-block w-10 h-10 border-4 border-gray-200 border-t-gray-900 rounded-full animate-spin mb-4" />
+          <p className="text-gray-600 dark:text-gray-400">Cargando ficha del cliente…</p>
+        </div>
+      </Layout>
+    );
+  }
+
   if (!client) {
     return (
       <Layout title={t('common.notFound')} subtitle="">
@@ -591,7 +739,8 @@ export function ClientDetail() {
   }
 
   const tagSearch = newTag.toLowerCase().trim();
-  const clientTagSuggestions = CLIENT_PREDEFINED_TAGS.filter(
+  const tagSuggestionsSource = isDeliveryBusiness ? DELIVERY_CLIENT_TAGS : CLIENT_PREDEFINED_TAGS;
+  const clientTagSuggestions = tagSuggestionsSource.filter(
     (s) => !(ctxClient?.tags || []).includes(s) && (tagSearch === '' || s.toLowerCase().includes(tagSearch)),
   );
 
@@ -684,6 +833,10 @@ export function ClientDetail() {
   };
 
   const renderGdprTab = () => {
+    if (isDeliveryBusiness && !clientPlan.canViewRgpd) {
+      return <ClientDetailLockedPanel featureId="ficha_rgpd" planTier={clientPlan.planTier} />;
+    }
+
     const gdpr = ctxClient?.gdpr || { deletionRequested: false, consentHistory: [] };
     const consents = ctxClient?.consents || { dataProcessing: false, commercial: false, thirdParty: false };
 
@@ -854,7 +1007,62 @@ export function ClientDetail() {
     navigate('/saas/crm/clientes?tab=clients');
   };
 
-  const tabsConfig = [
+  const goToDeliveryTpv = () => {
+    if (!client) return;
+    navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(client.id)}`);
+  };
+
+  const deliveryTabFeature = (tabId: string): ClientDetailFeatureId | null => {
+    switch (tabId) {
+      case 'resumen': return 'ficha_resumen_kpis';
+      case 'pedidos': return 'ficha_pedidos';
+      case 'datos': return 'ficha_datos';
+      case 'promociones': return 'ficha_promociones';
+      case 'actividad': return 'ficha_actividad';
+      case 'gdpr': return 'ficha_rgpd';
+      default: return null;
+    }
+  };
+
+  const isDeliveryTabUnlocked = (tabId: string) => {
+    const feat = deliveryTabFeature(tabId);
+    if (!feat) return true;
+    return clientPlan.canAccessFeature(feat);
+  };
+
+  const handleDetailTabChange = (tabId: string) => {
+    if (isDeliveryBusiness && !isDeliveryTabUnlocked(tabId)) {
+      const feat = deliveryTabFeature(tabId);
+      if (feat) {
+        const entry = getClientDetailFeature(feat);
+        toast.info(
+          entry
+            ? `«${entry.label}» disponible desde plan ${clientPlan.requiredPlanLabel(feat)}`
+            : 'No disponible en tu plan',
+        );
+      }
+    }
+    setActiveTab(tabId);
+  };
+
+  const tabsConfig = isDeliveryBusiness ? [
+    { id: 'resumen', label: 'Resumen', icon: <BarChart3 className="w-4 h-4" /> },
+    {
+      id: 'pedidos',
+      label: 'Pedidos',
+      icon: <ShoppingBag className="w-4 h-4" />,
+      count: deliveryOrders.length || clientSummary?.deliveryOrders || 0,
+    },
+    { id: 'datos', label: 'Datos', icon: <Database className="w-4 h-4" /> },
+    {
+      id: 'promociones',
+      label: 'Promociones',
+      icon: <Megaphone className="w-4 h-4" />,
+      count: clientPromotions.filter((p) => p.estado === 'activa').length || clientPromotions.length || undefined,
+    },
+    { id: 'actividad', label: 'Actividad', icon: <Activity className="w-4 h-4" /> },
+    { id: 'gdpr', label: 'RGPD', icon: <Shield className="w-4 h-4" /> },
+  ] : [
     { id: 'resumen', label: 'Resumen', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'datos', label: 'Datos', icon: <Database className="w-4 h-4" /> },
     { id: 'contactos', label: 'Contactos', icon: <Users className="w-4 h-4" />, count: client.contacts?.length || 0 },
@@ -865,6 +1073,10 @@ export function ClientDetail() {
     { id: 'documents', label: 'Documentos', icon: <FileText className="w-4 h-4" />, count: client.documentsCount },
     { id: 'gdpr', label: 'RGPD', icon: <Shield className="w-4 h-4" /> },
   ];
+
+  const detailSearchableTabs = isDeliveryBusiness
+    ? ['pedidos', 'promociones', 'actividad']
+    : ['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'];
 
   const getInteractionIcon = (type: string) => {
     switch (type) {
@@ -1394,6 +1606,45 @@ export function ClientDetail() {
   // ─── RESUMEN TAB ──────────────────────────────────────────────────────────
 
   const renderResumenTab = () => {
+    if (isDeliveryBusiness) {
+      const sourceClient = fetchedClientRecord ?? clients.find((item) => item.id === id);
+      const loyalty = sourceClient?.loyalty;
+      const activePromotionsCount = clientPromotions.filter((p) => p.estado === 'activa').length;
+
+      return (
+        <DeliveryClientResumen
+          client={{
+            id: client.id,
+            name: client.name,
+            phone: client.phone,
+            email: client.email,
+            address: client.address,
+            city: client.city,
+            postalCode: client.postalCode,
+            notes: client.notes,
+            createdAt: client.createdAt,
+          }}
+          summary={clientSummary}
+          orders={deliveryOrders}
+          loadingSummary={loadingSummary || loadingDeliveryOrders}
+          activePromotionsCount={activePromotionsCount}
+          loyalty={loyalty ? {
+            points: loyalty.points,
+            level: loyalty.level,
+            totalVisits: loyalty.totalVisits,
+            enrolled: loyalty.enrolled,
+          } : null}
+          onNewOrder={goToDeliveryTpv}
+          onGoToPedidos={() => handleDetailTabChange('pedidos')}
+          onGoToPromociones={() => handleDetailTabChange('promociones')}
+          analyticsUnlocked={clientPlan.canViewAnalytics}
+          loyaltyUnlocked={clientPlan.canViewLoyalty}
+          promosLinkUnlocked={clientPlan.canViewPromociones}
+          maxRecentOrders={clientPlan.maxRecentOrders}
+        />
+      );
+    }
+
     if (loadingSummary) {
       return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1475,8 +1726,8 @@ export function ClientDetail() {
         </div>
 
         {/* CLV Card (concesionario; oculto en delivery) */}
-        {!isDeliveryBusiness && authUser?.user_id && client.id && (
-          <ClientCLVCard userId={authUser.user_id} clientId={client.id} />
+        {!isDeliveryBusiness && dataUserId && client.id && (
+          <ClientCLVCard userId={dataUserId} clientId={client.id} />
         )}
       </div>
     );
@@ -1661,8 +1912,8 @@ export function ClientDetail() {
     } else {
       contacts.push({ ...contactForm, id: `contact-${uuidv4()}` });
     }
-    if (authUser?.user_id) {
-      await saveClientContacts(authUser.user_id, client.id, contacts);
+    if (dataUserId) {
+      await saveClientContacts(dataUserId, client.id, contacts);
     }
     await updateClient(client.id, { contacts } as any);
     setShowContactForm(false);
@@ -1673,8 +1924,8 @@ export function ClientDetail() {
   const handleDeleteContact = async (contactId: string) => {
     if (!client) return;
     const contacts = (client.contacts || []).filter((c) => c.id !== contactId);
-    if (authUser?.user_id) {
-      await saveClientContacts(authUser.user_id, client.id, contacts);
+    if (dataUserId) {
+      await saveClientContacts(dataUserId, client.id, contacts);
     }
     await updateClient(client.id, { contacts } as any);
   };
@@ -1856,8 +2107,8 @@ export function ClientDetail() {
   // ─── PROMOCIONES TAB ──────────────────────────────────────────────────────
 
   const handleCreatePromotion = async () => {
-    if (!client || !authUser?.user_id || !promotionForm.nombre.trim()) return;
-    const promo = await createClientPromotionRequest(authUser.user_id, client.id, {
+    if (!client || !dataUserId || !promotionForm.nombre.trim()) return;
+    const promo = await createClientPromotionRequest(dataUserId, client.id, {
       nombre: promotionForm.nombre,
       tipo: promotionForm.tipo,
       descuento: promotionForm.descuento ? Number(promotionForm.descuento) : null,
@@ -1874,22 +2125,29 @@ export function ClientDetail() {
   };
 
   const handleTogglePromotion = async (promo: ClientPromotion) => {
-    if (!client || !authUser?.user_id) return;
-    const updated = await toggleClientPromotionRequest(authUser.user_id, client.id, promo);
+    if (!client || !dataUserId) return;
+    const updated = await toggleClientPromotionRequest(dataUserId, client.id, promo);
     if (updated) {
       setClientPromotions((prev) => prev.map((p) => p.id === promo.id ? updated : p));
     }
   };
 
   const handleDeletePromotion = async (promoId: string) => {
-    if (!client || !authUser?.user_id) return;
-    const ok = await deleteClientPromotionRequest(authUser.user_id, client.id, promoId);
+    if (!client || !dataUserId) return;
+    const ok = await deleteClientPromotionRequest(dataUserId, client.id, promoId);
     if (ok) {
       setClientPromotions((prev) => prev.filter((p) => p.id !== promoId));
     }
   };
 
-  const renderPromocionesTab = () => (
+  const renderPromocionesTab = () => {
+    if (isDeliveryBusiness && !clientPlan.canViewPromociones) {
+      return <ClientDetailLockedPanel featureId="ficha_promociones" planTier={clientPlan.planTier} />;
+    }
+
+    const canManagePromos = !isDeliveryBusiness || clientPlan.canCreatePromociones;
+
+    return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-600 dark:text-gray-400">
@@ -1897,12 +2155,14 @@ export function ClientDetail() {
             ? `${filteredDetailPromotions.length} de ${clientPromotions.length} promociones`
             : `${clientPromotions.length} promociones`}
         </p>
-        <button onClick={() => setShowPromotionForm((v) => !v)} className="px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-sm font-medium transition-colors">
-          + Nueva promoción
-        </button>
+        {canManagePromos && (
+          <button onClick={() => setShowPromotionForm((v) => !v)} className="px-4 py-2 bg-gray-900 hover:bg-black text-white rounded-lg text-sm font-medium transition-colors">
+            + Nueva promoción
+          </button>
+        )}
       </div>
 
-      {showPromotionForm && (
+      {canManagePromos && showPromotionForm && (
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6 space-y-4">
           <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Nueva promoción</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1982,6 +2242,7 @@ export function ClientDetail() {
                     </div>
                     {promo.descripcion && <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">{promo.descripcion}</p>}
                   </div>
+                  {canManagePromos && (
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button onClick={() => { void handleTogglePromotion(promo); }} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors" title={isActive ? 'Desactivar' : 'Activar'}>
                       {isActive ? <ToggleRight className="w-5 h-5 text-emerald-600" /> : <ToggleLeft className="w-5 h-5 text-gray-400 dark:text-gray-500" />}
@@ -1990,6 +2251,7 @@ export function ClientDetail() {
                       <Trash2 className="w-4 h-4 text-red-400" />
                     </button>
                   </div>
+                  )}
                 </div>
               </div>
             );
@@ -1999,14 +2261,21 @@ export function ClientDetail() {
         <div className="bg-white dark:bg-gray-800 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-10 text-center">
           <Megaphone className="w-10 h-10 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">Sin promociones</h3>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">Crea promociones personalizadas para este cliente</p>
-          <button onClick={() => setShowPromotionForm(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors">
-            <Plus className="w-4 h-4" /> Nueva promoción
-          </button>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">
+            {canManagePromos
+              ? 'Crea promociones personalizadas para este cliente'
+              : 'Las promociones personalizadas están disponibles en plan Pro'}
+          </p>
+          {canManagePromos && (
+            <button onClick={() => setShowPromotionForm(true)} className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-semibold transition-colors">
+              <Plus className="w-4 h-4" /> Nueva promoción
+            </button>
+          )}
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   // ─── PRESUPUESTOS TAB ─────────────────────────────────────────────────────
 
@@ -2107,6 +2376,10 @@ export function ClientDetail() {
   // ─── ACTIVIDAD TAB ────────────────────────────────────────────────────────
 
   const renderActividadTab = () => {
+    if (isDeliveryBusiness && !clientPlan.canViewActividad) {
+      return <ClientDetailLockedPanel featureId="ficha_actividad" planTier={clientPlan.planTier} />;
+    }
+
     if (loadingActivities) {
       return (
         <div className="space-y-3">
@@ -2121,24 +2394,61 @@ export function ClientDetail() {
     }
 
     const tipoConfig: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
-      pedido: { icon: <Car className="w-4 h-4" />, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
+      pedido: { icon: isDeliveryBusiness ? <ShoppingBag className="w-4 h-4" /> : <Car className="w-4 h-4" />, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
       factura: { icon: <Receipt className="w-4 h-4" />, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
       nota: { icon: <MessageSquare className="w-4 h-4" />, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' },
     };
 
+    const filteredActivities = detailSearchNorm
+      ? clientActivities.filter((act) =>
+          `${act.titulo} ${act.descripcion} ${act.tipo} ${act.referencia || ''}`.toLowerCase().includes(detailSearchNorm),
+        )
+      : clientActivities;
+
     return (
       <div className="space-y-4">
+        {isDeliveryBusiness && clientActivityKpis && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Ingresos totales</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {clientActivityKpis.totalRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Pedidos</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{clientActivityKpis.totalOrders}</p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Ticket medio</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {clientActivityKpis.avgTicket.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+              <p className="text-xs text-gray-500 dark:text-gray-400">Relación</p>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {clientActivityKpis.relationshipDays != null ? `${clientActivityKpis.relationshipDays} días` : '—'}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-600 dark:text-gray-400">{clientActivities.length} actividades registradas</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {detailSearchNorm
+              ? `${filteredActivities.length} de ${clientActivities.length} actividades`
+              : `${clientActivities.length} actividades registradas`}
+          </p>
         </div>
 
-        {clientActivities.length > 0 ? (
+        {filteredActivities.length > 0 ? (
           <div className="space-y-2">
-            {clientActivities.map((act, idx) => {
+            {filteredActivities.map((act, idx) => {
               const cfg = tipoConfig[act.tipo] || { icon: <Clock className="w-4 h-4" />, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-700' };
               return (
                 <div key={act.id || idx} className="flex gap-4 relative">
-                  {idx < clientActivities.length - 1 && (
+                  {idx < filteredActivities.length - 1 && (
                     <div className="absolute left-5 top-10 bottom-0 w-0.5 bg-gray-100 dark:bg-gray-700" />
                   )}
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 border ${cfg.bg}`}>
@@ -2561,6 +2871,14 @@ export function ClientDetail() {
           Volver a clientes
         </button>
 
+        {isDeliveryBusiness && clientPlan.lockedCount > 0 && (
+          <ClientDetailPlanBanner
+            planLabel={clientPlan.planLabel}
+            unlockedCount={clientPlan.unlockedCount}
+            lockedCount={clientPlan.lockedCount}
+          />
+        )}
+
         {/* Header Card */}
         <div className="bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl p-8 text-white">
           <div className="flex items-start justify-between gap-4">
@@ -2587,14 +2905,17 @@ export function ClientDetail() {
                 {(ctxClient?.tags || []).map((tag) => (
                   <span key={tag} className="flex items-center gap-1 px-2.5 py-1 bg-white/20 border border-white/30 rounded-full text-xs font-semibold text-white">
                     {tag}
-                    <button
-                      onClick={() => void handleRemoveTag(tag)}
-                      className="hover:text-red-200 transition-colors ml-0.5"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    {(!isDeliveryBusiness || clientPlan.canUseTags) && (
+                      <button
+                        onClick={() => void handleRemoveTag(tag)}
+                        className="hover:text-red-200 transition-colors ml-0.5"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </span>
                 ))}
+                {(!isDeliveryBusiness || clientPlan.canUseTags) && (
                 <div className="relative">
                   <form
                     onSubmit={(e) => { e.preventDefault(); void handleAddTag(newTag); setShowTagSuggestions(false); }}
@@ -2639,87 +2960,101 @@ export function ClientDetail() {
                     </div>
                   )}
                 </div>
+                )}
               </div>
             </div>
             <div className="flex flex-col gap-2 flex-shrink-0">
-              {isDeliveryBusiness && (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(client.id)}`)}
-                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm shadow-md shadow-emerald-900/15"
-                >
-                  <ShoppingBag className="w-4 h-4" />
-                  Nuevo pedido delivery
-                </button>
-              )}
-              <button
-                onClick={handleCreateContract}
-                className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 text-blue-600 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
-              >
-                <FileText className="w-4 h-4" />
-                Crear contrato
-              </button>
-              {authUser?.user_id && (
-                <button
-                  onClick={async () => {
-                    if (portalLink) {
-                      try {
-                        await navigator.clipboard.writeText(portalLink);
-                      } catch {
-                        const ta = document.createElement('textarea');
-                        ta.value = portalLink;
-                        ta.style.position = 'fixed';
-                        ta.style.opacity = '0';
-                        document.body.appendChild(ta);
-                        ta.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(ta);
-                      }
-                      setPortalLinkCopied(true);
-                      setTimeout(() => setPortalLinkCopied(false), 2500);
-                      return;
-                    }
-                    setGeneratingPortalLink(true);
-                    setPortalLinkError(false);
-                    const link = await generatePortalLinkRequest(authUser.user_id, client.id);
-                    setGeneratingPortalLink(false);
-                    if (!link) {
-                      setPortalLinkError(true);
-                      setTimeout(() => setPortalLinkError(false), 3000);
-                      return;
-                    }
-                    setPortalLink(link);
-                    try {
-                      await navigator.clipboard.writeText(link);
-                    } catch {
-                      const ta = document.createElement('textarea');
-                      ta.value = link;
-                      ta.style.position = 'fixed';
-                      ta.style.opacity = '0';
-                      document.body.appendChild(ta);
-                      ta.select();
-                      document.execCommand('copy');
-                      document.body.removeChild(ta);
-                    }
-                    setPortalLinkCopied(true);
-                    setTimeout(() => setPortalLinkCopied(false), 2500);
-                  }}
-                  disabled={generatingPortalLink}
-                  className="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
-                >
-                  <Link2 className="w-4 h-4" />
-                  {generatingPortalLink ? 'Generando...' : portalLinkError ? 'Error al generar' : portalLinkCopied ? '¡Enlace copiado!' : portalLink ? 'Copiar enlace portal' : 'Portal cliente'}
-                </button>
-              )}
-              {portalLink && (
-                <a
-                  href={portalLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/80 rounded-lg transition-colors flex items-center gap-1.5 text-xs"
-                >
-                  <ExternalLink className="w-3 h-3" /> Ver portal
-                </a>
+              {isDeliveryBusiness ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={goToDeliveryTpv}
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm shadow-md shadow-emerald-900/15"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    Nuevo pedido
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('datos')}
+                    className="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    Editar datos
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleCreateContract}
+                    className="px-4 py-2.5 bg-white dark:bg-gray-800 hover:bg-blue-50 text-blue-600 rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Crear contrato
+                  </button>
+                  {dataUserId && (
+                    <button
+                      onClick={async () => {
+                        if (portalLink) {
+                          try {
+                            await navigator.clipboard.writeText(portalLink);
+                          } catch {
+                            const ta = document.createElement('textarea');
+                            ta.value = portalLink;
+                            ta.style.position = 'fixed';
+                            ta.style.opacity = '0';
+                            document.body.appendChild(ta);
+                            ta.select();
+                            document.execCommand('copy');
+                            document.body.removeChild(ta);
+                          }
+                          setPortalLinkCopied(true);
+                          setTimeout(() => setPortalLinkCopied(false), 2500);
+                          return;
+                        }
+                        setGeneratingPortalLink(true);
+                        setPortalLinkError(false);
+                        const link = await generatePortalLinkRequest(dataUserId, client.id);
+                        setGeneratingPortalLink(false);
+                        if (!link) {
+                          setPortalLinkError(true);
+                          setTimeout(() => setPortalLinkError(false), 3000);
+                          return;
+                        }
+                        setPortalLink(link);
+                        try {
+                          await navigator.clipboard.writeText(link);
+                        } catch {
+                          const ta = document.createElement('textarea');
+                          ta.value = link;
+                          ta.style.position = 'fixed';
+                          ta.style.opacity = '0';
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand('copy');
+                          document.body.removeChild(ta);
+                        }
+                        setPortalLinkCopied(true);
+                        setTimeout(() => setPortalLinkCopied(false), 2500);
+                      }}
+                      disabled={generatingPortalLink}
+                      className="px-4 py-2.5 bg-white/20 hover:bg-white/30 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm disabled:opacity-50"
+                    >
+                      <Link2 className="w-4 h-4" />
+                      {generatingPortalLink ? 'Generando...' : portalLinkError ? 'Error al generar' : portalLinkCopied ? '¡Enlace copiado!' : portalLink ? 'Copiar enlace portal' : 'Portal cliente'}
+                    </button>
+                  )}
+                  {portalLink && (
+                    <a
+                      href={portalLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white/80 rounded-lg transition-colors flex items-center gap-1.5 text-xs"
+                    >
+                      <ExternalLink className="w-3 h-3" /> Ver portal
+                    </a>
+                  )}
+                </>
               )}
               <button
                 onClick={() => setShowDeleteClientModal(true)}
@@ -2733,12 +3068,58 @@ export function ClientDetail() {
         </div>
 
         {/* Tabs */}
-        <Tabs
-          tabs={tabsConfig}
-          activeTab={activeTab}
-          onChange={setActiveTab}
-        />
+        {isDeliveryBusiness ? (
+          <div
+            className="flex overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {tabsConfig.map((tab, i) => {
+              const unlocked = isDeliveryTabUnlocked(tab.id);
+              const isActive = activeTab === tab.id;
+              const feat = deliveryTabFeature(tab.id);
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  title={feat && !unlocked ? `Plan ${clientPlan.requiredPlanLabel(feat)}` : undefined}
+                  onClick={() => handleDetailTabChange(tab.id)}
+                  className={`relative flex shrink-0 items-center gap-2 whitespace-nowrap px-5 py-3.5 text-sm font-semibold transition-colors ${
+                    i !== 0 ? 'border-l border-gray-100 dark:border-gray-800' : ''
+                  } ${
+                    isActive
+                      ? unlocked
+                        ? 'text-gray-900 dark:text-gray-100'
+                        : 'text-gray-500 dark:text-gray-400'
+                      : unlocked
+                        ? 'text-gray-400 hover:text-gray-600 dark:text-gray-500'
+                        : 'text-gray-400 opacity-70 dark:text-gray-600'
+                  }`}
+                >
+                  {tab.label}
+                  {tab.count !== undefined && (
+                    <span className={`rounded-full px-1.5 py-0.5 text-xs font-bold ${
+                      isActive && unlocked ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'
+                    }`}>
+                      {tab.count}
+                    </span>
+                  )}
+                  {!unlocked && <Lock className="h-3.5 w-3.5" />}
+                  {isActive && unlocked && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-t-full bg-amber-500" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <Tabs
+            tabs={tabsConfig}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+        )}
 
+        {(!isDeliveryBusiness || detailSearchableTabs.includes(activeTab)) && (
         <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-3 shadow-sm md:px-4">
           <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -2747,7 +3128,9 @@ export function ClientDetail() {
               value={detailListSearch}
               onChange={(e) => setDetailListSearch(e.target.value)}
               placeholder={
-                activeTab === 'presupuestos'
+                activeTab === 'pedidos'
+                  ? 'Buscar pedidos por número, tienda o estado…'
+                  : activeTab === 'presupuestos'
                   ? 'Buscar presupuestos por título o número…'
                   : activeTab === 'promociones'
                     ? 'Buscar promociones por nombre o código…'
@@ -2761,18 +3144,15 @@ export function ClientDetail() {
                             ? 'Buscar en el historial de actividad…'
                             : 'Buscar (disponible en listas: presupuestos, facturas, promociones…)'
               }
-              disabled={
-                !['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab)
-              }
+              disabled={!detailSearchableTabs.includes(activeTab)}
               className={`h-11 w-full rounded-xl border-2 border-gray-200 bg-white pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 ${
-                !['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab)
+                !detailSearchableTabs.includes(activeTab)
                   ? 'cursor-not-allowed opacity-60'
                   : ''
               }`}
               aria-label="Buscar en la pestaña actual"
             />
-            {detailListSearch &&
-            ['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'].includes(activeTab) ? (
+            {detailListSearch && detailSearchableTabs.includes(activeTab) ? (
               <button
                 type="button"
                 onClick={() => setDetailListSearch('')}
@@ -2784,9 +3164,25 @@ export function ClientDetail() {
             ) : null}
           </div>
         </div>
+        )}
 
         {/* Tab Content */}
         {activeTab === 'resumen' && renderResumenTab()}
+        {activeTab === 'pedidos' && isDeliveryBusiness && (
+          isDeliveryTabUnlocked('pedidos') ? (
+            <DeliveryClientPedidosTab
+              orders={deliveryOrders}
+              loading={loadingDeliveryOrders}
+              search={detailListSearch}
+              onNewOrder={goToDeliveryTpv}
+              canExpandDetalle={clientPlan.canExpandPedidoDetalle}
+              maxOrdersVisible={clientPlan.isBasicPlan ? clientPlan.maxOrdersVisible : undefined}
+              totalOrdersCount={deliveryOrders.length}
+            />
+          ) : (
+            <ClientDetailLockedPanel featureId="ficha_pedidos" planTier={clientPlan.planTier} />
+          )
+        )}
         {activeTab === 'datos' && renderDatosTab()}
         {activeTab === 'contactos' && renderContactosTab()}
         {activeTab === 'presupuestos' && renderPresupuestosTab()}
@@ -2803,7 +3199,7 @@ export function ClientDetail() {
         onClose={() => setShowCreateContractModal(false)}
         client={client}
         vehicles={vehicles || []}
-        userId={authUser?.user_id || authUser?.id || ''}
+        userId={dataUserId || authUser?.id || ''}
         responsibleName={authUser?.fullName || ''}
         companyName={authUser?.companyName || 'Vertial'}
         onSubmit={() => setShowCreateContractModal(false)}

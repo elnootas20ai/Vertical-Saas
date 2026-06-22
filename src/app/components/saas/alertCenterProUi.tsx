@@ -1,10 +1,11 @@
-import type { ReactNode, ComponentType } from 'react';
+import type { ReactNode, ComponentType, MouseEvent } from 'react';
 import type { AlertHistoryEntry, AlertPriority, AlertRecord, AlertSource, AlertSummary } from '../../lib/alertCenterApi';
 import { SOURCE_LABELS, SOURCE_COLORS, PRIORITY_LABELS, countAlertsForDepartment, formatHistoryEntry, HISTORY_ACTION_LABELS } from '../../lib/alertCenterApi';
 import type { BusinessAlertDepartment } from '../../lib/alertDepartments';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ArrowRight, Clock, Crown, History, Inbox, Settings2 } from 'lucide-react';
+import { ArrowRight, CheckCircle, Clock, Crown, Eye, History, Inbox, Settings2 } from 'lucide-react';
+import { alertHasNavigateTarget, getAlertResolveLabel } from '../../lib/alertActions';
 
 /** Gradiente premium Plan PRO — violeta → púrpura → dorado */
 export const PRO_PLAN_GRADIENT = 'bg-gradient-to-r from-violet-600 via-purple-600 to-amber-500';
@@ -188,14 +189,25 @@ export function AlertProDeptTabs({
 export function AlertProRow({
   alert,
   onClick,
+  onNavigate,
+  onMarkSeen,
+  onResolve,
   showArrow = true,
+  showActions = false,
 }: {
   alert: AlertRecord;
   onClick?: () => void;
+  onNavigate?: (route: string) => void;
+  onMarkSeen?: (alertId: string) => void;
+  onResolve?: (alertId: string) => void;
   showArrow?: boolean;
+  /** Muestra botones «Ir a resolver» / «Resolver» siempre visibles (drawer y móvil). */
+  showActions?: boolean;
 }) {
   const sourceColor = SOURCE_COLORS[alert.source as AlertSource] || '#71717a';
   const accent = PRIORITY_ACCENT[alert.priority] || PRIORITY_ACCENT.medium;
+  const canNavigate = alertHasNavigateTarget(alert);
+  const resolveLabel = getAlertResolveLabel(alert);
   const timeAgo = (() => {
     try {
       return formatDistanceToNow(new Date(alert.createdAt), { addSuffix: true, locale: es });
@@ -204,50 +216,100 @@ export function AlertProRow({
     }
   })();
 
+  const stop = (e: MouseEvent) => e.stopPropagation();
+
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick?.();
-      }}
-      className={`group w-full text-left rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 pl-3.5 transition-all hover:border-zinc-300 hover:shadow-md dark:hover:border-zinc-700 border-l-[3px] ${accent} ${
+    <div
+      className={`rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 pl-3.5 transition-all border-l-[3px] ${accent} ${
         alert.status === 'new' ? 'ring-1 ring-amber-500/20' : ''
       } ${alert.status === 'resolved' ? 'opacity-55' : ''}`}
     >
-      <div className="flex items-start gap-3">
-        <div
-          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: `${sourceColor}14` }}
-        >
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: sourceColor }} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-1">{alert.title}</p>
-            {alert.status === 'new' && (
-              <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                Nueva
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+        className="group w-full text-left"
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+            style={{ backgroundColor: `${sourceColor}14` }}
+          >
+            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: sourceColor }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-1">{alert.title}</p>
+              {alert.status === 'new' && (
+                <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  Nueva
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 line-clamp-2">{alert.message}</p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+              <span className="font-medium text-zinc-500">{PRIORITY_LABELS[alert.priority]}</span>
+              <span className="font-medium" style={{ color: sourceColor }}>
+                {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
               </span>
-            )}
+              <span className="ml-auto flex items-center gap-1 text-zinc-400">
+                <Clock className="h-3 w-3" />
+                {timeAgo}
+              </span>
+            </div>
           </div>
-          <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 line-clamp-2">{alert.message}</p>
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-            <span className="font-medium text-zinc-500">{PRIORITY_LABELS[alert.priority]}</span>
-            <span className="font-medium" style={{ color: sourceColor }}>
-              {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
-            </span>
-            <span className="ml-auto flex items-center gap-1 text-zinc-400">
-              <Clock className="h-3 w-3" />
-              {timeAgo}
-            </span>
-          </div>
+          {showArrow && !showActions && (
+            <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-600 dark:group-hover:text-zinc-300" />
+          )}
         </div>
-        {showArrow && (
-          <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-600 dark:group-hover:text-zinc-300" />
-        )}
-      </div>
-    </button>
+      </button>
+
+      {showActions && alert.status !== 'resolved' && (
+        <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          {canNavigate && alert.route && (
+            <button
+              type="button"
+              onClick={(e) => {
+                stop(e);
+                onNavigate?.(alert.route!);
+              }}
+              className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+            >
+              <ArrowRight className="h-3.5 w-3.5" />
+              {resolveLabel}
+            </button>
+          )}
+          {alert.status === 'new' && onMarkSeen && (
+            <button
+              type="button"
+              onClick={(e) => {
+                stop(e);
+                onMarkSeen(alert.id);
+              }}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Vista
+            </button>
+          )}
+          {onResolve && (
+            <button
+              type="button"
+              onClick={(e) => {
+                stop(e);
+                onResolve(alert.id);
+              }}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+            >
+              <CheckCircle className="h-3.5 w-3.5" />
+              Resolver
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

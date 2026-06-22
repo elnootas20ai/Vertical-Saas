@@ -15,8 +15,34 @@ import {
   findAccountByUserId,
   resolveDataOwnerUserId,
   logAccountActivity,
+  listBusinessesByUser,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
+
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+async function filterFinanceForBusinessScope(req, dataUserId, businessId, movements) {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return movements;
+
+  let businessCount = 1;
+  try {
+    const businesses = await listBusinessesByUser(req, dataUserId);
+    businessCount = Math.max(1, (businesses || []).length);
+  } catch {
+    businessCount = 1;
+  }
+
+  return movements.filter((doc) => {
+    const docBid = normalizeBusinessScopeId(doc.businessId || doc.business_id);
+    if (docBid === bid) return true;
+    // Legacy: movimientos sin empresa solo visibles si la cuenta tiene una sola empresa.
+    if (!docBid && businessCount <= 1) return true;
+    return false;
+  });
+}
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -80,7 +106,13 @@ export async function listFinanceMovements(req, res) {
     }
 
     const raw = await listFinanceByUser(req, dataUserId);
-    const { items, meta } = applyQueryOptions(raw.map(sanitizeFinance), req.query);
+    const scoped = await filterFinanceForBusinessScope(
+      req,
+      dataUserId,
+      req.query.businessId,
+      raw,
+    );
+    const { items, meta } = applyQueryOptions(scoped.map(sanitizeFinance), req.query);
     return res.json({ ok: true, movements: items, meta });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar movimientos' });

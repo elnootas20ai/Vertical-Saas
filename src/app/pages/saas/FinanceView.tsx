@@ -43,6 +43,7 @@ import {
 import { PeriodBadge } from '../../components/ui/PeriodBadge';
 import { useAuth } from '../../context/AuthContext';
 import { useFinanceUserId } from '../../hooks/useFinanceUserId';
+import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
 import { createFinanceMovementInCouch, listFinanceMovements } from '../../lib/financeApi';
 import {
   buildFinanceReference,
@@ -1136,6 +1137,7 @@ export function Finance() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const financeUserId = useFinanceUserId();
+  const { businessId, businessName, isMultiBusiness } = useActiveBusinessScope();
   const [activeTab, setActiveTab] = useState<FinanceTab>('overview');
   const [txFilter, setTxFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [showModal, setShowModal] = useState(false);
@@ -1177,14 +1179,14 @@ export function Finance() {
     setIsLoading(true);
     setError('');
     try {
-      const nextMovements = await listFinanceMovements(financeUserId);
+      const nextMovements = await listFinanceMovements(financeUserId, businessId || undefined);
       setMovements(nextMovements);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'No se pudieron cargar los movimientos');
     } finally {
       setIsLoading(false);
     }
-  }, [financeUserId]);
+  }, [financeUserId, businessId]);
 
   useEffect(() => {
     void loadMovements();
@@ -1196,7 +1198,7 @@ export function Finance() {
     try {
       const currentMovements = movements.length > 0
         ? movements
-        : await listFinanceMovements(financeUserId);
+        : await listFinanceMovements(financeUserId, businessId || undefined);
       const data = await syncPaymentRemindersFromMovements(financeUserId, currentMovements);
       await syncClientInvoicePaymentReminders(financeUserId).catch(() => {});
       setReminders(await listPaymentReminders(financeUserId));
@@ -1210,7 +1212,7 @@ export function Finance() {
     } finally {
       setRemindersLoading(false);
     }
-  }, [financeUserId, movements]);
+  }, [financeUserId, businessId, movements]);
 
   useEffect(() => {
     if (activeTab === 'reminders') void loadReminders();
@@ -1388,6 +1390,8 @@ export function Finance() {
         ...draft,
         user_id: financeUserId,
         companyName: user?.companyName || '',
+        businessId: businessId || undefined,
+        businessName: businessName || undefined,
       });
       setMovements((current) => [created, ...current]);
     } catch (error) {
@@ -1466,7 +1470,14 @@ export function Finance() {
   const isEmpty = !isLoading && movements.length === 0;
 
   return (
-    <Layout title={t('finance.title')} subtitle={t('finance.subtitle')}>
+    <Layout
+      title={t('finance.title')}
+      subtitle={
+        isMultiBusiness && businessName
+          ? `${t('finance.subtitle')} · ${businessName}`
+          : t('finance.subtitle')
+      }
+    >
       <div className="space-y-4">
         <div
           className="flex bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-x-auto [&::-webkit-scrollbar]:hidden"
@@ -1509,6 +1520,17 @@ export function Finance() {
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {isMultiBusiness && businessName && (
+          <div className="rounded-2xl border border-teal-200 bg-gradient-to-r from-teal-50 to-emerald-50 px-4 py-3 dark:border-teal-800 dark:from-teal-950/40 dark:to-emerald-950/30">
+            <p className="text-sm font-semibold text-teal-900 dark:text-teal-100">
+              Finanzas de <span className="text-teal-700 dark:text-teal-300">{businessName}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-teal-700/90 dark:text-teal-300">
+              Ingresos y gastos filtrados por la empresa seleccionada arriba. Los movimientos nuevos se guardan en esta empresa.
+            </p>
           </div>
         )}
 

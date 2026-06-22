@@ -35,6 +35,8 @@ import {
   shouldIncludeDocumentAlerts,
   isSyntheticDocumentAlert,
 } from '../../lib/documentAlertsApi';
+import { getAlertResolveLabel, alertHasNavigateTarget } from '../../lib/alertActions';
+import { toast } from 'sonner';
 
 interface Props {
   isOpen: boolean;
@@ -210,19 +212,74 @@ function AlertCenterDrawer({
     if (isOpen && businessId) void loadAlerts(activeDept);
   }, [activeDept, isOpen, businessId, loadAlerts]);
 
-  const handleAlertClick = async (alert: AlertRecord) => {
-    if (alert.status === 'new' && !isSyntheticDocumentAlert(alert.id)) {
+  const handleNavigate = useCallback(
+    (route: string) => {
+      if (route.startsWith('/')) {
+        navigate(route);
+      } else {
+        navigate(`/saas/${route.replace(/^\//, '')}`);
+      }
+      onClose();
+    },
+    [navigate, onClose],
+  );
+
+  const applyLocalStatus = useCallback(
+    (alertId: string, status: 'seen' | 'resolved') => {
+      setAlerts((prev) =>
+        status === 'resolved'
+          ? prev.filter((a) => a.id !== alertId)
+          : prev.map((a) => (a.id === alertId ? { ...a, status } : a)),
+      );
+    },
+    [],
+  );
+
+  const handleMarkSeen = useCallback(
+    async (alertId: string) => {
+      if (isSyntheticDocumentAlert(alertId)) {
+        applyLocalStatus(alertId, 'seen');
+        await reloadSummary();
+        return;
+      }
       try {
-        await updateAlertStatus(businessId, alert.id, 'seen');
-      } catch { /* silent */ }
-    }
+        await updateAlertStatus(businessId, alertId, 'seen');
+        applyLocalStatus(alertId, 'seen');
+        await reloadSummary();
+      } catch {
+        toast.error('No se pudo marcar como vista');
+      }
+    },
+    [businessId, applyLocalStatus, reloadSummary],
+  );
+
+  const handleResolve = useCallback(
+    async (alertId: string) => {
+      if (isSyntheticDocumentAlert(alertId)) {
+        applyLocalStatus(alertId, 'resolved');
+        toast.success('Alerta archivada');
+        await reloadSummary();
+        return;
+      }
+      try {
+        await updateAlertStatus(businessId, alertId, 'resolved');
+        applyLocalStatus(alertId, 'resolved');
+        toast.success('Alerta resuelta');
+        await reloadSummary();
+      } catch {
+        toast.error('No se pudo resolver la alerta');
+      }
+    },
+    [businessId, applyLocalStatus, reloadSummary],
+  );
+
+  const handleAlertClick = async (alert: AlertRecord) => {
     if (alert.route) {
-      navigate(alert.route);
-      onClose();
-    } else {
-      navigate('/saas/alerts');
-      onClose();
+      handleNavigate(alert.route);
+      return;
     }
+    navigate('/saas/alerts');
+    onClose();
   };
 
   const markAllSeen = async () => {
@@ -309,7 +366,16 @@ function AlertCenterDrawer({
             <AlertProEmpty label={`Sin alertas en ${departments.find((d) => d.id === activeDept)?.label || 'esta área'}`} />
           ) : (
             alerts.map((alert) => (
-              <AlertProRow key={alert.id} alert={alert} onClick={() => void handleAlertClick(alert)} />
+              <AlertProRow
+                key={alert.id}
+                alert={alert}
+                showActions
+                showArrow={false}
+                onClick={() => void handleAlertClick(alert)}
+                onNavigate={handleNavigate}
+                onMarkSeen={(id) => void handleMarkSeen(id)}
+                onResolve={(id) => void handleResolve(id)}
+              />
             ))
           )}
         </div>
@@ -322,7 +388,37 @@ function AlertCenterDrawer({
               className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 py-2.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
             >
               <Eye className="w-4 h-4" />
-              Marcar visibles como leídas
+              Marcar todas como vistas
+            </button>
+          )}
+          {alerts.some((a) => a.status !== 'resolved') && (
+            <button
+              type="button"
+              onClick={async () => {
+                const pending = alerts.filter((a) => a.status !== 'resolved');
+                const realIds = pending.filter((a) => !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+                const syntheticIds = pending.filter((a) => isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+                if (syntheticIds.length) {
+                  setAlerts((prev) => prev.filter((a) => !syntheticIds.includes(a.id)));
+                }
+                if (realIds.length) {
+                  try {
+                    await bulkUpdateAlertStatus(businessId, realIds, 'resolved');
+                    setAlerts((prev) => prev.filter((a) => !realIds.includes(a.id)));
+                    toast.success(`${realIds.length} alertas resueltas`);
+                    await reloadSummary();
+                  } catch {
+                    toast.error('Error al resolver alertas');
+                  }
+                } else if (syntheticIds.length) {
+                  toast.success('Alertas archivadas');
+                  await reloadSummary();
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 py-2.5 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition"
+            >
+              <CheckCircle className="w-4 h-4" />
+              Resolver todas visibles
             </button>
           )}
           <button

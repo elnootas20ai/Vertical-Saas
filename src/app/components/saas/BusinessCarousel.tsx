@@ -2,6 +2,8 @@ import { useRef, useCallback, useEffect, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
+  Lock,
   MapPin,
   Users,
 } from 'lucide-react';
@@ -61,12 +63,23 @@ interface BusinessCarouselProps {
   businesses: Business[];
   currentBusinessId: string | undefined;
   onSwitchBusiness: (businessId: string) => void;
+  /** Primera pestaña: vista portfolio (todas las empresas). */
+  showPortfolioTab?: boolean;
+  portfolioViewActive?: boolean;
+  portfolioTabLocked?: boolean;
+  onSelectPortfolioView?: () => void;
+  onPortfolioLockedClick?: () => void;
 }
 
 export function BusinessCarousel({
   businesses,
   currentBusinessId,
   onSwitchBusiness,
+  showPortfolioTab = false,
+  portfolioViewActive = false,
+  portfolioTabLocked = false,
+  onSelectPortfolioView,
+  onPortfolioLockedClick,
 }: BusinessCarouselProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -93,16 +106,21 @@ export function BusinessCarousel({
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !currentBusinessId) return;
-    const activeCard = el.querySelector<HTMLElement>(`[data-bid="${currentBusinessId}"]`);
-    if (activeCard) {
-      const left = activeCard.offsetLeft - el.offsetLeft - 16;
-      const isOutOfView = left < el.scrollLeft || left + activeCard.offsetWidth > el.scrollLeft + el.clientWidth;
+    if (!el) return;
+    const scrollTarget = portfolioViewActive
+      ? el.querySelector<HTMLElement>('[data-bid="__portfolio__"]')
+      : currentBusinessId
+        ? el.querySelector<HTMLElement>(`[data-bid="${currentBusinessId}"]`)
+        : null;
+    if (scrollTarget) {
+      const left = scrollTarget.offsetLeft - el.offsetLeft - 16;
+      const isOutOfView =
+        left < el.scrollLeft || left + scrollTarget.offsetWidth > el.scrollLeft + el.clientWidth;
       if (isOutOfView) {
         el.scrollTo({ left: left - 8, behavior: 'smooth' });
       }
     }
-  }, [currentBusinessId]);
+  }, [currentBusinessId, portfolioViewActive]);
 
   const scroll = useCallback((direction: 'left' | 'right') => {
     const el = scrollRef.current;
@@ -127,8 +145,82 @@ export function BusinessCarousel({
         className="flex gap-2.5 overflow-x-auto snap-x snap-mandatory pb-1 px-1 scroll-smooth"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
       >
+        {showPortfolioTab && (onSelectPortfolioView || portfolioTabLocked) ? (
+          <button
+            type="button"
+            data-bid="__portfolio__"
+            onClick={() => {
+              if (portfolioTabLocked) {
+                onPortfolioLockedClick?.();
+                return;
+              }
+              onSelectPortfolioView?.();
+            }}
+            className={`snap-start flex-shrink-0 w-[200px] p-3.5 rounded-xl border-2 transition-all duration-200 text-left group/card hover:shadow-md hover:-translate-y-0.5 ${
+              portfolioTabLocked
+                ? 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 opacity-90 cursor-pointer'
+                : portfolioViewActive
+                  ? 'border-indigo-400 bg-indigo-50/70 dark:bg-indigo-950/30 shadow-sm shadow-indigo-200/50 dark:shadow-indigo-900/20 ring-1 ring-indigo-200 dark:ring-indigo-800'
+                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-indigo-200 dark:hover:border-indigo-700'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 mb-2">
+              <div
+                className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                  portfolioTabLocked
+                    ? 'bg-gray-400 dark:bg-gray-600'
+                    : portfolioViewActive
+                      ? 'bg-indigo-600 dark:bg-indigo-500'
+                      : 'bg-gradient-to-br from-indigo-600 to-violet-600'
+                }`}
+              >
+                {portfolioTabLocked ? (
+                  <Lock className="w-4 h-4 text-white" />
+                ) : (
+                  <LayoutGrid className="w-4 h-4 text-white" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p
+                  className={`text-xs font-bold truncate transition-colors ${
+                    portfolioTabLocked
+                      ? 'text-gray-500 dark:text-gray-400'
+                      : portfolioViewActive
+                        ? 'text-indigo-700 dark:text-indigo-300'
+                        : 'text-gray-900 dark:text-gray-100 group-hover/card:text-indigo-700 dark:group-hover/card:text-indigo-300'
+                  }`}
+                >
+                  Visión general
+                </p>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate">
+                  {portfolioTabLocked ? 'Requiere plan Pro' : 'Todas las empresas'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span
+                className={`px-1.5 py-0.5 text-[9px] font-semibold rounded-md ${
+                  portfolioTabLocked
+                    ? 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                    : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300'
+                }`}
+              >
+                {portfolioTabLocked ? 'Pro' : 'Portfolio'}
+              </span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                {businesses.length} empresas
+              </span>
+              {portfolioViewActive && !portfolioTabLocked && (
+                <span className="ml-auto px-1.5 py-0.5 text-[9px] font-bold rounded-md bg-indigo-600 text-white">
+                  Activa
+                </span>
+              )}
+            </div>
+          </button>
+        ) : null}
+
         {businesses.map((business) => {
-          const isActive = currentBusinessId === business.business_id;
+          const isActive = !portfolioViewActive && currentBusinessId === business.business_id;
           const initials = business.name.slice(0, 2).toUpperCase();
           const typeLabel =
             BUSINESS_TYPE_LABELS[business.businessType] || business.businessType;

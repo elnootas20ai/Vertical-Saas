@@ -23,9 +23,16 @@ import {
   sanitizeClientPromotion,
   listClientPromotionsByClient,
   searchClientsByPhone,
+  listDeliveryOrdersByUser,
 } from '../services/couchdb.js';
 import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
+import {
+  deliveryOrderMatchesClient,
+  deliveryOrderRevenue,
+  isCancelledDeliveryOrder,
+} from '../shared/clients/deliveryClientMatch.js';
+import { syncClientFromDeliveryOrders } from '../services/deliveryClientSync.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -234,12 +241,16 @@ export async function getClientDetail(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const client = await ensureClientOwner(req, userId, clientId);
+    let client = await ensureClientOwner(req, userId, clientId);
     if (!client) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
 
-    const [salesDocs, invoiceDocs] = await Promise.all([
+    await syncClientFromDeliveryOrders(req, userId, clientId).catch(() => null);
+    client = (await ensureClientOwner(req, userId, clientId)) || client;
+
+    const [salesDocs, invoiceDocs, deliveryOrders] = await Promise.all([
       ensureDatabase(req, getSalesDbName()).then(() => getAllDocuments(req, getSalesDbName())),
       ensureDatabase(req, getInvoicesDbName()).then(() => getAllDocuments(req, getInvoicesDbName())),
+      listDeliveryOrdersByUser(req, userId),
     ]);
 
     const clientSales = salesDocs.filter(
@@ -248,19 +259,49 @@ export async function getClientDetail(req, res) {
     const clientInvoices = invoiceDocs.filter(
       (i) => i?.type === 'client_invoice' && !i?.deletedAt && i?.user_id === userId && i?.clientId === clientId,
     );
+    const clientDeliveryOrders = deliveryOrders.filter(
+      (o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o),
+    );
 
     const totalInvoiced = clientInvoices.reduce((s, inv) => s + Number(inv.total || 0), 0);
     const totalSalesRevenue = clientSales.reduce((s, sale) => s + Number(sale.totalPrice || 0), 0);
-    const totalOrders = clientSales.length + clientInvoices.length;
-    const totalRevenue = totalSalesRevenue + totalInvoiced;
+    const totalDeliveryRevenue = clientDeliveryOrders.reduce((s, order) => s + deliveryOrderRevenue(order), 0);
+    const totalOrders = clientSales.length + clientInvoices.length + clientDeliveryOrders.length;
+    const totalRevenue = totalSalesRevenue + totalInvoiced + totalDeliveryRevenue;
     const avgTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-    const allDates = [...clientSales, ...clientInvoices]
-      .map((r) => r.date || r.createdAt || '')
+    const allDates = [...clientSales, ...clientInvoices, ...clientDeliveryOrders]
+      .map((r) => r.date || r.createdAt || r.deliveredAt || '')
       .filter(Boolean)
       .sort();
 
     const lastPurchaseDate = allDates.length > 0 ? allDates[allDates.length - 1] : null;
+
+    const recentOrders = clientDeliveryOrders
+      .slice()
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 10)
+      .map((order) => ({
+        id: order._id,
+        orderNumber: order.orderNumber || order._id,
+        createdAt: order.createdAt || '',
+        status: order.status || '',
+        deliveryType: order.deliveryType || '',
+        channel: order.channel || '',
+        totalAmount: deliveryOrderRevenue(order),
+        salesPointName: order.salesPointName || '',
+        itemCount: Array.isArray(order.items) ? order.items.length : 0,
+        paymentStatus: order.paymentStatus || '',
+        customerAddress: order.customerAddress || '',
+      }));
+
+    const deliveryTypeCounts = {};
+    for (const order of clientDeliveryOrders) {
+      const key = String(order.deliveryType || 'otro');
+      deliveryTypeCounts[key] = (deliveryTypeCounts[key] || 0) + 1;
+    }
+    const favoriteDeliveryType = Object.entries(deliveryTypeCounts)
+      .sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
     return res.json({
       ok: true,
@@ -272,6 +313,10 @@ export async function getClientDetail(req, res) {
         lastPurchase: lastPurchaseDate,
         totalSalesRevenue: Number(totalSalesRevenue.toFixed(2)),
         totalInvoicesRevenue: Number(totalInvoiced.toFixed(2)),
+        totalDeliveryRevenue: Number(totalDeliveryRevenue.toFixed(2)),
+        deliveryOrders: clientDeliveryOrders.length,
+        favoriteDeliveryType,
+        recentOrders,
       },
     });
   } catch (error) {
@@ -661,10 +706,13 @@ export async function getClientActivity(req, res) {
     const client = await ensureClientOwner(req, userId, clientId);
     if (!client) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
 
-    const [salesDocs, invoiceDocs, notesDocs] = await Promise.all([
+    await syncClientFromDeliveryOrders(req, userId, clientId).catch(() => null);
+
+    const [salesDocs, invoiceDocs, notesDocs, deliveryOrders] = await Promise.all([
       ensureDatabase(req, getSalesDbName()).then(() => getAllDocuments(req, getSalesDbName())),
       ensureDatabase(req, getInvoicesDbName()).then(() => getAllDocuments(req, getInvoicesDbName())),
       listClientNotesByClient(req, userId, clientId),
+      listDeliveryOrdersByUser(req, userId),
     ]);
 
     const clientSales = salesDocs.filter(
@@ -673,8 +721,25 @@ export async function getClientActivity(req, res) {
     const clientInvoices = invoiceDocs.filter(
       (i) => i?.type === 'client_invoice' && !i?.deletedAt && i?.user_id === userId && i?.clientId === clientId,
     );
+    const clientDeliveryOrders = deliveryOrders.filter(
+      (o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o),
+    );
 
     const activities = [];
+
+    for (const order of clientDeliveryOrders) {
+      const status = String(order.status || '').toLowerCase();
+      activities.push({
+        id: order._id,
+        tipo: 'pedido',
+        titulo: `Pedido #${order.orderNumber || order._id}`,
+        descripcion: [order.deliveryType, order.salesPointName].filter(Boolean).join(' · '),
+        fecha: order.createdAt || order.updatedAt,
+        referencia: order.orderNumber || order._id,
+        monto: deliveryOrderRevenue(order),
+        estado: status === 'entregado' ? 'completado' : status === 'cancelled' || status === 'cancelado' ? 'cancelado' : 'pendiente',
+      });
+    }
 
     for (const sale of clientSales) {
       activities.push({
@@ -716,11 +781,12 @@ export async function getClientActivity(req, res) {
     activities.sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')));
 
     const totalRevenue = clientSales.reduce((s, sale) => s + Number(sale.totalPrice || 0), 0)
-      + clientInvoices.reduce((s, inv) => s + Number(inv.total || 0), 0);
-    const totalOrders = clientSales.length + clientInvoices.length;
+      + clientInvoices.reduce((s, inv) => s + Number(inv.total || 0), 0)
+      + clientDeliveryOrders.reduce((s, order) => s + deliveryOrderRevenue(order), 0);
+    const totalOrders = clientSales.length + clientInvoices.length + clientDeliveryOrders.length;
     const avgTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-    const firstDate = [...clientSales, ...clientInvoices]
+    const firstDate = [...clientSales, ...clientInvoices, ...clientDeliveryOrders]
       .map((r) => r.createdAt || '').filter(Boolean).sort()[0];
     const relationshipDays = firstDate
       ? Math.max(0, Math.floor((Date.now() - new Date(firstDate).getTime()) / 86400000))
@@ -738,6 +804,7 @@ export async function getClientActivity(req, res) {
         avgTicket: Number(avgTicket.toFixed(2)),
         totalInvoices: clientInvoices.length,
         totalSales: clientSales.length,
+        totalDeliveryOrders: clientDeliveryOrders.length,
         totalNotes: notesDocs.length,
         relationshipDays,
       },

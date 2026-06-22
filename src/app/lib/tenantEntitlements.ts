@@ -24,7 +24,7 @@ export type { SubscriptionPlanTier };
 export const INCLUDED_BUSINESSES: Record<SubscriptionPlanTier, number> = {
   basic: 1,
   normal: 1,
-  pro: 1,
+  pro: 2,
 };
 
 /** Marcas comerciales (sin contar la marca por defecto «General»). */
@@ -59,6 +59,18 @@ export type TenantEntitlementAccess = TenantEntitlementLimits & {
   needsPointOfSaleAddon: boolean;
   needsCommercialBrandAddon: boolean;
 };
+
+export function getIncludedBusinessLimit(planTier: SubscriptionPlanTier): number {
+  return INCLUDED_BUSINESSES[planTier];
+}
+
+/** Vista portfolio (Visión general) solo con plan que permite 2+ empresas y al menos 2 creadas. */
+export function portfolioViewAllowed(
+  planTier: SubscriptionPlanTier,
+  businessCount: number,
+): boolean {
+  return businessCount > 1 && INCLUDED_BUSINESSES[planTier] > 1;
+}
 
 export function countCommercialBrands(brands: Array<{ isDefault?: boolean }>): number {
   return brands.filter((b) => !b.isDefault).length;

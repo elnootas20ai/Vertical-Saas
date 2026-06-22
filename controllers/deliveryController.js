@@ -61,6 +61,7 @@ import {
   sanitizeRepartoConfig,
   ensureDatabase,
   getDocument,
+  getClientsDbName,
   putDocument,
   getAllDocuments,
   bulkPutDocuments,
@@ -108,6 +109,11 @@ import {
 } from '../services/deliveryAlertStatusUtils.js';
 import { notifyManagersOrderCancelled } from '../services/deliveryOrderNotifications.js';
 import logger from '../services/logger.js';
+import {
+  deliveryOrderMatchesClient,
+  isCancelledDeliveryOrder,
+} from '../shared/clients/deliveryClientMatch.js';
+import { syncClientAfterDeliveryOrder } from '../services/deliveryClientSync.js';
 
 /** Reglas mínimas para operar TPV / delivery con un PDV identificable. */
 function validatePointOfSaleTerminals(terminals) {
@@ -459,6 +465,7 @@ export async function createDeliveryOrder(req, res) {
     });
     const sanitized = sanitizeDeliveryOrder(savedDoc);
     broadcastDeliveryOrderSse(account, userId, 'created', savedDoc);
+    syncClientAfterDeliveryOrder(req, userId, savedDoc).catch(() => null);
     triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
     return res.status(201).json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
@@ -506,6 +513,7 @@ export async function updateDeliveryOrder(req, res) {
       oldStatus: existing.status,
       updatedBy: account.fullName || userId,
     });
+    syncClientAfterDeliveryOrder(req, userId, { ...doc, _rev: saved.rev }).catch(() => null);
     if (doc.status !== existing.status) {
       triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: doc.status, previousStatus: existing.status }).catch(() => null);
     }
@@ -1185,12 +1193,26 @@ export async function clientOrderHistory(req, res) {
     if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const clientsDb = getClientsDbName();
+    await ensureDatabase(req, clientsDb);
+    let client = null;
+    try {
+      client = await getDocument(req, clientsDb, clientId);
+    } catch {
+      client = null;
+    }
+    if (!client || client.type !== 'client' || client.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+    }
+
     let orders = await listDeliveryOrdersByUser(req, userId);
     orders = orders
+      .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o))
       .map(sanitizeDeliveryOrder)
-      .filter((o) => o && o.clientId === clientId)
+      .filter(Boolean)
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-    return res.json({ ok: true, orders });
+    return res.json({ ok: true, orders, total: orders.length });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al obtener historial de cliente' });
   }

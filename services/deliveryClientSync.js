@@ -1,0 +1,117 @@
+import {
+  getClientsDbName,
+  getDeliveryDbName,
+  getDocument,
+  putDocument,
+  buildClientDocument,
+  buildDeliveryOrderDocument,
+  listDeliveryOrdersByUser,
+  searchClientsByPhone,
+  ensureDatabase,
+} from './couchdb.js';
+import {
+  deliveryOrderMatchesClient,
+  deliveryOrderRevenue,
+  isCancelledDeliveryOrder,
+} from '../shared/clients/deliveryClientMatch.js';
+
+const LOYALTY_THRESHOLDS = { silver: 100, gold: 300, platinum: 600 };
+
+function computeLoyaltyLevel(points) {
+  if (points >= LOYALTY_THRESHOLDS.platinum) return 'platinum';
+  if (points >= LOYALTY_THRESHOLDS.gold) return 'gold';
+  if (points >= LOYALTY_THRESHOLDS.silver) return 'silver';
+  return 'bronze';
+}
+
+function computeOrderFrequencyDays(dates) {
+  if (dates.length < 2) return 0;
+  const gaps = [];
+  for (let i = 1; i < dates.length; i += 1) {
+    gaps.push((new Date(dates[i]).getTime() - new Date(dates[i - 1]).getTime()) / 86400000);
+  }
+  return Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
+}
+
+export async function linkOrphanOrdersToClient(req, userId, clientId, clientPhone) {
+  const deliveryDb = getDeliveryDbName();
+  await ensureDatabase(req, deliveryDb);
+  const orders = await listDeliveryOrdersByUser(req, userId);
+  let linked = 0;
+  for (const order of orders) {
+    if (String(order?.clientId || '').trim() || isCancelledDeliveryOrder(order)) continue;
+    if (!deliveryOrderMatchesClient(order, clientId, clientPhone)) continue;
+    const updated = buildDeliveryOrderDocument(userId, { ...order, clientId }, order);
+    await putDocument(req, deliveryDb, updated._id, updated);
+    linked += 1;
+  }
+  return linked;
+}
+
+export async function syncClientFromDeliveryOrders(req, userId, clientId) {
+  const clientsDb = getClientsDbName();
+  await ensureDatabase(req, clientsDb);
+
+  let client;
+  try {
+    client = await getDocument(req, clientsDb, clientId);
+  } catch {
+    return null;
+  }
+  if (!client || client.type !== 'client' || client.user_id !== userId || client.deletedAt) {
+    return null;
+  }
+
+  await linkOrphanOrdersToClient(req, userId, clientId, client.phone);
+
+  const orders = (await listDeliveryOrdersByUser(req, userId))
+    .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o));
+
+  const totalSpent = orders.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
+  const dates = orders.map((o) => o.createdAt).filter(Boolean).sort();
+  const lastOrderDate = dates.length > 0 ? dates[dates.length - 1] : null;
+  const deliveredOrders = orders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
+  const deliveredRevenue = deliveredOrders.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
+  const points = Math.floor(deliveredRevenue);
+
+  const stats = {
+    totalOrders: orders.length,
+    lastOrderDate,
+    orderFrequencyDays: computeOrderFrequencyDays(dates),
+    favoriteAddressId: client.stats?.favoriteAddressId || null,
+    totalSpent: Number(totalSpent.toFixed(2)),
+    createdFrom: client.stats?.createdFrom || 'crm',
+  };
+
+  const loyalty = {
+    enrolled: Boolean(client.loyalty?.enrolled || orders.length > 0),
+    enrolledAt: client.loyalty?.enrolledAt || (orders.length > 0 ? (client.createdAt || new Date().toISOString()) : null),
+    points: client.loyalty?.points && client.loyalty.points > points ? client.loyalty.points : points,
+    level: computeLoyaltyLevel(client.loyalty?.points && client.loyalty.points > points ? client.loyalty.points : points),
+    totalVisits: deliveredOrders.length,
+  };
+
+  const doc = buildClientDocument(userId, { ...client, stats, loyalty }, client);
+  const saved = await putDocument(req, clientsDb, doc._id, doc);
+  return { ...doc, _rev: saved.rev };
+}
+
+export async function syncClientAfterDeliveryOrder(req, userId, order) {
+  if (!order) return null;
+
+  let clientId = String(order.clientId || '').trim();
+
+  if (!clientId && order.customerPhone) {
+    const matches = await searchClientsByPhone(req, userId, order.customerPhone, 5);
+    if (matches.length === 1) {
+      clientId = matches[0]._id || matches[0].id;
+      const deliveryDb = getDeliveryDbName();
+      await ensureDatabase(req, deliveryDb);
+      const linked = buildDeliveryOrderDocument(userId, { ...order, clientId }, order);
+      await putDocument(req, deliveryDb, linked._id, linked);
+    }
+  }
+
+  if (!clientId) return null;
+  return syncClientFromDeliveryOrders(req, userId, clientId);
+}

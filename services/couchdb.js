@@ -3328,6 +3328,23 @@ export function buildClientDocument(userId, data = {}, existing = null) {
     defaultPaymentMethod: normalizePaymentMethod(data.defaultPaymentMethod || existing?.defaultPaymentMethod),
     referralCode: String(data.referralCode || existing?.referralCode || '').trim(),
     referredByAffiliateId: String(data.referredByAffiliateId || existing?.referredByAffiliateId || '').trim(),
+    stats: {
+      totalOrders: Number(data.stats?.totalOrders ?? existing?.stats?.totalOrders ?? 0),
+      lastOrderDate: data.stats?.lastOrderDate ?? existing?.stats?.lastOrderDate ?? null,
+      orderFrequencyDays: Number(data.stats?.orderFrequencyDays ?? existing?.stats?.orderFrequencyDays ?? 0),
+      favoriteAddressId: data.stats?.favoriteAddressId ?? existing?.stats?.favoriteAddressId ?? null,
+      totalSpent: Number(data.stats?.totalSpent ?? existing?.stats?.totalSpent ?? 0),
+      createdFrom: data.stats?.createdFrom ?? existing?.stats?.createdFrom ?? 'crm',
+    },
+    loyalty: {
+      enrolled: Boolean(data.loyalty?.enrolled ?? existing?.loyalty?.enrolled),
+      enrolledAt: data.loyalty?.enrolledAt ?? existing?.loyalty?.enrolledAt ?? null,
+      points: Number(data.loyalty?.points ?? existing?.loyalty?.points ?? 0),
+      level: data.loyalty?.level ?? existing?.loyalty?.level ?? 'bronze',
+      totalVisits: Number(data.loyalty?.totalVisits ?? existing?.loyalty?.totalVisits ?? 0),
+    },
+    portalToken: data.portalToken ?? existing?.portalToken,
+    portalTokenGeneratedAt: data.portalTokenGeneratedAt ?? existing?.portalTokenGeneratedAt,
     createdAt: existing?.createdAt || (data.createdAt ? String(data.createdAt) : now),
     updatedAt: now,
   };

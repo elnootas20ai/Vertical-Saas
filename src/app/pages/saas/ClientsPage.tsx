@@ -65,13 +65,29 @@ import {
   Receipt, Download, Calendar, X, ArrowUp, ArrowDown, Check, ChevronDown,
   User, Trash2, Package, BadgePercent, Upload, Tag, Kanban, AlertTriangle, Store,
   RotateCcw, ClipboardList, Zap, ReceiptText, Droplets,
-  Settings2, Timer, Workflow, Save,
+  Settings2, Timer, Workflow, Save, Lock, ShoppingBag,
 } from 'lucide-react';
+import { useClientsListPlanAccess } from '../../hooks/useClientsListPlanAccess';
+import {
+  ClientsListPlanBanner,
+  DeliveryClientCardExtras,
+  DeliveryClientContactCell,
+  DeliveryClientLastOrderCell,
+  DeliveryClientLoyaltyCell,
+  DeliveryClientNameCell,
+  DeliveryClientOrdersCell,
+  DeliveryClientRowActions,
+  DeliveryClientSpentCell,
+  DeliveryClientTagsCell,
+  getClientDeliveryStats,
+} from '../../components/saas/crm/ClientsDeliveryListUi';
 
 // ─── Column definitions ───────────────────────────────────────────────────────
 
 type LeadColId = 'nombre' | 'estado' | 'vehiculo' | 'responsable' | 'fecha';
-type ClientColId = 'nombre' | 'estado' | 'direccion' | 'ciudad' | 'responsable' | 'docs';
+type ClientColId =
+  | 'nombre' | 'estado' | 'direccion' | 'ciudad' | 'responsable' | 'docs'
+  | 'contacto' | 'pedidos' | 'gasto' | 'ultimo' | 'tags' | 'loyalty';
 
 const LEAD_COL_DEFS: ColumnDef<LeadColId>[] = [
   { id: 'nombre',      label: 'Nombre',       required: true },
@@ -88,6 +104,18 @@ const CLIENT_COL_DEFS: ColumnDef<ClientColId>[] = [
   { id: 'ciudad',      label: 'Ciudad' },
   { id: 'responsable', label: 'Responsable' },
   { id: 'docs',        label: 'Docs' },
+];
+
+const DELIVERY_CLIENT_COL_DEFS: ColumnDef<ClientColId>[] = [
+  { id: 'nombre',   label: 'Cliente',       required: true },
+  { id: 'estado',   label: 'Estado' },
+  { id: 'contacto', label: 'Contacto' },
+  { id: 'pedidos',  label: 'Pedidos' },
+  { id: 'gasto',    label: 'Total gastado' },
+  { id: 'ultimo',   label: 'Último pedido' },
+  { id: 'tags',     label: 'Etiquetas' },
+  { id: 'loyalty',  label: 'Fidelización' },
+  { id: 'ciudad',   label: 'Ciudad' },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -107,6 +135,8 @@ export interface Client {
   consents: { dataProcessing: boolean; commercial: boolean; thirdParty: boolean };
   notes?: string; vehiclesPurchased?: string[]; vehiclesSold?: string[]; documentsCount?: number;
   tags?: string[];
+  stats?: { totalOrders: number; totalSpent: number; lastOrderDate: string | null };
+  loyalty?: { enrolled?: boolean; points: number; level: string };
 }
 interface Invoice {
   id: string; clientId?: string; number: string; clientName: string; vehicleName: string;
@@ -138,6 +168,20 @@ function mapContextClientToPage(c: AppContextClient, i: number): Client {
     vehiclesSold: c.vehiclesSold || [],
     documentsCount: c.documentsCount || c.documentsList?.length || 0,
     tags: c.tags,
+    stats: c.stats
+      ? {
+          totalOrders: Number(c.stats.totalOrders || 0),
+          totalSpent: Number(c.stats.totalSpent || 0),
+          lastOrderDate: c.stats.lastOrderDate || null,
+        }
+      : undefined,
+    loyalty: c.loyalty
+      ? {
+          enrolled: c.loyalty.enrolled,
+          points: Number(c.loyalty.points || 0),
+          level: String(c.loyalty.level || 'bronze'),
+        }
+      : undefined,
   };
 }
 
@@ -1527,8 +1571,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const listPlan = useClientsListPlanAccess();
   const clientColDefsForUi = useMemo(
-    () => (isDeliveryBusiness ? CLIENT_COL_DEFS.filter((c) => c.id !== 'responsable') : CLIENT_COL_DEFS),
+    () => (isDeliveryBusiness ? DELIVERY_CLIENT_COL_DEFS : CLIENT_COL_DEFS),
     [isDeliveryBusiness],
   );
   const viewClientDetail = useCallback((clientId: string) => {
@@ -1539,6 +1584,10 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     }
     navigate(path);
   }, [embedDeliveryOps, navigate]);
+
+  const goToDeliveryTpvForClient = useCallback((clientId: string) => {
+    navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(clientId)}`);
+  }, [navigate]);
 
   const [activeTab,               setActiveTab]               = useState<ClientTabId>('clients');
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
@@ -2465,8 +2514,27 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort(null); setFilterBranch('all'); setFilterWorkCenter('all'); };
 
   const { visibleColumns: visibleLeadCols, visibleIds: visibleLeadColIds, columnOrder: leadColOrder, toggleColumn: toggleLeadCol, reorderColumns: reorderLeadCols, resetToDefault: resetLeadCols } = useColumnPreferences('leads', LEAD_COL_DEFS);
-  const clientColPrefsKey = isDeliveryBusiness ? 'clients-delivery' : 'clients';
+  const clientColPrefsKey = isDeliveryBusiness ? 'clients-delivery-v2' : 'clients';
   const { visibleColumns: visibleClientCols, visibleIds: visibleClientColIds, columnOrder: clientColOrder, toggleColumn: toggleClientCol, reorderColumns: reorderClientCols, resetToDefault: resetClientCols } = useColumnPreferences(clientColPrefsKey, clientColDefsForUi);
+
+  const effectiveVisibleClientCols = useMemo(() => {
+    if (!isDeliveryBusiness) return visibleClientCols;
+    return visibleClientCols.filter((colId) => {
+      if (colId === 'gasto') return listPlan.canViewSpent;
+      if (colId === 'ultimo') return listPlan.canViewLastOrder;
+      if (colId === 'tags') return listPlan.canViewTagsColumn;
+      if (colId === 'loyalty') return listPlan.canViewLoyalty;
+      if (colId === 'pedidos') return listPlan.canViewOrderCount;
+      return true;
+    });
+  }, [isDeliveryBusiness, visibleClientCols, listPlan]);
+
+  const lockedDeliveryColIds = useMemo(() => {
+    if (!isDeliveryBusiness) return [] as ClientColId[];
+    return clientColDefsForUi
+      .map((c) => c.id)
+      .filter((id) => !effectiveVisibleClientCols.includes(id));
+  }, [isDeliveryBusiness, clientColDefsForUi, effectiveVisibleClientCols]);
 
 
   const PILLS: { id: LeadPill; label: string }[] = [
@@ -2802,8 +2870,16 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const renderClientsTab = () => (
     <div className="space-y-3">
+      {isDeliveryBusiness && (
+        <ClientsListPlanBanner
+          planLabel={listPlan.planLabel}
+          unlockedCount={listPlan.unlockedCount}
+          lockedCount={listPlan.lockedCount}
+        />
+      )}
+
       {/* Toolbar */}
-      <div className={`flex items-center gap-2 ${isDeliveryBusiness ? 'justify-between' : ''}`}>
+      <div className={`flex items-center gap-2 ${isDeliveryBusiness ? 'justify-between flex-wrap' : ''}`}>
         <div className="flex items-center gap-2 min-w-0">
           {branches.length > 0 && (
             <div className="relative flex-shrink-0">
@@ -2829,7 +2905,65 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
 
         <div className={`flex items-center gap-2 flex-shrink-0 ${isDeliveryBusiness ? 'ml-auto' : ''}`}>
+          {isDeliveryBusiness && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!listPlan.canUseSegments) {
+                    toast.info(`Segmentación disponible desde plan ${listPlan.requiredPlanLabel('lista_segmentos')}`);
+                    return;
+                  }
+                  setShowSegmentBuilder((prev) => !prev);
+                }}
+                title={listPlan.canUseSegments ? 'Segmentación avanzada' : `Plan ${listPlan.requiredPlanLabel('lista_segmentos')}`}
+                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2.5 border-2 rounded-xl transition-colors text-xs font-semibold ${
+                  segmentConditions.length > 0
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
+                    : listPlan.canUseSegments
+                      ? 'border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-600 dark:text-gray-400'
+                      : 'border-gray-200 text-gray-400 opacity-70'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4" />
+                Segmentos
+                {!listPlan.canUseSegments && <Lock className="w-3 h-3" />}
+                {segmentConditions.length > 0 && (
+                  <span className="text-xs bg-indigo-600 text-white rounded-full w-4 h-4 flex items-center justify-center">
+                    {segmentConditions.length}
+                  </span>
+                )}
+              </button>
+              {listPlan.canExport ? (
+                <CrmDownloadDropdown
+                  mode="clients"
+                  isDelivery
+                  clients={filteredClients.map((c) => ({
+                    name: c.name,
+                    phone: c.phone,
+                    email: c.email,
+                    dni: c.dni,
+                    address: c.address,
+                    city: c.city,
+                    postalCode: c.postalCode,
+                    status: c.status,
+                    tags: c.tags,
+                  }))}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toast.info(`Exportación disponible desde plan ${listPlan.requiredPlanLabel('lista_export')}`)}
+                  className="flex-shrink-0 p-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-400 rounded-xl opacity-70"
+                  title={`Plan ${listPlan.requiredPlanLabel('lista_export')}`}
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+              )}
+            </>
+          )}
           {isDeliveryBusiness && otherBusinesses.length > 0 && (
+            listPlan.canImportFromBusiness ? (
             <button
               type="button"
               onClick={() => {
@@ -2840,6 +2974,16 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
             >
               Importar de otra empresa
             </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => toast.info(`Importación entre empresas disponible en plan ${listPlan.requiredPlanLabel('lista_import_empresa')}`)}
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-400 opacity-70"
+              >
+                <Lock className="w-3 h-3" />
+                Importar empresa
+              </button>
+            )
           )}
           <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
             <AddButtonDropdown
@@ -2854,8 +2998,21 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
       </div>
 
+      {isDeliveryBusiness && showSegmentBuilder && listPlan.canUseSegments && (
+        <div className="mt-1">
+          <SegmentBuilder
+            entityType="clients"
+            conditions={segmentConditions}
+            onChange={setSegmentConditions}
+            resultCount={clientsListTotal}
+            onClose={() => setShowSegmentBuilder(false)}
+          />
+        </div>
+      )}
+
       {/* Filtro por tags de clientes */}
       {(() => {
+        if (isDeliveryBusiness && !listPlan.canFilterTags) return null;
         const allClientTags = Array.from(new Set(
           (useServerClients ? serverClients : (contextClients || [])).flatMap(c => c.tags || [])
         )).sort();
@@ -2912,14 +3069,28 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         clientsListTotal > 0 ? (
           <>
           <div className="space-y-3">
-            {paginatedClients.map(client => (
+            {paginatedClients.map(client => {
+              const deliveryStats = getClientDeliveryStats(client);
+              return (
               <div key={client.id}
-                className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer`}
+                className={`group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer`}
                 onClick={() => viewClientDetail(client.id)}>
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <div>
-                    <h3 className="font-bold text-gray-900 dark:text-gray-100">{client.name}</h3>
-                    <span className="font-mono text-xs text-gray-400 dark:text-gray-500">{client.dni}</span>
+                  <div className="min-w-0">
+                    {isDeliveryBusiness ? (
+                      <DeliveryClientNameCell
+                        name={client.name}
+                        dni={client.dni}
+                        phone={client.phone}
+                        stats={deliveryStats}
+                        showTier={listPlan.canViewSpent}
+                      />
+                    ) : (
+                      <>
+                        <h3 className="font-bold text-gray-900 dark:text-gray-100">{client.name}</h3>
+                        <span className="font-mono text-xs text-gray-400 dark:text-gray-500">{client.dni}</span>
+                      </>
+                    )}
                   </div>
                   <ClientStatusBadge status={client.status} />
                 </div>
@@ -2928,25 +3099,46 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 min-w-0"><Mail className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{client.email}</span></div>
                   {client.city && <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><MapPin className="w-3.5 h-3.5" />{client.city}</div>}
                 </div>
+                {isDeliveryBusiness ? (
+                  <DeliveryClientCardExtras
+                    stats={deliveryStats}
+                    tags={client.tags || []}
+                    loyalty={client.loyalty}
+                    showStats={listPlan.canViewSpent && listPlan.canViewLastOrder}
+                    showTags={listPlan.canViewTagsColumn}
+                    showLoyalty={listPlan.canViewLoyalty}
+                    showTier={listPlan.canViewSpent}
+                  />
+                ) : null}
                 {!isDeliveryBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl mb-2">
                     <Car className="w-3 h-3 text-gray-400 dark:text-gray-500" />
                     <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{client.vehiclesPurchased!.join(' · ')}</p>
                   </div>
                 )}
-                  <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800 mt-2">
                   {!isDeliveryBusiness && (
                     <div className="flex items-center gap-1.5"><UserPlus className="w-3 h-3 text-gray-400 dark:text-gray-500" /><span className="text-xs text-gray-400 dark:text-gray-500">{client.responsible}</span></div>
                   )}
                   {isDeliveryBusiness && <div />}
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
-                    <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
-                    <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                    {isDeliveryBusiness ? (
+                      <DeliveryClientRowActions
+                        onView={() => viewClientDetail(client.id)}
+                        onNewOrder={() => goToDeliveryTpvForClient(client.id)}
+                        alwaysVisible
+                      />
+                    ) : (
+                      <>
+                        <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
+                        <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                        <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
           {!isClientsTabLoading && clientsListTotal > 0 && (
             <Pagination pagination={clientsPagination} />
@@ -2975,8 +3167,25 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <span className="text-sm text-gray-500 dark:text-gray-400">
               <span className="font-semibold text-gray-900 dark:text-gray-100">{clientsListTotal}</span> cliente{clientsListTotal !== 1 ? 's' : ''}
+              {isDeliveryBusiness && (
+                <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                  listPlan.isBasicPlan
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
+                    : listPlan.planTier === 'pro'
+                      ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200'
+                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
+                }`}>
+                  Plan {listPlan.planLabel}
+                </span>
+              )}
             </span>
             <div className="flex items-center gap-2">
+              {isDeliveryBusiness && lockedDeliveryColIds.length > 0 && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500" title="Columnas bloqueadas en tu plan">
+                  <Lock className="h-3 w-3" />
+                  {lockedDeliveryColIds.length} columna{lockedDeliveryColIds.length !== 1 ? 's' : ''} bloqueada{lockedDeliveryColIds.length !== 1 ? 's' : ''}
+                </span>
+              )}
               {(cActiveFilters > 0 || cSort) && (
                 <button onClick={clearCFilters} className="text-xs text-red-500 font-medium flex items-center gap-1"><X className="w-3 h-3" /> Limpiar filtros</button>
               )}
@@ -2988,67 +3197,170 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               <thead>
                 <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800">
                   <th className="w-1 px-0" />
-                  {visibleClientCols.includes('nombre') && (
+                  {effectiveVisibleClientCols.includes('nombre') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Cliente" options={cNameOptions} selected={cFilterName} onChange={setCFilterName}
                         sortKey="name" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)} />
                     </th>
                   )}
-                  {visibleClientCols.includes('estado') && (
+                  {effectiveVisibleClientCols.includes('estado') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Estado" options={cStatusOptions} selected={cFilterStatus} onChange={setCFilterStatus}
                         sortKey="status" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)}
                         renderOption={opt => <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${opt === 'Activo' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{opt}</span>} />
                     </th>
                   )}
-                  {visibleClientCols.includes('direccion') && (
+                  {effectiveVisibleClientCols.includes('contacto') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Contacto
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('pedidos') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Pedidos
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('gasto') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Total gastado
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('ultimo') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Último pedido
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('tags') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Etiquetas
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('loyalty') && (
+                    <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Fidelización
+                    </th>
+                  )}
+                  {effectiveVisibleClientCols.includes('direccion') && (
                     <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                       Calle
                     </th>
                   )}
-                  {visibleClientCols.includes('ciudad') && (
+                  {effectiveVisibleClientCols.includes('ciudad') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Ciudad" options={cCityOptions} selected={cFilterCity} onChange={setCFilterCity}
                         sortKey="city" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)} />
                     </th>
                   )}
-                  {visibleClientCols.includes('responsable') && <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Responsable</th>}
-                  {visibleClientCols.includes('docs') && <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Docs</th>}
+                  {effectiveVisibleClientCols.includes('responsable') && <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Responsable</th>}
+                  {effectiveVisibleClientCols.includes('docs') && <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Docs</th>}
+                  {isDeliveryBusiness && lockedDeliveryColIds.map((colId) => {
+                    const label = clientColDefsForUi.find((c) => c.id === colId)?.label || colId;
+                    return (
+                      <th
+                        key={`locked-${colId}`}
+                        className="px-3 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-gray-300 dark:text-gray-600 bg-gray-50/80 dark:bg-gray-900/40"
+                        title={`Disponible en plan Normal o Pro`}
+                      >
+                        <span className="inline-flex items-center gap-1">
+                          <Lock className="h-3 w-3" />
+                          {label}
+                        </span>
+                      </th>
+                    );
+                  })}
                   <th className="px-4 py-3 w-20" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {isClientsTabLoading ? (
-                  <tr><td colSpan={visibleClientCols.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</td></tr>
+                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</td></tr>
                 ) : paginatedClients.length === 0 ? (
-                  <tr><td colSpan={visibleClientCols.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
-                ) : paginatedClients.map(client => (
-                  <tr key={client.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group cursor-pointer" onClick={() => viewClientDetail(client.id)}>
+                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
+                ) : paginatedClients.map(client => {
+                  const deliveryStats = getClientDeliveryStats(client);
+                  return (
+                  <tr key={client.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer" onClick={() => viewClientDetail(client.id)}>
                     <td className="pl-3 pr-0 py-0"><div className={`w-1 h-14 rounded-full ${client.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} /></td>
-                    {visibleClientCols.includes('nombre') && (
+                    {effectiveVisibleClientCols.includes('nombre') && (
                       <td className="px-5 py-3.5">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{client.name}</p>
-                        <p className="text-xs font-mono text-gray-400 dark:text-gray-500">{client.dni}</p>
+                        {isDeliveryBusiness ? (
+                          <DeliveryClientNameCell
+                            name={client.name}
+                            dni={client.dni}
+                            phone={client.phone}
+                            stats={deliveryStats}
+                            showTier={listPlan.canViewSpent}
+                          />
+                        ) : (
+                          <>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{client.name}</p>
+                            <p className="text-xs font-mono text-gray-400 dark:text-gray-500">{client.dni}</p>
+                          </>
+                        )}
                       </td>
                     )}
-                    {visibleClientCols.includes('estado') && <td className="px-5 py-3.5"><ClientStatusBadge status={client.status} /></td>}
-                    {visibleClientCols.includes('direccion') && (
+                    {effectiveVisibleClientCols.includes('estado') && <td className="px-5 py-3.5"><ClientStatusBadge status={client.status} /></td>}
+                    {effectiveVisibleClientCols.includes('contacto') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientContactCell phone={client.phone} email={client.email} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('pedidos') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientOrdersCell count={deliveryStats.totalOrders} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('gasto') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientSpentCell amount={deliveryStats.totalSpent} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('ultimo') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientLastOrderCell date={deliveryStats.lastOrderDate} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('tags') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientTagsCell tags={client.tags || []} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('loyalty') && (
+                      <td className="px-5 py-3.5">
+                        <DeliveryClientLoyaltyCell loyalty={client.loyalty} />
+                      </td>
+                    )}
+                    {effectiveVisibleClientCols.includes('direccion') && (
                       <td className="px-5 py-3.5">
                         <span className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">{client.address || '—'}</span>
                       </td>
                     )}
-                    {visibleClientCols.includes('ciudad') && <td className="px-5 py-3.5"><span className="text-sm text-gray-600 dark:text-gray-400">{client.city || '—'}</span></td>}
-                    {visibleClientCols.includes('responsable') && <td className="px-5 py-3.5"><span className="text-xs text-gray-500 dark:text-gray-400">{client.responsible}</span></td>}
-                    {visibleClientCols.includes('docs') && <td className="px-5 py-3.5 text-right"><span className="text-sm font-bold text-gray-700 dark:text-gray-300">{client.documentsCount || 0}</span></td>}
+                    {effectiveVisibleClientCols.includes('ciudad') && <td className="px-5 py-3.5"><span className="text-sm text-gray-600 dark:text-gray-400">{client.city || '—'}</span></td>}
+                    {effectiveVisibleClientCols.includes('responsable') && <td className="px-5 py-3.5"><span className="text-xs text-gray-500 dark:text-gray-400">{client.responsible}</span></td>}
+                    {effectiveVisibleClientCols.includes('docs') && <td className="px-5 py-3.5 text-right"><span className="text-sm font-bold text-gray-700 dark:text-gray-300">{client.documentsCount || 0}</span></td>}
+                    {isDeliveryBusiness && lockedDeliveryColIds.map((colId) => (
+                      <td key={`locked-${colId}`} className="px-3 py-3.5 bg-gray-50/50 dark:bg-gray-900/30">
+                        <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
+                      </td>
+                    ))}
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
-                        <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
-                        <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                      <div onClick={e => e.stopPropagation()}>
+                        {isDeliveryBusiness ? (
+                          <DeliveryClientRowActions
+                            onView={() => viewClientDetail(client.id)}
+                            onNewOrder={() => goToDeliveryTpvForClient(client.id)}
+                          />
+                        ) : (
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
+                            <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
+                            <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                );})}
               </tbody>
             </table>
             {!isClientsTabLoading && clientsListTotal > 0 && <Pagination pagination={clientsPagination} />}

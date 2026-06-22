@@ -9,6 +9,8 @@ import { WorkerProfileCompletionBanner } from './WorkerProfileCompletionBanner';
 import { BottomNav } from './BottomNav';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
+import { useDashboardViewOptional } from '../../context/DashboardViewContext';
+import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 
 import { OnboardingTour } from './OnboardingTour';
 import { GuidedStepsPopup } from './GuidedStepsPopup';
@@ -18,6 +20,7 @@ import { useAuthOptional, type AuthContextType } from '../../context/AuthContext
 import { isWorkerAccount } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { Mail, X, ArrowLeft } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
@@ -146,6 +149,8 @@ function LayoutInner({
   const location = useLocation();
   const { user } = auth;
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
+  const dashboardView = useDashboardViewOptional();
+  const portfolioPlan = usePortfolioPlanAccess();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const stored = localStorage.getItem('sidebarCollapsed');
     return stored === 'true';
@@ -157,8 +162,9 @@ function LayoutInner({
   const showBusinessCarousel = isDashboard && businesses.length > 1;
 
   const handleSwitchBusiness = useCallback((businessId: string) => {
+    dashboardView?.enterBusinessView();
     switchBusiness(businessId);
-  }, [switchBusiness]);
+  }, [switchBusiness, dashboardView]);
 
   // Two-key sequence tracking (G+D, N+V, etc.)
   const lastKeyRef = useRef<string | null>(null);
@@ -286,6 +292,22 @@ function LayoutInner({
               businesses={businesses}
               currentBusinessId={currentBusiness?.business_id}
               onSwitchBusiness={handleSwitchBusiness}
+              showPortfolioTab={
+                businesses.length > 1 &&
+                (portfolioPlan.canUsePortfolioView || portfolioPlan.portfolioLocked)
+              }
+              portfolioViewActive={dashboardView?.isPortfolioView ?? false}
+              portfolioTabLocked={portfolioPlan.portfolioLocked}
+              onSelectPortfolioView={() => dashboardView?.setPortfolioView(true)}
+              onPortfolioLockedClick={() => {
+                toast.info('Visión general consolidada disponible en plan Pro', {
+                  description: 'Básico y Normal incluyen 1 empresa. Pro permite 2 empresas y comparativa.',
+                  action: {
+                    label: 'Ver planes',
+                    onClick: () => navigate('/saas/billing'),
+                  },
+                });
+              }}
             />
           </div>
         )}
