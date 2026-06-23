@@ -273,15 +273,6 @@ function AlertCenterDrawer({
     [businessId, applyLocalStatus, reloadSummary],
   );
 
-  const handleAlertClick = async (alert: AlertRecord) => {
-    if (alert.route) {
-      handleNavigate(alert.route);
-      return;
-    }
-    navigate('/saas/alerts');
-    onClose();
-  };
-
   const markAllSeen = async () => {
     const newIds = alerts.filter((a) => a.status === 'new' && !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
     if (newIds.length === 0) return;
@@ -369,9 +360,9 @@ function AlertCenterDrawer({
               <AlertProRow
                 key={alert.id}
                 alert={alert}
+                collapsible
                 showActions
                 showArrow={false}
-                onClick={() => void handleAlertClick(alert)}
                 onNavigate={handleNavigate}
                 onMarkSeen={(id) => void handleMarkSeen(id)}
                 onResolve={(id) => void handleResolve(id)}

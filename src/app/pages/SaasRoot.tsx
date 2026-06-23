@@ -36,9 +36,10 @@ import {
   WORKER_PAYROLL_SETUP_PATH,
   WORKER_UNLINKED_HOME_PATH,
 } from '../lib/workerProfileCompletion';
-import { DashboardViewProvider } from '../context/DashboardViewContext';
-
-
+import {
+  isBillingRecoveryPath,
+  isBlockingSubscriptionStatus,
+} from '../lib/billingRecovery';
 
 interface OnboardingCompanyProfile {
 
@@ -320,34 +321,22 @@ function SaasContent() {
   useEffect(() => {
     if (!sessionSyncedWithServer) return;
     if (subscription.status !== 'suspended') return;
-    if (
-      location.pathname === '/saas/suspended' ||
-      location.pathname === '/saas/billing' ||
-      location.pathname === '/saas/help'
-    ) {
-      return;
-    }
+    if (isBillingRecoveryPath(location.pathname)) return;
     navigate('/saas/suspended', { replace: true });
   }, [subscription.status, sessionSyncedWithServer, location.pathname, navigate]);
 
-
-
   useEffect(() => {
+    if (!sessionSyncedWithServer) return;
+    if (isWorkerAccount(user)) return;
+    if (subscription.status === 'suspended') return;
+    if (!isBlockingSubscriptionStatus(subscription.status)) return;
+    if (isBillingRecoveryPath(location.pathname)) return;
+    navigate('/saas/settings/facturacion', { replace: true });
+  }, [sessionSyncedWithServer, subscription.status, location.pathname, navigate, user]);
 
-    if (
-      isWorkerAccount(user) ||
-      subscription.status !== 'trial_expired' ||
-      location.pathname === '/saas/billing' ||
-      location.pathname === '/saas/settings' ||
-      location.pathname === '/saas/help' ||
-      location.pathname === '/saas/suspended'
-    ) {
-      return;
-    }
-
-    navigate('/saas/billing', { replace: true });
-
-  }, [subscription.status, location.pathname, navigate, user]);
+  const billingRecoveryMode =
+    isBlockingSubscriptionStatus(subscription.status) &&
+    isBillingRecoveryPath(location.pathname);
 
   const isInitialBusinessLoad =
     !businessCtx || isLoadingBusinesses || !businessesFetchSettled;
@@ -357,6 +346,7 @@ function SaasContent() {
     || location.pathname === WORKER_PAYROLL_SETUP_PATH
     || location.pathname === '/saas/user-dashboard'
     || location.pathname === '/saas/invitations'
+    || billingRecoveryMode
     || (unlinkedWorkerNeedsCompany && isWorkerUnlinkedAllowedPath(location.pathname))
     || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
 
@@ -398,7 +388,8 @@ function SaasContent() {
     businesses.length === 0 &&
     !isUserAccount &&
     !isLinkedWorker &&
-    (!businessesFetchSettled || isLoadingBusinesses)
+    (!businessesFetchSettled || isLoadingBusinesses) &&
+    !billingRecoveryMode
   ) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
@@ -408,23 +399,20 @@ function SaasContent() {
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
-    return null;
+    return <Navigate to="/auth/gate" replace />;
   }
 
 
 
   if (location.pathname === '/saas/suspended'
     || location.pathname === WORKER_IDENTITY_SETUP_PATH
-    || location.pathname === WORKER_PAYROLL_SETUP_PATH) {
+    || location.pathname === WORKER_PAYROLL_SETUP_PATH
+    || billingRecoveryMode) {
 
     return (
-
       <>
-
         <Outlet />
-
       </>
-
     );
 
   }
@@ -459,9 +447,7 @@ function SaasRootProviders() {
           <AppProvider>
             <ScrapyardProvider>
               <ActivationChecklistProvider>
-                <DashboardViewProvider>
                   <SaasContent />
-                </DashboardViewProvider>
               </ActivationChecklistProvider>
             </ScrapyardProvider>
           </AppProvider>

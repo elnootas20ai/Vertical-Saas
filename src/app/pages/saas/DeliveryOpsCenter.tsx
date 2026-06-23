@@ -28,6 +28,8 @@ import {
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { scrollToActivationField } from '../../components/saas/ActivationGuideUi';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
+import { writeBillingSelection } from '../../lib/billingSelection';
+import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { getAuthHeaders } from '../../lib/authApi';
 import { Delivery } from './Delivery';
 import {
@@ -131,14 +133,11 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   const goToPdvBilling = () => {
     const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
     if (resolvedUserId) {
-      try {
-        localStorage.setItem(
-          `billing_selection_${resolvedUserId}`,
-          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
-        );
-      } catch {
-        /* ignore */
-      }
+      writeBillingSelection(resolvedUserId, {
+        selectedPlanId: 'pro',
+        billingMode: 'monthly',
+        requestedAddon: pointOfSaleAccess.needsPointOfSaleAddon ? 'extra_pdv' : null,
+      });
     }
     nav('/saas/settings/facturacion');
   };
@@ -159,7 +158,7 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   const addPdvTitle = pointOfSaleAccess.canCreatePointOfSale
     ? `Crear un nuevo punto de venta (${pdvs.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
     : pointOfSaleAccess.needsPointOfSaleAddon
-      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Añade un extra para crear otro.`
+      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Ampliación: ${formatAddonPriceShort('extra_pdv')}.`
       : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
 
   const addPdvButtonClass =

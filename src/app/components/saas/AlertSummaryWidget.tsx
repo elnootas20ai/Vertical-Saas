@@ -19,7 +19,7 @@ import {
   mergeDocumentAlertsIntoSummary,
   isSyntheticDocumentAlert,
 } from '../../lib/documentAlertsApi';
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import {
   AlertProShell,
   AlertProKpiStrip,
@@ -42,6 +42,7 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [recent, setRecent] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [listOpen, setListOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!businessId) {
@@ -70,11 +71,6 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
   useEffect(() => { void load(); }, [load]);
 
   const goCenter = () => navigate('/saas/alerts');
-
-  const handleAlertClick = (alert: AlertRecord) => {
-    if (alert.route) navigate(alert.route);
-    else goCenter();
-  };
 
   if (loading && !summary) {
     return (
@@ -143,13 +139,30 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
         )}
       />
 
+      <button
+        type="button"
+        onClick={() => setListOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 border-t border-zinc-200/80 bg-zinc-50 px-4 py-3 text-left transition hover:bg-zinc-100/80 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900/80"
+        aria-expanded={listOpen}
+      >
+        <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+          {listOpen
+            ? 'Ocultar alertas'
+            : `${recent.length} alerta${recent.length !== 1 ? 's' : ''} reciente${recent.length !== 1 ? 's' : ''} · Toca para ver`}
+        </span>
+        {listOpen
+          ? <ChevronUp className="h-4 w-4 shrink-0 text-zinc-400" />
+          : <ChevronDown className="h-4 w-4 shrink-0 text-zinc-400" />}
+      </button>
+
+      {listOpen && (
       <div className="space-y-2 bg-zinc-50 p-3 dark:bg-zinc-950">
         {recent.slice(0, 5).map((alert) => (
           <AlertProRow
             key={alert.id}
             alert={alert}
+            collapsible
             showArrow={false}
-            onClick={() => handleAlertClick(alert)}
           />
         ))}
 
@@ -182,6 +195,22 @@ export function AlertSummaryWidget({ embedded = false }: { embedded?: boolean })
           </button>
         </div>
       </div>
+      )}
+
+      {!listOpen && (
+        <div className="flex items-center justify-between border-t border-zinc-200/80 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-950">
+          <span className="text-[11px] text-zinc-500">
+            {summary?.byStatus?.new ?? 0} nuevas sin leer
+          </span>
+          <button
+            type="button"
+            onClick={goCenter}
+            className="text-[11px] font-semibold text-zinc-700 transition hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white"
+          >
+            Ver todas →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

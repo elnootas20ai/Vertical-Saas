@@ -7,12 +7,14 @@ import {
   confirmSubscription,
   webhookSubscriptionStatus,
   webhookPaymentStatus,
+  purchaseAddon,
 } from '../controllers/subscriptionController.js';
 
 const subscriptionRouter = Router();
 
 // Rutas protegidas (requieren JWT)
 subscriptionRouter.post('/create', requireAuthAndEmailVerified, createAndActivate);
+subscriptionRouter.post('/addons/purchase', requireAuthAndEmailVerified, purchaseAddon);
 subscriptionRouter.get('/status', requireAuthAndEmailVerified, getStatus);
 subscriptionRouter.post('/cancel', requireAuthAndEmailVerified, cancelUserSubscription);
 subscriptionRouter.post('/confirm', requireAuthAndEmailVerified, confirmSubscription);

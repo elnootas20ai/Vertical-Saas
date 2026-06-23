@@ -53,7 +53,7 @@ import {
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
-import { useDashboardView } from '../../context/DashboardViewContext';
+import { DashboardViewProvider, useDashboardView } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { listFinanceMovements } from '../../lib/financeApi';
@@ -521,6 +521,14 @@ const FUNNEL_STAGE_KEYS = [
 
 
 export function Dashboard() {
+  return (
+    <DashboardViewProvider>
+      <DashboardPage />
+    </DashboardViewProvider>
+  );
+}
+
+function DashboardPage() {
   const { businesses, businessesFetchSettled } = useBusiness();
   const { isPortfolioView, selectBusinessFromPortfolio } = useDashboardView();
   const portfolioPlan = usePortfolioPlanAccess();

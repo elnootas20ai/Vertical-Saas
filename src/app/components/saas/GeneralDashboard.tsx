@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Search,
   ShoppingBag,
-  Sparkles,
   Store,
   Tag,
   TrendingDown,
@@ -136,9 +135,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   return (
     <Layout
       title="Visión general"
-      subtitle={`${businesses.length} empresas · resumen consolidado del mes`}
+      subtitle={`${businesses.length} empresas · Plan ${portfolioPlan.planLabel} · resumen del mes`}
     >
-      <div className="flex flex-col gap-6 -mt-1">
+      <div className="flex flex-col gap-4 -mt-1">
         <PortfolioPlanBanner
           planLabel={portfolioPlan.planLabel}
           planTier={portfolioPlan.planTier}
@@ -148,50 +147,31 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           portfolioLocked={portfolioPlan.portfolioLocked}
         />
 
-        {/* Hero + toolbar */}
-        <div className="relative overflow-hidden rounded-2xl border border-gray-200/80 dark:border-gray-700/80 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white p-5 sm:p-6">
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(99,102,241,0.35),_transparent_50%)]" />
-          <div className="relative flex flex-col gap-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-indigo-200 text-xs font-semibold uppercase tracking-wider mb-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Portfolio multi-empresa
-                </div>
-                <h2 className="text-xl sm:text-2xl font-black tracking-tight">
-                  Todas tus empresas de un vistazo
-                </h2>
-                <p className="text-sm text-slate-300 mt-1 max-w-xl">
-                  Finanzas, pedidos, equipo y tiendas. Pulsa una empresa arriba o «Entrar» para ver su dashboard.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => void reload()}
-                disabled={loading}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/20 text-sm font-semibold transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                Actualizar
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Finanzas globales (cuenta titular) */}
+        {/* Finanzas globales (cuenta titular) — lo primero visible */}
         <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <Wallet className="w-4 h-4 text-indigo-500" />
               Finanzas consolidadas del mes
             </h3>
-            <button
-              type="button"
-              onClick={() => navigate('/saas/ebitda')}
-              className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-            >
-              Ver EBITDA →
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void reload()}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Actualizar
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/saas/ebitda')}
+                className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                Ver EBITDA →
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
             <MoneyCard label="Ingresos" value={fmtEuro(finance.incomeMonth)} tone="emerald" icon={<TrendingUp className="w-4 h-4" />} />
@@ -268,31 +248,34 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           </section>
         )}
 
-        <div className="sticky top-0 z-10 flex flex-col gap-3 p-4 rounded-2xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar empresa, marca o tienda…"
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-indigo-500 dark:focus:border-indigo-400"
-            />
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mr-1">Empresa</span>
-            <FilterChip active={businessFilter === 'all'} onClick={() => setBusinessFilter('all')}>
-              Todas
-            </FilterChip>
-            {rows.map((r) => (
-              <FilterChip
-                key={r.businessId}
-                active={businessFilter === r.businessId}
-                onClick={() => setBusinessFilter((prev) => (prev === r.businessId ? 'all' : r.businessId))}
-              >
-                {r.business.name}
-              </FilterChip>
-            ))}
+        <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md px-3 py-2.5 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar empresa, marca o tienda…"
+                className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-indigo-500 dark:focus:border-indigo-400"
+              />
+            </div>
+            {rows.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 items-center sm:max-w-[50%]">
+                <FilterChip active={businessFilter === 'all'} onClick={() => setBusinessFilter('all')}>
+                  Todas
+                </FilterChip>
+                {rows.map((r) => (
+                  <FilterChip
+                    key={r.businessId}
+                    active={businessFilter === r.businessId}
+                    onClick={() => setBusinessFilter((prev) => (prev === r.businessId ? 'all' : r.businessId))}
+                  >
+                    {r.business.name}
+                  </FilterChip>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

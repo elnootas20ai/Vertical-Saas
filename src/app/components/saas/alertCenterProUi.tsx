@@ -1,10 +1,10 @@
-import type { ReactNode, ComponentType, MouseEvent } from 'react';
+import { useState, type ReactNode, type ComponentType, type MouseEvent } from 'react';
 import type { AlertHistoryEntry, AlertPriority, AlertRecord, AlertSource, AlertSummary } from '../../lib/alertCenterApi';
 import { SOURCE_LABELS, SOURCE_COLORS, PRIORITY_LABELS, countAlertsForDepartment, formatHistoryEntry, HISTORY_ACTION_LABELS } from '../../lib/alertCenterApi';
 import type { BusinessAlertDepartment } from '../../lib/alertDepartments';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { ArrowRight, CheckCircle, Clock, Crown, Eye, History, Inbox, Settings2 } from 'lucide-react';
+import { ArrowRight, CheckCircle, ChevronDown, ChevronUp, Clock, Crown, Eye, History, Inbox, Settings2 } from 'lucide-react';
 import { alertHasNavigateTarget, getAlertResolveLabel } from '../../lib/alertActions';
 
 /** Gradiente premium Plan PRO — violeta → púrpura → dorado */
@@ -194,6 +194,8 @@ export function AlertProRow({
   onResolve,
   showArrow = true,
   showActions = false,
+  collapsible = false,
+  defaultExpanded = false,
 }: {
   alert: AlertRecord;
   onClick?: () => void;
@@ -203,7 +205,13 @@ export function AlertProRow({
   showArrow?: boolean;
   /** Muestra botones «Ir a resolver» / «Resolver» siempre visibles (drawer y móvil). */
   showActions?: boolean;
+  /** Vista compacta: solo título hasta que el usuario expande. */
+  collapsible?: boolean;
+  defaultExpanded?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const isOpen = collapsible ? expanded : true;
+
   const sourceColor = SOURCE_COLORS[alert.source as AlertSource] || '#71717a';
   const accent = PRIORITY_ACCENT[alert.priority] || PRIORITY_ACCENT.medium;
   const canNavigate = alertHasNavigateTarget(alert);
@@ -218,55 +226,88 @@ export function AlertProRow({
 
   const stop = (e: MouseEvent) => e.stopPropagation();
 
+  const handleHeaderClick = () => {
+    if (collapsible) {
+      setExpanded((v) => !v);
+      return;
+    }
+    onClick?.();
+  };
+
   return (
     <div
-      className={`rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 pl-3.5 transition-all border-l-[3px] ${accent} ${
+      className={`rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 transition-all border-l-[3px] ${accent} ${
         alert.status === 'new' ? 'ring-1 ring-amber-500/20' : ''
-      } ${alert.status === 'resolved' ? 'opacity-55' : ''}`}
+      } ${alert.status === 'resolved' ? 'opacity-55' : ''} ${isOpen ? 'p-4 pl-3.5' : 'p-3 pl-3'}`}
     >
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onClick?.();
+          handleHeaderClick();
         }}
         className="group w-full text-left"
+        aria-expanded={collapsible ? isOpen : undefined}
       >
         <div className="flex items-start gap-3">
           <div
-            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+            className={`flex shrink-0 items-center justify-center rounded-lg ${isOpen ? 'mt-0.5 h-9 w-9' : 'h-8 w-8'}`}
             style={{ backgroundColor: `${sourceColor}14` }}
           >
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: sourceColor }} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-1">{alert.title}</p>
-              {alert.status === 'new' && (
-                <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
-                  Nueva
+            <div className="flex items-center justify-between gap-2">
+              <p className={`font-semibold text-zinc-900 dark:text-zinc-100 ${isOpen ? 'text-sm line-clamp-2' : 'text-sm line-clamp-1'}`}>
+                {alert.title}
+              </p>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {alert.status === 'new' && (
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                    Nueva
+                  </span>
+                )}
+                {collapsible && (
+                  isOpen
+                    ? <ChevronUp className="h-4 w-4 text-zinc-400" />
+                    : <ChevronDown className="h-4 w-4 text-zinc-400" />
+                )}
+              </div>
+            </div>
+
+            {!isOpen && (
+              <p className="mt-1 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+                <span className="truncate">{SOURCE_LABELS[alert.source as AlertSource] || alert.source}</span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {timeAgo}
                 </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400 line-clamp-2">{alert.message}</p>
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-              <span className="font-medium text-zinc-500">{PRIORITY_LABELS[alert.priority]}</span>
-              <span className="font-medium" style={{ color: sourceColor }}>
-                {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
-              </span>
-              <span className="ml-auto flex items-center gap-1 text-zinc-400">
-                <Clock className="h-3 w-3" />
-                {timeAgo}
-              </span>
-            </div>
+              </p>
+            )}
+
+            {isOpen && (
+              <>
+                <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{alert.message}</p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                  <span className="font-medium text-zinc-500">{PRIORITY_LABELS[alert.priority]}</span>
+                  <span className="font-medium" style={{ color: sourceColor }}>
+                    {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1 text-zinc-400">
+                    <Clock className="h-3 w-3" />
+                    {timeAgo}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
-          {showArrow && !showActions && (
+          {showArrow && !showActions && !collapsible && (
             <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-600 dark:group-hover:text-zinc-300" />
           )}
         </div>
       </button>
 
-      {showActions && alert.status !== 'resolved' && (
+      {isOpen && showActions && alert.status !== 'resolved' && (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
           {canNavigate && alert.route && (
             <button

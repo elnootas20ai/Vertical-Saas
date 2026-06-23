@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { useApp, userCanUseDevPlanOverride } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
+import { useApp } from '../context/AppContext';
 import { useBusiness } from '../context/BusinessContext';
 import {
   countCommercialBrands,
@@ -20,8 +19,6 @@ export function useTenantEntitlements(options?: {
 }): TenantEntitlementAccess {
   const { subscription } = useApp();
   const { businesses } = useBusiness();
-  const { user } = useAuth();
-  const devUnlimitedBrands = userCanUseDevPlanOverride(user);
 
   return useMemo(
     () =>
@@ -32,14 +29,12 @@ export function useTenantEntitlements(options?: {
           pointOfSales: options?.pointOfSaleCount ?? 0,
           commercialBrands: options?.commercialBrandCount ?? 0,
         },
-        { devUnlimitedBrands },
       ),
     [
       subscription,
       businesses.length,
       options?.pointOfSaleCount,
       options?.commercialBrandCount,
-      devUnlimitedBrands,
     ],
   );
 }

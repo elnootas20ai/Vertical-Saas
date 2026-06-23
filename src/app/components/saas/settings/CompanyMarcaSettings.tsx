@@ -67,6 +67,8 @@ import {
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
 import { useTenantEntitlements, countCommercialBrands } from '../../../hooks/useTenantEntitlements';
+import { writeBillingSelection } from '../../../lib/billingSelection';
+import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import { listWorkCentersForDelivery, type WorkCenter } from '../../../lib/workCentersApi';
 import { BrandLogoPreview, isExtremeWideLogo } from './BrandLogoPreview';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
@@ -1575,8 +1577,9 @@ export function CompanyMarcaSettings() {
                 ? ` y ${entitlements.commercialBrands} línea comercial adicional.`
                 : ' sin líneas comerciales extra (p. ej. Pizzería, Burger).'}
               {' '}
-              Para añadir otra línea (Pizzería, Burger…), activa PRO, contrata ampliación o pide a soporte que
-              amplíe el cupo en el panel de administración.
+              {entitlements.needsCommercialBrandAddon
+                ? `Para añadir otra línea contrata la ampliación (${formatAddonPriceShort('extra_brand')}).`
+                : 'Para añadir líneas comerciales activa el plan PRO.'}
             </p>
             <p className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800 dark:border-violet-900 dark:bg-violet-950/20 dark:text-violet-200">
               Marcas comerciales (sin contar «General»): {commercialBrandCount} / {entitlements.commercialBrands}
@@ -1593,11 +1596,20 @@ export function CompanyMarcaSettings() {
                 type="button"
                 onClick={() => {
                   setShowUpgradeModal(false);
+                  if (dataUserId) {
+                    writeBillingSelection(dataUserId, {
+                      selectedPlanId: 'pro',
+                      billingMode: 'monthly',
+                      requestedAddon: entitlements.needsCommercialBrandAddon ? 'extra_brand' : null,
+                    });
+                  }
                   navigate('/saas/settings/facturacion');
                 }}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
               >
-                Ver planes
+                {entitlements.needsCommercialBrandAddon
+                  ? `Contratar ampliación (${formatAddonPriceShort('extra_brand')})`
+                  : 'Ver planes'}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>

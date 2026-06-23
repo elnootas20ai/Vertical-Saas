@@ -75,6 +75,7 @@ import {
   getBaseCommercialBrandLimit,
   getEffectiveCommercialBrandLimit,
 } from '../../lib/tenantEntitlements';
+import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import type { AuthUser } from '../../lib/authApi';
 import {
   getCompanyVerificationSnapshot,
@@ -138,10 +139,9 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 const PLAN_OPTIONS = [
-  { id: 'basic', name: 'Basic' },
+  { id: 'basic', name: 'Básico' },
+  { id: 'normal', name: 'Normal' },
   { id: 'pro', name: 'Pro' },
-  { id: 'enterprise', name: 'Enterprise' },
-  { id: 'trial', name: 'Trial' },
 ];
 
 const SUBSCRIPTION_STATUS_OPTIONS = [
@@ -545,9 +545,29 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               </span>
             </label>
             <div>
-              <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200 mb-1.5">
-                PDV extra (además del plan)
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
+                  PDV extra (además del plan)
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setExtraPointOfSaleSlots(String(Math.max(0, extraPdv - 1)))}
+                    disabled={extraPdv <= 0}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    −1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtraPointOfSaleSlots(String(Math.min(99, extraPdv + 1)))}
+                    disabled={extraPdv >= 99}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    +1 PDV
+                  </button>
+                </div>
+              </div>
               <input
                 type="number"
                 min={0}
@@ -558,13 +578,33 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               />
               <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
                 Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
-                Ej.: plan Pro (2) + 2 extra = 4 tiendas.
+                Referencia comercial: {formatAddonPriceShort('extra_pdv')} por cada PDV de pago.
               </p>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200 mb-1.5">
-                Marcas comerciales extra (además del plan)
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
+                  Marcas comerciales extra (además del plan)
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setExtraCommercialBrandSlots(String(Math.max(0, extraBrands - 1)))}
+                    disabled={extraBrands <= 0}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    −1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtraCommercialBrandSlots(String(Math.min(99, extraBrands + 1)))}
+                    disabled={extraBrands >= 99}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    +1 marca
+                  </button>
+                </div>
+              </div>
               <input
                 type="number"
                 min={0}
@@ -575,7 +615,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               />
               <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
                 Cupo total: <strong>{totalBrandLimit}</strong> líneas comerciales ({baseBrandLimit} del plan + {extraBrands}{' '}
-                extra). No cuenta la marca por defecto «General». Ej.: plan Básico (0) + 1 extra = puede crear Pizzería, Burger…
+                extra). Referencia comercial: {formatAddonPriceShort('extra_brand')} por cada marca de pago.
               </p>
             </div>
           </div>

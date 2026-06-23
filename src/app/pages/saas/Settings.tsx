@@ -134,13 +134,24 @@ import {
   getSubscriptionStatus,
   confirmMoneiSubscription,
   cancelMoneiSubscription,
+  purchaseSubscriptionAddon,
 } from '../../lib/subscriptionApi';
+import { isBlockingSubscriptionStatus } from '../../lib/billingRecovery';
 import { PUBLIC_PAYMENT_UNAVAILABLE, sanitizePaymentError } from '../../lib/paymentErrors';
 import {
   getPlanPricingConfig,
   DEFAULT_PLANS,
   DEFAULT_ANNUAL_DISCOUNT,
 } from '../../lib/planPricingApi';
+import {
+  formatAddonPrice,
+  getAddonMonthlyPriceEur,
+  isPlanAddonId,
+  PLAN_ADDON_CATALOG,
+  PLAN_ADDON_LIST,
+  type PlanAddonId,
+} from '../../lib/planAddonCatalog';
+import { writeBillingSelection } from '../../lib/billingSelection';
 import { ZONE_COLOR_MAP } from '../../lib/parkingZones';
 import { formatRolePermissions, loadCustomRoles, mergeRoleCatalog, saveCustomRoles, upsertCustomRole } from '../../lib/roleCatalog';
 import {
@@ -331,8 +342,10 @@ function TabBilling() {
   const [invoices, setInvoices] = useState<BillingInvoice[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState(subscription.selectedPlanId || 'basic');
   const [billingMode, setBillingMode] = useState<'monthly' | 'annual'>('monthly');
+  const [requestedAddon, setRequestedAddon] = useState<PlanAddonId | null>(null);
   const [isLoadingBilling, setIsLoadingBilling] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
+  const [isPurchasingAddon, setIsPurchasingAddon] = useState(false);
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   const [isInvoicePreviewOpen, setIsInvoicePreviewOpen] = useState(false);
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
@@ -374,6 +387,8 @@ function TabBilling() {
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) || plans[0];
   const activeSubscriptionPlanId = subscription.selectedPlanId || 'basic';
+  const accountBlocked = isBlockingSubscriptionStatus(subscription.status);
+  const isSuspended = subscription.status === 'suspended';
   /** Permite ir a pasarela aunque ya haya suscripción, si el usuario eligió otro plan (pruebas / futuro upgrade). */
   const wantsDifferentPlanThanSubscription = selectedPlanId !== activeSubscriptionPlanId;
 
@@ -409,6 +424,7 @@ function TabBilling() {
       const parsedSelection = JSON.parse(rawSelection) as {
         selectedPlanId?: string;
         billingMode?: 'monthly' | 'annual';
+        requestedAddon?: string;
       };
 
       if (parsedSelection.selectedPlanId) {
@@ -417,6 +433,10 @@ function TabBilling() {
 
       if (parsedSelection.billingMode === 'monthly' || parsedSelection.billingMode === 'annual') {
         setBillingMode(parsedSelection.billingMode);
+      }
+
+      if (isPlanAddonId(parsedSelection.requestedAddon)) {
+        setRequestedAddon(parsedSelection.requestedAddon);
       }
     } catch {
       // Si hay datos corruptos en localStorage, se ignoran.
@@ -431,9 +451,10 @@ function TabBilling() {
     const payload = JSON.stringify({
       selectedPlanId,
       billingMode,
+      ...(requestedAddon ? { requestedAddon } : {}),
     });
     localStorage.setItem(billingSelectionStorageKey, payload);
-  }, [billingMode, billingSelectionStorageKey, selectedPlanId]);
+  }, [billingMode, billingSelectionStorageKey, selectedPlanId, requestedAddon]);
 
   useEffect(() => {
     if (!user?.user_id) return;
@@ -561,6 +582,28 @@ function TabBilling() {
       url.searchParams.delete('subscription_cancelled');
       window.history.replaceState({}, '', url.toString());
     }
+
+    if (params.get('addon_complete') === 'true') {
+      setBillingFeedback('Ampliación registrada. Actualizando tu cuenta…');
+      void refreshCurrentUser().then(() => {
+        setBillingFeedback('Ampliación contratada correctamente.');
+        if (user?.user_id) {
+          writeBillingSelection(user.user_id, { requestedAddon: null });
+        }
+        setRequestedAddon(null);
+      });
+      const url = new URL(window.location.href);
+      url.searchParams.delete('addon_complete');
+      url.searchParams.delete('addon_id');
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    if (params.get('addon_cancelled') === 'true') {
+      setBillingFeedback('Has cancelado la contratación de la ampliación.');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('addon_cancelled');
+      window.history.replaceState({}, '', url.toString());
+    }
   }, []);
 
   // Carga el estado de MONEI al montar
@@ -574,6 +617,45 @@ function TabBilling() {
       })
       .catch(() => {});
   }, [user?.user_id]);
+
+  const handlePurchaseAddon = async (addonId: PlanAddonId) => {
+    if (!user?.user_id) {
+      setBillingFeedback('No hay usuario autenticado.');
+      return;
+    }
+    if (accountBlocked) {
+      setBillingFeedback('Primero reactiva tu suscripción mensual; después podrás contratar ampliaciones.');
+      return;
+    }
+
+    setIsPurchasingAddon(true);
+    setBillingFeedback(null);
+    setRequestedAddon(addonId);
+    writeBillingSelection(user.user_id, { requestedAddon: addonId, billingMode });
+
+    try {
+      const result = await purchaseSubscriptionAddon(addonId, billingMode);
+      if (result.ok && result.redirectUrl) {
+        setBillingFeedback('Redirigiendo al pago seguro de la ampliación…');
+        window.location.href = result.redirectUrl;
+        return;
+      }
+      if (result.ok && result.skippedMonei) {
+        setBillingFeedback('Ampliación activada en tu cuenta.');
+        writeBillingSelection(user.user_id, { requestedAddon: null });
+        setRequestedAddon(null);
+        void refreshCurrentUser();
+        return;
+      }
+      setBillingFeedback('No se pudo completar la contratación de la ampliación.');
+    } catch (error) {
+      setBillingFeedback(
+        sanitizePaymentError(error instanceof Error ? error.message : undefined),
+      );
+    } finally {
+      setIsPurchasingAddon(false);
+    }
+  };
 
   const handlePaySubscription = async () => {
     if (!user?.user_id) {
@@ -721,6 +803,19 @@ function TabBilling() {
 
   return (
     <div className="space-y-6">
+      {accountBlocked && (
+        <div className="rounded-2xl border-2 border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/30">
+          <p className="text-sm font-bold text-red-900 dark:text-red-100">
+            {isSuspended ? 'Cuenta suspendida' : 'Suscripción pendiente de pago'}
+          </p>
+          <p className="mt-1 text-sm text-red-800 dark:text-red-200">
+            {isSuspended
+              ? 'Regulariza tu suscripción mensual para recuperar el acceso. Elige tu plan abajo y pulsa «Pagar y reactivar».'
+              : 'Tu acceso puede estar limitado hasta que confirmes el pago del plan.'}
+          </p>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="p-6 border-b border-gray-100 dark:border-gray-800">
           <div className="flex items-start justify-between gap-4">
@@ -900,6 +995,103 @@ function TabBilling() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Ampliaciones</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Suma cupos a tu plan Pro. Precio por unidad adicional (la marca «General» no cuenta de cupo).
+          </p>
+          {(subscription.extraPointOfSaleSlots ?? 0) > 0 || (subscription.extraCommercialBrandSlots ?? 0) > 0 ? (
+            <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+              Cupos extra activos:{' '}
+              {(subscription.extraPointOfSaleSlots ?? 0) > 0
+                ? `${subscription.extraPointOfSaleSlots} PDV`
+                : null}
+              {(subscription.extraPointOfSaleSlots ?? 0) > 0 && (subscription.extraCommercialBrandSlots ?? 0) > 0
+                ? ' · '
+                : null}
+              {(subscription.extraCommercialBrandSlots ?? 0) > 0
+                ? `${subscription.extraCommercialBrandSlots} marca(s)`
+                : null}
+            </p>
+          ) : null}
+        </div>
+        {requestedAddon && (
+          <div className="mb-5 flex items-start gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-950/30">
+            <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600" />
+            <p className="text-sm text-violet-900 dark:text-violet-100">
+              Quieres contratar{' '}
+              <span className="font-semibold">{PLAN_ADDON_CATALOG[requestedAddon].name}</span>{' '}
+              ({formatAddonPrice(requestedAddon, billingMode)}).
+              {accountBlocked
+                ? ' Reactiva primero tu suscripción; las ampliaciones requieren plan activo.'
+                : ' Pulsa «Contratar ampliación» en la tarjeta para pagar.'}
+            </p>
+          </div>
+        )}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          {PLAN_ADDON_LIST.map((addon) => {
+            const isSelected = requestedAddon === addon.id;
+            return (
+              <div
+                key={addon.id}
+                className={`rounded-2xl border-2 p-5 transition-all ${
+                  isSelected
+                    ? 'border-violet-400 bg-violet-50 dark:border-violet-600 dark:bg-violet-950/20'
+                    : 'border-gray-200 dark:border-gray-700'
+                }`}
+              >
+                <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">{addon.name}</h3>
+                <p className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {getAddonMonthlyPriceEur(addon.id)}€
+                  <span className="text-sm font-normal text-gray-500 dark:text-gray-400">/mes</span>
+                </p>
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  O {formatAddonPrice(addon.id, 'annual')} con plan anual (−20%)
+                </p>
+                <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">{addon.description}</p>
+                <p className="mt-2 text-xs font-medium text-violet-700 dark:text-violet-300">
+                  Requiere plan Pro activo
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = isSelected ? null : addon.id;
+                    setRequestedAddon(next);
+                    if (user?.user_id) {
+                      writeBillingSelection(user.user_id, { requestedAddon: next, billingMode });
+                    }
+                  }}
+                  className={`mt-3 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                    isSelected
+                      ? 'border border-violet-300 bg-white text-violet-800 dark:border-violet-700 dark:bg-gray-900 dark:text-violet-200'
+                      : 'border border-gray-200 text-gray-700 hover:border-violet-300 dark:border-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {isSelected ? 'Seleccionada' : `Seleccionar ${addon.shortLabel}`}
+                </button>
+                <button
+                  type="button"
+                  disabled={!isSelected || isPurchasingAddon || accountBlocked}
+                  onClick={() => void handlePurchaseAddon(addon.id)}
+                  className={`mt-2 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                    isSelected && !accountBlocked
+                      ? 'bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50'
+                      : 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
+                  }`}
+                >
+                  {isPurchasingAddon && isSelected
+                    ? 'Procesando…'
+                    : accountBlocked
+                      ? 'Reactiva suscripción primero'
+                      : `Contratar ampliación (${formatAddonPrice(addon.id, billingMode)})`}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between mb-5 gap-3">
           <div>
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Suscripción con MONEI</p>
@@ -996,18 +1188,22 @@ function TabBilling() {
               disabled={
                 isLoadingBilling ||
                 isPaying ||
-                ((moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING') && !wantsDifferentPlanThanSubscription)
+                (!accountBlocked &&
+                  (moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING') &&
+                  !wantsDifferentPlanThanSubscription)
               }
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CreditCard className="w-4 h-4" />
               {isPaying
                 ? 'Redirigiendo a MONEI...'
-                : moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING'
-                  ? wantsDifferentPlanThanSubscription
-                    ? 'Ir a pagar plan seleccionado'
-                    : 'Suscripción activa'
-                  : 'Ir a pagar'}
+                : accountBlocked
+                  ? 'Pagar y reactivar suscripción'
+                  : moneiStatus === 'ACTIVE' || moneiStatus === 'TRIALING'
+                    ? wantsDifferentPlanThanSubscription
+                      ? 'Ir a pagar plan seleccionado'
+                      : 'Suscripción activa'
+                    : 'Ir a pagar'}
             </button>
           </div>
         </div>
@@ -3663,7 +3859,7 @@ export function Settings() {
   const navigate = useNavigate();
   const { tab: tabSlug } = useParams<{ tab?: string }>();
   const { user, updateProfile, listRoles, listUsers } = useAuth();
-  const { parkingZones, addParkingZone } = useApp();
+  const { parkingZones, addParkingZone, subscription } = useApp();
   const { templates, upsertTemplate, duplicateTemplate } = useDocumentTemplates();
   const { currentBusiness } = useBusiness();
   const activeTab: TabId = (tabSlug && SLUG_TO_TAB[tabSlug]) || DEFAULT_TAB;
@@ -3683,6 +3879,12 @@ export function Settings() {
       navigate(`/saas/settings/${canonical}${location.search}${location.hash}`, { replace: true });
     }
   }, [tabSlug, location.search, location.hash, navigate]);
+
+  useEffect(() => {
+    if (!isBlockingSubscriptionStatus(subscription.status)) return;
+    if (activeTab === 'billing') return;
+    navigate('/saas/settings/facturacion', { replace: true });
+  }, [subscription.status, activeTab, navigate]);
 
   const teamStats = useMemo(() => {
     const members = currentBusiness?.members;

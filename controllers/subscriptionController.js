@@ -9,6 +9,7 @@ import {
   verifyWebhookSignature,
   resolveApiKey,
   getDefaultMode,
+  createPayment,
 } from '../services/monei.js';
 import {
   findAccountByUserId,
@@ -24,6 +25,13 @@ import {
   sendGracePeriodNotification,
   sendSuspensionNotification,
 } from '../services/subscriptionLifecycle.js';
+import { PLAN_ADDON_CATALOG } from '../shared/billing/planAddons.js';
+import {
+  applyAddonToAccount,
+  canPurchaseAddon,
+  resolveAddonAmountCents,
+} from '../services/subscriptionAddons.js';
+import { isBlockingSubscriptionStatus } from '../services/subscriptionAdminActivation.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -32,6 +40,8 @@ const PLAN_CATALOG = {
   normal: { name: 'Normal', monthlyPrice: 14900, annualPrice: 143040 },
   pro: { name: 'Pro', monthlyPrice: 34900, annualPrice: 335040 },
 };
+
+export { PLAN_CATALOG, PLAN_ADDON_CATALOG };
 
 /** Alinea plan en cuenta con metadata de MONEI (createSubscription guarda planId / billingMode). */
 function subscriptionPlanFieldsFromMoneiMetadata(metadata) {
@@ -45,6 +55,43 @@ function subscriptionPlanFieldsFromMoneiMetadata(metadata) {
 function isSkipMoneiSubscription() {
   const v = String(process.env.SKIP_MONEI_SUBSCRIPTION || '').trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes';
+}
+
+function isSubscriptionReactivation(previousStatus) {
+  return isBlockingSubscriptionStatus(previousStatus);
+}
+
+function buildActivatedSubscriptionFields(sub, planId, planName, billingMode) {
+  const now = new Date();
+  const periodEnd = new Date(now);
+  if (billingMode === 'annual') {
+    periodEnd.setFullYear(periodEnd.getFullYear() + 1);
+  } else {
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+  }
+  const graceEnd = new Date(periodEnd);
+  graceEnd.setDate(graceEnd.getDate() + 7);
+  return {
+    ...sub,
+    status: 'subscription_active',
+    selectedPlanId: planId,
+    planName,
+    billingMode,
+    cancelAtPeriodEnd: false,
+    currentPeriodStart: now.toISOString(),
+    currentPeriodEnd: periodEnd.toISOString(),
+    gracePeriodEndsAt: graceEnd.toISOString(),
+    lastPaymentAt: now.toISOString(),
+  };
+}
+
+function extractPaymentRedirectUrl(payment) {
+  return (
+    payment?.nextAction?.redirectUrl
+    || payment?.redirectUrl
+    || payment?.paymentUrl
+    || null
+  );
 }
 
 /**
@@ -73,23 +120,24 @@ export async function createAndActivate(req, res) {
 
     if (isSkipMoneiSubscription()) {
       const now = new Date().toISOString();
+      const reactivating = isSubscriptionReactivation(account.subscription?.status);
       await saveAccount(req, {
         ...account,
-        subscription: {
-          ...account.subscription,
-          moneiSubscriptionId: '',
-          moneiPaymentId: null,
-          moneiSubscriptionStatus: 'SKIPPED',
-          selectedPlanId: planId,
-          planName: plan.name,
+        subscription: buildActivatedSubscriptionFields(
+          {
+            ...account.subscription,
+            moneiSubscriptionId: '',
+            moneiPaymentId: null,
+            moneiSubscriptionStatus: 'SKIPPED',
+          },
+          planId,
+          plan.name,
           billingMode,
-          status: 'subscription_active',
-          lastPaymentAt: now,
-        },
+        ),
         updatedAt: now,
       });
       logger.warn(
-        { userId, planId, billingMode },
+        { userId, planId, billingMode, reactivating },
         '[MONEI] SKIP_MONEI_SUBSCRIPTION activo: plan guardado en cuenta sin pasarela',
       );
       return res.json({
@@ -98,6 +146,7 @@ export async function createAndActivate(req, res) {
         subscriptionId: 'skip-monei',
         paymentId: null,
         skippedMonei: true,
+        reactivated: reactivating,
       });
     }
 
@@ -128,6 +177,8 @@ export async function createAndActivate(req, res) {
     const isAnnual = billingMode === 'annual';
     const amount = isAnnual ? plan.annualPrice : plan.monthlyPrice;
     const interval = isAnnual ? 'year' : 'month';
+    const reactivating = isSubscriptionReactivation(account.subscription?.status);
+    const trialPeriodDays = reactivating ? 0 : 14;
 
     const baseUrl = APP_URL.replace(/\/$/, '');
     const callbackUrl = `${baseUrl}/api/subscriptions/webhook/status`;
@@ -140,8 +191,8 @@ export async function createAndActivate(req, res) {
       currency: 'EUR',
       interval,
       intervalCount: 1,
-      trialPeriodDays: 14,
-      description: `Vertial ${plan.name} (${isAnnual ? 'anual' : 'mensual'})`,
+      trialPeriodDays,
+      description: `Vertial ${plan.name} (${isAnnual ? 'anual' : 'mensual'})${reactivating ? ' — reactivación' : ''}`,
       customerName: account.fullName || `${account.firstName} ${account.lastName}`.trim(),
       customerEmail: account.email,
       callbackUrl,
@@ -536,15 +587,61 @@ export async function webhookPaymentStatus(req, res) {
     const paymentId = payment.id;
     const paymentStatus = payment.status;
     const subscriptionId = payment.subscriptionId;
+    const metadata = payment.metadata || {};
+    const userId = metadata.userId;
+    const purchaseType = metadata.purchaseType || metadata.type;
+    const addonId = metadata.addonId;
 
-    logger.info({ paymentId, paymentStatus, subscriptionId, fullPayment: payment }, '[MONEI] Webhook pago recibido');
+    logger.info(
+      { paymentId, paymentStatus, subscriptionId, userId, purchaseType, addonId, fullPayment: payment },
+      '[MONEI] Webhook pago recibido',
+    );
+
+    if (purchaseType === 'addon' && addonId && userId) {
+      const account = await findAccountByUserId(req, userId);
+      if (!account) {
+        return res.status(200).json({ ok: true, skipped: true });
+      }
+
+      const now = new Date();
+      if (paymentStatus === 'SUCCEEDED') {
+        const patched = applyAddonToAccount(account, addonId, metadata.quantity || 1);
+        await saveAccount(req, {
+          ...patched,
+          updatedAt: now.toISOString(),
+        });
+        await writeChangelog(req, {
+          entity: 'subscription_addon',
+          entityId: addonId,
+          entityLabel: account.fullName || account.email,
+          action: 'purchase',
+          actorUserId: userId,
+          actorName: account.fullName || account.email,
+          changes: {
+            addonId: { before: null, after: addonId },
+            extraPointOfSaleSlots: {
+              before: account.subscription?.extraPointOfSaleSlots ?? 0,
+              after: patched.subscription?.extraPointOfSaleSlots ?? 0,
+            },
+            extraCommercialBrandSlots: {
+              before: account.subscription?.extraCommercialBrandSlots ?? 0,
+              after: patched.subscription?.extraCommercialBrandSlots ?? 0,
+            },
+          },
+          metadata: { paymentId, billingMode: metadata.billingMode || 'monthly' },
+        });
+        sendPaymentSuccessNotification({ ...account, subscription: patched.subscription }).catch(() => null);
+        logger.info({ paymentId, userId, addonId }, '[MONEI] Ampliación aplicada tras pago');
+      } else if (paymentStatus === 'FAILED') {
+        sendPaymentFailedNotification(account).catch(() => null);
+      }
+
+      return res.status(200).json({ ok: true });
+    }
 
     if (!subscriptionId) {
       return res.status(200).json({ ok: true, skipped: true });
     }
-
-    const metadata = payment.metadata || {};
-    const userId = metadata.userId;
 
     if (!userId) {
       return res.status(200).json({ ok: true, skipped: true });
@@ -558,18 +655,29 @@ export async function webhookPaymentStatus(req, res) {
     const now = new Date();
 
     if (paymentStatus === 'SUCCEEDED') {
+      const reactivated = isBlockingSubscriptionStatus(account.subscription?.status);
+      const periodFields = reactivated
+        ? buildActivatedSubscriptionFields(
+            account.subscription || {},
+            account.subscription?.selectedPlanId || 'basic',
+            account.subscription?.planName || 'Básico',
+            account.subscription?.billingMode || 'monthly',
+          )
+        : account.subscription || {};
+
       const updatedAccount = await saveAccount(req, {
         ...account,
         subscription: {
-          ...account.subscription,
+          ...periodFields,
           status: 'subscription_active',
           moneiSubscriptionStatus: 'ACTIVE',
           lastPaymentAt: now.toISOString(),
+          cancelAtPeriodEnd: false,
         },
         updatedAt: now.toISOString(),
       });
       sendPaymentSuccessNotification(updatedAccount).catch(() => null);
-      logger.info({ paymentId, userId }, '[MONEI] Pago recurrente exitoso');
+      logger.info({ paymentId, userId, reactivated }, '[MONEI] Pago recurrente exitoso');
     } else if (paymentStatus === 'FAILED') {
       const updatedAccount = await saveAccount(req, {
         ...account,
@@ -587,5 +695,114 @@ export async function webhookPaymentStatus(req, res) {
   } catch (error) {
     logger.error(error, '[MONEI] Error procesando webhook de pago');
     return res.status(200).json({ ok: true });
+  }
+}
+
+/**
+ * POST /api/subscriptions/addons/purchase
+ * Contrata una ampliación (PDV, marca, empresa). Con MONEI redirige al pago; en SKIP aplica al instante.
+ */
+export async function purchaseAddon(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+
+    const { addonId, billingMode = 'monthly', quantity = 1 } = req.body || {};
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const validation = canPurchaseAddon(account, addonId);
+    if (!validation.ok) {
+      return res.status(403).json({ ok: false, error: validation.error, code: validation.code });
+    }
+
+    const amount = resolveAddonAmountCents(addonId, billingMode);
+    if (!amount) {
+      return res.status(400).json({ ok: false, error: 'Ampliación no válida' });
+    }
+
+    const addon = PLAN_ADDON_CATALOG[addonId];
+    const qty = Math.max(1, Math.min(99, Math.floor(Number(quantity) || 1)));
+
+    if (isSkipMoneiSubscription()) {
+      let patched = account;
+      for (let i = 0; i < qty; i += 1) {
+        patched = applyAddonToAccount(patched, addonId, 1);
+      }
+      const saved = await saveAccount(req, {
+        ...patched,
+        updatedAt: new Date().toISOString(),
+      });
+      await writeChangelog(req, {
+        entity: 'subscription_addon',
+        entityId: addonId,
+        entityLabel: account.fullName || account.email,
+        action: 'grant_skip_monei',
+        actorUserId: userId,
+        actorName: account.fullName || account.email,
+        metadata: { addonId, quantity: qty, billingMode },
+      });
+      return res.json({
+        ok: true,
+        skippedMonei: true,
+        subscription: saved.subscription,
+        addonId,
+        quantity: qty,
+      });
+    }
+
+    const userApiKey = await resolveApiKey(req, userId);
+    const baseUrl = APP_URL.replace(/\/$/, '');
+    const completeUrl = `${baseUrl}/saas/settings/facturacion?addon_complete=true&addon_id=${encodeURIComponent(addonId)}`;
+    const cancelUrl = `${baseUrl}/saas/settings/facturacion?addon_cancelled=true`;
+
+    const payment = await createPayment({
+      amount: amount * qty,
+      currency: 'EUR',
+      orderId: `addon_${addonId}_${userId}_${Date.now()}`,
+      description: `Vertial — ${addon.name}${qty > 1 ? ` x${qty}` : ''}`,
+      customer: {
+        name: account.fullName || `${account.firstName} ${account.lastName}`.trim(),
+        email: account.email,
+      },
+      completeUrl,
+      cancelUrl,
+      callbackUrl: `${baseUrl}/api/subscriptions/webhook/payment`,
+      apiKey: userApiKey,
+      metadata: {
+        userId,
+        addonId,
+        purchaseType: 'addon',
+        billingMode,
+        quantity: qty,
+      },
+    });
+
+    const redirectUrl = extractPaymentRedirectUrl(payment);
+    if (!redirectUrl) {
+      logger.error({ payment }, '[MONEI] createPayment addon sin redirectUrl');
+      return res.status(502).json({ ok: false, error: PUBLIC_PAYMENT_UNAVAILABLE });
+    }
+
+    return res.json({
+      ok: true,
+      redirectUrl,
+      paymentId: payment.id,
+      addonId,
+      amount: amount * qty,
+      billingMode,
+    });
+  } catch (error) {
+    logger.error(error, '[MONEI] Error comprando ampliación');
+    return res.status(500).json({
+      ok: false,
+      error: sanitizePaymentErrorForClient(
+        error instanceof Error ? error.message : 'Error al contratar la ampliación',
+      ),
+    });
   }
 }

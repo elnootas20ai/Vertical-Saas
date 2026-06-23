@@ -570,6 +570,12 @@ export interface AppContextType {
   enableDevUnlimitedPdv: () => void;
   /** Sin tope de PDV al crear tiendas (solo simulación local). */
   devUnlimitedPdv: boolean;
+  /** Cupos extra de tienda/PDV simulados en local (suman al plan). */
+  devExtraPdv: number;
+  /** Cupos extra de marca comercial simulados en local (suman al plan). */
+  devExtraBrands: number;
+  setDevExtraPdvSlots: (value: number) => void;
+  setDevExtraBrandSlots: (value: number) => void;
   canAccessFeature: () => boolean;
   canPerformCriticalAction: () => boolean;
   getAccessRestrictionMessage: () => string | null;
@@ -644,6 +650,10 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       setDevSubscriptionPlan: () => {},
       enableDevUnlimitedPdv: () => {},
       devUnlimitedPdv: false,
+      devExtraPdv: 0,
+      devExtraBrands: 0,
+      setDevExtraPdvSlots: () => {},
+      setDevExtraBrandSlots: () => {},
       canAccessFeature: () => true,
       canPerformCriticalAction: () => true,
       getAccessRestrictionMessage: () => null,
@@ -786,6 +796,7 @@ function persistNotificationsCache(key: string, notifications: AppNotification[]
 
 export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
 export const DEV_EXTRA_PDV_KEY = 'vertial_dev_extra_pdv';
+export const DEV_EXTRA_BRAND_KEY = 'vertial_dev_extra_brands';
 export const DEV_UNLIMITED_PDV_KEY = 'vertial_dev_unlimited_pdv';
 
 type DevPlan = 'basic' | 'normal' | 'pro';
@@ -817,15 +828,24 @@ export function readDevPlanOverride(): DevPlan | null {
   }
 }
 
-/** PDV extra solo en local (suma al cupo del plan real al simular). */
-export function readDevExtraPdv(): number {
+function readDevExtraSlots(key: string): number {
   if (typeof window === 'undefined') return 0;
   try {
-    const n = Math.floor(Number(window.localStorage.getItem(DEV_EXTRA_PDV_KEY) || 0));
+    const n = Math.floor(Number(window.localStorage.getItem(key) || 0));
     return Math.max(0, Math.min(99, n));
   } catch {
     return 0;
   }
+}
+
+/** PDV extra solo en local (suma al cupo del plan real al simular). */
+export function readDevExtraPdv(): number {
+  return readDevExtraSlots(DEV_EXTRA_PDV_KEY);
+}
+
+/** Marcas comerciales extra solo en local (suman al cupo del plan al simular). */
+export function readDevExtraBrands(): number {
+  return readDevExtraSlots(DEV_EXTRA_BRAND_KEY);
 }
 
 export function readDevUnlimitedPdv(): boolean {
@@ -842,6 +862,7 @@ function clearDevPlanLocalStorage() {
   try {
     window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
     window.localStorage.removeItem(DEV_EXTRA_PDV_KEY);
+    window.localStorage.removeItem(DEV_EXTRA_BRAND_KEY);
     window.localStorage.removeItem(DEV_UNLIMITED_PDV_KEY);
   } catch {
     // ignore
@@ -860,12 +881,20 @@ function mergeDevOverrides(sub: Subscription): Subscription {
       selectedPlanId: def.selectedPlanId,
     };
   }
-  const devExtra = readDevExtraPdv();
-  if (devExtra > 0) {
+  const devExtraPdv = readDevExtraPdv();
+  if (devExtraPdv > 0) {
     const serverExtra = Math.max(0, Math.floor(Number(sub.extraPointOfSaleSlots) || 0));
     result = {
       ...result,
-      extraPointOfSaleSlots: Math.min(99, serverExtra + devExtra),
+      extraPointOfSaleSlots: Math.min(99, serverExtra + devExtraPdv),
+    };
+  }
+  const devExtraBrands = readDevExtraBrands();
+  if (devExtraBrands > 0) {
+    const serverExtra = Math.max(0, Math.floor(Number(sub.extraCommercialBrandSlots) || 0));
+    result = {
+      ...result,
+      extraCommercialBrandSlots: Math.min(99, serverExtra + devExtraBrands),
     };
   }
   return result;
@@ -1123,6 +1152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const [devExtraPdv, setDevExtraPdv] = useState(0);
+  const [devExtraBrands, setDevExtraBrands] = useState(0);
   const [devUnlimitedPdv, setDevUnlimitedPdv] = useState(false);
 
   useEffect(() => {
@@ -1144,9 +1174,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSubscription(canUseDevPlanOverride ? applyDevPlanOverride(baseSubscription) : baseSubscription);
     if (canUseDevPlanOverride) {
       setDevExtraPdv(readDevExtraPdv());
+      setDevExtraBrands(readDevExtraBrands());
       setDevUnlimitedPdv(readDevUnlimitedPdv());
     } else {
       setDevExtraPdv(0);
+      setDevExtraBrands(0);
       setDevUnlimitedPdv(false);
     }
     if (!canUseDevPlanOverride && typeof window !== 'undefined') {
@@ -1160,6 +1192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     setSubscription(mergeDevOverrides(base));
     setDevExtraPdv(readDevExtraPdv());
+    setDevExtraBrands(readDevExtraBrands());
     setDevUnlimitedPdv(readDevUnlimitedPdv());
   }, [authUser?.subscription]);
 
@@ -1179,6 +1212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (!plan) {
       setDevExtraPdv(0);
+      setDevExtraBrands(0);
       setDevUnlimitedPdv(false);
       setSubscription(deserializeSubscription(authUser?.subscription, {
         isWorker: isWorkerAccount(authUser),
@@ -1202,6 +1236,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDevUnlimitedPdv(true);
     setSubscription(deserializeSubscription(authUser?.subscription));
   }, [authUser]);
+
+  const setDevExtraPdvSlots = useCallback((value: number) => {
+    if (!userCanUseDevPlanOverride(authUser)) return;
+    const clamped = Math.max(0, Math.min(99, Math.floor(value)));
+    try {
+      if (clamped > 0) {
+        window.localStorage.setItem(DEV_EXTRA_PDV_KEY, String(clamped));
+        window.localStorage.removeItem(DEV_UNLIMITED_PDV_KEY);
+      } else {
+        window.localStorage.removeItem(DEV_EXTRA_PDV_KEY);
+      }
+    } catch {
+      // ignore
+    }
+    setDevExtraPdv(clamped);
+    if (clamped > 0) setDevUnlimitedPdv(false);
+    refreshDevSubscription();
+  }, [authUser, refreshDevSubscription]);
+
+  const setDevExtraBrandSlots = useCallback((value: number) => {
+    if (!userCanUseDevPlanOverride(authUser)) return;
+    const clamped = Math.max(0, Math.min(99, Math.floor(value)));
+    try {
+      if (clamped > 0) {
+        window.localStorage.setItem(DEV_EXTRA_BRAND_KEY, String(clamped));
+      } else {
+        window.localStorage.removeItem(DEV_EXTRA_BRAND_KEY);
+      }
+    } catch {
+      // ignore
+    }
+    setDevExtraBrands(clamped);
+    refreshDevSubscription();
+  }, [authUser, refreshDevSubscription]);
 
   useEffect(() => {
     if (!authUser?.user_id) {
@@ -2254,6 +2322,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDevSubscriptionPlan,
     enableDevUnlimitedPdv,
     devUnlimitedPdv,
+    devExtraPdv,
+    devExtraBrands,
+    setDevExtraPdvSlots,
+    setDevExtraBrandSlots,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
     addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,

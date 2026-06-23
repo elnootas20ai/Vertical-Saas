@@ -100,6 +100,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
+import { writeBillingSelection } from '../../../lib/billingSelection';
+import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 
 const WORK_CENTERS_CHANGED_EVENT = 'work-centers:changed';
 
@@ -1879,14 +1881,11 @@ export function SalesPointsTab() {
 
   const goToProAccess = () => {
     if (dataUserId) {
-      try {
-        localStorage.setItem(
-          `billing_selection_${dataUserId}`,
-          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
-        );
-      } catch {
-        // Ignore storage failures; billing still opens.
-      }
+      writeBillingSelection(dataUserId, {
+        selectedPlanId: 'pro',
+        billingMode: 'monthly',
+        requestedAddon: proAccessReason === 'pdv-extra' ? 'extra_pdv' : null,
+      });
     }
     setShowProAccessModal(false);
     setForceCreatePdv(false);
@@ -2636,7 +2635,7 @@ export function SalesPointsTab() {
                 </h4>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
                   {proAccessReason === 'pdv-extra'
-                    ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} puntos de venta. Para crear un PDV adicional necesitas contratar una ampliación.`
+                    ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} puntos de venta. Para crear otro PDV contrata la ampliación (${formatAddonPriceShort('extra_pdv')}).`
                     : `El plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} centro de trabajo. Tanto Básico como Normal solo permiten 1 PDV; para crear otra tienda, almacén u oficina necesitas activar PRO.`}
                 </p>
               </div>
@@ -2657,7 +2656,7 @@ export function SalesPointsTab() {
                 onClick={goToProAccess}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
               >
-                {proAccessReason === 'pdv-extra' ? 'Añadir ampliación' : 'Solicitar PRO'}
+                {proAccessReason === 'pdv-extra' ? `Contratar ampliación (${formatAddonPriceShort('extra_pdv')})` : 'Solicitar PRO'}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>

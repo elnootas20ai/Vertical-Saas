@@ -18,10 +18,18 @@ Documento **para humanos y para el asistente**: resume el “qué es” y el “
 |----------------------------|----------------|----------------|
 | **50 €**                   | Entrada / básico | **1 PDV** |
 | **150 €**                  | Intermedio     | **1 PDV** |
-| **350 €**                  | Alto / multi-sede base | **2 PDV** |
+| **350 €**                  | Alto / multi-sede base | **2 PDV** · **1 marca** (sin contar «General») |
 
-- **PDV adicional** (más allá de lo que incluye el plan): **+50 €** cada uno (ampliación / add-on).
-- En código hoy los planes se expresan como **Básico / Normal / Pro** con límites de PDV **1 / 1 / 2**; los **importes (50 / 150 / 350 / +50)** deben vivir alineados con **catálogo de facturación** (Monei / planes) cuando el producto y el panel de precios coincidan al 100 % con esta tabla.
+| Ampliación (plan Pro) | Precio/mes | Qué suma |
+|----------------------|------------|----------|
+| **Tienda / PDV extra** | **49 €** | +1 punto de venta (TPV, stock, operativa) |
+| **Marca comercial extra** | **19 €** | +1 línea de catálogo (p. ej. Pizzería, Burger) |
+| **Empresa extra** | **89 €** | +1 negocio/vertical en la misma cuenta |
+
+- Los add-ons **requieren plan Pro** activo. Básico/Normal deben subir a Pro antes de ampliar cupos.
+- Anual: **−20 %** sobre el precio mensual (igual que los planes base).
+- En código: catálogo en `src/app/lib/planAddonCatalog.ts` y `shared/billing/planAddons.js` (céntimos para MONEI).
+- **PDV adicional** (referencia histórica doc): alineado a **49 €/mes** (antes 50 € en borrador).
 
 ---
 

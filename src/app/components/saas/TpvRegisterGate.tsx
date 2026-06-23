@@ -6,6 +6,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
+import { writeBillingSelection } from '../../lib/billingSelection';
+import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
@@ -497,14 +499,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const goToPdvBilling = () => {
     const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
     if (resolvedUserId) {
-      try {
-        localStorage.setItem(
-          `billing_selection_${resolvedUserId}`,
-          JSON.stringify({ selectedPlanId: 'pro', billingMode: 'monthly' }),
-        );
-      } catch {
-        // Billing still opens if localStorage is not available.
-      }
+      writeBillingSelection(resolvedUserId, {
+        selectedPlanId: 'pro',
+        billingMode: 'monthly',
+        requestedAddon: pointOfSaleAccess.needsPointOfSaleAddon ? 'extra_pdv' : null,
+      });
     }
     navigate('/saas/settings/facturacion');
   };
@@ -525,7 +524,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const pointOfSaleActionTitle = pointOfSaleAccess.canCreatePointOfSale
     ? `Crear un nuevo punto de venta (${pointsOfSale.length}/${pointOfSaleAccess.includedPointOfSaleLimit})`
     : pointOfSaleAccess.needsPointOfSaleAddon
-      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Añade un extra para crear otro.`
+      ? `Tu plan PRO incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Ampliación: ${formatAddonPriceShort('extra_pdv')}.`
       : `Tu plan ${pointOfSaleAccess.planLabel} incluye ${pointOfSaleAccess.includedPointOfSaleLimit} PDV. Sube a PRO para crear más.`;
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);

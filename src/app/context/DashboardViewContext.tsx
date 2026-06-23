@@ -1,5 +1,4 @@
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -12,6 +11,12 @@ import { useBusiness } from './BusinessContext';
 import { useApp } from './AppContext';
 import { portfolioViewAllowed } from '../lib/tenantEntitlements';
 import { resolvePlanTier } from '../lib/pointOfSaleLimits';
+import {
+  DashboardViewContext,
+  type DashboardViewContextValue,
+} from './dashboardViewContextRef';
+
+export type { DashboardViewContextValue };
 
 const DASH_GENERAL_KEY = 'vertial_dash_general';
 
@@ -26,15 +31,6 @@ function readPortfolioPreference(businessCount: number): boolean {
     return businessCount > 1;
   }
 }
-
-export type DashboardViewContextValue = {
-  isPortfolioView: boolean;
-  setPortfolioView: (value: boolean) => void;
-  selectBusinessFromPortfolio: (businessId: string) => void;
-  enterBusinessView: () => void;
-};
-
-const DashboardViewContext = createContext<DashboardViewContextValue | null>(null);
 
 export function DashboardViewProvider({ children }: { children: ReactNode }) {
   const { businesses, businessesFetchSettled, switchBusiness } = useBusiness();

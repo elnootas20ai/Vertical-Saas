@@ -135,6 +135,7 @@ import {
 } from '../../lib/workerProfileCompletion';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
 import { getEffectivePointOfSaleLimit } from '../../lib/pointOfSaleLimits';
+import { getEffectiveCommercialBrandLimit } from '../../lib/tenantEntitlements';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
@@ -553,6 +554,10 @@ function SidebarInner({
     setDevSubscriptionPlan,
     enableDevUnlimitedPdv,
     devUnlimitedPdv,
+    devExtraPdv,
+    devExtraBrands,
+    setDevExtraPdvSlots,
+    setDevExtraBrandSlots,
   } = useApp();
   const { t } = useTranslation();
   const canUseDevPlanSwitcher = userCanUseDevPlanOverride(user);
@@ -1628,10 +1633,53 @@ function SidebarInner({
             >
               Ilimitado
             </button>
+            {!devUnlimitedPdv && (
+              <div className="mt-1.5 space-y-1">
+                {([
+                  {
+                    label: 'Tiendas extra',
+                    value: devExtraPdv,
+                    onChange: setDevExtraPdvSlots,
+                  },
+                  {
+                    label: 'Marcas extra',
+                    value: devExtraBrands,
+                    onChange: setDevExtraBrandSlots,
+                  },
+                ] as const).map(({ label, value, onChange }) => (
+                  <div key={label} className="flex items-center justify-between gap-1">
+                    <span className="text-[9px] text-violet-700 dark:text-violet-300">{label}</span>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        aria-label={`Menos ${label}`}
+                        onClick={() => onChange(value - 1)}
+                        disabled={value <= 0}
+                        className="h-5 w-5 rounded border border-violet-200 bg-white text-[11px] font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-300 dark:hover:bg-violet-900/30"
+                      >
+                        −
+                      </button>
+                      <span className="min-w-[1.25rem] text-center text-[10px] font-semibold text-violet-800 dark:text-violet-200">
+                        {value}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Más ${label}`}
+                        onClick={() => onChange(value + 1)}
+                        disabled={value >= 99}
+                        className="h-5 w-5 rounded border border-violet-200 bg-white text-[11px] font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-40 dark:border-violet-800 dark:bg-gray-900 dark:text-violet-300 dark:hover:bg-violet-900/30"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <p className="mt-1 text-[9px] text-violet-600/80 dark:text-violet-400/80">
               {devUnlimitedPdv
                 ? 'PDV sin límite (plan real)'
-                : `Máx. ${getEffectivePointOfSaleLimit(subscription)} PDV`}
+                : `Máx. ${getEffectivePointOfSaleLimit(subscription)} tiendas · ${getEffectiveCommercialBrandLimit(subscription)} marcas`}
             </p>
             <button
               type="button"

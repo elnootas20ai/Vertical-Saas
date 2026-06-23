@@ -101,3 +101,29 @@ export async function cancelMoneiSubscription() {
     method: 'POST',
   });
 }
+
+export interface PurchaseAddonResponse {
+  ok: boolean;
+  redirectUrl?: string | null;
+  paymentId?: string;
+  addonId?: string;
+  amount?: number;
+  billingMode?: string;
+  skippedMonei?: boolean;
+  subscription?: Record<string, unknown>;
+  quantity?: number;
+}
+
+/**
+ * Contrata una ampliación (PDV, marca, empresa). Redirige a MONEI o aplica al instante en SKIP.
+ */
+export async function purchaseSubscriptionAddon(
+  addonId: string,
+  billingMode: 'monthly' | 'annual' = 'monthly',
+  quantity = 1,
+) {
+  return request<PurchaseAddonResponse>('/api/subscriptions/addons/purchase', {
+    method: 'POST',
+    body: JSON.stringify({ addonId, billingMode, quantity }),
+  });
+}

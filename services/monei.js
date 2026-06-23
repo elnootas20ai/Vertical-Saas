@@ -322,6 +322,7 @@ export async function createPayment({
   cancelUrl,
   callbackUrl,
   paymentToken,
+  metadata = {},
   apiKey = null,
 }) {
   return moneiRequest(
@@ -337,6 +338,7 @@ export async function createPayment({
       ...(cancelUrl ? { cancelUrl } : {}),
       ...(callbackUrl ? { callbackUrl } : {}),
       ...(paymentToken ? { paymentToken } : {}),
+      ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {}),
     },
     apiKey,
   );
