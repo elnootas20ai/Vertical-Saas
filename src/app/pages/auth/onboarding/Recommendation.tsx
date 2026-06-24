@@ -68,6 +68,8 @@ export function Recommendation() {
         billingMode,
         userCount: data.businessMetrics.userCount,
         locationCount: data.businessMetrics.locationCount,
+        businessCount: data.businessMetrics.businessCount,
+        commercialBrandCount: data.businessMetrics.commercialBrandCount,
       }),
     [billingMode, data.businessMetrics, recommendation.plan],
   );
@@ -77,6 +79,8 @@ export function Recommendation() {
       plan: recommendation.plan,
       userCount: data.businessMetrics.userCount,
       locationCount: data.businessMetrics.locationCount,
+      businessCount: data.businessMetrics.businessCount,
+      commercialBrandCount: data.businessMetrics.commercialBrandCount,
     });
 
     updateData('subscriptionSelection', {
@@ -177,12 +181,18 @@ export function Recommendation() {
             </span>
           </div>
 
-          {(pricing.extraUsers > 0 || pricing.extraLocations > 0) && (
-            <p className="shrink-0 text-xs text-gray-600 dark:text-gray-400 mb-2">
-              Base {pricing.baseCost}€
-              {pricing.extraUsers > 0 && ` + ${pricing.extraUsers} usuario(s) extra (${pricing.extraUsersCost}€)`}
-              {pricing.extraLocations > 0 &&
-                ` + ${pricing.extraLocations} local(es) extra (${pricing.extraLocationsCost}€)`}
+          {(pricing.extraUsers > 0 ||
+            pricing.extraPdv > 0 ||
+            pricing.extraBusinesses > 0 ||
+            pricing.extraBrands > 0) && (
+            <p className="shrink-0 text-xs text-gray-600 dark:text-gray-400 mb-2 leading-relaxed">
+              Plan {recommendation.plan.name} {pricing.baseCost}€
+              {pricing.extraUsers > 0 && ` + ${pricing.extraUsers} trabajador(es) extra (${pricing.extraUsersCost}€)`}
+              {pricing.extraPdv > 0 && ` + ${pricing.extraPdv} PDV extra (${pricing.extraPdvCost}€)`}
+              {pricing.extraBusinesses > 0 &&
+                ` + ${pricing.extraBusinesses} empresa(s) extra (${pricing.extraBusinessesCost}€)`}
+              {pricing.extraBrands > 0 &&
+                ` + ${pricing.extraBrands} línea(s) comercial extra (${pricing.extraBrandsCost}€)`}
             </p>
           )}
 

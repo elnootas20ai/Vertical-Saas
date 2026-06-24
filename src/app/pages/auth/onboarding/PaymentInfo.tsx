@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { CreditCard, Lock, Shield, AlertCircle } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
@@ -9,6 +9,11 @@ import {
   OnboardingContentCard,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import {
+  calculateOnboardingPricing,
+  getPlansForBusinessType,
+  recommendOnboardingPlan,
+} from '../../../lib/onboardingPlanRecommendation';
 
 const inputClass = (hasError: boolean) =>
   `w-full px-3 py-2 text-sm border-2 rounded-xl outline-none transition-colors ${
@@ -60,6 +65,27 @@ export function PaymentInfo() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const orderSummary = useMemo(() => {
+    const recommendation = recommendOnboardingPlan({
+      businessType: data.businessType,
+      userCount: data.businessMetrics.userCount,
+      locationCount: data.businessMetrics.locationCount,
+      businessCount: data.businessMetrics.businessCount,
+      commercialBrandCount: data.businessMetrics.commercialBrandCount,
+      modules: data.requestedModules,
+    });
+    const billingMode = data.subscriptionSelection.billingMode;
+    const pricing = calculateOnboardingPricing({
+      plan: recommendation.plan,
+      billingMode,
+      userCount: data.businessMetrics.userCount,
+      locationCount: data.businessMetrics.locationCount,
+      businessCount: data.businessMetrics.businessCount,
+      commercialBrandCount: data.businessMetrics.commercialBrandCount,
+    });
+    return { recommendation, billingMode, pricing };
+  }, [data]);
 
   // Formatear número de tarjeta (espacios cada 4 dígitos)
   const formatCardNumber = (value: string) => {
@@ -224,6 +250,50 @@ export function PaymentInfo() {
             <span>{submitError}</span>
           </div>
         )}
+
+        <OnboardingContentCard className="space-y-3">
+          <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3 dark:border-gray-700">
+            <div>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Resumen de tu suscripción</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Plan {orderSummary.recommendation.plan.name} ·{' '}
+                {orderSummary.billingMode === 'monthly' ? 'facturación mensual' : 'facturación anual (-20%)'}
+              </p>
+            </div>
+            <p className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
+              {orderSummary.pricing.total}€
+              <span className="text-xs font-normal text-gray-500">/mes</span>
+            </p>
+          </div>
+          <ul className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+            <li>Plan {orderSummary.recommendation.plan.name}: {orderSummary.pricing.baseCost}€</li>
+            {orderSummary.pricing.extraUsers > 0 ? (
+              <li>
+                +{orderSummary.pricing.extraUsers} trabajador(es) extra: {orderSummary.pricing.extraUsersCost}€
+              </li>
+            ) : null}
+            {orderSummary.pricing.extraPdv > 0 ? (
+              <li>+{orderSummary.pricing.extraPdv} PDV extra: {orderSummary.pricing.extraPdvCost}€</li>
+            ) : null}
+            {orderSummary.pricing.extraBusinesses > 0 ? (
+              <li>
+                +{orderSummary.pricing.extraBusinesses} empresa(s) extra: {orderSummary.pricing.extraBusinessesCost}€
+              </li>
+            ) : null}
+            {orderSummary.pricing.extraBrands > 0 ? (
+              <li>
+                +{orderSummary.pricing.extraBrands} línea(s) comercial extra: {orderSummary.pricing.extraBrandsCost}€
+              </li>
+            ) : null}
+          </ul>
+          <p className="text-[11px] text-gray-500 dark:text-gray-500 leading-snug">
+            {data.businessMetrics.businessCount ?? 1} empresa · {data.businessMetrics.locationCount} PDV ·{' '}
+            {data.businessMetrics.userCount} trabajadores
+            {(data.businessMetrics.commercialBrandCount ?? 0) > 0
+              ? ` · ${data.businessMetrics.commercialBrandCount} línea(s) extra`
+              : ''}
+          </p>
+        </OnboardingContentCard>
 
         <OnboardingContentCard className="space-y-4">
           <div className="flex items-center gap-2 border-b border-gray-100 pb-3 dark:border-gray-700">

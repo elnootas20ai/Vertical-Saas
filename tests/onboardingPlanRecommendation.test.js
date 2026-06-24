@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { recommendOnboardingPlan, recommendOnboardingPlanId } from '../src/app/lib/onboardingPlanRecommendation.ts';
+import {
+  calculateOnboardingPricing,
+  recommendOnboardingPlan,
+  recommendOnboardingPlanId,
+} from '../src/app/lib/onboardingPlanRecommendation.ts';
 
 describe('onboarding plan recommendation', () => {
   const baseModules = {
@@ -72,5 +76,35 @@ describe('onboarding plan recommendation', () => {
     });
     expect(rec.plan.id).toBe('pro');
     expect(rec.exceedsPlanLimits).toBe(true);
+  });
+
+  it('calcula total con plan PRO y ampliaciones de infraestructura', () => {
+    const proPlan = {
+      id: 'pro',
+      name: 'PRO',
+      priceMonthly: 349,
+      priceAnnual: 279,
+      maxUsers: 12,
+      maxLocations: 2,
+      maxBusinesses: 3,
+      maxCommercialBrands: 1,
+      features: [],
+    };
+    const pricing = calculateOnboardingPricing({
+      plan: proPlan,
+      billingMode: 'monthly',
+      userCount: 5,
+      locationCount: 3,
+      businessCount: 4,
+      commercialBrandCount: 2,
+    });
+    expect(pricing.baseCost).toBe(349);
+    expect(pricing.extraPdv).toBe(1);
+    expect(pricing.extraPdvCost).toBe(49);
+    expect(pricing.extraBusinesses).toBe(1);
+    expect(pricing.extraBusinessesCost).toBe(89);
+    expect(pricing.extraBrands).toBe(1);
+    expect(pricing.extraBrandsCost).toBe(19);
+    expect(pricing.total).toBe(349 + 49 + 89 + 19);
   });
 });
