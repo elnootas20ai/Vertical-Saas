@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
 
 type AccentKey = 'neutral' | 'blue' | 'violet';
@@ -118,7 +119,8 @@ export function Entry() {
 
   if (view === 'register') {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
+      <AccesoSplitLayout visualKey="register-company">
+        <div className="flex flex-1 flex-col items-center p-6 py-8 lg:px-10 lg:py-10">
         <div className="w-full max-w-3xl">
           <div className="text-center mb-10">
             <div className="flex items-center justify-center mb-6">
@@ -228,13 +230,15 @@ export function Entry() {
             </WEB__Button>
           </div>
         </div>
-      </div>
+        </div>
+      </AccesoSplitLayout>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-      <div className="w-full max-w-5xl">
+    <AccesoSplitLayout visualKey="entry">
+      <div className="flex flex-1 flex-col p-6 py-8 lg:px-10 lg:py-10">
+      <div className="w-full max-w-5xl mx-auto">
         <div className="text-center mb-10">
           <div className="flex items-center justify-center mb-6">
             <VertialLogo size="xl" />
@@ -300,6 +304,7 @@ export function Entry() {
           </WEB__Button>
         </div>
       </div>
-    </div>
+      </div>
+    </AccesoSplitLayout>
   );
 }

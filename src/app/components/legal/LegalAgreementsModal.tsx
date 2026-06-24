@@ -41,10 +41,10 @@ export function LegalAgreementsModal({ isOpen, onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[min(90vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+        className="flex max-h-[min(95vh,52rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700">
           <div>
             <h2 id="legal-agreements-title" className="text-lg font-bold text-gray-900 dark:text-gray-100">
               Acuerdos legales
@@ -63,7 +63,7 @@ export function LegalAgreementsModal({ isOpen, onClose }: Props) {
           </button>
         </div>
 
-        <div className="flex flex-wrap gap-1 border-b border-gray-100 px-3 py-2 dark:border-gray-800">
+        <div className="flex shrink-0 flex-wrap gap-1 border-b border-gray-100 px-4 py-2.5 dark:border-gray-800">
           {TABS.map((t) => {
             const Icon = t.icon;
             const active = tab === t.id;
@@ -85,7 +85,7 @@ export function LegalAgreementsModal({ isOpen, onClose }: Props) {
           })}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-visible px-6 py-5">
           {tab === 'resumen' ? (
             <div className="space-y-4">
               <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400">
@@ -121,7 +121,7 @@ export function LegalAgreementsModal({ isOpen, onClose }: Props) {
           ) : null}
         </div>
 
-        <div className="border-t border-gray-200 px-5 py-3 dark:border-gray-700">
+        <div className="shrink-0 border-t border-gray-200 px-6 py-4 dark:border-gray-700">
           <button
             type="button"
             onClick={onClose}

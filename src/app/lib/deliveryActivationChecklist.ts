@@ -54,12 +54,12 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     id: 'delivery_store',
     number: 1,
     label: 'Tienda y PDV',
-    description: 'Crea el local y la caja; pulsa Ir en cada dato pendiente',
+    description: 'Crea el local y activa la caja del TPV en PC (no tablet ni datáfono)',
     route: '/saas/settings/tienda',
     icon: 'store',
     subSteps: [
       { id: 'retail_store', label: 'Primera tienda creada', completed: flags.hasActiveRetailStore },
-      { id: 'active_pdv', label: 'PDV de caja activo', completed: flags.hasActivePdv },
+      { id: 'active_pdv', label: 'Caja del TPV activada', completed: flags.hasActivePdv },
     ],
   },
   {

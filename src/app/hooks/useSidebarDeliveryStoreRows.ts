@@ -120,15 +120,17 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
           }
         }
       } finally {
+        inflightRef.current = false;
         if (!cancelled) {
           setFallbackLoading(false);
-          inflightRef.current = false;
         }
       }
     })();
 
     return () => {
       cancelled = true;
+      inflightRef.current = false;
+      setFallbackLoading(false);
     };
   }, [
     enabled,
@@ -144,10 +146,10 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   ]);
 
   const rows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
-  const loading =
-    enabled &&
-    rows.length === 0 &&
-    (activeStore.loading || fallbackLoading || !businessesFetchSettled);
+  const waitingForBusinessList = !businessesFetchSettled;
+  const waitingForStores =
+    Boolean(businessId) && (activeStore.loading || fallbackLoading);
+  const loading = enabled && rows.length === 0 && (waitingForBusinessList || waitingForStores);
 
   return { rows, loading };
 }

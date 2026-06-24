@@ -102,6 +102,7 @@ export function Company() {
       }
     >
       <OnboardingStepHeading
+        stepLabel="Paso 2 · Empresa"
         title="Datos de tu empresa"
         subtitle="Esta información nos ayudará a configurar tu espacio de trabajo"
       />

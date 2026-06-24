@@ -23,6 +23,16 @@ export function normalizePdvCodeInput(raw: string): string;
 
 export function sanitizePdvCodeInput(raw: string): string;
 
+export function sanitizePdvCodePrefixPart(raw: string): string;
+
+export function sanitizePdvCodeSeqPart(raw: string): string;
+
+export function parsePdvCodeParts(code: string): { prefix: string; seq: string };
+
+export function buildPdvCodeFromParts(prefix: string, seq: string): string;
+
+export const PDV_CODE_STRICT_RE: RegExp;
+
 export function validatePdvCodeInput(raw: string): string | null;
 
 export function sanitizeRetailTextField(raw: string, maxLen: number): string;

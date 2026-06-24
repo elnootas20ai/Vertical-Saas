@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router';
 import { CheckCircle, Calendar, CreditCard, ArrowRight, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
+import { VertialLogo } from '../../../components/VertialLogo';
+import { OnboardingHeroPanel } from '../../../components/auth/onboarding/OnboardingHeroPanel';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import { useAuth } from '../../../context/AuthContext';
 import { isDeliveryBusinessType } from '../../../lib/onboardingPlanRecommendation';
@@ -98,9 +100,16 @@ export function Confirmation() {
   }, [currentStep]);
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-800 flex flex-col items-center justify-center p-6">
+    <div className="h-dvh max-h-dvh min-h-0 grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,38%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
+      <div className="flex min-h-0 flex-col items-center justify-center overflow-y-auto overscroll-contain scrollbar-visible p-6 pb-28">
       <div className="w-full max-w-3xl">
-        <div className="text-center mb-8">
+        <div className="mb-8 text-center">
+          <div className="mb-5 flex justify-center">
+            <VertialLogo size="lg" />
+          </div>
+          <p className="mb-3 inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+            Configuración completada
+          </p>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
             {headingTitle}
           </h1>
@@ -109,7 +118,7 @@ export function Confirmation() {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-8">
+        <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-700 dark:bg-gray-800">
           <div className="space-y-4">
             {steps.map((step, index) => {
               const isCompleted = completedSteps.includes(step.id);
@@ -153,18 +162,10 @@ export function Confirmation() {
           </div>
 
           {currentStep >= steps.length && (
-            <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
-              <p className="text-center text-green-800 font-medium">
+            <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900/50 dark:bg-green-950/30">
+              <p className="text-center font-medium text-green-800 dark:text-green-200">
                 {t('onboarding.confirmation.redirect', { countdown })}
               </p>
-              <div className="flex justify-center">
-                <ACCESO__Button
-                  variant="primary"
-                  onClick={() => navigate('/saas/dashboard', { replace: true })}
-                >
-                  {t('onboarding.confirmation.goNow')}
-                </ACCESO__Button>
-              </div>
             </div>
           )}
         </div>
@@ -175,6 +176,23 @@ export function Confirmation() {
           </p>
         </div>
       </div>
+
+      {currentStep >= steps.length ? (
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-4 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(1rem,env(safe-area-inset-bottom))] lg:left-0 lg:right-[38%]">
+          <ACCESO__Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            icon="next"
+            onClick={() => navigate('/saas/dashboard', { replace: true })}
+          >
+            {t('onboarding.confirmation.goNow')}
+          </ACCESO__Button>
+        </div>
+      ) : null}
+      </div>
+
+      <OnboardingHeroPanel visualKey="confirmation" className="border-l border-white/10" />
     </div>
   );
 }

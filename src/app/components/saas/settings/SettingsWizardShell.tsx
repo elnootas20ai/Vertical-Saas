@@ -12,7 +12,7 @@ export type SettingsWizardStep = {
   completed?: boolean;
 };
 
-export type SettingsWizardSize = 'default' | 'large';
+export type SettingsWizardSize = 'default' | 'medium' | 'large';
 
 const SHELL_SIZE_STYLES: Record<
   SettingsWizardSize,
@@ -42,6 +42,20 @@ const SHELL_SIZE_STYLES: Record<
     stepNum: 'h-7 w-7 text-xs',
     stepTitle: 'text-xs',
     preview: 'hidden w-36 shrink-0 p-3 sm:block md:w-40',
+    body: 'p-4 sm:p-5',
+    footer: 'px-4 py-3 sm:px-5',
+  },
+  medium: {
+    panel: 'max-w-3xl rounded-2xl',
+    overlay: 'p-3 sm:p-4',
+    header: 'px-5 py-4 sm:px-6',
+    title: 'text-lg sm:text-xl',
+    subtitle: 'text-xs sm:text-sm',
+    icon: 'h-11 w-11 rounded-xl',
+    steps: 'px-4 py-2.5 sm:px-5',
+    stepNum: 'h-7 w-7 text-xs',
+    stepTitle: 'text-xs sm:text-sm',
+    preview: 'hidden w-40 shrink-0 p-4 sm:block md:w-44',
     body: 'p-4 sm:p-5',
     footer: 'px-4 py-3 sm:px-5',
   },

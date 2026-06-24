@@ -103,10 +103,17 @@ function userLikelyHasBusinesses(userId: string): boolean {
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
+/** Errores transitorios: JWT aún no refleja email verificado tras /me o verify. */
+function isEmailVerificationBlockedError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes('verificar tu email') || m.includes('email_not_verified');
+}
+
 export function BusinessProvider({ children }: { children: ReactNode }) {
   const auth = useAuthOptional();
   const user = auth?.user ?? null;
   const isInitializing = auth?.isInitializing ?? true;
+  const refreshCurrentUser = auth?.refreshCurrentUser;
 
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
@@ -158,6 +165,16 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Sin email verificado la API devuelve 403; no pedir empresas ni guardar error stale.
+    if (!user.emailVerified) {
+      setBusinessesLoadError(null);
+      setBusinesses([]);
+      setCurrentBusiness(null);
+      setIsLoading(false);
+      setBusinessesFetchSettled(true);
+      return;
+    }
+
     const userId = user.user_id;
     const loadSeq = ++businessesLoadSeqRef.current;
     const cachedBeforeFetch = readBusinessesCache(userId);
@@ -182,6 +199,16 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
               : firstError instanceof Error
                 ? firstError.message
                 : 'No se pudieron cargar las empresas';
+          if (refreshCurrentUser && isEmailVerificationBlockedError(message)) {
+            await refreshCurrentUser();
+            await new Promise((r) => setTimeout(r, 150));
+            try {
+              const response = await listBusinessesRequest(userId);
+              return response.businesses || [];
+            } catch {
+              /* sesión aún sincronizando */
+            }
+          }
           throw new Error(message);
         }
       }
@@ -225,6 +252,8 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         setBusinessesLoadError(
           `${message} Se muestran los datos guardados en este navegador.`,
         );
+      } else if (isEmailVerificationBlockedError(message)) {
+        setBusinessesLoadError(null);
       } else {
         setBusinessesLoadError(message);
       }
@@ -234,7 +263,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         setBusinessesFetchSettled(true);
       }
     }
-  }, [user?.user_id, user?.linkedBusinessId, isInitializing, resolveCurrentBusiness]);
+  }, [user?.user_id, user?.emailVerified, user?.linkedBusinessId, isInitializing, resolveCurrentBusiness, refreshCurrentUser]);
 
   useEffect(() => {
     if (user?.user_id) return;

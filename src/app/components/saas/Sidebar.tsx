@@ -1861,7 +1861,11 @@ function SidebarInner({
               <button
                 onClick={() => {
                   setShowUserMenu(false);
-                  navigate('/auth/gate', { replace: true });
+                  if (businesses.length <= 1) {
+                    navigate('/saas/dashboard', { replace: true });
+                  } else {
+                    navigate('/auth/gate', { replace: true });
+                  }
                 }}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-left"
               >

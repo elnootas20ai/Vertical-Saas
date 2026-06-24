@@ -20,7 +20,6 @@ import { useAuthOptional, type AuthContextType } from '../../context/AuthContext
 import { isWorkerAccount } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { Mail, X, ArrowLeft } from 'lucide-react';
-import { toast } from 'sonner';
 import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
@@ -166,6 +165,14 @@ function LayoutInner({
     switchBusiness(businessId);
   }, [switchBusiness, dashboardView]);
 
+  const handlePortfolioTabClick = useCallback(() => {
+    if (!portfolioPlan.canUsePortfolioView) {
+      navigate('/saas/billing');
+      return;
+    }
+    dashboardView?.setPortfolioView(true);
+  }, [portfolioPlan.canUsePortfolioView, navigate, dashboardView]);
+
   // Two-key sequence tracking (G+D, N+V, etc.)
   const lastKeyRef = useRef<string | null>(null);
   const lastKeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -298,16 +305,8 @@ function LayoutInner({
               }
               portfolioViewActive={dashboardView?.isPortfolioView ?? false}
               portfolioTabLocked={portfolioPlan.portfolioLocked}
-              onSelectPortfolioView={() => dashboardView?.setPortfolioView(true)}
-              onPortfolioLockedClick={() => {
-                toast.info('Visión general consolidada disponible en plan Pro', {
-                  description: 'Básico y Normal incluyen 1 empresa. Pro permite 2 empresas y comparativa.',
-                  action: {
-                    label: 'Ver planes',
-                    onClick: () => navigate('/saas/billing'),
-                  },
-                });
-              }}
+              onSelectPortfolioView={handlePortfolioTabClick}
+              onPortfolioLockedClick={handlePortfolioTabClick}
             />
           </div>
         )}

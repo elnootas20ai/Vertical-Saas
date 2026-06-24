@@ -187,6 +187,7 @@ function ActiveStoreScopeProviderImpl({
   const loadSeqRef = useRef(0);
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDisplayedStoresRef = useRef(false);
+  const emptyRetryDoneRef = useRef(false);
   const pathnameRef = useRef(location.pathname);
 
   const applyStores = useCallback((retail: WorkCenter[], allPdvs: PointOfSale[]) => {
@@ -232,6 +233,7 @@ function ActiveStoreScopeProviderImpl({
 
   useLayoutEffect(() => {
     setInitialLoading(false);
+    emptyRetryDoneRef.current = false;
     if (!businessId) {
       setPointsOfSale([]);
       setAllPointsOfSale([]);
@@ -324,7 +326,7 @@ function ActiveStoreScopeProviderImpl({
       } catch {
         /* conservar caché / última lista */
       } finally {
-        if (seq === loadSeqRef.current && showInitialSpinner) {
+        if (showInitialSpinner) {
           setInitialLoading(false);
         }
       }
@@ -355,13 +357,17 @@ function ActiveStoreScopeProviderImpl({
     void load();
   }, [authInitializing, businessId, businessesFetchSettled, user?.user_id, user?.id, load]);
 
-  /** Reintento si la sesión/empresa ya están listas pero la lista sigue vacía (p. ej. carrera al F5). */
+  /** Un solo reintento si la lista sigue vacía tras F5 (evita bucle infinito de loading en topbar). */
   useEffect(() => {
     if (authInitializing || !businessId || !businessesFetchSettled) return;
     const uid = String(user?.user_id || user?.id || '').trim();
     if (!uid) return;
-    if (retailWorkCenters.length > 0 || allPointsOfSale.length > 0) return;
+    if (retailWorkCenters.length > 0 || allPointsOfSale.length > 0) {
+      emptyRetryDoneRef.current = false;
+      return;
+    }
     if (initialLoading || loadInflightRef.current) return;
+    if (emptyRetryDoneRef.current) return;
     if (
       !resolveShouldUseDeliveryStores(
         currentBusiness,
@@ -373,6 +379,7 @@ function ActiveStoreScopeProviderImpl({
       return;
     }
 
+    emptyRetryDoneRef.current = true;
     const timer = window.setTimeout(() => {
       void loadRef.current({ force: true });
     }, 600);

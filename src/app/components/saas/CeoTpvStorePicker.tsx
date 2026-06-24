@@ -1,5 +1,8 @@
 import { useMemo } from 'react';
-import { ArrowLeft, Store, Loader2, Monitor } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Store, Loader2, Monitor, Plus } from 'lucide-react';
+import { ACCESO__Button } from '../design-system/ACCESO__Button';
+import { DELIVERY_TIENDA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import {
   buildDeliverySidebarStoreRows,
   pointOfSaleDisplayLabel,
@@ -29,6 +32,7 @@ export function CeoTpvStorePicker({
   onSelect,
   onBack,
 }: CeoTpvStorePickerProps) {
+  const navigate = useNavigate();
   const rows = useMemo(() => {
     if (storeRows.length > 0) return storeRows.filter((r) => !r.inactive);
     return pointsOfSale
@@ -78,9 +82,24 @@ export function CeoTpvStorePicker({
               <p className="text-sm">Cargando tiendas…</p>
             </div>
           ) : openable.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-8 text-center text-gray-500">
-              <Store className="w-10 h-10 mx-auto mb-3 opacity-40" />
-              <p className="text-sm">No hay tiendas listas para operar.</p>
+            <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center mx-auto mb-4">
+                <Store className="w-7 h-7 text-indigo-600 dark:text-indigo-400 opacity-80" />
+              </div>
+              <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                Aún no tienes tiendas
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-6 max-w-md mx-auto leading-relaxed">
+                Para usar el TPV necesitas al menos un centro de venta con caja. Créalo en Ajustes y
+                vuelve aquí para abrir turno.
+              </p>
+              <ACCESO__Button
+                variant="primary"
+                onClick={() => navigate(DELIVERY_TIENDA_SETTINGS_PATH)}
+              >
+                <Plus className="w-4 h-4" />
+                Crear primera tienda
+              </ACCESO__Button>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -159,7 +159,7 @@ export function Login() {
     setIsSubmitting(false);
 
     if (result.success) {
-      navigate(result.redirectTo || '/auth/gate');
+      navigate(result.redirectTo || '/saas/dashboard');
     } else if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });
       setLoginMode('emailCode');
@@ -233,7 +233,7 @@ export function Login() {
     const result = await verifyLoginCode(email, code);
     setIsSubmitting(false);
     if (result.success) {
-      navigate(result.redirectTo || '/auth/gate');
+      navigate(result.redirectTo || '/saas/dashboard');
     } else {
       setErrors({ password: result.error || 'Código inválido o expirado' });
     }

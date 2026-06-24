@@ -260,7 +260,7 @@ export function resolveWorkerSessionEntryPath(
   > | null,
 ): string {
   if (!user) return WORKER_DEFAULT_LANDING_PATH;
-  if (user.accountType === 'company') return '/auth/gate';
+  if (user.accountType === 'company') return '/saas/dashboard';
   if (user.accountType === 'user' && !String(user.linkedBusinessId || '').trim()) {
     return '/saas/user-dashboard';
   }

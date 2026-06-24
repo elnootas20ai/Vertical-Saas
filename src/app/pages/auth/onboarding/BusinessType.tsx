@@ -78,6 +78,7 @@ export function BusinessType() {
       }
     >
       <OnboardingStepHeading
+        stepLabel="Paso 1 · Tipo de negocio"
         title="¿Qué tipo de negocio tienes?"
         subtitle="Selecciona el sector que mejor describa tu actividad principal."
       />

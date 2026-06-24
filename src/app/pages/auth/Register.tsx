@@ -7,6 +7,7 @@ import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import type { GoogleUserProfile } from '../../lib/authApi';
@@ -245,9 +246,10 @@ export function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
+    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'}>
+      <div className="flex flex-1 flex-col items-center p-6 py-8 lg:px-10 lg:py-10">
       <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 sm:p-8 shadow-sm">
           <div className="text-center mb-8">
             <div className="flex items-center justify-center mb-6">
               <VertialLogo size="lg" />
@@ -590,6 +592,7 @@ export function Register() {
           </ACCESO__Button>
         </div>
       </div>
-    </div>
+      </div>
+    </AccesoSplitLayout>
   );
 }

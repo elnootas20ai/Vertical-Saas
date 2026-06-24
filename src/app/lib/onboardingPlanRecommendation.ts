@@ -1,7 +1,12 @@
 /**
  * Recomendación de plan y precio durante el onboarding.
- * Usa businessType, métricas (usuarios/locales) y requestedModules (mismas claves que setupSteps).
+ * Usa businessType, métricas de infraestructura y requestedModules (mismas claves que setupSteps).
  */
+
+import {
+  getAddonMonthlyPriceEur,
+  PLAN_ADDON_ANNUAL_DISCOUNT,
+} from './planAddonCatalog';
 
 export type OnboardingPlanId = 'basic' | 'normal' | 'pro';
 
@@ -22,6 +27,8 @@ export interface OnboardingPlanDefinition {
   priceAnnual: number;
   maxUsers: number;
   maxLocations: number;
+  maxBusinesses: number;
+  maxCommercialBrands: number;
   features: string[];
 }
 
@@ -32,7 +39,11 @@ export interface NeedsOptionDefinition {
 }
 
 const EXTRA_USER_MONTHLY = 5;
-const EXTRA_LOCATION_MONTHLY = 25;
+
+function addonUnitMonthlyPrice(baseEur: number, billingMode: 'monthly' | 'annual'): number {
+  if (billingMode === 'monthly') return baseEur;
+  return Math.round(baseEur * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
+}
 
 const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
   {
@@ -42,12 +53,14 @@ const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
     priceAnnual: 39,
     maxUsers: 2,
     maxLocations: 1,
+    maxBusinesses: 1,
+    maxCommercialBrands: 0,
     features: [
-      'Hasta 2 usuarios',
-      '1 ubicación',
+      '1 empresa · 1 PDV',
+      'Marca principal incluida (General)',
+      'Hasta 2 trabajadores',
       'Stock y operaciones',
       'CRM básico',
-      'Documentos esenciales',
     ],
   },
   {
@@ -57,11 +70,13 @@ const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
     priceAnnual: 119,
     maxUsers: 5,
     maxLocations: 1,
+    maxBusinesses: 1,
+    maxCommercialBrands: 0,
     features: [
-      'Hasta 5 usuarios',
-      '1 ubicación',
+      '1 empresa · 1 PDV',
+      'Marca principal incluida (General)',
+      'Hasta 5 trabajadores',
       'Firma digital',
-      'Gestoría integrada',
       'KPIs avanzados',
     ],
   },
@@ -72,12 +87,14 @@ const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
     priceAnnual: 279,
     maxUsers: 12,
     maxLocations: 2,
+    maxBusinesses: 3,
+    maxCommercialBrands: 1,
     features: [
-      'Hasta 12 usuarios',
-      'Hasta 2 ubicaciones',
+      'Hasta 3 empresas · 2 PDV',
+      '1 línea comercial extra (p. ej. Pizzería)',
+      'Hasta 12 trabajadores',
       'API y webhooks',
       'Soporte prioritario',
-      'Onboarding personalizado',
     ],
   },
 ];
@@ -223,22 +240,58 @@ export function countEnabledModules(modules: Partial<RequestedModules>): number 
   return Object.values(modules).filter(Boolean).length;
 }
 
-function planTierForDefault(
-  userCount: number,
-  locationCount: number,
+export type OnboardingInfrastructureMetrics = {
+  userCount: number;
+  locationCount: number;
+  businessCount: number;
+  commercialBrandCount: number;
+};
+
+export function normalizeInfrastructureMetrics(
+  metrics: Partial<OnboardingInfrastructureMetrics>,
+): OnboardingInfrastructureMetrics {
+  return {
+    userCount: Math.max(1, Math.floor(Number(metrics.userCount) || 1)),
+    locationCount: Math.max(1, Math.floor(Number(metrics.locationCount) || 1)),
+    businessCount: Math.max(1, Math.floor(Number(metrics.businessCount) || 1)),
+    commercialBrandCount: Math.max(0, Math.floor(Number(metrics.commercialBrandCount) || 0)),
+  };
+}
+
+function planTierForInfrastructure(
+  metrics: OnboardingInfrastructureMetrics,
   modules: Partial<RequestedModules>,
 ): number {
+  const { userCount, locationCount, businessCount, commercialBrandCount } = metrics;
   const moduleCount = countEnabledModules(modules);
   let tier = 0;
 
-  if (userCount > 2 || locationCount > 1) tier = Math.max(tier, 1);
+  if (userCount > 2) tier = Math.max(tier, 1);
   if (modules.analytics || modules.documentation) tier = Math.max(tier, 1);
   if (modules.workshop && userCount > 3) tier = Math.max(tier, 1);
   if (moduleCount >= 5) tier = Math.max(tier, 1);
-  if (userCount > 8 || locationCount > 2) tier = 2;
-  if (userCount > 5 && locationCount > 1) tier = Math.max(tier, 2);
+
+  // PRO: varias empresas, varios PDV o líneas comerciales extra (Pizzería, Burger…)
+  if (commercialBrandCount > 0 || businessCount > 1 || locationCount > 1) {
+    tier = 2;
+  }
+  if (userCount > 8 || (userCount > 5 && locationCount > 1)) {
+    tier = Math.max(tier, 2);
+  }
 
   return tier;
+}
+
+function infrastructureExceedsPlan(
+  plan: OnboardingPlanDefinition,
+  metrics: OnboardingInfrastructureMetrics,
+): boolean {
+  return (
+    metrics.userCount > plan.maxUsers ||
+    metrics.locationCount > plan.maxLocations ||
+    metrics.businessCount > plan.maxBusinesses ||
+    metrics.commercialBrandCount > plan.maxCommercialBrands
+  );
 }
 
 const TIER_TO_PLAN: OnboardingPlanId[] = ['basic', 'normal', 'pro'];
@@ -247,17 +300,25 @@ export function recommendOnboardingPlanId(params: {
   businessType: string;
   userCount: number;
   locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
   modules: Partial<RequestedModules>;
 }): OnboardingPlanId {
-  const { businessType, userCount, locationCount, modules } = params;
-  const plans = getPlansForBusinessType(businessType);
+  const metrics = normalizeInfrastructureMetrics(params);
+  const { modules } = params;
+  const plans = getPlansForBusinessType(params.businessType);
   const topPlan = plans[plans.length - 1];
 
-  if (userCount > topPlan.maxUsers || locationCount > topPlan.maxLocations) {
+  if (
+    metrics.userCount > topPlan.maxUsers ||
+    metrics.locationCount > topPlan.maxLocations ||
+    metrics.businessCount > topPlan.maxBusinesses ||
+    metrics.commercialBrandCount > topPlan.maxCommercialBrands
+  ) {
     return 'pro';
   }
 
-  const tier = planTierForDefault(userCount, locationCount, modules);
+  const tier = planTierForInfrastructure(metrics, modules);
 
   return TIER_TO_PLAN[Math.min(tier, 2)];
 }
@@ -266,43 +327,60 @@ export function buildRecommendationReason(params: {
   businessType: string;
   userCount: number;
   locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
   modules: Partial<RequestedModules>;
   plan: OnboardingPlanDefinition;
   exceedsPlanLimits: boolean;
 }): string {
-  const { businessType, userCount, locationCount, modules, plan, exceedsPlanLimits } = params;
+  const metrics = normalizeInfrastructureMetrics(params);
+  const { businessType, modules, plan, exceedsPlanLimits } = params;
   const parts: string[] = [];
 
   parts.push(
-    `${userCount} usuario${userCount !== 1 ? 's' : ''}`,
-    `${locationCount} local${locationCount !== 1 ? 'es' : ''}`,
+    `${metrics.businessCount} empresa${metrics.businessCount !== 1 ? 's' : ''}`,
+    `${metrics.locationCount} PDV`,
+    `${metrics.userCount} trabajador${metrics.userCount !== 1 ? 'es' : ''}`,
   );
+  if (metrics.commercialBrandCount > 0) {
+    parts.push(
+      `${metrics.commercialBrandCount} línea${metrics.commercialBrandCount !== 1 ? 's' : ''} comercial${metrics.commercialBrandCount !== 1 ? 'es' : ''} extra`,
+    );
+  }
 
   const selected = getSelectedModuleLabels(businessType, modules);
   if (selected.length > 0) {
     parts.push(`módulos: ${selected.slice(0, 3).join(', ')}${selected.length > 3 ? '…' : ''}`);
   }
 
+  if (metrics.commercialBrandCount > 0 && plan.maxCommercialBrands === 0) {
+    return `Con líneas comerciales extra necesitas al menos el plan PRO. Tu operativa: ${parts.join(' · ')}.`;
+  }
+
   if (isDeliveryBusinessType(businessType)) {
     if (exceedsPlanLimits) {
-      return `Para ${parts.join(' y ')}, recomendamos ${plan.name}. Puedes ampliar usuarios o locales según crezca tu operación.`;
+      return `Para ${parts.join(' · ')}, recomendamos ${plan.name}. Puedes ampliar cupos en Facturación si creces.`;
     }
     return `Precio orientativo para tu delivery: ${parts.join(' · ')}. Plan recomendado: ${plan.name}.`;
   }
 
   if (exceedsPlanLimits) {
-    return `Con ${parts.join(' y ')}, el plan más cercano es ${plan.name}. Puedes ampliar usuarios o locales con extras.`;
+    return `Con ${parts.join(' · ')}, el plan más cercano es ${plan.name}. Puedes ampliar cupos con extras.`;
   }
 
-  return `Plan ${plan.name} según tu operativa (${parts.join(' · ')}).`;
+  return `Plan ${plan.name} según tu infraestructura (${parts.join(' · ')}).`;
 }
 
 export interface OnboardingPricingBreakdown {
   baseCost: number;
   extraUsers: number;
-  extraLocations: number;
+  extraPdv: number;
+  extraBusinesses: number;
+  extraBrands: number;
   extraUsersCost: number;
-  extraLocationsCost: number;
+  extraPdvCost: number;
+  extraBusinessesCost: number;
+  extraBrandsCost: number;
   total: number;
 }
 
@@ -311,56 +389,91 @@ export function calculateOnboardingPricing(params: {
   billingMode: 'monthly' | 'annual';
   userCount: number;
   locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
 }): OnboardingPricingBreakdown {
-  const { plan, billingMode, userCount, locationCount } = params;
-  const extraUsers = Math.max(0, userCount - plan.maxUsers);
-  const extraLocations = Math.max(0, locationCount - plan.maxLocations);
-  const extraUsersCost = extraUsers * EXTRA_USER_MONTHLY;
-  const extraLocationsCost = extraLocations * EXTRA_LOCATION_MONTHLY;
-  const baseCost = billingMode === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
-  const total = baseCost + extraUsersCost + extraLocationsCost;
+  const metrics = normalizeInfrastructureMetrics(params);
+  const { plan, billingMode } = params;
 
-  return { baseCost, extraUsers, extraLocations, extraUsersCost, extraLocationsCost, total };
+  const extraUsers = Math.max(0, metrics.userCount - plan.maxUsers);
+  const extraPdv = Math.max(0, metrics.locationCount - plan.maxLocations);
+  const extraBusinesses = Math.max(0, metrics.businessCount - plan.maxBusinesses);
+  const extraBrands = Math.max(0, metrics.commercialBrandCount - plan.maxCommercialBrands);
+
+  const pdvUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_pdv'), billingMode);
+  const brandUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_brand'), billingMode);
+  const businessUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_business'), billingMode);
+  const userUnit = billingMode === 'annual'
+    ? Math.round(EXTRA_USER_MONTHLY * (1 - PLAN_ADDON_ANNUAL_DISCOUNT))
+    : EXTRA_USER_MONTHLY;
+
+  const extraUsersCost = extraUsers * userUnit;
+  const extraPdvCost = extraPdv * pdvUnit;
+  const extraBusinessesCost = extraBusinesses * businessUnit;
+  const extraBrandsCost = extraBrands * brandUnit;
+  const baseCost = billingMode === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
+  const total = baseCost + extraUsersCost + extraPdvCost + extraBusinessesCost + extraBrandsCost;
+
+  return {
+    baseCost,
+    extraUsers,
+    extraPdv,
+    extraBusinesses,
+    extraBrands,
+    extraUsersCost,
+    extraPdvCost,
+    extraBusinessesCost,
+    extraBrandsCost,
+    total,
+  };
 }
 
 export function recommendOnboardingPlan(params: {
   businessType: string;
   userCount: number;
   locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
   modules: Partial<RequestedModules>;
 }) {
+  const metrics = normalizeInfrastructureMetrics(params);
   const plans = getPlansForBusinessType(params.businessType);
   const topPlan = plans[plans.length - 1];
-  const exceedsPlanLimits =
-    params.userCount > topPlan.maxUsers || params.locationCount > topPlan.maxLocations;
 
   const planId = recommendOnboardingPlanId(params);
   const plan = plans.find((p) => p.id === planId) ?? plans[0];
+  const exceedsPlanLimits = infrastructureExceedsPlan(topPlan, metrics);
   const reason = buildRecommendationReason({
     ...params,
     plan,
     exceedsPlanLimits,
   });
 
-  return { planId, plan, reason, exceedsPlanLimits };
+  return { planId, plan, reason, exceedsPlanLimits, metrics };
 }
 
 export function estimateSubscriptionTotals(params: {
   plan: OnboardingPlanDefinition;
   userCount: number;
   locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
 }): { estimatedMonthlyTotal: number; estimatedAnnualTotal: number } {
   const monthly = calculateOnboardingPricing({
     plan: params.plan,
     billingMode: 'monthly',
     userCount: params.userCount,
     locationCount: params.locationCount,
+    businessCount: params.businessCount,
+    commercialBrandCount: params.commercialBrandCount,
   });
   const annual = calculateOnboardingPricing({
     plan: params.plan,
     billingMode: 'annual',
     userCount: params.userCount,
     locationCount: params.locationCount,
+    businessCount: params.businessCount,
+    commercialBrandCount: params.commercialBrandCount,
   });
 
   return {

@@ -1,33 +1,27 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router';
-import { 
-  Building2, 
-  UserPlus, 
-  ArrowRight, 
+import { useNavigate, useLocation } from 'react-router';
+import {
+  Building2,
+  UserPlus,
   CheckCircle,
   Car,
   Users,
   UserSearch,
   Receipt,
-  Building,
   Plus,
-  Upload,
-  FileText,
-  FolderOpen,
-  Download,
-  Wrench,
   AlertTriangle,
   RefreshCw,
+  Wrench,
 } from 'lucide-react';
 import { ACCESO__Modal } from '../../components/design-system/ACCESO__Modal';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
+import { VertialLogo } from '../../components/VertialLogo';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useAuth } from '../../context/AuthContext';
 import { resolveWorkerSessionEntryPath } from '../../lib/workerProfileCompletion';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
-import { BadgeStatus } from '../../components/gate/BadgeStatus';
 import { BusinessGrid } from '../../components/gate/BusinessGrid';
 import { ModalProximamente } from '../../components/gate/ModalProximamente';
 import { ModalExportar } from '../../components/gate/ModalExportar';
@@ -36,7 +30,6 @@ import { ModalModulo } from '../../components/gate/ModalModulo';
 import { VehicleImportWizard } from '../../components/saas/VehicleImportWizard';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import type { BusinessType } from '../../lib/businessApi';
-import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 
 const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'carDealership', label: 'Compraventa' },
@@ -87,8 +80,14 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+(\.[^\s@]+)?$/.test(clean);
 }
 
+function isTransientVerificationLoadError(message: string | null | undefined): boolean {
+  const m = String(message || '').toLowerCase();
+  return m.includes('verificar tu email') || m.includes('email_not_verified');
+}
+
 export function Gate() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data } = useOnboarding();
   const { logout, user } = useAuth();
   const {
@@ -102,8 +101,6 @@ export function Gate() {
     reloadBusinesses,
   } = useBusiness();
   const { vehicles, leads, clients, sales } = useApp();
-  const isSuperAdmin = isVertialSuperAdminEmail(user?.email);
-  const showAncoveIntegration = currentBusiness?.businessType === 'carDealership';
 
   useEffect(() => {
     if (!user) return;
@@ -164,7 +161,10 @@ export function Gate() {
   // Datos reales del onboarding (sin placeholders)
   const hasApiBusinesses = businesses.length > 0;
   const isBusinessesPending = !businessesFetchSettled || (isLoadingBusinesses && !hasApiBusinesses);
-  const showBusinessesLoadError = Boolean(businessesLoadError) && !isBusinessesPending;
+  const showBusinessesLoadError =
+    Boolean(businessesLoadError) &&
+    !isBusinessesPending &&
+    !isTransientVerificationLoadError(businessesLoadError);
   const showTrulyEmptyBusinesses =
     businessesFetchSettled && !isBusinessesPending && !hasApiBusinesses && !businessesLoadError;
 
@@ -174,16 +174,29 @@ export function Gate() {
     const first = businesses[0];
     if (first?.business_id) switchBusiness(first.business_id);
   }, [isBusinessesPending, hasApiBusinesses, currentBusiness, businesses, switchBusiness]);
-  const hasCIF = hasApiBusinesses
-    ? Boolean(currentBusiness?.taxId?.trim())
-    : data.companyProfile.taxId.length > 0;
-  const displayTradeName = hasApiBusinesses
-    ? (currentBusiness?.name || '')
-    : data.companyProfile.tradeName;
-  const displayTaxId = hasApiBusinesses
-    ? (currentBusiness?.taxId || '')
-    : data.companyProfile.taxId;
-  
+
+  // Una sola empresa → ir directo al panel (esta pantalla solo tiene sentido con varias).
+  useEffect(() => {
+    if (location.pathname !== '/auth/gate') return;
+    if (isBusinessesPending || showBusinessesLoadError) return;
+    if (businesses.length !== 1) return;
+    const only = businesses[0];
+    if (!only?.business_id) return;
+    if (currentBusiness?.business_id !== only.business_id) {
+      switchBusiness(only.business_id);
+    }
+    navigate('/saas/dashboard', { replace: true });
+  }, [
+    location.pathname,
+    isBusinessesPending,
+    showBusinessesLoadError,
+    businesses,
+    currentBusiness?.business_id,
+    switchBusiness,
+    navigate,
+  ]);
+
+
   const handleCreateBusiness = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!createBusinessData.name.trim()) return;
@@ -273,15 +286,6 @@ export function Gate() {
     setCreateBusinessStep((prev) => (prev === 1 ? 1 : ((prev - 1) as 1 | 2 | 3)));
   };
 
-  const handleEnterDashboard = () => {
-    navigate('/saas/dashboard');
-  };
-
-  const handleComingSoon = (verticalName: string) => {
-    setComingSoonVertical(verticalName);
-    setShowComingSoonModal(true);
-  };
-
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     setShowInviteModal(false);
@@ -290,296 +294,122 @@ export function Gate() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-[#0f1419] rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-xl">U</span>
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Vertial</h1>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Plataforma SaaS multi-vertical</p>
-              </div>
-            </div>
-            <button 
-              onClick={() => {
-                logout();
-                navigate('/');
-              }}
-              className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors"
-            >
-              Cerrar sesión
-            </button>
-          </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <header className="border-b border-gray-200/80 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-4">
+          <VertialLogo size="md" />
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              navigate('/');
+            }}
+            className="text-sm text-gray-600 transition-colors hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+          >
+            Cerrar sesión
+          </button>
         </div>
-      </div>
+      </header>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Welcome section */}
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-            Bienvenido a Vertial{user?.firstName ? `, ${user.firstName}` : ''}
-          </h2>
-          <p className="text-lg text-gray-600 dark:text-gray-400 mb-4">
-            Plataforma SaaS multi-vertical para digitalizar negocios.
-            {isSuperAdmin ? (
-              <>
-                {' '}
-                Tu acceso actual es <strong>{user?.role || 'Admin'}</strong>.
-              </>
-            ) : null}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <BadgeStatus label="Compraventa" status="available" />
-            <BadgeStatus label="Taller" status="available" />
-            <BadgeStatus label="Delivery" status="available" />
-            <BadgeStatus label="Eventos" status="available" />
-            <BadgeStatus label="Limpieza" status="available" />
-            <BadgeStatus label="Peluquería" status="available" />
-            <BadgeStatus label="Gimnasio" status="available" />
-            <BadgeStatus label="Clínica" status="available" />
-            <BadgeStatus label="Hotel" status="available" />
-            <BadgeStatus label="Construcción" status="available" />
-            <BadgeStatus label="Academia" status="available" />
-            <BadgeStatus label="Inmobiliaria" status="available" />
-            <BadgeStatus label="Abogado" status="available" />
-            <BadgeStatus label="Ocio nocturno" status="available" />
-            <BadgeStatus label="Desguace" status="available" />
-            <BadgeStatus label="Recambios" status="available" />
-            <BadgeStatus label="Taxi" status="available" />
-            <BadgeStatus label="Farmacia" status="available" />
-            <BadgeStatus label="Lavadero" status="available" />
-            <BadgeStatus label="Veterinario" status="available" />
-            <BadgeStatus label="Estanco" status="available" />
-            <BadgeStatus label="Carnicería" status="available" />
+      <main className="mx-auto max-w-4xl px-6 py-10">
+        {isBusinessesPending ? (
+          <div className="space-y-4 animate-pulse">
+            <div className="h-8 w-48 rounded-lg bg-gray-200 dark:bg-gray-700" />
+            <div className="h-32 rounded-2xl bg-gray-200 dark:bg-gray-700" />
+            <div className="h-32 rounded-2xl bg-gray-200 dark:bg-gray-700" />
           </div>
-        </div>
-
-        {/* Grid layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column - 2/3 */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Todas las empresas — grid completo */}
-            <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 space-y-4">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Todas las empresas</h3>
-                  <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium rounded-full">
-                    {isBusinessesPending ? '…' : businesses.length}
-                  </span>
-                </div>
-                {isBusinessesPending ? (
-                  <div className="space-y-3 animate-pulse">
-                    <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
-                    <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
-                  </div>
-                ) : showBusinessesLoadError ? (
-                  <div className="rounded-2xl border border-amber-300 dark:border-amber-700 bg-amber-50/90 dark:bg-amber-950/30 p-8 text-center">
-                    <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto mb-3" />
-                    <p className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">
-                      Conexión lenta con el servidor
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 max-w-md mx-auto">
-                      Tus empresas y datos <strong>no se han borrado</strong>. Suele ser un fallo puntual de red o
-                      sincronización. Pulsa Reintentar y deberían aparecer en unos segundos.
-                    </p>
-                    <div className="flex flex-wrap items-center justify-center gap-3">
-                      <ACCESO__Button variant="primary" onClick={() => void reloadBusinesses()}>
-                        <RefreshCw className="w-4 h-4" />
-                        Reintentar
-                      </ACCESO__Button>
-                      {hasApiBusinesses ? (
-                        <ACCESO__Button
-                          variant="outline"
-                          onClick={() => {
-                            if (currentBusiness?.business_id) {
-                              switchBusiness(currentBusiness.business_id);
-                            }
-                            navigate('/saas/dashboard');
-                          }}
-                        >
-                          Entrar con datos en caché
-                        </ACCESO__Button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : hasApiBusinesses && businesses.length > 0 ? (
-                  <BusinessGrid
-                    businesses={businesses}
-                    currentBusinessId={currentBusiness?.business_id}
-                    onEnterBusiness={(businessId) => {
-                      switchBusiness(businessId);
-                      navigate('/saas/dashboard');
-                    }}
-                    onManageBusinesses={() => navigate('/saas/settings/empresas')}
-                    vehicles={vehicles}
-                    sales={sales}
-                  />
-                ) : showTrulyEmptyBusinesses ? (
-                  <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-800 p-8 text-center">
-                    <Building2 className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-                    <p className="text-base font-medium text-gray-900 dark:text-gray-100 mb-1">Todavia no hay empresas</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                      Es normal en un entorno nuevo. Crea tu primera empresa para empezar a trabajar.
-                    </p>
-                    <ACCESO__Button
-                      variant="primary"
-                      onClick={() => setShowCreateBusiness(true)}
-                    >
-                      <Plus className="w-4 h-4" />
-                      Crear primera empresa
-                    </ACCESO__Button>
-                  </div>
-                ) : null}
-              </div>
-
-          </div>
-
-          {/* Right column - 1/3 */}
-          <div className="space-y-6 lg:sticky lg:top-8 lg:self-start">
-            {/* Tu espacio / Empresa activa */}
-            <div className="p-7 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800 shadow-sm">
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-5">Tu espacio</h3>
-              {isBusinessesPending ? (
-                <div className="space-y-3 animate-pulse">
-                  <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded-xl" />
-                  <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
-                </div>
-              ) : showBusinessesLoadError && hasApiBusinesses && currentBusiness ? (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/25 p-4 text-sm text-amber-900 dark:text-amber-200">
-                    Conexión inestable. Puedes entrar con la última empresa guardada en este navegador.
-                  </div>
-                  <ACCESO__Button onClick={handleEnterDashboard} variant="primary" fullWidth size="lg">
-                    <span className="flex-1 text-left">Entrar al panel ({currentBusiness.name})</span>
-                    <ArrowRight className="w-5 h-5 shrink-0" />
-                  </ACCESO__Button>
-                  <ACCESO__Button variant="outline" fullWidth onClick={() => void reloadBusinesses()}>
-                    <RefreshCw className="w-5 h-5" />
-                    Reintentar carga
-                  </ACCESO__Button>
-                </div>
-              ) : hasApiBusinesses && currentBusiness ? (
-                <div className="space-y-4">
-                  <ACCESO__Button
-                    onClick={handleEnterDashboard}
-                    variant="primary"
-                    fullWidth
-                    size="lg"
-                  >
-                    <span className="flex-1 text-left">Entrar al panel</span>
-                    <ArrowRight className="w-5 h-5 shrink-0" />
-                  </ACCESO__Button>
-                  <div className="p-5 bg-gradient-to-br from-gray-50 to-white dark:from-gray-800 dark:to-gray-800/70 rounded-2xl border border-gray-200 dark:border-gray-700">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 bg-gray-900 dark:bg-gray-700 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
-                        {currentBusiness.logo ? (
-                          <img src={currentBusiness.logo} alt="" className="w-12 h-12 object-cover" />
-                        ) : (
-                          <Building2 className="w-6 h-6 text-white" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{displayTradeName}</h4>
-                          <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 text-xs font-medium rounded-full">
-                            Empresa activa
-                          </span>
-                        </div>
-                        {hasCIF ? (
-                          <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">CIF: {displayTaxId}</p>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full mt-1">
-                            CIF pendiente
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {!hasCIF && (
-                      <button
-                        type="button"
-                        onClick={() => navigate('/auth/onboarding/company')}
-                        className="w-full mt-4 px-3 py-1.5 border border-yellow-600 text-yellow-700 rounded-lg hover:bg-yellow-50 dark:hover:bg-yellow-950/30 transition-colors text-sm font-medium"
-                      >
-                        Completar datos
-                      </button>
-                    )}
-                  </div>
-                  <ACCESO__Button onClick={() => setShowInviteModal(true)} variant="outline" fullWidth>
-                    <UserPlus className="w-5 h-5" />
-                    Invitar a un trabajador
-                  </ACCESO__Button>
-                </div>
-              ) : showTrulyEmptyBusinesses ? (
-                <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Plus className="w-7 h-7 text-amber-600" />
-                  </div>
-                  <p className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-1">Crea tu primera empresa</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                    Configura tu negocio para activar tu panel principal
-                  </p>
-                  <ACCESO__Button
-                    variant="primary"
-                    onClick={() => setShowCreateBusiness(true)}
-                    fullWidth
-                    size="lg"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Nueva empresa
-                  </ACCESO__Button>
-                </div>
-              ) : showBusinessesLoadError ? (
-                <div className="text-center py-8 space-y-4">
-                  <AlertTriangle className="w-10 h-10 text-amber-600 mx-auto" />
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{businessesLoadError}</p>
-                  <ACCESO__Button variant="primary" fullWidth onClick={() => void reloadBusinesses()}>
-                    <RefreshCw className="w-5 h-5" />
-                    Reintentar
-                  </ACCESO__Button>
-                </div>
-              ) : hasApiBusinesses ? (
-                <div className="space-y-3 animate-pulse">
-                  <div className="h-12 bg-gray-100 dark:bg-gray-700 rounded-xl" />
-                  <div className="h-24 bg-gray-100 dark:bg-gray-700 rounded-2xl" />
-                </div>
+        ) : showBusinessesLoadError ? (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-10 text-center dark:border-amber-700 dark:bg-amber-950/30">
+            <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-600" />
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">No se pudieron cargar tus empresas</h1>
+            <p className="mx-auto mt-2 max-w-md text-sm text-gray-600 dark:text-gray-400">
+              Tus datos no se han borrado. Suele ser un fallo puntual de red o sincronización.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <ACCESO__Button variant="primary" onClick={() => void reloadBusinesses()}>
+                <RefreshCw className="h-4 w-4" />
+                Reintentar
+              </ACCESO__Button>
+              {hasApiBusinesses && currentBusiness ? (
+                <ACCESO__Button
+                  variant="outline"
+                  onClick={() => {
+                    switchBusiness(currentBusiness.business_id);
+                    navigate('/saas/dashboard');
+                  }}
+                >
+                  Entrar con datos en caché
+                </ACCESO__Button>
               ) : null}
             </div>
+          </div>
+        ) : showTrulyEmptyBusinesses ? (
+          <div className="mx-auto max-w-lg rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center shadow-sm dark:border-gray-600 dark:bg-gray-800">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-700">
+              <Building2 className="h-7 w-7 text-gray-500 dark:text-gray-400" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Crea tu primera empresa</h1>
+            <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+              Configura tu negocio para acceder al panel de Vertial.
+            </p>
+            <ACCESO__Button
+              className="mt-6"
+              variant="primary"
+              size="lg"
+              onClick={() => setShowCreateBusiness(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Nueva empresa
+            </ACCESO__Button>
+          </div>
+        ) : hasApiBusinesses && businesses.length > 1 ? (
+          <div className="space-y-6 pb-24">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  Elige empresa
+                </h1>
+                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                  Tienes {businesses.length} negocios. Pulsa el botón de la empresa o entra con la activa.
+                </p>
+              </div>
+              <ACCESO__Button variant="outline" onClick={() => setShowCreateBusiness(true)}>
+                <Plus className="h-4 w-4" />
+                Nueva empresa
+              </ACCESO__Button>
+            </div>
 
-            {/* Integraciones (solo Compraventa) */}
-            {showAncoveIntegration ? (
-              <div className="p-6 border-2 border-gray-200 dark:border-gray-700 rounded-2xl bg-white dark:bg-gray-800">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Integraciones</h3>
-                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                  <div className="flex items-start gap-3 mb-2">
-                    <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <Building className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-gray-900 dark:text-gray-100">ANCOVE</h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">(Opcional)</p>
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-200 text-gray-700 dark:text-gray-300 text-xs font-medium rounded-full">
-                        <span className="w-1.5 h-1.5 bg-gray-500 rounded-full"></span>
-                        No conectado
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Configúralo cuando lo necesites</p>
-                  <button
-                    onClick={() => navigate('/saas/ancove')}
-                    className="w-full px-4 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-sm font-medium"
-                  >
-                    Configurar
-                  </button>
-                </div>
+            <BusinessGrid
+              businesses={businesses}
+              currentBusinessId={currentBusiness?.business_id}
+              onEnterBusiness={(businessId) => {
+                switchBusiness(businessId);
+                navigate('/saas/dashboard');
+              }}
+              onManageBusinesses={() => navigate('/saas/settings/empresas')}
+              vehicles={vehicles}
+              sales={sales}
+            />
+
+            {currentBusiness ? (
+              <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-4 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                <ACCESO__Button
+                  variant="primary"
+                  size="lg"
+                  fullWidth
+                  icon="next"
+                  onClick={() => {
+                    switchBusiness(currentBusiness.business_id);
+                    navigate('/saas/dashboard');
+                  }}
+                >
+                  Entrar al panel — {currentBusiness.name}
+                </ACCESO__Button>
               </div>
             ) : null}
           </div>
-        </div>
-      </div>
+        ) : null}
+      </main>
 
       {/* Modal de invitación */}
       <ACCESO__Modal

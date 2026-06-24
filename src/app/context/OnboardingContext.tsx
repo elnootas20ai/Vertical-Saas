@@ -46,7 +46,12 @@ export interface OnboardingData {
   };
   businessMetrics: {
     userCount: number;
+    /** Puntos de venta / locales operativos (legacy: locationCount). */
     locationCount: number;
+    /** Empresas en la cuenta (CIF distintos o marcas bajo un grupo). */
+    businessCount: number;
+    /** Líneas comerciales además de la marca «General» (p. ej. Pizzería, Burger). */
+    commercialBrandCount: number;
     monthlyOperations: string;
     activeItems: string;
     currentTools: string[];
@@ -111,6 +116,8 @@ export const initialOnboardingData: OnboardingData = {
   businessMetrics: {
     userCount: 1,
     locationCount: 1,
+    businessCount: 1,
+    commercialBrandCount: 0,
     monthlyOperations: '',
     activeItems: '',
     currentTools: [],
@@ -166,7 +173,13 @@ function mergeOnboardingData(partial?: Partial<OnboardingData> | null): Onboardi
       verificationDocuments: p.companyProfile?.verificationDocuments ?? [],
       verificationNote: p.companyProfile?.verificationNote ?? '',
     },
-    businessMetrics: { ...initialOnboardingData.businessMetrics, ...(p.businessMetrics ?? {}) },
+    businessMetrics: {
+      ...initialOnboardingData.businessMetrics,
+      ...(p.businessMetrics ?? {}),
+      businessCount: p.businessMetrics?.businessCount ?? initialOnboardingData.businessMetrics.businessCount,
+      commercialBrandCount:
+        p.businessMetrics?.commercialBrandCount ?? initialOnboardingData.businessMetrics.commercialBrandCount,
+    },
     requestedModules: { ...initialOnboardingData.requestedModules, ...(p.requestedModules ?? {}) },
     deliveryNeeds: p.deliveryNeeds,
     subscriptionSelection: {

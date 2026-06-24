@@ -131,6 +131,7 @@ export function Needs() {
       }
     >
       <OnboardingStepHeading
+        stepLabel="Paso 4 · Operativa"
         title={isDelivery ? '¿Qué quieres usar?' : '¿Qué vas a usar en Vertial?'}
         subtitle={
           isDelivery

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowRight, Check, CheckCircle, MapPin, Users } from 'lucide-react';
+import { ArrowRight, Building2, Check, CheckCircle, Layers, Store, Users } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { ACCESO__Modal } from '../../../components/design-system/ACCESO__Modal';
 import {
@@ -47,12 +47,16 @@ export function Recommendation() {
         businessType: data.businessType,
         userCount: data.businessMetrics.userCount,
         locationCount: data.businessMetrics.locationCount,
+        businessCount: data.businessMetrics.businessCount,
+        commercialBrandCount: data.businessMetrics.commercialBrandCount,
         modules: data.requestedModules,
       }),
     [
       data.businessType,
       data.businessMetrics.locationCount,
       data.businessMetrics.userCount,
+      data.businessMetrics.businessCount,
+      data.businessMetrics.commercialBrandCount,
       data.requestedModules,
     ],
   );
@@ -103,7 +107,7 @@ export function Recommendation() {
         </div>
       }
     >
-      <OnboardingStepHeading title="Tu precio recomendado" subtitle={recommendation.reason} />
+      <OnboardingStepHeading stepLabel="Paso 5 · Precio" title="Tu precio recomendado" subtitle={recommendation.reason} />
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 bg-white dark:bg-gray-800 border-2 border-amber-500 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col overflow-hidden">
@@ -116,21 +120,38 @@ export function Recommendation() {
             Plan {recommendation.plan.name}
           </h2>
 
-          <div className="shrink-0 flex flex-wrap gap-3 text-xs text-gray-700 dark:text-gray-300 my-2">
-            <span className="inline-flex items-center gap-1">
+          <div className="shrink-0 flex flex-wrap gap-2 text-xs text-gray-700 dark:text-gray-300 my-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-700">
+              <Building2 className="w-3.5 h-3.5" />
+              {data.businessMetrics.businessCount ?? 1} empresa{(data.businessMetrics.businessCount ?? 1) !== 1 ? 's' : ''}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-700">
+              <Store className="w-3.5 h-3.5" />
+              {data.businessMetrics.locationCount} PDV
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 dark:bg-gray-700">
               <Users className="w-3.5 h-3.5" />
-              {data.businessMetrics.userCount} usuarios
+              {data.businessMetrics.userCount} trabajadores
             </span>
-            <span className="inline-flex items-center gap-1">
-              <MapPin className="w-3.5 h-3.5" />
-              {data.businessMetrics.locationCount} locales
-            </span>
+            {(data.businessMetrics.commercialBrandCount ?? 0) > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
+                <Layers className="w-3.5 h-3.5" />
+                {data.businessMetrics.commercialBrandCount} línea
+                {data.businessMetrics.commercialBrandCount !== 1 ? 's' : ''} extra
+              </span>
+            ) : null}
             {selectedLabels.length > 0 && (
               <span className="text-gray-500 dark:text-gray-400">
                 · {selectedLabels.join(', ')}
               </span>
             )}
           </div>
+
+          {recommendation.exceedsPlanLimits ? (
+            <p className="shrink-0 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+              Tu operativa supera el cupo base del plan PRO. Podrás contratar ampliaciones en Facturación.
+            </p>
+          ) : null}
 
           <div className="shrink-0 flex items-center gap-2 mb-2">
             <button

@@ -13,6 +13,7 @@ import {
   Building2,
   MapPin,
   X,
+  ArrowRight,
 } from 'lucide-react';
 import type { Business, BusinessType } from '../../lib/businessApi';
 
@@ -109,21 +110,10 @@ function getBusinessStats(business: Business, realData?: RealBusinessData): Busi
 
   const profit = revenue - expenses;
 
+  // Solo alertas operativas del negocio (no pendientes de ficha/perfil).
   const alerts: BusinessAlert[] = [];
-  if (!business.taxId?.trim()) {
-    alerts.push({ id: 'no-cif', type: 'warning', message: 'CIF/NIF pendiente de completar' });
-  }
-  if (employeeCount <= 1) {
-    alerts.push({ id: 'no-team', type: 'info', message: 'Sin equipo — invita a tu primer trabajador' });
-  }
   if (realData && profit < 0) {
     alerts.push({ id: 'negative-profit', type: 'error', message: 'Beneficio negativo este periodo' });
-  }
-  if (!business.address?.trim()) {
-    alerts.push({ id: 'no-address', type: 'warning', message: 'Dirección fiscal no configurada' });
-  }
-  if (!business.email?.trim()) {
-    alerts.push({ id: 'no-email', type: 'info', message: 'Email de contacto no configurado' });
   }
   if (realData) {
     const pendingSales = realData.sales.filter((s) => s.status === 'pending');
@@ -204,17 +194,15 @@ function BusinessCard({
   const typeColor = BUSINESS_TYPE_COLORS[business.businessType] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
 
   return (
-    <button
-      type="button"
-      onClick={onEnter}
-      className={`relative w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 group hover:shadow-lg hover:-translate-y-0.5 ${
+    <div
+      className={`relative flex w-full flex-col rounded-2xl border-2 p-4 transition-all duration-200 ${
         isActive
-          ? 'border-amber-400 bg-amber-50/50 dark:bg-amber-950/20 shadow-amber-100 dark:shadow-amber-950/10'
-          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'
+          ? 'border-amber-400 bg-amber-50/50 shadow-md shadow-amber-100/80 dark:bg-amber-950/20 dark:shadow-amber-950/10'
+          : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
       }`}
     >
       {/* Header */}
-      <div className="flex items-start gap-3 mb-3">
+      <div className="mb-3 flex items-start gap-3">
         <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 bg-gray-900 dark:bg-gray-700 overflow-hidden">
           {business.logo ? (
             <img src={business.logo} alt="" className="w-11 h-11 object-cover" />
@@ -223,7 +211,7 @@ function BusinessCard({
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate group-hover:text-amber-700 dark:group-hover:text-amber-300 transition-colors">
+          <p className="truncate text-sm font-bold text-gray-900 dark:text-gray-100">
             {business.name}
           </p>
           {business.city && (
@@ -298,7 +286,20 @@ function BusinessCard({
           <AlertPopup alerts={stats.alerts} visible={hoverAlerts} />
         </div>
       )}
-    </button>
+
+      <button
+        type="button"
+        onClick={onEnter}
+        className={`mt-4 flex w-full min-h-[3rem] items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition-all active:scale-[0.98] ${
+          isActive
+            ? 'bg-gray-900 text-white shadow-lg shadow-gray-900/20 hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white'
+            : 'bg-amber-500 text-white shadow-md shadow-amber-500/25 hover:bg-amber-600'
+        }`}
+      >
+        Entrar al panel
+        <ArrowRight className="h-4 w-4 shrink-0" />
+      </button>
+    </div>
   );
 }
 

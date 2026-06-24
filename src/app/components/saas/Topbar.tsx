@@ -99,9 +99,7 @@ function TopbarInner({
   const activeStore = useActiveStoreScope();
   const hasSavedStorePreference = Boolean(activeStore.activePreferenceRaw?.trim());
   const showStoreStrip =
-    activeStore.loading ||
-    activeStore.pointsOfSale.length > 0 ||
-    hasSavedStorePreference;
+    activeStore.pointsOfSale.length > 0 || hasSavedStorePreference;
 
   return (
     <>

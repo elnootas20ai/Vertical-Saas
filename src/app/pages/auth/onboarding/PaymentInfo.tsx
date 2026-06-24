@@ -6,6 +6,7 @@ import { useAuth } from '../../../context/AuthContext';
 import {
   OnboardingStepHeading,
   OnboardingStepShell,
+  OnboardingContentCard,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 
@@ -204,6 +205,7 @@ export function PaymentInfo() {
       }
     >
       <OnboardingStepHeading
+        stepLabel="Paso 6 · Pago"
         title="Información de pago"
         subtitle="Datos de tarjeta. Trámite seguro y cifrado."
       />
@@ -211,127 +213,135 @@ export function PaymentInfo() {
       <form
         id="payment-form"
         onSubmit={handleSubmit}
-        className="flex-1 min-h-0 flex flex-col justify-center gap-2.5 overflow-hidden"
+        className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto overscroll-contain scrollbar-visible pr-0.5"
       >
         {submitError && (
           <div
-            className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-100 flex gap-2"
+            className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-100 flex gap-2"
             role="alert"
           >
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span>{submitError}</span>
           </div>
         )}
-        <div className="shrink-0">
-          <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1">
-            Número de tarjeta *
-          </label>
-          <div className="relative">
-            <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="0000 0000 0000 0000"
-              value={formData.cardNumber}
-              onChange={handleCardNumberChange}
-              className={`${inputClass(Boolean(errors.cardNumber))} pl-10`}
-            />
-          </div>
-              {errors.cardNumber && (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  {errors.cardNumber}
-                </p>
-              )}
-        </div>
 
-        <div className="shrink-0">
-          <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1">
-            Titular *
-          </label>
-          <input
-            type="text"
-            placeholder="Nombre del titular"
-            value={formData.cardHolderName}
-            onChange={(e) => {
-              setFormData({ ...formData, cardHolderName: e.target.value.toUpperCase() });
-              setErrors({ ...errors, cardHolderName: '' });
-            }}
-            className={inputClass(Boolean(errors.cardHolderName))}
-          />
-              {errors.cardHolderName && (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  {errors.cardHolderName}
-                </p>
-              )}
-        </div>
-
-        <div className="shrink-0 grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1">
-              Caducidad *
-            </label>
-            <input
-              type="text"
-              placeholder="MM/AA"
-              value={formData.expiryDate}
-              onChange={handleExpiryDateChange}
-              className={inputClass(Boolean(errors.expiryDate))}
-            />
-                {errors.expiryDate && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {errors.expiryDate}
-                  </p>
-                )}
+        <OnboardingContentCard className="space-y-4">
+          <div className="flex items-center gap-2 border-b border-gray-100 pb-3 dark:border-gray-700">
+            <CreditCard className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Tarjeta de crédito o débito</p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1">
-              CVV *
+            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+              Número de tarjeta *
+            </label>
+            <div className="relative">
+              <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="0000 0000 0000 0000"
+                value={formData.cardNumber}
+                onChange={handleCardNumberChange}
+                className={`${inputClass(Boolean(errors.cardNumber))} pl-10`}
+              />
+            </div>
+            {errors.cardNumber && (
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.cardNumber}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+              Titular *
             </label>
             <input
               type="text"
-              placeholder="CVV"
-              value={formData.cvv}
-              onChange={handleCvvChange}
-              className={inputClass(Boolean(errors.cvv))}
-            />
-                {errors.cvv && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {errors.cvv}
-                  </p>
-                )}
-          </div>
-        </div>
-
-        <div className="shrink-0 pt-1 border-t border-gray-200 dark:border-gray-700">
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.acceptTerms}
+              placeholder="Nombre del titular"
+              value={formData.cardHolderName}
               onChange={(e) => {
-                setFormData({ ...formData, acceptTerms: e.target.checked });
-                setErrors({ ...errors, acceptTerms: '' });
+                setFormData({ ...formData, cardHolderName: e.target.value.toUpperCase() });
+                setErrors({ ...errors, cardHolderName: '' });
               }}
-              className="mt-0.5 w-4 h-4 border-2 border-gray-300 rounded shrink-0"
+              className={inputClass(Boolean(errors.cardHolderName))}
             />
-            <span className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
-              Confirmo los datos y autorizo guardar este método de pago según los términos aplicables.
-            </span>
-          </label>
-              {errors.acceptTerms && (
-                <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+            {errors.cardHolderName && (
+              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.cardHolderName}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+                Caducidad *
+              </label>
+              <input
+                type="text"
+                placeholder="MM/AA"
+                value={formData.expiryDate}
+                onChange={handleExpiryDateChange}
+                className={inputClass(Boolean(errors.expiryDate))}
+              />
+              {errors.expiryDate && (
+                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
-                  {errors.acceptTerms}
+                  {errors.expiryDate}
                 </p>
               )}
-        </div>
+            </div>
 
-        <div className="shrink-0 flex items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
-          <Shield className="w-4 h-4 text-green-600 shrink-0" />
-          <span className="flex items-center gap-1">
+            <div>
+              <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+                CVV *
+              </label>
+              <input
+                type="text"
+                placeholder="CVV"
+                value={formData.cvv}
+                onChange={handleCvvChange}
+                className={inputClass(Boolean(errors.cvv))}
+              />
+              {errors.cvv && (
+                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  {errors.cvv}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-3 dark:border-gray-700">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.acceptTerms}
+                onChange={(e) => {
+                  setFormData({ ...formData, acceptTerms: e.target.checked });
+                  setErrors({ ...errors, acceptTerms: '' });
+                }}
+                className="mt-0.5 w-4 h-4 border-2 border-gray-300 rounded shrink-0"
+              />
+              <span className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
+                Confirmo los datos y autorizo guardar este método de pago según los términos aplicables.
+              </span>
+            </label>
+            {errors.acceptTerms && (
+              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {errors.acceptTerms}
+              </p>
+            )}
+          </div>
+        </OnboardingContentCard>
+
+        <div className="shrink-0 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
+          <Shield className="w-4 h-4 text-emerald-600 shrink-0 dark:text-emerald-400" />
+          <span className="flex items-center gap-1.5">
             <Lock className="w-3 h-3" />
             Pago seguro · cifrado de nivel bancario
           </span>

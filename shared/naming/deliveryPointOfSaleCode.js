@@ -77,6 +77,8 @@ export const PDV_RETAIL_LIMITS = {
 const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/g;
 /** Código: letras/números y guiones, sin empezar/terminar en guion (ej. BAD-01). */
 const PDV_CODE_FORMAT_RE = /^[A-Z0-9][A-Z0-9-]*[A-Z0-9]$/;
+/** Formato estricto para altas/edición en UI: 3 letras + guion + 2 dígitos (ej. CDM-01). */
+export const PDV_CODE_STRICT_RE = /^[A-Z]{3}-\d{2}$/;
 
 export function clampText(raw, maxLen) {
   const n = Number(maxLen);
@@ -118,20 +120,51 @@ export function normalizePdvCodeInput(raw) {
 }
 
 export function sanitizePdvCodeInput(raw) {
+  const { prefix, seq } = parsePdvCodeParts(raw);
+  if (!prefix && !seq) return '';
+  if (prefix.length === 3) return `${prefix}-${seq}`;
   return clampText(normalizePdvCodeInput(raw), PDV_RETAIL_LIMITS.pdvCodeMax);
+}
+
+export function sanitizePdvCodePrefixPart(raw) {
+  return alnumUpper(raw).replace(/[^A-Z]/g, '').slice(0, 3);
+}
+
+export function sanitizePdvCodeSeqPart(raw) {
+  return String(raw || '').replace(/\D/g, '').slice(0, 2);
+}
+
+export function parsePdvCodeParts(code) {
+  const norm = normalizePdvCodeInput(code);
+  if (!norm) return { prefix: '', seq: '' };
+  const dash = norm.indexOf('-');
+  if (dash === -1) {
+    const letters = norm.replace(/[^A-Z]/g, '').slice(0, 3);
+    const digits = norm.replace(/\D/g, '').slice(0, 2);
+    return { prefix: letters, seq: digits };
+  }
+  return {
+    prefix: sanitizePdvCodePrefixPart(norm.slice(0, dash)),
+    seq: sanitizePdvCodeSeqPart(norm.slice(dash + 1)),
+  };
+}
+
+export function buildPdvCodeFromParts(prefix, seq) {
+  const p = sanitizePdvCodePrefixPart(prefix);
+  const s = sanitizePdvCodeSeqPart(seq);
+  if (!p && !s) return '';
+  if (p.length < 3) return s ? `${p}-${s}` : p;
+  return `${p}-${s}`;
 }
 
 export function validatePdvCodeInput(raw) {
   const code = sanitizePdvCodeInput(raw);
   if (!code) return 'El código PDV es obligatorio';
-  if (code.length < PDV_RETAIL_LIMITS.pdvCodeMin) {
-    return `El código debe tener al menos ${PDV_RETAIL_LIMITS.pdvCodeMin} caracteres (ej. BAD-01)`;
+  if (!PDV_CODE_STRICT_RE.test(code)) {
+    return 'Usa 3 letras, guion y 2 números (ej. CDM-01)';
   }
   if (code.length > PDV_RETAIL_LIMITS.pdvCodeMax) {
     return `El código no puede superar ${PDV_RETAIL_LIMITS.pdvCodeMax} caracteres`;
-  }
-  if (!PDV_CODE_FORMAT_RE.test(code) || code.includes('--')) {
-    return 'Usa letras, números y un guion (ej. BAD-01)';
   }
   return null;
 }
