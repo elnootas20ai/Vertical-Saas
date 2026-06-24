@@ -104,6 +104,7 @@ import { applySuperAdminSubscriptionActivation } from '../services/subscriptionA
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
+import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -980,6 +981,19 @@ export async function updateProfile(req, res) {
       nextSubscription = merged;
     }
 
+    const completingOnboarding =
+      onboardingCompleted !== undefined &&
+      Boolean(onboardingCompleted) &&
+      !account.onboardingCompleted;
+    const onbForProvision =
+      onboardingData !== undefined ? onboardingData : account.onboardingData;
+    if (completingOnboarding && onbForProvision) {
+      nextSubscription = buildSubscriptionFromOnboarding(
+        onbForProvision,
+        nextSubscription || account.subscription || {},
+      );
+    }
+
     const nextEmployment = employment !== undefined
       ? mergeEmploymentInfo(account.employment, employment)
       : account.employment;
@@ -1197,6 +1211,22 @@ export async function saveBillingCard(req, res) {
 
     const savedCard = await saveCard(req, existingCard ? { ...existingCard, ...baseCard, updatedAt: new Date().toISOString() } : baseCard);
 
+    const onboardingData = account.onboardingData || {};
+    const dataForProvision = {
+      ...onboardingData,
+      subscriptionSelection: {
+        ...(onboardingData.subscriptionSelection || {}),
+        recommendedPlanId:
+          selectedPlanId || onboardingData.subscriptionSelection?.recommendedPlanId || 'basic',
+        billingMode: billingMode || onboardingData.subscriptionSelection?.billingMode || 'monthly',
+      },
+    };
+    const nextSubscription = buildSubscriptionFromOnboarding(
+      dataForProvision,
+      account.subscription || {},
+      { selectedPlanId, billingMode },
+    );
+
     const savedAccount = await saveAccount(req, {
       ...account,
       paymentSummary: {
@@ -1207,6 +1237,7 @@ export async function saveBillingCard(req, res) {
         billingMode: savedCard.billingMode,
         selectedPlanId: savedCard.selectedPlanId,
       },
+      subscription: nextSubscription,
       updatedAt: new Date().toISOString(),
     });
 
@@ -2513,11 +2544,19 @@ export async function saveOnboarding(req, res) {
     const prevVerificationDocCount = Array.isArray(account.onboardingData?.companyProfile?.verificationDocuments)
       ? account.onboardingData.companyProfile.verificationDocuments.length
       : 0;
+    const nextOnboardingData =
+      onboardingData !== undefined ? onboardingData : account.onboardingData;
+    const willComplete =
+      onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted;
+    let nextSubscription = account.subscription;
+    if (wasIncomplete && willComplete && nextOnboardingData) {
+      nextSubscription = buildSubscriptionFromOnboarding(nextOnboardingData, account.subscription || {});
+    }
     const savedAccount = await saveAccount(req, {
       ...account,
-      onboardingCompleted:
-        onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted,
-      onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
+      onboardingCompleted: willComplete,
+      onboardingData: nextOnboardingData,
+      subscription: nextSubscription,
       updatedAt: new Date().toISOString(),
     });
 
