@@ -164,7 +164,7 @@ export function alertTierDescription(tier, vertical = 'delivery') {
       return 'Plan de entrada con avisos mínimos: leads, ventas canceladas, stock bajo y recordatorios simples.';
     }
     if (tier === 'normal') {
-      return 'El plan recomendado: pedidos, cocina, reparto, caja, impagos y operación diaria del restaurante.';
+      return 'Plan recomendado para el gerente: caja, incidencias de pedidos, impagos, fichajes y operación del negocio.';
     }
     return 'El más completo: finanzas avanzadas, fiscal, proveedores, documentación, márgenes, canales y control inteligente.';
   }

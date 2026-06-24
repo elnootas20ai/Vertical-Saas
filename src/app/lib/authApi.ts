@@ -220,8 +220,14 @@ export interface BillingSubscription {
   extraPointOfSaleSlots?: number;
   /** Marcas comerciales extra sin cobro (solo superadmin; no cuenta la marca «General»). */
   extraCommercialBrandSlots?: number;
+  /** Empresas extra contratadas o concedidas por admin. */
+  extraBusinessSlots?: number;
   /** PRO manual sin pasarela (solo superadmin). */
   adminProAccess?: boolean;
+  /** Exento de suspensión automática por MONEI/cron. */
+  billingExempt?: boolean;
+  moneiSubscriptionId?: string;
+  moneiSubscriptionStatus?: string;
 }
 
 export interface BillingCard {

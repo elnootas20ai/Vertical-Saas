@@ -15,6 +15,7 @@ import {
   saveNotification,
   sanitizeNotification,
   findBusinessById,
+  findAccountByUserId,
   ensureDatabase,
   couchRequest,
   getAllDocuments,
@@ -31,9 +32,14 @@ import {
   derivePriorityFromLevel,
   PRIORITY_TO_LEVEL,
 } from './alertConstants.js';
+import { resolveAlertPlanTier } from './alertPlanTiers.js';
+import { resolvePlanTier } from './subscriptionAddons.js';
+import { MANAGER_RECIPIENT_ROLES, ALL_ALERT_RULE_DEFINITIONS } from './alertRulesCatalog.js';
 
 export const fakeReq = { headers: {} };
 const SETTINGS_DB = 'settings';
+
+const PLAN_TIER_RANK = { basic: 0, normal: 1, pro: 2 };
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -79,8 +85,6 @@ export async function getBusinessesOfType(businessType) {
   }
 }
 
-// ─── Business alert config ──────────────────────────────────────────────────
-
 async function getBusinessAlertConfig(businessId) {
   if (!businessId) return null;
   try {
@@ -96,23 +100,72 @@ async function getBusinessAlertConfig(businessId) {
   }
 }
 
+function memberMatchesRecipientRoles(memberRole, configuredRoles) {
+  const role = String(memberRole || '').trim();
+  if (!role) return false;
+  const configured = new Set((configuredRoles || []).map((r) => String(r || '').trim()));
+  if (configured.has(role)) return true;
+  const wantsManagers = ['Admin', 'Gerente', 'manager', 'gerente', 'owner'].some((r) => configured.has(r));
+  if (wantsManagers && MANAGER_RECIPIENT_ROLES.includes(role)) return true;
+  return false;
+}
+
+async function businessOwnerMeetsAlertRule(business, ruleId, category) {
+  const ownerId = business?.owner_user_id;
+  if (!ownerId) return true;
+  try {
+    const account = await findAccountByUserId(fakeReq, ownerId);
+    if (!account) return true;
+    const sub = account.subscription || {};
+    if (sub.billingExempt || sub.adminProAccess) return true;
+    const userTier = resolvePlanTier(sub.selectedPlanId, sub.planName);
+    const def = ALL_ALERT_RULE_DEFINITIONS.find((r) => r.id === ruleId || r.id === category);
+    const ruleTier = resolveAlertPlanTier(ruleId || category, def?.department || 'operaciones');
+    return (PLAN_TIER_RANK[userTier] ?? 0) >= (PLAN_TIER_RANK[ruleTier] ?? 1);
+  } catch {
+    return true;
+  }
+}
+
 async function resolveRecipients(businessId, ruleId, category, fallbackUserId) {
   if (!businessId) return fallbackUserId ? [fallbackUserId] : [];
   try {
     const business = await findBusinessById(fakeReq, businessId);
-    if (!business?.members?.length) return fallbackUserId ? [fallbackUserId] : [];
+    if (!business?.members?.length) {
+      return business?.owner_user_id
+        ? [business.owner_user_id]
+        : (fallbackUserId ? [fallbackUserId] : []);
+    }
     const config = await getBusinessAlertConfig(businessId);
     const rules = config?.rules || [];
     const rule = rules.find((r) => r.id === ruleId || r.id === category) || null;
     if (rule && !rule.enabled) return [];
+
+    const userIds = new Set();
+    if (business.owner_user_id) userIds.add(business.owner_user_id);
+
     if (rule?.recipientRoles?.length) {
-      const roleSet = new Set(rule.recipientRoles);
-      const userIds = business.members.filter((m) => m.user_id && roleSet.has(m.role)).map((m) => m.user_id);
-      if (rule.customRecipients?.length) {
-        for (const uid of rule.customRecipients) { if (uid && !userIds.includes(uid)) userIds.push(uid); }
+      for (const m of business.members) {
+        if (!m.user_id) continue;
+        if (memberMatchesRecipientRoles(m.role, rule.recipientRoles)) {
+          userIds.add(m.user_id);
+        }
       }
-      return userIds.length > 0 ? userIds : (fallbackUserId ? [fallbackUserId] : []);
+      if (rule.customRecipients?.length) {
+        for (const uid of rule.customRecipients) {
+          if (uid) userIds.add(uid);
+        }
+      }
+    } else {
+      for (const m of business.members) {
+        if (!m.user_id) continue;
+        if (MANAGER_RECIPIENT_ROLES.includes(String(m.role || ''))) {
+          userIds.add(m.user_id);
+        }
+      }
     }
+
+    if (userIds.size > 0) return Array.from(userIds);
     return fallbackUserId ? [fallbackUserId] : [business.owner_user_id].filter(Boolean);
   } catch {
     return fallbackUserId ? [fallbackUserId] : [];
@@ -201,6 +254,13 @@ export async function emitGlobalAlert({
 
     const channels = await resolveChannels(businessId, ruleId, category);
     if (channels.length === 0) return null;
+
+    if (businessId) {
+      const business = await findBusinessById(fakeReq, businessId);
+      if (business && !(await businessOwnerMeetsAlertRule(business, ruleId, category))) {
+        return null;
+      }
+    }
 
     const recipientUserIds = await resolveRecipients(businessId, ruleId, category, userId);
     if (recipientUserIds.length === 0) return null;

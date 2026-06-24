@@ -49,7 +49,7 @@ import {
   DollarSign, Wallet, AlertCircle, UserCheck, BarChart3, Briefcase,
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
-  LayoutGrid,
+  LayoutGrid, LayoutDashboard,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
@@ -388,7 +388,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
   /** Delivery: solo enlaces del vertical (sin taller, vehículos ni CRM compraventa genérico). */
   if (vertical === 'delivery') {
     return [
-      { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Centro ops', icon: <LayoutGrid className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
       { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
       { label: 'Clientes', icon: <Users className="w-5 h-5" />, route: '/saas/clients', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
@@ -412,6 +412,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
 
   const verticalLinks: Record<string, QuickAccessItem[]> = {
     carDealership: [
+      { label: 'Centro operativo', icon: <LayoutDashboard className="w-5 h-5" />, route: '/saas/vertical/compraventa', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
       { label: 'Vehículos', icon: <Car className="w-5 h-5" />, route: '/saas/vehicles', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
       { label: 'Reservas', icon: <BookmarkCheck className="w-5 h-5" />, route: '/saas/reservations', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
       { label: 'Ventas', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/sales', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
@@ -1121,7 +1122,7 @@ function UnifiedDashboard() {
                       ? (pendingDeliveriesKpi > 0 ? { value: `${pendingDeliveriesKpi} en curso`, up: true } : undefined)
                       : (criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined)
                   }
-                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery' : '/saas/catalog')}
+                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-ops' : '/saas/catalog')}
                   loading={serverLoading}
                 />
                 <KPICard
@@ -1657,7 +1658,7 @@ function OperativeBlock({
     const verticalSpecific: Record<string, { title: string; value: string; sub: string; icon: React.ReactNode; bg: string; text: string; route: string }> = {
       carDealership: { title: 'Stock vehículos', value: String(stockCount), sub: 'Disponibles', icon: <Car className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vehicles' },
       workshop: { title: 'Órdenes taller', value: '—', sub: 'Abiertas', icon: <Wrench className="w-4 h-4" />, bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600', route: '/saas/workshop' },
-      delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery' },
+      delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery-ops' },
       cleaning: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/cleaning-hub' },
       gym: { title: 'Socios activos', value: '—', sub: 'Este mes', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-members' },
       clinic: { title: 'Citas hoy', value: '—', sub: 'Programadas', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/clinic-appointments' },

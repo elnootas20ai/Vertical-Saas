@@ -10,6 +10,7 @@ const es = {
       dashboard: 'Dashboard',
       alertas: 'Alertas',
       compraventaHub: 'Centro Operativo',
+      'compraventa-crm': 'CRM Compraventa',
       publicacionVenta: 'Publicación y venta',
       purchaseOrders: 'Órdenes de compra',
       vehicles: 'Vehículos',

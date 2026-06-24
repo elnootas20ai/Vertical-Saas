@@ -5,6 +5,9 @@
 
 import { resolveAlertPlanTier } from './alertPlanTiers.js';
 
+/** Roles que reciben alertas de gestión (owner siempre incluido en emisor). */
+export const MANAGER_RECIPIENT_ROLES = ['Admin', 'Gerente', 'Administrador', 'Encargado'];
+
 function r(id, category, department, label, description, opts = {}) {
   return {
     id,
@@ -17,7 +20,7 @@ function r(id, category, department, label, description, opts = {}) {
     channels: opts.channels || ['inApp'],
     urgency: opts.urgency || 'medium',
     schedule: opts.schedule || 'instant',
-    recipientRoles: opts.recipientRoles || ['Admin'],
+    recipientRoles: opts.recipientRoles || [...MANAGER_RECIPIENT_ROLES],
     customRecipients: [],
   };
 }
@@ -39,12 +42,12 @@ export const ALERT_RULE_DEPARTMENTS = [
 export const ALL_ALERT_RULE_DEFINITIONS = [
   // ─── Delivery / caja / operación restaurante ─────────────────────────────
   r('delivery_delayed_order', 'delivery', 'delivery', 'Pedido retrasado', 'Pedido que supera el tiempo máximo en su estado actual', { ...pushInApp, urgency: 'high' }),
-  r('delivery_kitchen_saturated', 'delivery', 'delivery', 'Cocina saturada', 'Demasiados pedidos en cocina respecto a la capacidad', { ...pushInApp, urgency: 'high' }),
-  r('delivery_queue_overflow', 'delivery', 'delivery', 'Cola de cocina desbordada', 'Pedidos en cola y cocina por encima de la capacidad', { ...pushInApp, urgency: 'high' }),
+  r('delivery_kitchen_saturated', 'delivery', 'delivery', 'Cocina saturada', 'Demasiados pedidos en cocina respecto a la capacidad', { ...pushInApp, urgency: 'high', enabled: false }),
+  r('delivery_queue_overflow', 'delivery', 'delivery', 'Cola de cocina desbordada', 'Pedidos en cola y cocina por encima de la capacidad', { ...pushInApp, urgency: 'high', enabled: false }),
   r('delivery_product_out_of_stock', 'delivery', 'delivery', 'Producto agotado en carta', 'Producto activo sin stock disponible', { urgency: 'high' }),
   r('delivery_product_low_stock', 'delivery', 'delivery', 'Stock bajo en producto de carta', 'Producto con stock por debajo del mínimo o alta demanda', { urgency: 'medium' }),
-  r('delivery_rider_saturated', 'delivery', 'delivery', 'Reparto saturado', 'Demasiados pedidos por repartidor activo', { ...pushInApp, urgency: 'high' }),
-  r('delivery_no_active_riders', 'delivery', 'delivery', 'Sin repartidores activos', 'Hay pedidos esperando reparto y ningún rider disponible', { ...pushInApp, urgency: 'high' }),
+  r('delivery_rider_saturated', 'delivery', 'delivery', 'Reparto saturado', 'Demasiados pedidos por repartidor activo', { ...pushInApp, urgency: 'high', enabled: false }),
+  r('delivery_no_active_riders', 'delivery', 'delivery', 'Sin repartidores activos', 'Hay pedidos esperando reparto y ningún rider disponible', { ...pushInApp, urgency: 'high', enabled: false }),
   r('delivery_unassigned_order', 'delivery', 'delivery', 'Pedido sin repartidor', 'Pedido en reparto sin repartidor asignado', { urgency: 'medium' }),
   r('delivery_cash_pending_close', 'delivery', 'pdvs', 'Caja sin cerrar', 'Caja abierta después de la hora límite o demasiadas horas', { ...pushEmail, urgency: 'high' }),
   r('delivery_register_not_opened', 'delivery', 'pdvs', 'Caja sin abrir', 'Terminal activo sin sesión de caja abierta hoy', { ...pushInApp, urgency: 'medium' }),
@@ -60,7 +63,8 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_unpaid', 'delivery', 'delivery', 'Cobro pendiente (legacy)', 'Obsoleto: usar «Pedido sin cobrar» (motor delivery)', { enabled: false, urgency: 'medium' }),
   r('delivery_no_address', 'delivery', 'delivery', 'Pedido sin dirección', 'Pedido a domicilio sin dirección de entrega', { urgency: 'medium' }),
   r('delivery_channel_incident', 'delivery', 'delivery', 'Canal con incidencias', 'Varias incidencias en un canal de pedidos', { urgency: 'high' }),
-  r('register_high_return', 'delivery', 'pdvs', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { urgency: 'medium' }),
+  r('register_high_return', 'delivery', 'pdvs', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { ...pushInApp, urgency: 'medium' }),
+  r('delivery_order_cancelled', 'delivery', 'delivery', 'Pedido cancelado', 'Un trabajador o el TPV canceló un pedido', { ...pushInApp, urgency: 'high' }),
 
   // ─── Finanzas / compras / conciliación / OCR ─────────────────────────────
   r('payment_received', 'finanzas', 'finanzas', 'Pago recibido', 'Se registra un cobro o pago', { enabled: false, urgency: 'low' }),
@@ -227,18 +231,19 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('system_update', 'sistema', 'sistema', 'Actualización del sistema', 'Nueva versión o mantenimiento programado', { enabled: false, urgency: 'low' }),
 ];
 
-/** Paquete CEO delivery: 10 reglas activas al crear negocio delivery. */
+/** Paquete delivery al crear negocio: avisos al gerente/owner (caja, incidencias, equipo). */
 export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
-  'delivery_delayed_order',
-  'delivery_kitchen_saturated',
-  'delivery_queue_overflow',
-  'delivery_no_active_riders',
-  'delivery_unpaid_order',
   'delivery_cash_pending_close',
   'delivery_register_not_opened',
-  'delivery_failed_delivery',
-  'delivery_product_out_of_stock',
   'delivery_cash_discrepancy',
+  'register_high_return',
+  'delivery_unpaid_order',
+  'delivery_failed_delivery',
+  'delivery_delayed_order',
+  'delivery_no_address',
+  'delivery_product_out_of_stock',
+  'delivery_order_cancelled',
+  'worker_no_clockin',
 ];
 
 /** Duplicados del motor general — desactivados cuando el motor delivery está activo. */

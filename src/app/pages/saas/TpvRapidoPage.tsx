@@ -1496,7 +1496,7 @@ export function TpvRapidoOrderFlow({
                 />
               )}
               <button
-                onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery'))}
+                onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery-ops'))}
                 className="px-6 min-h-[48px] py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation"
               >
                 {tabletMode ? 'Volver al tablero' : 'Ver pedido'}

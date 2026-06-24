@@ -73,7 +73,7 @@ const QUICK_ACTIONS_DEFAULT = [
 ];
 
 const QUICK_ACTIONS_DELIVERY = [
-  { label: 'Ir a Pedidos', shortcut: 'G D', route: '/saas/delivery', icon: <Truck className="w-4 h-4" /> },
+  { label: 'Ir a Pedidos', shortcut: 'G D', route: '/saas/delivery-ops', icon: <Truck className="w-4 h-4" /> },
   { label: 'Ir a Clientes', shortcut: 'G C', route: '/saas/clients', icon: <UserRound className="w-4 h-4" /> },
   { label: 'Ir a Catálogo', shortcut: 'G A', route: '/saas/catalog', icon: <Package className="w-4 h-4" /> },
   { label: 'Ir a Finanzas', shortcut: 'G F', route: '/saas/finance', icon: <TrendingUp className="w-4 h-4" /> },
@@ -226,7 +226,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
           title: `#${o.orderNumber} · ${o.customerName}`,
           subtitle: [STATUS_LABELS[o.status] || o.status, `${(o.totalAmount || 0).toLocaleString('es-ES')}€`, o.customerPhone].filter(Boolean).join(' · '),
           category: 'order' as const,
-          route: '/saas/delivery',
+          route: '/saas/delivery-ops',
           searchText: `${o.orderNumber} ${o.customerName} ${o.customerPhone} ${o.customerAddress} ${o.status}`,
         })),
       );

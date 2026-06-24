@@ -689,7 +689,7 @@ async function checkStaleDeliveryOrders(ctx, deliveryOrders, config) {
       ...ctx, dedupKey: `staledeliv-${order._id}`, level: minutes > 120 ? 'alert' : 'warning',
       category: 'stale_delivery', source: 'delivery', title: 'Pedido delivery retrasado',
       message: `Pedido ${order.orderNumber || ''} lleva ${minutes} min en estado "${order.status}".`,
-      entityId: order._id, entityType: 'delivery_order', route: '/saas/vertical/delivery/pedidos',
+      entityId: order._id, entityType: 'delivery_order', route: '/saas/delivery-ops',
       metadata: { orderNumber: order.orderNumber, minutes, status: order.status },
     }));
   }
@@ -710,7 +710,7 @@ async function checkDeliveryUnattended(ctx, deliveryOrders, config) {
       ...ctx, dedupKey: `unattended-${order._id}`, level: 'warning',
       category: 'delivery_unattended', source: 'delivery', title: 'Pedido nuevo sin atender',
       message: `Pedido ${order.orderNumber || ''} lleva ${minutes} min sin atender.`,
-      entityId: order._id, entityType: 'delivery_order', route: '/saas/vertical/delivery/pedidos',
+      entityId: order._id, entityType: 'delivery_order', route: '/saas/delivery-ops',
       metadata: { orderNumber: order.orderNumber, minutes },
     }));
   }
@@ -732,7 +732,7 @@ async function checkDeliveryUnpaid(ctx, deliveryOrders, config) {
       ...ctx, dedupKey: `unpaid-${order._id}`, level: 'warning',
       category: 'delivery_unpaid', source: 'delivery', title: 'Pedido sin cobro',
       message: `Pedido ${order.orderNumber || ''} entregado hace ${minutes} min sin cobrar (${Number(order.totalAmount || 0).toFixed(2)}€).`,
-      entityId: order._id, entityType: 'delivery_order', route: '/saas/vertical/delivery/pedidos',
+      entityId: order._id, entityType: 'delivery_order', route: '/saas/delivery-ops',
       metadata: { orderNumber: order.orderNumber, totalAmount: order.totalAmount, minutes },
     }));
   }
@@ -750,7 +750,7 @@ async function checkDeliveryNoAddress(ctx, deliveryOrders, config) {
       ...ctx, dedupKey: `noaddr-${order._id}`, level: 'alert',
       category: 'delivery_no_address', source: 'delivery', title: 'Pedido a domicilio sin dirección',
       message: `Pedido ${order.orderNumber || ''} es a domicilio pero no tiene dirección.`,
-      entityId: order._id, entityType: 'delivery_order', route: '/saas/vertical/delivery/pedidos',
+      entityId: order._id, entityType: 'delivery_order', route: '/saas/delivery-ops',
       metadata: { orderNumber: order.orderNumber },
     }));
   }
@@ -776,7 +776,7 @@ async function checkDeliveryChannelIncident(ctx, deliveryOrders, config) {
       ...ctx, dedupKey: `chincident-${channel}`, level: 'alert',
       category: 'delivery_channel_incident', source: 'delivery', title: 'Canal con incidencias',
       message: `Canal "${channel}" tiene ${count} pedidos con incidencia en las últimas 2 horas.`,
-      entityType: 'delivery_order', route: '/saas/vertical/delivery/pedidos',
+      entityType: 'delivery_order', route: '/saas/delivery-ops',
       metadata: { channel, count },
     }));
   }

@@ -53,7 +53,7 @@ function TopbarInner({
   const { user } = auth;
   const isWorker = isWorkerAccount(user);
   const alertCenterBusinessId = useAlertCenterBusinessId();
-  const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
+  const { unresolved: alertCenterUnresolved, summary: alertSummary } = useAlertCenterSummary(
     !isWorker ? alertCenterBusinessId : undefined,
     { pollMs: 60_000 },
   );
@@ -88,6 +88,13 @@ function TopbarInner({
   ] as const;
   const legacyUnread = notifications.filter((notification) => !notification.read).length;
   const unreadCount = isWorker ? legacyUnread : alertCenterUnresolved;
+  const highAlertCount = alertSummary?.byPriority?.high ?? 0;
+  const bellTone = unreadCount <= 0
+    ? 'text-gray-600 dark:text-gray-300'
+    : highAlertCount > 0
+      ? 'text-red-600 dark:text-red-400'
+      : 'text-amber-600 dark:text-amber-400';
+  const badgeTone = highAlertCount > 0 ? 'bg-red-500' : 'bg-amber-500';
 
   const activeStore = useActiveStoreScope();
   const hasSavedStorePreference = Boolean(activeStore.activePreferenceRaw?.trim());
@@ -267,13 +274,19 @@ function TopbarInner({
             </button>
 
             <button
+              type="button"
               onClick={() => setShowNotifications(true)}
-              className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors touch-manipulation"
               title={isWorker ? t('topbar.notifications') : 'Centro de alertas'}
+              aria-label={
+                unreadCount > 0
+                  ? `${unreadCount} alerta${unreadCount === 1 ? '' : 's'} pendiente${unreadCount === 1 ? '' : 's'}`
+                  : (isWorker ? t('topbar.notifications') : 'Centro de alertas')
+              }
             >
-              <Bell className={`w-5 h-5 ${unreadCount > 0 ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`} />
+              <Bell className={`w-5 h-5 ${bellTone}`} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-emerald-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900">
+                <span className={`absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 ${badgeTone} rounded-full text-[10px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-900`}>
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}

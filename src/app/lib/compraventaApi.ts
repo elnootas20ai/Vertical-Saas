@@ -1,11 +1,5 @@
 import { getApiBase } from './apiBase';
-const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
-
-function getCouchHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
-  return headers;
-}
+import { authFetch } from './authApi';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -163,11 +157,8 @@ export async function fetchCompraventaData(
   const qs = params.toString();
   const url = `${API_BASE}/api/compraventa/${encodeURIComponent(userId)}${qs ? `?${qs}` : ''}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...getCouchHeaders(),
-    },
+  const response = await authFetch(url, {
+    headers: { 'Content-Type': 'application/json' },
   });
 
   const payload = await response.json().catch(() => ({ ok: false, error: 'Respuesta inválida' }));

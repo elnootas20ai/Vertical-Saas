@@ -41,6 +41,8 @@ import {
   mergeDocumentAlertsIntoSummary,
   shouldIncludeDocumentAlerts,
   isSyntheticDocumentAlert,
+  dismissDocumentAlert,
+  dismissDocumentAlerts,
 } from '../../lib/documentAlertsApi';
 import {
   Bell, CheckCircle, Eye, Filter, Search, RefreshCw,
@@ -111,6 +113,7 @@ export default function AlertCenterPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [activeDepartment, setActiveDepartment] = useState('all');
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [historyFrom, setHistoryFrom] = useState('');
@@ -122,12 +125,13 @@ export default function AlertCenterPage() {
 
   const accountUserId = user?.user_id || user?.id || '';
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!businessId) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) setLoading(true);
     try {
       const summaryRes = await fetchAlertSummary(businessId);
       const sourceFilter = departmentSourceFilter(activeDepartment);
@@ -175,7 +179,7 @@ export default function AlertCenterPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error cargando alertas');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [businessId, dataUserId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo, activeDepartment, departmentSourceFilter]);
 
@@ -192,8 +196,8 @@ export default function AlertCenterPage() {
     businessId: businessId || null,
     enabled: !!accountUserId && !!sseToken && !!businessId && !isSettings,
     handlers: {
-      notification: () => { void loadData(); },
-      'delivery:alert_triggered': () => { void loadData(); },
+      notification: () => { void loadData({ silent: true }); },
+      'delivery:alert_triggered': () => { void loadData({ silent: true }); },
     },
   });
 
@@ -202,11 +206,13 @@ export default function AlertCenterPage() {
   const handleStatusChange = useCallback(async (alertId: string, status: AlertStatus) => {
     if (isSyntheticDocumentAlert(alertId)) {
       if (status === 'seen' || status === 'resolved') {
+        if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
         setAlerts((prev) => prev.filter((a) => a.id !== alertId));
         setSummary((prev) => {
           if (!prev) return prev;
           const next = { ...prev, unresolved: Math.max(0, prev.unresolved - 1) };
           next.byStatus = { ...next.byStatus, new: Math.max(0, (next.byStatus.new || 0) - 1) };
+          next.bySource = { ...next.bySource, documentacion: Math.max(0, (next.bySource.documentacion || 0) - 1) };
           return next;
         });
       }
@@ -215,35 +221,54 @@ export default function AlertCenterPage() {
     try {
       await updateAlertStatus(businessId, alertId, status);
       toast.success(`Alerta marcada como ${STATUS_LABELS[status].toLowerCase()}`);
-      loadData();
+      await loadData({ silent: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error actualizando alerta');
     }
-  }, [businessId, loadData]);
+  }, [businessId, dataUserId, loadData]);
 
   const handleBulkStatus = useCallback(async (status: AlertStatus) => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || bulkBusy) return;
     const realIds = [...selectedIds].filter((id) => !isSyntheticDocumentAlert(id));
     const syntheticIds = [...selectedIds].filter((id) => isSyntheticDocumentAlert(id));
-    if (syntheticIds.length > 0 && (status === 'seen' || status === 'resolved')) {
-      setAlerts((prev) => prev.filter((a) => !syntheticIds.includes(a.id)));
-    }
-    if (realIds.length === 0) {
-      setSelectedIds(new Set());
-      return;
-    }
+    setBulkBusy(true);
     try {
+      if (syntheticIds.length > 0 && (status === 'seen' || status === 'resolved')) {
+        if (dataUserId) dismissDocumentAlerts(dataUserId, businessId, syntheticIds);
+        setAlerts((prev) => prev.filter((a) => !syntheticIds.includes(a.id)));
+        setSummary((prev) => {
+          if (!prev) return prev;
+          const n = syntheticIds.length;
+          return {
+            ...prev,
+            unresolved: Math.max(0, prev.unresolved - n),
+            byStatus: { ...prev.byStatus, new: Math.max(0, (prev.byStatus.new || 0) - n) },
+            bySource: { ...prev.bySource, documentacion: Math.max(0, (prev.bySource.documentacion || 0) - n) },
+          };
+        });
+      }
+      if (realIds.length === 0) {
+        setSelectedIds(new Set());
+        return;
+      }
       const result = await bulkUpdateAlertStatus(businessId, realIds, status);
-      toast.success(`${result.updated} alertas actualizadas`);
+      if (result.errors > 0) {
+        toast.warning(`${result.updated} actualizadas · ${result.errors} con error`);
+      } else {
+        toast.success(`${result.updated} alertas actualizadas`);
+      }
       setSelectedIds(new Set());
-      loadData();
+      await loadData({ silent: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error en actualización masiva');
+    } finally {
+      setBulkBusy(false);
     }
-  }, [businessId, selectedIds, loadData]);
+  }, [businessId, dataUserId, selectedIds, bulkBusy, loadData]);
 
   const handleDelete = useCallback(async (alertId: string) => {
     if (isSyntheticDocumentAlert(alertId)) {
+      if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
       setAlerts((prev) => prev.filter((a) => a.id !== alertId));
       return;
     }
@@ -254,7 +279,7 @@ export default function AlertCenterPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error eliminando alerta');
     }
-  }, [businessId, loadData]);
+  }, [businessId, dataUserId, loadData]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -335,11 +360,6 @@ export default function AlertCenterPage() {
     setPageTab(tabFromSearch(searchParams.get('tab')));
   }, [searchParams]);
 
-  useEffect(() => {
-    if (!businessId || !accountUserId) return;
-    void triggerAlertEngineCheck(accountUserId).catch(() => null);
-  }, [businessId, accountUserId]);
-
   const layoutSubtitle = isSettings
     ? 'Configura qué debe vigilar tu negocio de delivery'
     : isHistory
@@ -349,8 +369,8 @@ export default function AlertCenterPage() {
   const deptLabel = alertDepartments.find((d) => d.id === activeDepartment)?.label || 'Todas';
 
   return (
-    <Layout title="Centro de alertas" subtitle={layoutSubtitle}>
-      <div className="flex flex-col gap-5">
+    <Layout title="Centro de alertas" subtitle={layoutSubtitle} noPadding>
+      <div className="flex flex-col gap-4 px-3 pb-4 pt-2 md:gap-5 md:px-0 md:pb-0 md:pt-0">
         {/* Navegación principal — una sola fila */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Tabs
@@ -516,11 +536,11 @@ export default function AlertCenterPage() {
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                     {selectedIds.size} seleccionada{selectedIds.size > 1 ? 's' : ''}
                   </span>
-                  <button type="button" onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                  <button type="button" disabled={bulkBusy} onClick={() => handleBulkStatus('seen')} className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 disabled:opacity-50">
                     <Eye className="h-3.5 w-3.5" /> Marcar vistas
                   </button>
-                  <button type="button" onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
-                    <Check className="h-3.5 w-3.5" /> Resolver
+                  <button type="button" disabled={bulkBusy} onClick={() => handleBulkStatus('resolved')} className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50">
+                    {bulkBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Resolver
                   </button>
                   <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto text-gray-400 hover:text-gray-600">
                     <X className="h-4 w-4" />
@@ -753,12 +773,12 @@ function AlertPageRow({
       </div>
 
       {!historyMode && alert.status !== 'resolved' && (
-        <div className="flex flex-wrap gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-700">
+        <div className="flex flex-col gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-700 sm:flex-row sm:flex-wrap">
           {alertHasNavigateTarget(alert) && alert.route && (
             <button
               type="button"
               onClick={() => onNavigate(alert.route!)}
-              className="inline-flex flex-1 min-w-[140px] items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:opacity-90 dark:bg-gray-100 dark:text-gray-900"
+              className="inline-flex w-full sm:flex-1 sm:min-w-[140px] items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2.5 text-xs font-semibold text-white hover:opacity-90 dark:bg-gray-100 dark:text-gray-900 touch-manipulation"
             >
               <Eye className="h-3.5 w-3.5" />
               {getAlertResolveLabel(alert)}
@@ -768,7 +788,7 @@ function AlertPageRow({
             <button
               type="button"
               onClick={() => onStatusChange(alert.id, 'seen')}
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
             >
               <Eye className="h-3.5 w-3.5" />
               Marcar vista
@@ -777,7 +797,7 @@ function AlertPageRow({
           <button
             type="button"
             onClick={() => onStatusChange(alert.id, 'resolved')}
-            className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+            className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 touch-manipulation"
           >
             <CheckCircle className="h-3.5 w-3.5" />
             Resolver

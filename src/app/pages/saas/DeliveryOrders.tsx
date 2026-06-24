@@ -1,3 +1,7 @@
+/**
+ * Pantalla dedicada de pedidos delivery (WIP, sin ruta pública).
+ * Entrada operativa: `/saas/delivery-ops` y subpantallas (cocina, montaje, reparto).
+ */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { toast } from 'sonner';

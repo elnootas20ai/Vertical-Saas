@@ -358,7 +358,7 @@ function WorkCenterModal({ isOpen, onClose, onSave, editItem }: WorkCenterModalP
 
 // ── Página principal ──────────────────────────────────────────────────────────
 
-export function SalesPointsPage() {
+export function WorkCentersSettingsPanel({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
@@ -536,10 +536,9 @@ export function SalesPointsPage() {
 
   const getTypeLabel = (wc: WorkCenter) => wc.centerType === 'custom' ? (wc.customTypeName || 'Otro') : WORK_CENTER_TYPE_SHORT[wc.centerType];
 
-  return (
-    <Layout title="Centros de Trabajo" subtitle="Gestión de oficinas, puntos de venta, almacenes y otros centros">
+  const panel = (
       <div className="space-y-6">
-        {/* Quick nav */}
+        {!embedded && (
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/saas/catalog')} className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1.5">
             <BookOpen className="w-3.5 h-3.5" /> Catálogo <ExternalLink className="w-3 h-3" />
@@ -551,6 +550,7 @@ export function SalesPointsPage() {
             <FileText className="w-3.5 h-3.5" /> Presupuestos <ExternalLink className="w-3 h-3" />
           </button>
         </div>
+        )}
 
         {/* KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -698,6 +698,15 @@ export function SalesPointsPage() {
           </div>
         )}
       </div>
+  );
+
+  return (
+    <>
+      {embedded ? panel : (
+        <Layout title="Centros de Trabajo" subtitle="Gestión de oficinas, puntos de venta, almacenes y otros centros">
+          {panel}
+        </Layout>
+      )}
 
       <WorkCenterModal
         isOpen={showModal}
@@ -722,6 +731,10 @@ export function SalesPointsPage() {
         fields={WC_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />
-    </Layout>
+    </>
   );
+}
+
+export function SalesPointsPage() {
+  return <WorkCentersSettingsPanel />;
 }

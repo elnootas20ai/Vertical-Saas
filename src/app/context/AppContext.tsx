@@ -544,8 +544,14 @@ export interface Subscription {
   extraPointOfSaleSlots?: number;
   /** Cupo extra de marcas comerciales concedido por superadmin (sin cobro). */
   extraCommercialBrandSlots?: number;
+  /** Empresas extra contratadas o concedidas por admin. */
+  extraBusinessSlots?: number;
   /** Funciones PRO activadas manualmente por superadmin. */
   adminProAccess?: boolean;
+  /** Exento de suspensión automática (MONEI/cron). Cuentas manuales como clientes sin pasarela. */
+  billingExempt?: boolean;
+  moneiSubscriptionId?: string;
+  moneiSubscriptionStatus?: string;
 }
 
 // ─── Context Type ─────────────────────────────────────────────────────────────
@@ -574,8 +580,11 @@ export interface AppContextType {
   devExtraPdv: number;
   /** Cupos extra de marca comercial simulados en local (suman al plan). */
   devExtraBrands: number;
+  /** Cupos extra de empresa simulados en local (suman al plan). */
+  devExtraBusiness: number;
   setDevExtraPdvSlots: (value: number) => void;
   setDevExtraBrandSlots: (value: number) => void;
+  setDevExtraBusinessSlots: (value: number) => void;
   canAccessFeature: () => boolean;
   canPerformCriticalAction: () => boolean;
   getAccessRestrictionMessage: () => string | null;
@@ -652,8 +661,10 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       devUnlimitedPdv: false,
       devExtraPdv: 0,
       devExtraBrands: 0,
+      devExtraBusiness: 0,
       setDevExtraPdvSlots: () => {},
       setDevExtraBrandSlots: () => {},
+      setDevExtraBusinessSlots: () => {},
       canAccessFeature: () => true,
       canPerformCriticalAction: () => true,
       getAccessRestrictionMessage: () => null,
@@ -797,6 +808,7 @@ function persistNotificationsCache(key: string, notifications: AppNotification[]
 export const DEV_PLAN_OVERRIDE_KEY = 'vertial_dev_plan_override';
 export const DEV_EXTRA_PDV_KEY = 'vertial_dev_extra_pdv';
 export const DEV_EXTRA_BRAND_KEY = 'vertial_dev_extra_brands';
+export const DEV_EXTRA_BUSINESS_KEY = 'vertial_dev_extra_businesses';
 export const DEV_UNLIMITED_PDV_KEY = 'vertial_dev_unlimited_pdv';
 
 type DevPlan = 'basic' | 'normal' | 'pro';
@@ -848,6 +860,11 @@ export function readDevExtraBrands(): number {
   return readDevExtraSlots(DEV_EXTRA_BRAND_KEY);
 }
 
+/** @internal Dev-only extra business slots (localStorage). */
+export function readDevExtraBusinesses(): number {
+  return readDevExtraSlots(DEV_EXTRA_BUSINESS_KEY);
+}
+
 export function readDevUnlimitedPdv(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -863,6 +880,7 @@ function clearDevPlanLocalStorage() {
     window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
     window.localStorage.removeItem(DEV_EXTRA_PDV_KEY);
     window.localStorage.removeItem(DEV_EXTRA_BRAND_KEY);
+    window.localStorage.removeItem(DEV_EXTRA_BUSINESS_KEY);
     window.localStorage.removeItem(DEV_UNLIMITED_PDV_KEY);
   } catch {
     // ignore
@@ -895,6 +913,14 @@ function mergeDevOverrides(sub: Subscription): Subscription {
     result = {
       ...result,
       extraCommercialBrandSlots: Math.min(99, serverExtra + devExtraBrands),
+    };
+  }
+  const devExtraBusiness = readDevExtraBusinesses();
+  if (devExtraBusiness > 0) {
+    const serverExtra = Math.max(0, Math.floor(Number(sub.extraBusinessSlots) || 0));
+    result = {
+      ...result,
+      extraBusinessSlots: Math.min(99, serverExtra + devExtraBusiness),
     };
   }
   return result;
@@ -942,7 +968,11 @@ function deserializeSubscription(
     cancelAtPeriodEnd: Boolean(subscription.cancelAtPeriodEnd),
     extraPointOfSaleSlots: subscription.extraPointOfSaleSlots,
     extraCommercialBrandSlots: subscription.extraCommercialBrandSlots,
+    extraBusinessSlots: subscription.extraBusinessSlots,
     adminProAccess: Boolean(subscription.adminProAccess),
+    billingExempt: Boolean(subscription.billingExempt),
+    moneiSubscriptionId: subscription.moneiSubscriptionId,
+    moneiSubscriptionStatus: subscription.moneiSubscriptionStatus,
   };
 }
 
@@ -1153,6 +1183,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [devExtraPdv, setDevExtraPdv] = useState(0);
   const [devExtraBrands, setDevExtraBrands] = useState(0);
+  const [devExtraBusiness, setDevExtraBusiness] = useState(0);
   const [devUnlimitedPdv, setDevUnlimitedPdv] = useState(false);
 
   useEffect(() => {
@@ -1175,10 +1206,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (canUseDevPlanOverride) {
       setDevExtraPdv(readDevExtraPdv());
       setDevExtraBrands(readDevExtraBrands());
+      setDevExtraBusiness(readDevExtraBusinesses());
       setDevUnlimitedPdv(readDevUnlimitedPdv());
     } else {
       setDevExtraPdv(0);
       setDevExtraBrands(0);
+      setDevExtraBusiness(0);
       setDevUnlimitedPdv(false);
     }
     if (!canUseDevPlanOverride && typeof window !== 'undefined') {
@@ -1193,6 +1226,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSubscription(mergeDevOverrides(base));
     setDevExtraPdv(readDevExtraPdv());
     setDevExtraBrands(readDevExtraBrands());
+    setDevExtraBusiness(readDevExtraBusinesses());
     setDevUnlimitedPdv(readDevUnlimitedPdv());
   }, [authUser?.subscription]);
 
@@ -1213,6 +1247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!plan) {
       setDevExtraPdv(0);
       setDevExtraBrands(0);
+      setDevExtraBusiness(0);
       setDevUnlimitedPdv(false);
       setSubscription(deserializeSubscription(authUser?.subscription, {
         isWorker: isWorkerAccount(authUser),
@@ -1268,6 +1303,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // ignore
     }
     setDevExtraBrands(clamped);
+    refreshDevSubscription();
+  }, [authUser, refreshDevSubscription]);
+
+  const setDevExtraBusinessSlots = useCallback((value: number) => {
+    if (!userCanUseDevPlanOverride(authUser)) return;
+    const clamped = Math.max(0, Math.min(99, Math.floor(value)));
+    try {
+      if (clamped > 0) {
+        window.localStorage.setItem(DEV_EXTRA_BUSINESS_KEY, String(clamped));
+      } else {
+        window.localStorage.removeItem(DEV_EXTRA_BUSINESS_KEY);
+      }
+    } catch {
+      // ignore
+    }
+    setDevExtraBusiness(clamped);
     refreshDevSubscription();
   }, [authUser, refreshDevSubscription]);
 
@@ -1563,12 +1614,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [notifications, notificationsStorageKey]);
 
   const canAccessFeature = () =>
+    Boolean(subscription.billingExempt) ||
     ['trial_active', 'trial_expiring', 'subscription_active'].includes(subscription.status);
 
   const canPerformCriticalAction = () =>
+    Boolean(subscription.billingExempt) ||
     ['trial_active', 'trial_expiring', 'subscription_active'].includes(subscription.status);
 
   const getAccessRestrictionMessage = (): string | null => {
+    if (subscription.billingExempt) return null;
     switch (subscription.status) {
       case 'trial_expired': return 'Tu periodo de prueba ha expirado. Actualiza tu suscripción para continuar.';
       case 'suspended': return 'Cuenta suspendida. Actualiza tu método de pago para restaurar el acceso.';
@@ -2324,8 +2378,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     devUnlimitedPdv,
     devExtraPdv,
     devExtraBrands,
+    devExtraBusiness,
     setDevExtraPdvSlots,
     setDevExtraBrandSlots,
+    setDevExtraBusinessSlots,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
     addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,

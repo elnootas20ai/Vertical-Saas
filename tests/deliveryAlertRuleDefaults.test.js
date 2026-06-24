@@ -19,6 +19,9 @@ test('mergeAlertRules delivery: paquete CEO activo y legacy desactivado', () => 
   }
   assert.equal(byId.delivery_channel_silent?.enabled, false);
   assert.equal(byId.delivery_low_margin?.enabled, false);
+  assert.equal(byId.delivery_kitchen_saturated?.enabled, false);
+  assert.equal(byId.delivery_queue_overflow?.enabled, false);
+  assert.equal(byId.delivery_order_cancelled?.enabled, true);
 });
 
 test('mergeAlertRules sin vertical: no fuerza paquete CEO', () => {

@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, userCanUseDevPlanOverride } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
+import { isVertialSuperAdminEmail } from '../lib/superAdmin';
 import {
   countCommercialBrands,
   resolveTenantEntitlements,
@@ -17,8 +19,13 @@ export function useTenantEntitlements(options?: {
   pointOfSaleCount?: number;
   commercialBrandCount?: number;
 }): TenantEntitlementAccess {
-  const { subscription } = useApp();
+  const { subscription, devUnlimitedPdv } = useApp();
+  const { user } = useAuth();
   const { businesses } = useBusiness();
+
+  const devUnlimited = userCanUseDevPlanOverride(user) && devUnlimitedPdv;
+  const superAdmin = isVertialSuperAdminEmail(user?.email);
+  const bypassLimits = devUnlimited || superAdmin;
 
   return useMemo(
     () =>
@@ -29,12 +36,17 @@ export function useTenantEntitlements(options?: {
           pointOfSales: options?.pointOfSaleCount ?? 0,
           commercialBrands: options?.commercialBrandCount ?? 0,
         },
+        {
+          devUnlimitedBrands: bypassLimits,
+          devUnlimitedBusinesses: bypassLimits,
+        },
       ),
     [
       subscription,
       businesses.length,
       options?.pointOfSaleCount,
       options?.commercialBrandCount,
+      bypassLimits,
     ],
   );
 }

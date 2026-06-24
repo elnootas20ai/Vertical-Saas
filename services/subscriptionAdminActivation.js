@@ -18,7 +18,7 @@ export function applySuperAdminSubscriptionActivation(merged, previousSubscripti
 
   return {
     ...merged,
-    billingExempt: true,
+    billingExempt: Boolean(merged.billingExempt),
     cancelAtPeriodEnd: false,
     currentPeriodEnd: merged.currentPeriodEnd || periodEnd.toISOString(),
     gracePeriodEndsAt:

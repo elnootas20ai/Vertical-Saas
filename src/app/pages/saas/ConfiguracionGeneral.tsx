@@ -347,6 +347,15 @@ export function ConfiguracionGeneral() {
   const bizId = biz?.business_id;
   const dataUserId = resolveBusinessDataUserId(user, biz);
   const isDeliveryBiz = biz?.businessType === 'delivery';
+  const isCarDealershipBiz = biz?.businessType === 'carDealership';
+  const visibleConnections = useMemo(
+    () => CONNECTIONS.filter((conn) => {
+      if (conn.id === 'tpv') return isDeliveryBiz;
+      if (conn.id === 'stock' && isCarDealershipBiz) return false;
+      return true;
+    }),
+    [isDeliveryBiz, isCarDealershipBiz],
+  );
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
   const catalogImportDone =
     (resolvedImportStatus?.catalog ?? biz?.initialImportStatus?.catalog) === 'completed';
@@ -1094,7 +1103,7 @@ export function ConfiguracionGeneral() {
         />
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}
-        {activeModulesSet.has('tpv') && (
+        {activeModulesSet.has('tpv') && isDeliveryBiz && (
           <section id="tpv-config" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center">
@@ -1214,7 +1223,7 @@ export function ConfiguracionGeneral() {
 
           <div className="rounded-xl border border-gray-200/90 bg-gray-50/95 p-1 dark:border-gray-700/90 dark:bg-gray-800/55">
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-0.5">
-            {CONNECTIONS.map((conn) => {
+            {visibleConnections.map((conn) => {
               const Icon = conn.icon;
               const isActive = activeModulesSet.has(conn.id) || conn.id === 'dashboard' || conn.id === 'onboarding';
               return (

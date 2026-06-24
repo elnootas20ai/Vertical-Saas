@@ -38,7 +38,7 @@ import {
 } from '../lib/workerProfileCompletion';
 import {
   isBillingRecoveryPath,
-  isBlockingSubscriptionStatus,
+  shouldBlockSaasAccess,
 } from '../lib/billingRecovery';
 
 interface OnboardingCompanyProfile {
@@ -320,22 +320,24 @@ function SaasContent() {
 
   useEffect(() => {
     if (!sessionSyncedWithServer) return;
+    if (user?.subscription?.billingExempt || subscription.billingExempt) return;
     if (subscription.status !== 'suspended') return;
     if (isBillingRecoveryPath(location.pathname)) return;
     navigate('/saas/suspended', { replace: true });
-  }, [subscription.status, sessionSyncedWithServer, location.pathname, navigate]);
+  }, [subscription.status, subscription.billingExempt, sessionSyncedWithServer, location.pathname, navigate, user?.subscription?.billingExempt]);
 
   useEffect(() => {
     if (!sessionSyncedWithServer) return;
     if (isWorkerAccount(user)) return;
+    if (user?.subscription?.billingExempt || subscription.billingExempt) return;
     if (subscription.status === 'suspended') return;
-    if (!isBlockingSubscriptionStatus(subscription.status)) return;
+    if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (isBillingRecoveryPath(location.pathname)) return;
     navigate('/saas/settings/facturacion', { replace: true });
-  }, [sessionSyncedWithServer, subscription.status, location.pathname, navigate, user]);
+  }, [sessionSyncedWithServer, subscription.status, subscription.billingExempt, location.pathname, navigate, user]);
 
   const billingRecoveryMode =
-    isBlockingSubscriptionStatus(subscription.status) &&
+    shouldBlockSaasAccess(subscription.status, subscription) &&
     isBillingRecoveryPath(location.pathname);
 
   const isInitialBusinessLoad =

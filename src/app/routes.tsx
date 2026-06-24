@@ -101,12 +101,13 @@ import { Parts } from './pages/saas/Parts';
 import { TechnicianView } from './pages/saas/TechnicianView';
 import { Commissions } from './pages/saas/Commissions';
 import { PayrollPage } from './pages/saas/PayrollPage';
-import { Delivery } from './pages/saas/Delivery';
+import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery';
 import { SalaPage } from './pages/saas/SalaPage';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
-import { CatalogPage } from './pages/saas/DeliveryCatalog';
+import { VerticalCatalogEntry, VerticalArticlesRedirect } from './pages/saas/VerticalCatalogEntry';
+import { DealershipWorkers } from './pages/saas/DealershipWorkers';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
 import { CajaPage } from './pages/saas/CajaPage';
@@ -562,8 +563,8 @@ export const router = createBrowserRouter([
           { path: 'ebitda', element: <RequireBusinessOwner><EbitdaPage /></RequireBusinessOwner> },
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
-          { path: 'catalog', Component: CatalogPage },
-          { path: 'articles', element: <Navigate to="/saas/catalog?tab=stock" replace /> },
+          { path: 'catalog', Component: VerticalCatalogEntry },
+          { path: 'articles', Component: VerticalArticlesRedirect },
           { path: 'suppliers', element: <RequireBusinessOwner><Outlet /></RequireBusinessOwner>, children: [
             {
               element: <SuppliersLayout />,
@@ -582,8 +583,10 @@ export const router = createBrowserRouter([
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },
-          { path: 'delivery', element: <RequireBusinessOwner><Delivery /></RequireBusinessOwner> },
+          { path: 'delivery', element: <RequireBusinessOwner><RedirectLegacyDelivery /></RequireBusinessOwner> },
           { path: 'delivery-ops', element: <RequireBusinessOwner><DeliveryOpsCenter /></RequireBusinessOwner> },
+          { path: 'vertical/delivery/pedidos', element: <Navigate to="/saas/delivery-ops" replace /> },
+          { path: 'vertical/delivery', element: <Navigate to="/saas/delivery-ops" replace /> },
           { path: 'delivery-reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
           { path: 'vertical/delivery/reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
           { path: 'delivery-kitchen', element: <RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission> },
@@ -811,6 +814,9 @@ export const router = createBrowserRouter([
           { path: 'butcher-tpv', Component: ButcherTpvPage },
 
           // Compraventa (car dealership)
+          { path: 'vertical/compraventa', element: <RequireBusinessOwner><CompraventaHub /></RequireBusinessOwner> },
+          { path: 'dealership-workers', element: <RequireBusinessOwner><DealershipWorkers /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/trabajadores', element: <Navigate to="/saas/dealership-workers" replace /> },
           { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/crm', element: <RequireWorkerPermission permission="clients"><CompraventaCrm /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><PreparationExpenses /></RequireBusinessOwner> },

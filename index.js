@@ -158,6 +158,7 @@ import {
   assertClockinDocReadAccess,
   validateClockinDocWrite,
 } from './middleware/couchClockinsGuard.js';
+import { validateWorkCenterEntitlementWrite } from './services/entitlementEnforcement.js';
 
 const _5xxTimes = [];
 const _5xxAlertSkipPaths = [
@@ -972,6 +973,7 @@ const internalRouters = [
   ['/api/scrapyard/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardAlertRouter],
   ['/api/scrapyard',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardRouter],
   ['/api/compraventa',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaRouter],
+  ['/api/compraventa/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaAlertRouter],
   ['/api/opportunities',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, opportunitiesRouter],
 ];
 
@@ -1644,6 +1646,17 @@ app.delete('/api/couch/attachment/:dbName/:docId/:attachmentName', requireCouchD
 
 app.post('/api/couch/doc/:dbName', requireCouchDbAccess, async (req, res) => {
   try {
+    const actorEmail = req.authUser?.email || '';
+    const wcCheck = await validateWorkCenterEntitlementWrite(
+      req,
+      req.params.dbName,
+      req.body,
+      req.body?._id || null,
+      actorEmail,
+    );
+    if (!wcCheck.ok) {
+      return res.status(wcCheck.status).json({ ok: false, error: wcCheck.error, code: wcCheck.code });
+    }
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}`, {
       method: 'POST',
@@ -1670,6 +1683,17 @@ app.put('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, async (req, res) 
       if (!validation.ok) {
         return res.status(validation.status).json({ error: validation.error });
       }
+    }
+    const actorEmail = req.authUser?.email || '';
+    const wcCheck = await validateWorkCenterEntitlementWrite(
+      req,
+      req.params.dbName,
+      req.body,
+      req.params.docId,
+      actorEmail,
+    );
+    if (!wcCheck.ok) {
+      return res.status(wcCheck.status).json({ ok: false, error: wcCheck.error, code: wcCheck.code });
     }
     const dbName = encodeURIComponent(req.params.dbName);
     const docId = encodeURIComponent(req.params.docId);

@@ -675,7 +675,7 @@ async function checkLeadNoFollowUp(ctx, leads, config) {
       category: 'cv_lead_no_followup',
       priority, level, title, message,
       entityId: lead._id, entityType: 'lead',
-      route: `/saas/crm?leadId=${lead._id}`,
+      route: `/saas/vertical/compraventa/crm?tab=leads&leadId=${lead._id}`,
       dedupKey: `cvleadnf-${lead._id}`,
       metadata: {
         leadName, responsible: lead.responsible,
@@ -912,7 +912,7 @@ function checkWorkerPerformanceAlerts(ctx, leads, sales, config) {
           priority: 'high',
           title: `${responsible}: ${unmanaged.length} lead(s) sin gestionar`,
           message: `${responsible} tiene ${unmanaged.length} lead(s) sin contactar desde hace más de ${unmanagedHours}h`,
-          route: '/saas/vertical/compraventa/trabajadores',
+          route: '/saas/dealership-workers',
           dedupKey: `cv_worker_unmanaged:${responsible}:${now.toISOString().slice(0, 10)}`,
           metadata: { responsible, count: unmanaged.length },
         }));
@@ -932,7 +932,7 @@ function checkWorkerPerformanceAlerts(ctx, leads, sales, config) {
           priority: 'medium',
           title: `${responsible}: sin actividad comercial`,
           message: `${responsible} no registra actividad en los últimos ${inactiveDays} días`,
-          route: '/saas/vertical/compraventa/trabajadores',
+          route: '/saas/dealership-workers',
           dedupKey: `cv_worker_inactive:${responsible}:${now.toISOString().slice(0, 10)}`,
           metadata: { responsible, inactiveDays },
         }));
@@ -961,7 +961,7 @@ function checkWorkerPerformanceAlerts(ctx, leads, sales, config) {
           priority: 'medium',
           title: `${responsible}: ${total} tareas pendientes`,
           message: `${responsible} acumula ${total} tareas pendientes (${unmanagedLeads} leads, ${pendingDeliveries} entregas, ${pendingDocs} docs)`,
-          route: '/saas/vertical/compraventa/trabajadores',
+          route: '/saas/dealership-workers',
           dedupKey: `cv_worker_excess:${responsible}:${now.toISOString().slice(0, 10)}`,
           metadata: { responsible, total, unmanagedLeads, pendingDeliveries, pendingDocs },
         }));
@@ -981,7 +981,7 @@ function checkWorkerPerformanceAlerts(ctx, leads, sales, config) {
           priority: 'medium',
           title: `${w.responsible}: baja conversión (${w.ratio}%)`,
           message: `${w.responsible} convierte al ${w.ratio}% vs media del equipo ${Math.round(avgConversion)}%`,
-          route: '/saas/vertical/compraventa/trabajadores',
+          route: '/saas/dealership-workers',
           dedupKey: `cv_worker_lowconv:${w.responsible}:${now.toISOString().slice(0, 7)}`,
           metadata: { responsible: w.responsible, ratio: w.ratio, avgConversion: Math.round(avgConversion) },
         }));

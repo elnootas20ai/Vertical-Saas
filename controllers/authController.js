@@ -959,6 +959,10 @@ export async function updateProfile(req, res) {
           const extraBrands = Math.floor(Number(subscription.extraCommercialBrandSlots) || 0);
           merged.extraCommercialBrandSlots = Math.max(0, Math.min(99, extraBrands));
         }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'extraBusinessSlots')) {
+          const extraBiz = Math.floor(Number(subscription.extraBusinessSlots) || 0);
+          merged.extraBusinessSlots = Math.max(0, Math.min(99, extraBiz));
+        }
         if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
           merged.adminProAccess = Boolean(subscription.adminProAccess);
         }
@@ -969,6 +973,7 @@ export async function updateProfile(req, res) {
       } else {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
         merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;
+        merged.extraBusinessSlots = account.subscription?.extraBusinessSlots ?? 0;
         merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
         merged.billingExempt = Boolean(account.subscription?.billingExempt);
       }

@@ -12,6 +12,7 @@ import {
   BUSINESSES_DB,
 } from '../services/couchdb.js';
 import { seedAlertsConfigIfMissing } from './settingsController.js';
+import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -24,6 +25,12 @@ export async function createBusiness(req, res) {
 
     if (!userId) return badRequest(res, 'Falta userId');
     if (!String(name || '').trim()) return badRequest(res, 'El nombre de la empresa es obligatorio');
+
+    const actorEmail = req.authUser?.email || '';
+    const limitCheck = await assertCanCreateBusiness(req, userId, actorEmail);
+    if (!limitCheck.ok) {
+      return res.status(limitCheck.status).json({ ok: false, error: limitCheck.error, code: limitCheck.code });
+    }
 
     const business = buildBusinessDocument({
       ownerUserId: userId,

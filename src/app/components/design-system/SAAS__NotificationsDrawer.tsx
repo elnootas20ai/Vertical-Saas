@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   X, Bell, CheckCircle, AlertCircle, Info, Clock,
   ArrowRight, RefreshCw, Bike, DollarSign, Users, Activity,
@@ -34,6 +34,8 @@ import {
   mergeAlertLists,
   shouldIncludeDocumentAlerts,
   isSyntheticDocumentAlert,
+  dismissDocumentAlert,
+  dismissDocumentAlerts,
 } from '../../lib/documentAlertsApi';
 import { getAlertResolveLabel, alertHasNavigateTarget } from '../../lib/alertActions';
 import { toast } from 'sonner';
@@ -90,8 +92,11 @@ function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white dark:bg-gray-800 shadow-2xl z-50 flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[55]" onClick={onClose} />
+      <div
+        className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-white dark:bg-gray-800 shadow-2xl z-[60] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Bell className="w-5 h-5 text-gray-700 dark:text-gray-300" />
@@ -133,7 +138,7 @@ function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
           )}
         </div>
         {notifications.length > 0 && (
-          <div className="border-t px-6 py-4">
+          <div className="border-t px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <button onClick={() => void markAllNotificationsAsRead()} className="w-full text-sm font-medium text-blue-600">
               Marcar todas como leídas
             </button>
@@ -162,12 +167,15 @@ function AlertCenterDrawer({
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [activeDept, setActiveDept] = useState('all');
+  const busyAlertIds = useRef(new Set<string>());
   useModalClose(isOpen, onClose);
 
-  const loadAlerts = useCallback(async (deptId = activeDept) => {
+  const loadAlerts = useCallback(async (deptId = activeDept, options?: { silent?: boolean }) => {
     if (!businessId) return;
-    setLoading(true);
+    const silent = options?.silent === true;
+    if (!silent) setLoading(true);
     try {
       const sourceFilter = departmentSourceFilter(deptId);
       const includeDocs = shouldIncludeDocumentAlerts(sourceFilter);
@@ -185,31 +193,36 @@ function AlertCenterDrawer({
       ]);
       setAlerts(mergeAlertLists(res.alerts || [], docAlerts, 20));
     } catch { /* silent */ } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [businessId, activeDept, dataUserId, departmentSourceFilter]);
 
-  const syncAndReload = useCallback(async () => {
+  const refreshData = useCallback(async () => {
     if (!businessId) return;
+    await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: false })]);
+  }, [businessId, reloadSummary, loadAlerts, activeDept]);
+
+  const syncAndReload = useCallback(async () => {
+    if (!businessId || syncing) return;
     setSyncing(true);
     try {
       const accountUserId = user?.user_id || user?.id || '';
       if (accountUserId) {
         await triggerAlertEngineCheck(accountUserId).catch(() => null);
       }
-      await Promise.all([reloadSummary(), loadAlerts(activeDept)]);
+      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
     } finally {
       setSyncing(false);
     }
-  }, [businessId, user?.user_id, user?.id, reloadSummary, loadAlerts, activeDept]);
+  }, [businessId, user?.user_id, user?.id, reloadSummary, loadAlerts, activeDept, syncing]);
 
   useEffect(() => {
     if (!isOpen || !businessId) return;
-    void syncAndReload();
+    void refreshData();
   }, [isOpen, businessId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (isOpen && businessId) void loadAlerts(activeDept);
+    if (isOpen && businessId) void loadAlerts(activeDept, { silent: true });
   }, [activeDept, isOpen, businessId, loadAlerts]);
 
   const handleNavigate = useCallback(
@@ -237,50 +250,113 @@ function AlertCenterDrawer({
 
   const handleMarkSeen = useCallback(
     async (alertId: string) => {
-      if (isSyntheticDocumentAlert(alertId)) {
-        applyLocalStatus(alertId, 'seen');
-        await reloadSummary();
-        return;
-      }
+      if (busyAlertIds.current.has(alertId)) return;
+      busyAlertIds.current.add(alertId);
       try {
+        if (isSyntheticDocumentAlert(alertId)) {
+          if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
+          applyLocalStatus(alertId, 'seen');
+          await reloadSummary();
+          return;
+        }
         await updateAlertStatus(businessId, alertId, 'seen');
         applyLocalStatus(alertId, 'seen');
         await reloadSummary();
       } catch {
         toast.error('No se pudo marcar como vista');
+      } finally {
+        busyAlertIds.current.delete(alertId);
       }
     },
-    [businessId, applyLocalStatus, reloadSummary],
+    [businessId, dataUserId, applyLocalStatus, reloadSummary],
   );
 
   const handleResolve = useCallback(
     async (alertId: string) => {
-      if (isSyntheticDocumentAlert(alertId)) {
-        applyLocalStatus(alertId, 'resolved');
-        toast.success('Alerta archivada');
-        await reloadSummary();
-        return;
-      }
+      if (busyAlertIds.current.has(alertId)) return;
+      busyAlertIds.current.add(alertId);
       try {
+        if (isSyntheticDocumentAlert(alertId)) {
+          if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
+          applyLocalStatus(alertId, 'resolved');
+          toast.success('Alerta archivada');
+          await reloadSummary();
+          return;
+        }
         await updateAlertStatus(businessId, alertId, 'resolved');
         applyLocalStatus(alertId, 'resolved');
         toast.success('Alerta resuelta');
         await reloadSummary();
       } catch {
         toast.error('No se pudo resolver la alerta');
+      } finally {
+        busyAlertIds.current.delete(alertId);
       }
     },
-    [businessId, applyLocalStatus, reloadSummary],
+    [businessId, dataUserId, applyLocalStatus, reloadSummary],
   );
 
   const markAllSeen = async () => {
+    if (bulkBusy) return;
     const newIds = alerts.filter((a) => a.status === 'new' && !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-    if (newIds.length === 0) return;
+    const syntheticIds = alerts.filter((a) => a.status === 'new' && isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+    if (newIds.length === 0 && syntheticIds.length === 0) return;
+    setBulkBusy(true);
     try {
-      await bulkUpdateAlertStatus(businessId, newIds, 'seen');
-      await Promise.all([reloadSummary(), loadAlerts(activeDept)]);
-    } catch { /* silent */ }
+      if (syntheticIds.length && dataUserId) {
+        dismissDocumentAlerts(dataUserId, businessId, syntheticIds);
+        setAlerts((prev) => prev.map((a) => (syntheticIds.includes(a.id) ? { ...a, status: 'seen' as const } : a)));
+      }
+      if (newIds.length) {
+        await bulkUpdateAlertStatus(businessId, newIds, 'seen');
+      }
+      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
+    } catch {
+      toast.error('No se pudieron marcar como vistas');
+    } finally {
+      setBulkBusy(false);
+    }
   };
+
+  const resolveAllVisible = useCallback(async () => {
+    if (!businessId || bulkBusy) return;
+    const pending = alerts.filter((a) => a.status !== 'resolved');
+    if (pending.length === 0) return;
+
+    const syntheticIds = pending.filter((a) => isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+    const realIds = pending.filter((a) => !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+
+    setBulkBusy(true);
+    try {
+      if (syntheticIds.length && dataUserId) {
+        dismissDocumentAlerts(dataUserId, businessId, syntheticIds);
+      }
+
+      setAlerts([]);
+
+      let updated = 0;
+      let errors = 0;
+      if (realIds.length) {
+        const result = await bulkUpdateAlertStatus(businessId, realIds, 'resolved');
+        updated = result.updated ?? 0;
+        errors = result.errors ?? 0;
+      }
+
+      const totalOk = updated + syntheticIds.length;
+      if (errors > 0) {
+        toast.warning(`${totalOk} resueltas · ${errors} no se pudieron guardar`);
+      } else {
+        toast.success(`${totalOk} alerta${totalOk !== 1 ? 's' : ''} resuelta${totalOk !== 1 ? 's' : ''}`);
+      }
+
+      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
+    } catch {
+      toast.error('Error al resolver alertas');
+      await loadAlerts(activeDept, { silent: true });
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [alerts, bulkBusy, businessId, dataUserId, activeDept, reloadSummary, loadAlerts]);
 
   const goFullCenter = () => {
     navigate('/saas/alerts');
@@ -300,10 +376,10 @@ function AlertCenterDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[55]" onClick={onClose} />
 
       <div
-        className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-zinc-50 dark:bg-zinc-950 shadow-2xl z-50 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300"
+        className="fixed inset-y-0 right-0 w-full sm:max-w-md bg-zinc-50 dark:bg-zinc-950 shadow-2xl z-[60] flex flex-col overflow-hidden animate-in slide-in-from-right duration-300 pt-[env(safe-area-inset-top,0px)]"
         onClick={(e) => e.stopPropagation()}
       >
         <AlertProShell
@@ -349,7 +425,12 @@ function AlertCenterDrawer({
         />
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-zinc-50 dark:bg-zinc-950">
-          {loading && alerts.length === 0 ? (
+          {bulkBusy ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-zinc-500">
+              <RefreshCw className="h-5 w-5 animate-spin" />
+              Resolviendo alertas…
+            </div>
+          ) : loading && alerts.length === 0 ? (
             <div className="flex items-center justify-center py-16">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
             </div>
@@ -360,7 +441,6 @@ function AlertCenterDrawer({
               <AlertProRow
                 key={alert.id}
                 alert={alert}
-                collapsible
                 showActions
                 showArrow={false}
                 onNavigate={handleNavigate}
@@ -371,10 +451,11 @@ function AlertCenterDrawer({
           )}
         </div>
 
-        <div className="shrink-0 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2">
+        <div className="shrink-0 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {newCount > 0 && (
             <button
               type="button"
+              disabled={bulkBusy || syncing}
               onClick={() => void markAllSeen()}
               className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 py-2.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
             >
@@ -385,31 +466,16 @@ function AlertCenterDrawer({
           {alerts.some((a) => a.status !== 'resolved') && (
             <button
               type="button"
-              onClick={async () => {
-                const pending = alerts.filter((a) => a.status !== 'resolved');
-                const realIds = pending.filter((a) => !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-                const syntheticIds = pending.filter((a) => isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-                if (syntheticIds.length) {
-                  setAlerts((prev) => prev.filter((a) => !syntheticIds.includes(a.id)));
-                }
-                if (realIds.length) {
-                  try {
-                    await bulkUpdateAlertStatus(businessId, realIds, 'resolved');
-                    setAlerts((prev) => prev.filter((a) => !realIds.includes(a.id)));
-                    toast.success(`${realIds.length} alertas resueltas`);
-                    await reloadSummary();
-                  } catch {
-                    toast.error('Error al resolver alertas');
-                  }
-                } else if (syntheticIds.length) {
-                  toast.success('Alertas archivadas');
-                  await reloadSummary();
-                }
-              }}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 py-2.5 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition"
+              disabled={bulkBusy || syncing}
+              onClick={() => void resolveAllVisible()}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 py-2.5 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition disabled:opacity-50"
             >
-              <CheckCircle className="w-4 h-4" />
-              Resolver todas visibles
+              {bulkBusy ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle className="w-4 h-4" />
+              )}
+              {bulkBusy ? 'Resolviendo…' : 'Resolver todas visibles'}
             </button>
           )}
           <button

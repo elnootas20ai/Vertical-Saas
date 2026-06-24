@@ -153,7 +153,7 @@ export function AlertProDeptTabs({
 }) {
   return (
     <div className={`shrink-0 ${compact ? 'px-3 py-3' : 'px-1 py-4'} bg-zinc-50/80 dark:bg-zinc-900/40 border-b border-zinc-200/80 dark:border-zinc-800`}>
-      <div className={`flex gap-1 overflow-x-auto ${compact ? '' : 'rounded-xl bg-white dark:bg-zinc-900 p-1 shadow-sm border border-zinc-200/80 dark:border-zinc-800 max-w-fit'}`}>
+      <div className={`flex gap-1 overflow-x-auto overscroll-x-contain snap-x snap-mandatory [&::-webkit-scrollbar]:hidden ${compact ? '' : 'rounded-xl bg-white dark:bg-zinc-900 p-1 shadow-sm border border-zinc-200/80 dark:border-zinc-800 max-w-fit'}`} style={{ scrollbarWidth: 'none' }}>
         {departments.map((dept) => {
           const Icon = IconMap[dept.id];
           const count = countAlertsForDepartment(summary, dept.id, vertical);
@@ -163,7 +163,7 @@ export function AlertProDeptTabs({
               key={dept.id}
               type="button"
               onClick={() => onChange(dept.id)}
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap font-semibold transition-all ${
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap font-semibold transition-all snap-start ${
                 compact
                   ? `px-3 py-1.5 rounded-lg text-xs border ${active ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-white dark:text-zinc-900' : 'bg-white dark:bg-zinc-800 text-zinc-600 border-zinc-200 dark:border-zinc-700'}`
                   : `px-4 py-2 rounded-lg text-sm ${active ? 'bg-zinc-900 text-white shadow-sm dark:bg-white dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`
@@ -308,7 +308,7 @@ export function AlertProRow({
       </button>
 
       {isOpen && showActions && alert.status !== 'resolved' && (
-        <div className="mt-3 flex flex-wrap gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+        <div className="mt-3 flex flex-col gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:flex-row sm:flex-wrap">
           {canNavigate && alert.route && (
             <button
               type="button"
@@ -316,7 +316,7 @@ export function AlertProRow({
                 stop(e);
                 onNavigate?.(alert.route!);
               }}
-              className="inline-flex flex-1 min-w-[120px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+              className="inline-flex w-full sm:flex-1 sm:min-w-[120px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 touch-manipulation"
             >
               <ArrowRight className="h-3.5 w-3.5" />
               {resolveLabel}
@@ -329,7 +329,7 @@ export function AlertProRow({
                 stop(e);
                 onMarkSeen(alert.id);
               }}
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-zinc-200 px-3 py-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 touch-manipulation"
             >
               <Eye className="h-3.5 w-3.5" />
               Vista
@@ -342,7 +342,7 @@ export function AlertProRow({
                 stop(e);
                 onResolve(alert.id);
               }}
-              className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300"
+              className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 touch-manipulation"
             >
               <CheckCircle className="h-3.5 w-3.5" />
               Resolver

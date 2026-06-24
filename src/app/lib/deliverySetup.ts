@@ -38,16 +38,9 @@ export const DELIVERY_FIRST_PDV_PATH = '/saas/settings/tienda';
 /** Tras crear PDV en sesión (evita parpadeos al revalidar listas). */
 export const DELIVERY_PDV_SESSION_KEY = 'vertial_delivery_has_pdv';
 
-/**
- * Oculta Sala (`/saas/sala`) y la pantalla clásica de pedidos (`/saas/delivery`)
- * en menú y accesos del centro operativo hasta la nueva UX.
- */
-export const DELIVERY_LEGACY_SCREENS_HIDDEN = true;
-
-export function filterDeliverySidebarItemIds(itemIds: readonly string[]): string[] {
-  if (!DELIVERY_LEGACY_SCREENS_HIDDEN) return [...itemIds];
-  return itemIds.filter((id) => id !== 'sala' && id !== 'delivery');
-}
+/** @deprecated Pantalla clásica `/saas/delivery` — redirige a centro operativo. */
+export const DELIVERY_LEGACY_PATH = '/saas/delivery';
+export const DELIVERY_OPS_PATH = '/saas/delivery-ops';
 
 import { ONBOARDING_DATA_LEGACY_KEY, onboardingDataStorageKey } from './onboardingStorage';
 

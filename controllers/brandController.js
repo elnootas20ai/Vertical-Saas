@@ -10,6 +10,7 @@ import {
   softDeleteDocument,
 } from '../services/couchdb.js';
 import { isDefaultCommercialBrandName } from '../shared/brand/constants.js';
+import { assertCanCreateCommercialBrand } from '../services/entitlementEnforcement.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -52,6 +53,12 @@ export async function createBrand(req, res) {
 
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const actorEmail = req.authUser?.email || '';
+    const limitCheck = await assertCanCreateCommercialBrand(req, businessId, brand, actorEmail);
+    if (!limitCheck.ok) {
+      return res.status(limitCheck.status).json({ ok: false, error: limitCheck.error, code: limitCheck.code });
+    }
 
     const userId = req.authUser?.userId || req.authUser?.user_id || '';
     const db = getCatalogDbName();

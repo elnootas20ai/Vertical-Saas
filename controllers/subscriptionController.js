@@ -32,6 +32,11 @@ import {
   resolveAddonAmountCents,
 } from '../services/subscriptionAddons.js';
 import { isBlockingSubscriptionStatus } from '../services/subscriptionAdminActivation.js';
+import {
+  applyBillingExemptOverride,
+  mapMoneiStatusToAppStatus,
+  shouldApplyMoneiWebhookUpdate,
+} from '../services/moneiSubscriptionSync.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -413,18 +418,10 @@ export async function confirmSubscription(req, res) {
     const moneiStatus = moneiSub.status;
     let appStatus = account.subscription?.status || 'trial_active';
 
-    if (moneiStatus === 'ACTIVE') appStatus = 'subscription_active';
-    else if (moneiStatus === 'TRIALING') appStatus = 'trial_active';
-    else if (moneiStatus === 'PAST_DUE') appStatus = 'payment_failed';
-    else if (moneiStatus === 'PAUSED') appStatus = 'grace_period';
-    else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
-
-    if (
-      Boolean(account.subscription?.billingExempt) &&
-      ['suspended', 'payment_failed', 'grace_period'].includes(appStatus)
-    ) {
-      appStatus = 'subscription_active';
+    if (shouldApplyMoneiWebhookUpdate(account, subscriptionId, moneiStatus)) {
+      appStatus = mapMoneiStatusToAppStatus(moneiStatus, appStatus);
     }
+    appStatus = applyBillingExemptOverride(appStatus, account.subscription);
 
     const now = new Date();
     const fromMoneiMeta = subscriptionPlanFieldsFromMoneiMetadata(moneiSub.metadata);
@@ -506,18 +503,10 @@ export async function webhookSubscriptionStatus(req, res) {
     }
 
     let appStatus = account.subscription?.status || 'trial_active';
-    if (moneiStatus === 'ACTIVE') appStatus = 'subscription_active';
-    else if (moneiStatus === 'TRIALING') appStatus = 'trial_active';
-    else if (moneiStatus === 'PAST_DUE') appStatus = 'payment_failed';
-    else if (moneiStatus === 'PAUSED') appStatus = 'grace_period';
-    else if (moneiStatus === 'CANCELLED') appStatus = 'suspended';
-
-    if (
-      Boolean(account.subscription?.billingExempt) &&
-      ['suspended', 'payment_failed', 'grace_period'].includes(appStatus)
-    ) {
-      appStatus = 'subscription_active';
+    if (shouldApplyMoneiWebhookUpdate(account, subscriptionId, moneiStatus)) {
+      appStatus = mapMoneiStatusToAppStatus(moneiStatus, appStatus);
     }
+    appStatus = applyBillingExemptOverride(appStatus, account.subscription);
 
     const fromWebhookMeta = subscriptionPlanFieldsFromMoneiMetadata(metadata);
 

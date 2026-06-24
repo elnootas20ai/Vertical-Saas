@@ -370,7 +370,7 @@ export async function adminReactivateAccount(req, res) {
         {
           ...sub,
           status: 'subscription_active',
-          billingExempt: true,
+          billingExempt: Boolean(billingExempt),
           currentPeriodEnd: periodEnd.toISOString(),
           gracePeriodEndsAt: graceEnd.toISOString(),
           cancelAtPeriodEnd: false,
@@ -389,7 +389,7 @@ export async function adminReactivateAccount(req, res) {
       actorName: req.authUser?.fullName || 'Admin',
       changes: {
         status: { before: previousStatus, after: 'subscription_active' },
-        billingExempt: { before: Boolean(sub.billingExempt), after: true },
+        billingExempt: { before: Boolean(sub.billingExempt), after: Boolean(billingExempt) },
       },
     });
 
@@ -401,6 +401,53 @@ export async function adminReactivateAccount(req, res) {
     return res.json({ ok: true, subscription: updatedAccount.subscription });
   } catch (error) {
     logger.error(error, '[Admin] Error reactivando cuenta');
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+}
+
+/** Quita enlace MONEI roto para cuentas manuales (evita webhooks que suspenden). */
+export async function adminClearMoneiLink(req, res) {
+  try {
+    const denied = requireAdmin(req);
+    if (denied) return res.status(denied.status).json(denied);
+
+    const { userId } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: 'userId es requerido' });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const sub = account.subscription || {};
+    const updatedAccount = await saveAccount(req, {
+      ...account,
+      subscription: {
+        ...sub,
+        moneiSubscriptionId: undefined,
+        moneiSubscriptionStatus: undefined,
+        moneiPaymentId: undefined,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+
+    await writeChangelog(req, {
+      entity: 'subscription',
+      entityId: account.user_id,
+      entityLabel: account.fullName || account.email,
+      action: 'clear_monei_link',
+      actorUserId: req.authUser?.userId || 'admin',
+      actorName: req.authUser?.fullName || 'Admin',
+      changes: {
+        moneiSubscriptionId: { before: sub.moneiSubscriptionId || null, after: null },
+      },
+    });
+
+    return res.json({ ok: true, subscription: updatedAccount.subscription });
+  } catch (error) {
+    logger.error(error, '[Admin] Error limpiando enlace MONEI');
     return res.status(500).json({ ok: false, error: error.message });
   }
 }

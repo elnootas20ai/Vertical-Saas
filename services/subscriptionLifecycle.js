@@ -194,10 +194,25 @@ export async function runSubscriptionLifecycle() {
         const daysLeft = daysBetween(now, trialEndsAt);
         if (daysLeft <= 0) {
           newStatus = 'trial_expired';
+          const suspendAfter = new Date(trialEndsAt.getTime() + 7 * 86400000);
           emailFn = async () => {
             const { subject, html } = buildTrialExpiredEmail(account.email, account.fullName, BILLING_URL);
             await sendEmail({ to: account.email, subject, html });
           };
+          await saveAccount(fakeReq, {
+            ...account,
+            subscription: {
+              ...sub,
+              status: 'trial_expired',
+              gracePeriodEndsAt: sub.gracePeriodEndsAt || suspendAfter.toISOString(),
+            },
+            updatedAt: now.toISOString(),
+          });
+          transitioned++;
+          try { await emailFn(); } catch (e) {
+            logger.error({ tag: 'LIFECYCLE', err: e?.message }, 'Email error in trial→expired');
+          }
+          continue;
         } else if (daysLeft <= 3) {
           newStatus = 'trial_expiring';
           emailFn = async () => {
@@ -213,38 +228,34 @@ export async function runSubscriptionLifecycle() {
       } else if (status === 'trial_expiring' && trialEndsAt) {
         const daysLeft = daysBetween(now, trialEndsAt);
         if (daysLeft <= 0) {
-          newStatus = 'trial_expired';
-          emailFn = async () => {
+          const suspendAfter = new Date(trialEndsAt.getTime() + 7 * 86400000);
+          await saveAccount(fakeReq, {
+            ...account,
+            subscription: {
+              ...sub,
+              status: 'trial_expired',
+              gracePeriodEndsAt: sub.gracePeriodEndsAt || suspendAfter.toISOString(),
+            },
+            updatedAt: now.toISOString(),
+          });
+          transitioned++;
+          try {
             const { subject, html } = buildTrialExpiredEmail(account.email, account.fullName, BILLING_URL);
+            await sendEmail({ to: account.email, subject, html });
+          } catch (e) {
+            logger.error({ tag: 'LIFECYCLE', err: e?.message }, 'Email error in trial_expiring→expired');
+          }
+          continue;
+        }
+      } else if (status === 'trial_expired') {
+        const deadline = gracePeriodEndsAt || (trialEndsAt ? new Date(trialEndsAt.getTime() + 7 * 86400000) : null);
+        if (deadline && deadline <= now) {
+          newStatus = 'suspended';
+          emailFn = async () => {
+            const { subject, html } = buildSuspensionEmail(account.email, account.fullName, BILLING_URL);
             await sendEmail({ to: account.email, subject, html });
           };
         }
-      } else if (status === 'trial_expired') {
-        const graceEnd = new Date(now.getTime() + GRACE_HOURS * 3600000);
-        newStatus = 'grace_period';
-        emailFn = async () => {
-          const { subject, html } = buildGracePeriodEmail(
-            account.email,
-            account.fullName,
-            graceEnd.toISOString(),
-            BILLING_URL,
-          );
-          await sendEmail({ to: account.email, subject, html });
-        };
-        await saveAccount(fakeReq, {
-          ...account,
-          subscription: {
-            ...sub,
-            status: 'grace_period',
-            gracePeriodEndsAt: graceEnd.toISOString(),
-          },
-          updatedAt: now.toISOString(),
-        });
-        transitioned++;
-        try { await emailFn(); } catch (e) {
-          logger.error({ tag: 'LIFECYCLE', err: e?.message }, 'Email error in trial_expired→grace_period');
-        }
-        continue;
       } else if (status === 'payment_failed') {
         if (!gracePeriodEndsAt || gracePeriodEndsAt < now) {
           const graceEnd = new Date(now.getTime() + GRACE_HOURS * 3600000);

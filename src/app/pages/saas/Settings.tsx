@@ -1000,18 +1000,24 @@ function TabBilling() {
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Suma cupos a tu plan Pro. Precio por unidad adicional (la marca «General» no cuenta de cupo).
           </p>
-          {(subscription.extraPointOfSaleSlots ?? 0) > 0 || (subscription.extraCommercialBrandSlots ?? 0) > 0 ? (
+          {(subscription.extraPointOfSaleSlots ?? 0) > 0 ||
+          (subscription.extraCommercialBrandSlots ?? 0) > 0 ||
+          (subscription.extraBusinessSlots ?? 0) > 0 ? (
             <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
               Cupos extra activos:{' '}
-              {(subscription.extraPointOfSaleSlots ?? 0) > 0
-                ? `${subscription.extraPointOfSaleSlots} PDV`
-                : null}
-              {(subscription.extraPointOfSaleSlots ?? 0) > 0 && (subscription.extraCommercialBrandSlots ?? 0) > 0
-                ? ' · '
-                : null}
-              {(subscription.extraCommercialBrandSlots ?? 0) > 0
-                ? `${subscription.extraCommercialBrandSlots} marca(s)`
-                : null}
+              {[
+                (subscription.extraPointOfSaleSlots ?? 0) > 0
+                  ? `${subscription.extraPointOfSaleSlots} PDV`
+                  : null,
+                (subscription.extraCommercialBrandSlots ?? 0) > 0
+                  ? `${subscription.extraCommercialBrandSlots} marca(s)`
+                  : null,
+                (subscription.extraBusinessSlots ?? 0) > 0
+                  ? `${subscription.extraBusinessSlots} empresa(s)`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           ) : null}
         </div>
@@ -2100,6 +2106,24 @@ function TabBusinesses() {
 
   const isOwner = (business: Business) => business.owner_user_id === user?.user_id;
 
+  const openBillingForMoreBusinesses = useCallback(() => {
+    if (!user?.user_id) return;
+    if (entitlements.needsBusinessUpgrade) {
+      writeBillingSelection(user.user_id, {
+        selectedPlanId: 'pro',
+        billingMode: 'monthly',
+        requestedAddon: null,
+      });
+    } else {
+      writeBillingSelection(user.user_id, {
+        selectedPlanId: 'pro',
+        billingMode: 'monthly',
+        requestedAddon: 'extra_business',
+      });
+    }
+    navigate('/saas/settings/facturacion');
+  }, [user?.user_id, entitlements.needsBusinessUpgrade, navigate]);
+
   return (
     <div className="space-y-6">
       <PortfolioPlanBanner
@@ -2126,30 +2150,38 @@ function TabBusinesses() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (!entitlements.canCreateBusiness) return;
-              setShowForm(true);
-              setEditingBusiness(null);
-            }}
-            disabled={!entitlements.canCreateBusiness}
-            title={
-              entitlements.canCreateBusiness
-                ? 'Crear nueva empresa'
-                : `Plan ${entitlements.planLabel}: máximo ${entitlements.businesses} empresa${entitlements.businesses !== 1 ? 's' : ''}`
-            }
-            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors ${
-              entitlements.canCreateBusiness
-                ? 'bg-blue-600 hover:bg-blue-700'
-                : 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed text-gray-500 dark:text-gray-400'
-            }`}
-          >
-            <Plus className="w-4 h-4" />
-            {entitlements.canCreateBusiness
-              ? 'Nueva empresa'
-              : `Límite ${entitlements.businesses} empresa${entitlements.businesses !== 1 ? 's' : ''}`}
-          </button>
+          {entitlements.canCreateBusiness ? (
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(true);
+                setEditingBusiness(null);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors bg-blue-600 hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" />
+              Nueva empresa
+            </button>
+          ) : entitlements.needsBusinessUpgrade ? (
+            <button
+              type="button"
+              onClick={openBillingForMoreBusinesses}
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors bg-violet-600 hover:bg-violet-700"
+            >
+              <Plus className="w-4 h-4" />
+              Subir a Pro
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={openBillingForMoreBusinesses}
+              title={`Plan ${entitlements.planLabel}: ${businesses.length} de ${entitlements.businesses} empresas`}
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Plus className="w-4 h-4" />
+              Añadir empresa extra
+            </button>
+          )}
         </div>
 
         {feedback && (

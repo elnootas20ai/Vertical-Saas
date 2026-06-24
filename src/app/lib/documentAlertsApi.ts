@@ -37,13 +37,14 @@ const SEVERITY_TO_PRIORITY: Record<string, AlertPriority> = {
   info: 'low',
 };
 
-function docAlertId(alert: DocumentAlert, index: number): string {
+function docAlertId(alert: DocumentAlert): string {
   const key = [
     alert.type,
     alert.documentId || '',
     alert.vehicleId || '',
-    alert.message.slice(0, 40),
-    index,
+    alert.registrationPlate || '',
+    alert.documentName || '',
+    alert.message.slice(0, 60),
   ].join(':');
   return `doc:${key}`;
 }
@@ -52,16 +53,67 @@ export function isSyntheticDocumentAlert(alertId: string): boolean {
   return String(alertId || '').startsWith('doc:');
 }
 
+const DISMISSED_DOC_ALERTS_PREFIX = 'vertial_dismissed_doc_alerts:';
+const DISMISSED_DOC_ALERTS_MAX = 500;
+
+function dismissedDocAlertsStorageKey(userId: string, businessId: string): string {
+  return `${DISMISSED_DOC_ALERTS_PREFIX}${userId}:${businessId}`;
+}
+
+function readDismissedDocAlertIds(userId: string, businessId: string): Set<string> {
+  if (typeof localStorage === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(dismissedDocAlertsStorageKey(userId, businessId));
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeDismissedDocAlertIds(userId: string, businessId: string, ids: Set<string>): void {
+  if (typeof localStorage === 'undefined') return;
+  const list = [...ids].slice(-DISMISSED_DOC_ALERTS_MAX);
+  localStorage.setItem(dismissedDocAlertsStorageKey(userId, businessId), JSON.stringify(list));
+}
+
+/** Persiste el archivado de alertas de documentación (no existen en CouchDB). */
+export function dismissDocumentAlert(userId: string, businessId: string, alertId: string): void {
+  const uid = String(userId || '').trim();
+  const biz = String(businessId || '').trim();
+  const id = String(alertId || '').trim();
+  if (!uid || !biz || !id || !isSyntheticDocumentAlert(id)) return;
+  const ids = readDismissedDocAlertIds(uid, biz);
+  ids.add(id);
+  writeDismissedDocAlertIds(uid, biz, ids);
+}
+
+export function dismissDocumentAlerts(userId: string, businessId: string, alertIds: string[]): void {
+  for (const alertId of alertIds) {
+    dismissDocumentAlert(userId, businessId, alertId);
+  }
+}
+
+export function filterDismissedDocumentAlerts(
+  alerts: AlertRecord[],
+  userId: string,
+  businessId: string,
+): AlertRecord[] {
+  const dismissed = readDismissedDocAlertIds(userId, businessId);
+  if (dismissed.size === 0) return alerts;
+  return alerts.filter((alert) => !dismissed.has(alert.id));
+}
+
 export function documentAlertToRecord(
   alert: DocumentAlert,
   userId: string,
   businessId: string,
-  index = 0,
 ): AlertRecord {
   const priority = SEVERITY_TO_PRIORITY[alert.severity] || 'medium';
   const now = new Date().toISOString();
   return {
-    id: docAlertId(alert, index),
+    id: docAlertId(alert),
     user_id: userId,
     level: alert.severity,
     category: alert.type,
@@ -116,7 +168,8 @@ export async function fetchDocumentAlertsAsRecords(
   businessId: string,
 ): Promise<AlertRecord[]> {
   const raw = await fetchDocumentAlerts(userId);
-  return raw.map((alert, index) => documentAlertToRecord(alert, userId, businessId, index));
+  const records = raw.map((alert) => documentAlertToRecord(alert, userId, businessId));
+  return filterDismissedDocumentAlerts(records, userId, businessId);
 }
 
 const PRIORITY_RANK: Record<AlertPriority, number> = { high: 0, medium: 1, low: 2 };
@@ -126,7 +179,14 @@ export function mergeAlertLists(
   documentAlerts: AlertRecord[],
   limit?: number,
 ): AlertRecord[] {
-  const merged = [...globalAlerts, ...documentAlerts].sort((a, b) => {
+  const seen = new Set<string>();
+  const merged = [...globalAlerts, ...documentAlerts]
+    .filter((alert) => {
+      if (seen.has(alert.id)) return false;
+      seen.add(alert.id);
+      return true;
+    })
+    .sort((a, b) => {
     const pr = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
     if (pr !== 0) return pr;
     return String(b.createdAt).localeCompare(String(a.createdAt));

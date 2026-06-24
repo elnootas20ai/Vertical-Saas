@@ -74,8 +74,10 @@ import {
 import {
   getBaseCommercialBrandLimit,
   getEffectiveCommercialBrandLimit,
+  INCLUDED_BUSINESSES,
 } from '../../lib/tenantEntitlements';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
+import { isBlockingSubscriptionStatus } from '../../lib/billingRecovery';
 import type { AuthUser } from '../../lib/authApi';
 import {
   getCompanyVerificationSnapshot,
@@ -264,6 +266,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [extraCommercialBrandSlots, setExtraCommercialBrandSlots] = useState(
     String(account.subscription?.extraCommercialBrandSlots ?? 0),
   );
+  const [extraBusinessSlots, setExtraBusinessSlots] = useState(
+    String((account.subscription as { extraBusinessSlots?: number } | undefined)?.extraBusinessSlots ?? 0),
+  );
   const [adminProAccess, setAdminProAccess] = useState(
     Boolean(account.subscription?.adminProAccess),
   );
@@ -285,6 +290,12 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [reactivating, setReactivating] = useState(false);
   const [grantResult, setGrantResult] = useState<{ ok: boolean; months?: number; error?: string } | null>(null);
   const [reactivateResult, setReactivateResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [clearingMonei, setClearingMonei] = useState(false);
+  const [clearMoneiResult, setClearMoneiResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  const accountNeedsAccessRestore =
+    isBlockingSubscriptionStatus(subscriptionStatus) ||
+    isBlockingSubscriptionStatus(account.subscription?.status);
 
   const handleReactivateAccount = async () => {
     setReactivating(true);
@@ -292,7 +303,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     try {
       const res = await apiFetch('/api/admin/monei/reactivate-account', {
         method: 'POST',
-        body: JSON.stringify({ userId: account.user_id, billingExempt: true }),
+        body: JSON.stringify({ userId: account.user_id, billingExempt }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -309,6 +320,30 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     } finally {
       setReactivating(false);
       setTimeout(() => setReactivateResult(null), 5000);
+    }
+  };
+
+  const handleClearMoneiLink = async () => {
+    setClearingMonei(true);
+    setClearMoneiResult(null);
+    try {
+      const res = await apiFetch('/api/admin/monei/clear-monei-link', {
+        method: 'POST',
+        body: JSON.stringify({ userId: account.user_id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setClearMoneiResult({ ok: true });
+        const updated = await updateUser(account.user_id, {});
+        if (updated.user) onSaved(updated.user);
+      } else {
+        setClearMoneiResult({ ok: false, error: data.error || 'Error desconocido' });
+      }
+    } catch (err: unknown) {
+      setClearMoneiResult({ ok: false, error: err instanceof Error ? err.message : 'Error de red' });
+    } finally {
+      setClearingMonei(false);
+      setTimeout(() => setClearMoneiResult(null), 5000);
     }
   };
 
@@ -361,6 +396,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           0,
           Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)),
         ),
+        extraBusinessSlots: Math.max(0, Math.min(99, Math.floor(Number(extraBusinessSlots) || 0))),
         adminProAccess,
         billingExempt: effectiveBillingExempt,
       },
@@ -429,6 +465,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const baseBrandLimit = getBaseCommercialBrandLimit(planTier);
   const extraBrands = Math.max(0, Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)));
   const totalBrandLimit = baseBrandLimit + extraBrands;
+  const baseBusinessLimit = INCLUDED_BUSINESSES[planTier];
+  const extraBusiness = Math.max(0, Math.min(99, Math.floor(Number(extraBusinessSlots) || 0)));
+  const totalBusinessLimit = baseBusinessLimit + extraBusiness;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -488,6 +527,36 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                   className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 transition-all"
                   placeholder="Nombre de la empresa" />
               </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 px-3 py-2.5 text-xs text-slate-700 dark:text-slate-300 space-y-1">
+              <p className="font-semibold text-slate-900 dark:text-slate-100">Estado de acceso</p>
+              <p>
+                Suscripción:{' '}
+                <span className="font-medium">
+                  {SUBSCRIPTION_STATUS_OPTIONS.find((s) => s.id === (account.subscription?.status || subscriptionStatus))?.label ||
+                    account.subscription?.status ||
+                    subscriptionStatus}
+                </span>
+                {billingExempt ? ' · Exento de suspensión' : ''}
+              </p>
+              {account.subscription?.trialEndsAt ? (
+                <p>Trial hasta: {new Date(account.subscription.trialEndsAt).toLocaleString('es-ES')}</p>
+              ) : null}
+              {account.subscription?.currentPeriodEnd ? (
+                <p>Periodo hasta: {new Date(account.subscription.currentPeriodEnd).toLocaleString('es-ES')}</p>
+              ) : null}
+              {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
+                <p className="font-mono text-[10px] break-all">
+                  MONEI: {(account.subscription as { moneiSubscriptionId?: string }).moneiSubscriptionId}
+                </p>
+              ) : (
+                <p className="text-emerald-700 dark:text-emerald-300">Sin enlace MONEI (cuenta manual)</p>
+              )}
+              {!billingExempt && accountNeedsAccessRestore ? (
+                <p className="text-amber-800 dark:text-amber-200">
+                  El cliente verá bloqueo o pantalla de pago hasta reactivar o marcar exento.
+                </p>
+              ) : null}
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Plan</label>
@@ -618,6 +687,43 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 extra). Referencia comercial: {formatAddonPriceShort('extra_brand')} por cada marca de pago.
               </p>
             </div>
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
+                  Empresas extra (además del plan)
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setExtraBusinessSlots(String(Math.max(0, extraBusiness - 1)))}
+                    disabled={extraBusiness <= 0}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    −1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtraBusinessSlots(String(Math.min(99, extraBusiness + 1)))}
+                    disabled={extraBusiness >= 99}
+                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
+                  >
+                    +1 empresa
+                  </button>
+                </div>
+              </div>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={extraBusinessSlots}
+                onChange={(e) => setExtraBusinessSlots(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+              />
+              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
+                Cupo total: <strong>{totalBusinessLimit}</strong> empresas ({baseBusinessLimit} del plan + {extraBusiness}{' '}
+                extra). Referencia comercial: {formatAddonPriceShort('extra_business')} por cada empresa de pago.
+              </p>
+            </div>
           </div>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4 space-y-3">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contraseña</p>
@@ -669,13 +775,14 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             </div>
           )}
 
-          {(subscriptionStatus === 'suspended' || account.subscription?.status === 'suspended') && (
+          {(accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
             <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
-                Cuenta suspendida
+                Restaurar acceso al SaaS
               </p>
               <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
-                Reactiva el acceso y marca la cuenta como exenta de suspensión automática (recomendado para Modomio y cuentas sin cobro en Monei).
+                Para cuentas como Pauroyo / Modomio sin cobro en pasarela: activa suscripción, marca «Exento de suspensión» arriba y
+                guarda. Si MONEI suspende sola, usa también «Quitar enlace MONEI».
               </p>
               <button
                 type="button"
@@ -684,8 +791,18 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
               >
                 <CheckCircle className={`w-4 h-4 ${reactivating ? 'animate-spin' : ''}`} />
-                {reactivating ? 'Reactivando…' : 'Reactivar cuenta ahora'}
+                {reactivating ? 'Reactivando…' : 'Reactivar y marcar exento'}
               </button>
+              {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
+                <button
+                  type="button"
+                  onClick={() => void handleClearMoneiLink()}
+                  disabled={clearingMonei}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-white text-emerald-800 text-sm font-semibold hover:bg-emerald-100/80 disabled:opacity-50 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                >
+                  {clearingMonei ? 'Quitando enlace…' : 'Quitar enlace MONEI (evitar suspensiones fantasma)'}
+                </button>
+              ) : null}
               {reactivateResult?.ok && (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
                   Cuenta reactivada. El cliente puede volver a entrar al SaaS.
@@ -693,6 +810,12 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               )}
               {reactivateResult && !reactivateResult.ok && (
                 <p className="text-xs text-red-700 dark:text-red-300">{reactivateResult.error}</p>
+              )}
+              {clearMoneiResult?.ok && (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300">Enlace MONEI eliminado.</p>
+              )}
+              {clearMoneiResult && !clearMoneiResult.ok && (
+                <p className="text-xs text-red-700 dark:text-red-300">{clearMoneiResult.error}</p>
               )}
             </div>
           )}

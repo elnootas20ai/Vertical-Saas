@@ -297,6 +297,8 @@ export function CompraventaCrm() {
 
         {/* Sidebar derecho */}
         <div className="space-y-6">
+          <CrmAlertsPanel userId={userId} searchQuery={searchQuery} />
+
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
             <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-2">
               <Receipt className="w-4 h-4" /> Facturación y cobros
@@ -919,7 +921,31 @@ function CreateOpportunityModal({ vehicles, leads, clients, userId, onClose, onC
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} oportunidad(s) importado(s)`);
+    if (!userId) return;
+    let created = 0;
+    for (const entry of entries) {
+      try {
+        const vehicleName = String(entry.vehicle || '').trim();
+        const matchedVehicle = vehicles.find((v) => {
+          const label = `${v.brand || ''} ${v.model || ''}`.trim().toLowerCase();
+          return label === vehicleName.toLowerCase()
+            || String(v.registrationPlate || '').toLowerCase() === vehicleName.toLowerCase();
+        });
+        const result = await createOpportunityRequest(userId, {
+          vehicleName: vehicleName || 'Sin vehículo',
+          vehicleId: matchedVehicle?.id || '',
+          vehiclePlate: matchedVehicle?.registrationPlate || '',
+          budget: Number.parseFloat(String(entry.value || '0').replace(',', '.')) || 0,
+          commercialStatus: (String(entry.status || 'new').trim() as OpportunityStatus) || 'new',
+          notes: String(entry.notes || '').trim() || undefined,
+        });
+        if (result) {
+          setOpportunities((prev) => [result, ...prev]);
+          created++;
+        }
+      } catch { /* skip row */ }
+    }
+    toast.success(`${created} oportunidad(es) importada(s)`);
   };
 
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);

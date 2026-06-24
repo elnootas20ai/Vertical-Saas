@@ -135,7 +135,7 @@ import {
 } from '../../lib/workerProfileCompletion';
 import { useApp, userCanUseDevPlanOverride } from '../../context/AppContext';
 import { getEffectivePointOfSaleLimit } from '../../lib/pointOfSaleLimits';
-import { getEffectiveCommercialBrandLimit } from '../../lib/tenantEntitlements';
+import { getEffectiveBusinessLimit, getEffectiveCommercialBrandLimit } from '../../lib/tenantEntitlements';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import type { BusinessType } from '../../lib/businessApi';
@@ -146,7 +146,6 @@ import {
 import {
   filterWorkCentersForBusinessScope,
   resolveBusinessScopeId,
-  filterDeliverySidebarItemIds,
 } from '../../lib/deliverySetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
@@ -218,6 +217,7 @@ const menuItemDefs = [
   { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
 
   // ── Clientes / CRM ──────────────────────────────────────────────────────────
+  { id: 'clients',     navKey: 'clients',     icon: <Users className="w-5 h-5" />,     path: '/saas/clients' },
   { id: 'quotes',     navKey: 'quotes',     icon: <ClipboardList className="w-5 h-5" />, path: '/saas/quotes' },
   { id: 'promotions', navKey: 'promotions', icon: <Megaphone className="w-5 h-5" />,      path: '/saas/promotions', isNew: true },
 
@@ -261,6 +261,7 @@ const menuItemDefs = [
   { id: 'pipeline', navKey: 'pipeline', icon: <Kanban className="w-5 h-5" />,     path: '/saas/pipeline' },
   { id: 'compraventa-crm', navKey: 'compraventa-crm', icon: <Kanban className="w-5 h-5" />, path: '/saas/vertical/compraventa/crm' },
   { id: 'gastos-preparacion', navKey: 'gastosPreparacion', icon: <Wrench className="w-5 h-5" />, path: '/saas/vertical/compraventa/gastos-preparacion', isNew: true },
+  { id: 'dealership-workers', navKey: 'dealershipWorkers', icon: <BarChart3 className="w-5 h-5" />, path: '/saas/dealership-workers' },
   { id: 'ancove',   navKey: 'ancove',   icon: <Building2 className="w-5 h-5" />,  path: '/saas/ancove' },
 
   // ── Vertical: Taller ─────────────────────────────────────────────────────────
@@ -273,7 +274,6 @@ const menuItemDefs = [
   { id: 'tpv',              navKey: 'tpv',             icon: <Receipt className="w-5 h-5" />,  path: '/saas/tpv' },
   { id: 'sala',             navKey: 'sala',             icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/sala' },
   { id: 'tpv-locales',      navKey: 'tpvLocales',      icon: <Store className="w-5 h-5" />,    path: '/saas/tpv/locales' },
-  { id: 'delivery',         navKey: 'delivery',        icon: <Truck className="w-5 h-5" />,    path: '/saas/delivery' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
   { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/delivery-ops?panel=clients' },
@@ -443,9 +443,9 @@ const sidebarGroupDefs = [
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
-  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'pipeline', 'dealership-workers', 'ancove'] },
+  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'compraventa-crm', 'gastos-preparacion', 'dealership-workers', 'ancove'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'delivery', 'caja', 'web-orders', 'web-config', 'delivery-integrations'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'caja', 'web-orders', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -490,6 +490,14 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   vet:           new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'vet']),
   tobaccoShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'tobaccoShop']),
   butcherShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'butcherShop']),
+};
+
+/** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
+const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string, readonly string[]>>> = {
+  carDealership: {
+    clientesCrm: ['clients', 'compraventa-crm', 'quotes', 'promotions'],
+    catalogProviders: ['suppliers'],
+  },
 };
 
 const VERTICAL_BOTTOM_ITEMS: Record<BusinessType, Set<string>> = {
@@ -556,8 +564,10 @@ function SidebarInner({
     devUnlimitedPdv,
     devExtraPdv,
     devExtraBrands,
+    devExtraBusiness,
     setDevExtraPdvSlots,
     setDevExtraBrandSlots,
+    setDevExtraBusinessSlots,
   } = useApp();
   const { t } = useTranslation();
   const canUseDevPlanSwitcher = userCanUseDevPlanOverride(user);
@@ -765,12 +775,15 @@ function SidebarInner({
     });
   }, [t, deliveryNav.isDelivery, deliveryNav.pdvReady, deliveryNav.brandReady]);
 
-  const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => ({
-    id: g.id,
-    icon: g.icon,
-    itemIds: g.id === 'delivery' ? filterDeliverySidebarItemIds(g.itemIds) : [...g.itemIds],
-    label: g.id === 'equipo' ? 'RRHH' : t(`sidebar.groups.${g.id}`),
-  }));
+  const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => {
+    const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
+    return {
+      id: g.id,
+      icon: g.icon,
+      itemIds: override ? [...override] : [...g.itemIds],
+      label: g.id === 'equipo' ? 'RRHH' : t(`sidebar.groups.${g.id}`),
+    };
+  });
 
   const workerMenuItems: SidebarItem[] = workerMenuItemDefs.map(item => ({
     ...item,
@@ -874,11 +887,8 @@ function SidebarInner({
     'suppliers', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
-    // 'delivery' apunta a /saas/delivery que requiere RequireBusinessOwner: si lo viese
-    // un worker y clicase, se chocaría con el guard. El TPV rápido (tpv-rapido) solo lo
-    // usa el gerente en sidebar; trabajadores entran por landing / código de tienda.
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
-    'delivery', 'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
+    'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
     'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
     'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents',
     'gym-classes', 'gym-memberships', 'gym-routines', 'gym-access',
@@ -970,11 +980,18 @@ function SidebarInner({
         location.pathname.startsWith('/saas/settings/centros-de-trabajo'))) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
     (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
+    (item.id === 'compraventa-hub' && location.pathname === '/saas/vertical/compraventa') ||
+    (item.id === 'compraventa-crm' && location.pathname.startsWith('/saas/vertical/compraventa/crm')) ||
+    (item.id === 'gastos-preparacion' && location.pathname.startsWith('/saas/vertical/compraventa/gastos-preparacion')) ||
+    (item.id === 'dealership-workers' && location.pathname.startsWith('/saas/dealership-workers')) ||
+    (item.id === 'clients' && location.pathname.startsWith('/saas/clients')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
     (item.id === 'tpv' && location.pathname === '/saas/tpv') ||
     (item.id === 'tpv-locales' && location.pathname === '/saas/tpv/locales') ||
-    (item.id === 'delivery' && location.pathname === '/saas/delivery') ||
+    (item.id === 'delivery-ops'
+      && location.pathname.startsWith('/saas/delivery-ops')
+      && new URLSearchParams(location.search).get('panel') !== 'clients') ||
     (item.id === 'delivery-clients'
       && (location.pathname.startsWith('/saas/clients')
         || (location.pathname.startsWith('/saas/delivery-ops') && new URLSearchParams(location.search).get('panel') === 'clients'))) ||
@@ -1646,6 +1663,11 @@ function SidebarInner({
                     value: devExtraBrands,
                     onChange: setDevExtraBrandSlots,
                   },
+                  {
+                    label: 'Empresas extra',
+                    value: devExtraBusiness,
+                    onChange: setDevExtraBusinessSlots,
+                  },
                 ] as const).map(({ label, value, onChange }) => (
                   <div key={label} className="flex items-center justify-between gap-1">
                     <span className="text-[9px] text-violet-700 dark:text-violet-300">{label}</span>
@@ -1678,8 +1700,8 @@ function SidebarInner({
             )}
             <p className="mt-1 text-[9px] text-violet-600/80 dark:text-violet-400/80">
               {devUnlimitedPdv
-                ? 'PDV sin límite (plan real)'
-                : `Máx. ${getEffectivePointOfSaleLimit(subscription)} tiendas · ${getEffectiveCommercialBrandLimit(subscription)} marcas`}
+                ? 'Sin límite de cupos (plan real)'
+                : `Máx. ${getEffectiveBusinessLimit(subscription)} empresas · ${getEffectivePointOfSaleLimit(subscription)} tiendas · ${getEffectiveCommercialBrandLimit(subscription)} marcas`}
             </p>
             <button
               type="button"

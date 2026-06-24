@@ -88,6 +88,7 @@ import {
   roundRevenueMap,
 } from '../shared/delivery/orderLineRevenueSplit.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
+import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements, deductStaffConsumptionStock } from '../services/recipeStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
@@ -2543,6 +2544,12 @@ export async function createPointOfSale(req, res) {
     }
     const createErr = validatePointOfSaleCreateBody(body);
     if (createErr) return badRequest(res, createErr);
+
+    const actorEmail = req.authUser?.email || account.email || '';
+    const pdvLimitCheck = await assertCanCreatePointOfSale(req, userId, actorEmail);
+    if (!pdvLimitCheck.ok) {
+      return res.status(pdvLimitCheck.status).json({ ok: false, error: pdvLimitCheck.error, code: pdvLimitCheck.code });
+    }
 
     if (wcId) {
       const again = findActivePointOfSaleForWorkCenter(await listPointsOfSaleByUser(req, userId), wcId);

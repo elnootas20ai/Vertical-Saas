@@ -21,6 +21,54 @@ import {
 } from '../services/alertHistory.js';
 import { ALERT_STATUSES, ALERT_PRIORITIES, ALERT_SOURCES } from '../services/alertConstants.js';
 
+const ALERT_PUT_MAX_ATTEMPTS = 4;
+
+function isRevisionConflict(error) {
+  const msg = error instanceof Error ? error.message : String(error || '');
+  return /conflict|409|_rev|updated/i.test(msg);
+}
+
+async function updateAlertDocWithRetry(req, alertId, mutateFn) {
+  for (let attempt = 0; attempt < ALERT_PUT_MAX_ATTEMPTS; attempt += 1) {
+    await ensureDatabase(req, NOTIFICATIONS_DB);
+    const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
+    if (!doc || doc.type !== 'notification' || doc.deletedAt) {
+      return null;
+    }
+
+    const updated = mutateFn(doc);
+    try {
+      const result = await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
+      return { ...updated, _rev: result.rev };
+    } catch (error) {
+      if (attempt < ALERT_PUT_MAX_ATTEMPTS - 1 && isRevisionConflict(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error('Conflicto de concurrencia al guardar la alerta');
+}
+
+async function mapPool(items, concurrency, iterator) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await iterator(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
+}
+
 function buildListFilters(query, defaults = {}) {
   return {
     status: query.status ?? defaults.status ?? null,
@@ -162,22 +210,19 @@ export async function updateAlertStatus(req, res) {
       });
     }
 
-    await ensureDatabase(req, NOTIFICATIONS_DB);
-    const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
+    const now = new Date().toISOString();
+    const userId = req.authUser?.userId || null;
+    const updated = await updateAlertDocWithRetry(req, alertId, (doc) =>
+      mutateAlertStatus(doc, { status, userId, now }),
+    );
 
-    if (!doc || doc.type !== 'notification' || doc.deletedAt) {
+    if (!updated) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
 
-    const now = new Date().toISOString();
-    const userId = req.authUser?.userId || null;
-    const updated = mutateAlertStatus(doc, { status, userId, now });
-
-    const result = await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
-
     return res.json({
       ok: true,
-      alert: sanitizeNotification({ ...updated, _rev: result.rev }),
+      alert: sanitizeNotification(updated),
     });
   } catch (error) {
     return res.status(500).json({
@@ -213,23 +258,22 @@ export async function bulkUpdateAlertStatus(req, res) {
 
     const now = new Date().toISOString();
     const userId = req.authUser?.userId || null;
-    const results = { updated: 0, errors: 0 };
 
-    for (const id of ids) {
+    const outcomes = await mapPool(ids, 10, async (id) => {
       try {
-        const doc = await getDocument(req, NOTIFICATIONS_DB, id);
-        if (!doc || doc.type !== 'notification' || doc.deletedAt) {
-          results.errors++;
-          continue;
-        }
-
-        const updated = mutateAlertStatus(doc, { status, userId, now });
-        await putDocument(req, NOTIFICATIONS_DB, id, updated);
-        results.updated++;
+        const updated = await updateAlertDocWithRetry(req, id, (doc) =>
+          mutateAlertStatus(doc, { status, userId, now }),
+        );
+        return updated ? 'updated' : 'error';
       } catch {
-        results.errors++;
+        return 'error';
       }
-    }
+    });
+
+    const results = {
+      updated: outcomes.filter((o) => o === 'updated').length,
+      errors: outcomes.filter((o) => o !== 'updated').length,
+    };
 
     return res.json({ ok: true, ...results });
   } catch (error) {

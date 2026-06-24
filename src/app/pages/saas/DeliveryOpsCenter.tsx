@@ -31,7 +31,6 @@ import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { writeBillingSelection } from '../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { getAuthHeaders } from '../../lib/authApi';
-import { Delivery } from './Delivery';
 import {
   getOpsCenterRequest,
   localDateInputValue,
@@ -46,7 +45,6 @@ import {
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import { brandDisplayName, reportCategoryLabel } from '../../lib/deliveryOrderReporting';
-import { DELIVERY_LEGACY_SCREENS_HIDDEN } from '../../lib/deliverySetup';
 import {
   Activity, ChefHat, Package, Truck, CheckCircle2, Clock, AlertTriangle,
   ShoppingBag, Wallet, AlertCircle, Receipt, Euro,
@@ -657,22 +655,19 @@ function cajaAlertBadge(cashStatus: OpsCenterData['cashStatus'] | undefined): nu
 
 /* ── Quick Access ─────────────────────────────────────────────────────────── */
 
-function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, pedidosQueueCount, activationFocus }: {
+function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, activationFocus }: {
   cfg: DeliveryConfig | null; kpis: OpsCenterData['kpis'] | null; cashPend: number; incidents: number;
   onNavigate: (path: string) => void;
-  /** Cola nuevo+cocina+listo (preferible a KPI suelto; evita parpadeos) */
-  pedidosQueueCount: number;
   activationFocus?: string | null;
 }) {
   type QItem = { l: string; i: typeof Activity; r: string; b: number | null; bc?: string; v: boolean; highlight?: boolean };
   const items: QItem[] = [
     { l: 'TPV rápido', i: Zap, r: '/saas/vertical/delivery/tpv', b: null, v: true },
     { l: 'Caja', i: Banknote, r: '/saas/vertical/delivery/caja', b: cashPend > 0 ? cashPend : null, bc: 'bg-red-500', v: true, highlight: cashPend > 0 },
-    { l: 'Pedidos', i: Truck, r: '/saas/delivery', b: pedidosQueueCount > 0 ? pedidosQueueCount : null, v: !DELIVERY_LEGACY_SCREENS_HIDDEN },
     { l: 'Cocina', i: ChefHat, r: '/saas/delivery-kitchen', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
     { l: 'Montaje', i: ClipboardCheck, r: '/saas/delivery-montaje', b: kpis?.byStatus.listo ?? null, v: cfg?.hasAssemblyStation !== false },
     { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
-    { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: !DELIVERY_LEGACY_SCREENS_HIDDEN && cfg?.hasPhysicalTables === true },
+    { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: cfg?.hasPhysicalTables === true },
     { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
     { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },
@@ -967,7 +962,7 @@ function IncidentsW({ orders, onNavigate }: { orders: DeliveryOrder[]; onNavigat
               <p className="text-xs text-gray-500 mt-0.5">{o.incidentType || 'General'}: {(o.incidentNotes || '').slice(0, 50)}</p>
             </div>
             <button
-              onClick={() => onNavigate(DELIVERY_LEGACY_SCREENS_HIDDEN ? '/saas/delivery-reparto' : '/saas/delivery')}
+              onClick={() => onNavigate('/saas/delivery-reparto')}
               className="px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg shrink-0"
             >
               Resolver
@@ -1064,13 +1059,10 @@ function RevenueBreakdownW({
   );
 }
 
-type OpsPanelId = 'operativa' | 'pedidos' | 'clients' | 'promotions';
+type OpsPanelId = 'operativa' | 'clients' | 'promotions';
 
 function opsPanelFromSearch(panelParam: string | null): OpsPanelId {
   const p = panelParam?.trim();
-  if (p === 'pedidos') {
-    return DELIVERY_LEGACY_SCREENS_HIDDEN ? 'operativa' : 'pedidos';
-  }
   if (p === 'clients' || p === 'promotions') return p;
   return 'operativa';
 }
@@ -1100,8 +1092,7 @@ export function DeliveryOpsCenter() {
 
   const onDeliveryOpsSectionTab = useCallback(
     (id: string) => {
-      if (id === 'pedidos' && !DELIVERY_LEGACY_SCREENS_HIDDEN) setOpsPanel('pedidos');
-      else if (id === 'clients') setOpsPanel('clients');
+      if (id === 'clients') setOpsPanel('clients');
       else if (id === 'promotions') setOpsPanel('promotions');
       else setOpsPanel('operativa');
     },
@@ -1110,20 +1101,8 @@ export function DeliveryOpsCenter() {
 
   useEffect(() => {
     const p = searchParams.get('panel');
-    const allowed = new Set(
-      DELIVERY_LEGACY_SCREENS_HIDDEN
-        ? ['clients', 'promotions']
-        : ['pedidos', 'clients', 'promotions'],
-    );
-    if (p === 'pedidos' && DELIVERY_LEGACY_SCREENS_HIDDEN) {
-      setSearchParams((prev) => {
-        const n = new URLSearchParams(prev);
-        n.delete('panel');
-        return n;
-      }, { replace: true });
-      return;
-    }
-    if (p !== null && p !== '' && !allowed.has(p)) {
+    const allowed = new Set(['clients', 'promotions']);
+    if (p === 'pedidos' || (p !== null && p !== '' && !allowed.has(p))) {
       setSearchParams((prev) => {
         const n = new URLSearchParams(prev);
         n.delete('panel');
@@ -1316,37 +1295,18 @@ export function DeliveryOpsCenter() {
     activeStoreScope.activeSalesPointId,
   ]);
 
-  /** Cola nuevo+cocina+listo desde pedidos activos (alineado con la lista real, menos parpadeos que solo KPI). */
-  const pedidosQueueCount = useMemo(() => {
-    if (!data?.activeOrders) return 0;
-    return data.activeOrders.filter((o) => o.status === 'nuevo' || o.status === 'cocina' || o.status === 'listo' || o.status === 'en_reparto').length;
-  }, [data?.activeOrders]);
-
   const quickNav = useCallback(
     (path: string) => {
-      if (path === '/saas/delivery') {
-        if (DELIVERY_LEGACY_SCREENS_HIDDEN) {
-          navFromOps('/saas/delivery-reparto');
-          return;
-        }
-        if (opsPanel !== 'pedidos') setOpsPanel('pedidos');
-        return;
-      }
-      if (path === '/saas/sala' && DELIVERY_LEGACY_SCREENS_HIDDEN) return;
       navFromOps(path);
     },
-    [navFromOps, opsPanel, setOpsPanel],
+    [navFromOps],
   );
 
-  const deliveryOpsTabs = useMemo(() => {
-    const tabs = [
-      { id: 'operativa', label: 'Operativa' },
-      { id: 'pedidos', label: 'Pedidos', ...(pedidosQueueCount > 0 ? { count: pedidosQueueCount } : {}) },
-      { id: 'clients', label: 'Clientes' },
-      { id: 'promotions', label: 'Promociones' },
-    ];
-    return DELIVERY_LEGACY_SCREENS_HIDDEN ? tabs.filter((t) => t.id !== 'pedidos') : tabs;
-  }, [pedidosQueueCount]);
+  const deliveryOpsTabs = useMemo(() => [
+    { id: 'operativa', label: 'Operativa' },
+    { id: 'clients', label: 'Clientes' },
+    { id: 'promotions', label: 'Promociones' },
+  ], []);
 
   const load = useCallback(async () => {
     if (!authUserId) return;
@@ -1474,13 +1434,11 @@ export function DeliveryOpsCenter() {
   ]);
 
   const layoutSecondaryLine =
-    opsPanel === 'pedidos'
-      ? 'Pedidos e historial integrados en Ops'
-      : opsPanel === 'clients'
-        ? 'Clientes en Ops'
-        : opsPanel === 'promotions'
-          ? 'Promociones en Ops'
-          : subtitle;
+    opsPanel === 'clients'
+      ? 'Clientes en Ops'
+      : opsPanel === 'promotions'
+        ? 'Promociones en Ops'
+        : subtitle;
 
   const layoutSubtitle = effectiveOpsPdvLabel
     ? `${effectiveOpsPdvLabel} · ${layoutSecondaryLine}`
@@ -1516,27 +1474,7 @@ export function DeliveryOpsCenter() {
           </div>
         </div>
 
-        {opsPanel === 'pedidos' ? (
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
-              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
-            </div>
-            <div className="shrink-0 px-2 pt-2 pb-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950">
-              <QuickAccess
-                cfg={cfg}
-                kpis={data?.kpis || null}
-                cashPend={cajaAlertBadge(data?.cashStatus)}
-                incidents={data?.kpis?.byStatus?.incident || 0}
-                onNavigate={quickNav}
-                pedidosQueueCount={pedidosQueueCount}
-                activationFocus={activationFocus}
-              />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
-              <Delivery embedded onEmbeddedBack={() => setOpsPanel('operativa')} />
-            </div>
-          </div>
-        ) : opsPanel === 'clients' ? (
+        {opsPanel === 'clients' ? (
           <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
             <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
               <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
@@ -1586,7 +1524,6 @@ export function DeliveryOpsCenter() {
               cashPend={cajaAlertBadge(data?.cashStatus)}
               incidents={data?.kpis?.byStatus?.incident || 0}
               onNavigate={quickNav}
-              pedidosQueueCount={pedidosQueueCount}
               activationFocus={activationFocus}
             />
 
@@ -1622,7 +1559,7 @@ export function DeliveryOpsCenter() {
                 )}
                 <CashW cs={data?.cashStatus || null} onNavigate={quickNav} opsDate={data?.date || filters.date} nowMs={nowMs} />
                 <IncidentsW orders={active} onNavigate={navFromOps} />
-                {!DELIVERY_LEGACY_SCREENS_HIDDEN && cfg?.hasPhysicalTables && cfg.tableCount > 0 && (
+                {cfg?.hasPhysicalTables && cfg.tableCount > 0 && (
                   <TablesW cfg={cfg} orders={active} />
                 )}
               </div>

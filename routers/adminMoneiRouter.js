@@ -14,6 +14,7 @@ import {
   getDashboardStats,
   adminGrantFreeMonths,
   adminReactivateAccount,
+  adminClearMoneiLink,
 } from '../controllers/adminMoneiController.js';
 
 const adminMoneiRouter = Router();
@@ -31,5 +32,6 @@ adminMoneiRouter.post('/payments/:id/refund', requireAuthAndEmailVerified, admin
 adminMoneiRouter.post('/test-payment', requireAuthAndEmailVerified, adminTestPayment);
 adminMoneiRouter.post('/grant-free-months', requireAuthAndEmailVerified, adminGrantFreeMonths);
 adminMoneiRouter.post('/reactivate-account', requireAuthAndEmailVerified, adminReactivateAccount);
+adminMoneiRouter.post('/clear-monei-link', requireAuthAndEmailVerified, adminClearMoneiLink);
 
 export { adminMoneiRouter };

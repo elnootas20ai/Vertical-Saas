@@ -166,7 +166,7 @@ export function alertTierDescription(tier: AlertPlanTier, vertical?: string | nu
       return 'Plan de entrada con avisos mínimos: leads, ventas canceladas, stock bajo y recordatorios simples.';
     }
     if (tier === 'normal') {
-      return 'El plan recomendado: pedidos, cocina, reparto, caja, impagos y operación diaria del restaurante.';
+      return 'El plan recomendado para el gerente: caja, incidencias, impagos, fichajes y control del negocio.';
     }
     return 'El más completo: finanzas avanzadas, fiscal, proveedores, documentación, márgenes, canales y control inteligente.';
   }
@@ -185,7 +185,7 @@ export function alertTierExamples(tier: AlertPlanTier, vertical?: string | null)
       return 'Ej.: nuevo lead, venta cancelada, stock bajo, caja sin abrir, trabajador sin fichar.';
     }
     if (tier === 'normal') {
-      return 'Ej.: pedido retrasado, cocina llena, caja sin cerrar, producto agotado, impago de cliente.';
+      return 'Ej.: caja sin cerrar, descuadre, pedido cancelado, impago, trabajador sin fichar, producto agotado.';
     }
     return 'Ej.: margen bajo, canal sin pedidos, factura vencida, banco sin conciliar, contrato por firmar.';
   }

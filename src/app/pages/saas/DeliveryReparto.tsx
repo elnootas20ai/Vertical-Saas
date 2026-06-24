@@ -386,9 +386,9 @@ export function DeliveryReparto() {
         {showMgrView && (
           <div className="flex flex-wrap gap-2 pt-2">
             {[
-              { label: 'Pedidos', path: '/saas/delivery', icon: <Package className="w-3.5 h-3.5" /> },
+              { label: 'Pedidos', path: '/saas/delivery-ops', icon: <Package className="w-3.5 h-3.5" /> },
               { label: 'Montaje', path: '/saas/delivery-montaje', icon: <ClipboardCheck className="w-3.5 h-3.5" /> },
-              { label: 'Caja repartidor', path: '/saas/delivery', icon: <Receipt className="w-3.5 h-3.5" /> },
+              { label: 'Caja repartidor', path: '/saas/vertical/delivery/caja', icon: <Receipt className="w-3.5 h-3.5" /> },
               { label: 'Dashboard', path: '/saas/dashboard', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
             ].map(lnk => (
               <button key={lnk.path} onClick={() => nav(lnk.path)}

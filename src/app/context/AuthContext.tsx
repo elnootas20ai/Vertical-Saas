@@ -899,12 +899,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       const next = response.user;
       setUser((prev) => {
+        const prevSub = JSON.stringify(prev?.subscription ?? null);
+        const nextSub = JSON.stringify(next.subscription ?? null);
         if (
           prev?.user_id === next.user_id &&
           prev.emailVerified === next.emailVerified &&
           prev.updatedAt === next.updatedAt &&
-          prev.subscription?.status === next.subscription?.status &&
-          Boolean(prev.subscription?.billingExempt) === Boolean(next.subscription?.billingExempt)
+          prevSub === nextSub
         ) {
           return prev;
         }
