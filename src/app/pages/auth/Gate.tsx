@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
   Building2,
@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Wrench,
+  Loader2,
 } from 'lucide-react';
 import { ACCESO__Modal } from '../../components/design-system/ACCESO__Modal';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
@@ -29,6 +30,11 @@ import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { ModalModulo } from '../../components/gate/ModalModulo';
 import { VehicleImportWizard } from '../../components/saas/VehicleImportWizard';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
+import {
+  ensureDeliveryDefaultBrand,
+  isDeliveryBusinessType,
+  readStoredOnboardingBusinessType,
+} from '../../lib/deliverySetup';
 import type { BusinessType } from '../../lib/businessApi';
 
 const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
@@ -85,6 +91,53 @@ function isTransientVerificationLoadError(message: string | null | undefined): b
   return m.includes('verificar tu email') || m.includes('email_not_verified');
 }
 
+type OnboardingCompanyProfile = {
+  tradeName?: string;
+  legalName?: string;
+  taxId?: string;
+  address?: string;
+  province?: string;
+  city?: string;
+  companyEmail?: string;
+  companyPhone?: string;
+};
+
+function resolveOnboardingCompanyProfile(
+  user: ReturnType<typeof useAuth>['user'],
+  localOnboarding: ReturnType<typeof useOnboarding>['data'],
+): OnboardingCompanyProfile | null {
+  const serverProfile = (user?.onboardingData as { companyProfile?: OnboardingCompanyProfile } | undefined)
+    ?.companyProfile;
+  const localProfile = localOnboarding.companyProfile;
+  const profile = serverProfile?.tradeName?.trim() ? serverProfile : localProfile;
+  if (!profile?.tradeName?.trim() && !user?.companyName?.trim()) return null;
+  return profile;
+}
+
+function buildCreatePayloadFromOnboarding(
+  user: ReturnType<typeof useAuth>['user'],
+  localOnboarding: ReturnType<typeof useOnboarding>['data'],
+) {
+  const profile = resolveOnboardingCompanyProfile(user, localOnboarding);
+  const businessType = (
+    (user?.onboardingData as { businessType?: string } | undefined)?.businessType ||
+    localOnboarding.businessType ||
+    readStoredOnboardingBusinessType(user?.user_id) ||
+    'delivery'
+  ) as BusinessType;
+
+  return {
+    name: profile?.tradeName?.trim() || user?.companyName?.trim() || '',
+    legalName: profile?.legalName,
+    taxId: profile?.taxId,
+    address: profile?.address,
+    city: profile?.city || profile?.province,
+    phone: profile?.companyPhone || user?.phone,
+    email: profile?.companyEmail || user?.email,
+    businessType,
+  };
+}
+
 export function Gate() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -135,7 +188,7 @@ export function Gate() {
     phone: string;
     email: string;
     businessType: BusinessType | '';
-  }>({
+  }>(() => ({
     name: '',
     taxId: '',
     address: '',
@@ -143,10 +196,31 @@ export function Gate() {
     phone: '',
     email: '',
     businessType: (data.businessType as BusinessType) || '',
-  });
+  }));
   const [isCreatingBusiness, setIsCreatingBusiness] = useState(false);
   const [createBusinessStep, setCreateBusinessStep] = useState<1 | 2 | 3>(1);
   const [createBusinessError, setCreateBusinessError] = useState('');
+  const [isAutoProvisioning, setIsAutoProvisioning] = useState(false);
+  const autoProvisionAttempted = useRef(false);
+
+  const onboardingPayload = useMemo(
+    () => buildCreatePayloadFromOnboarding(user, data),
+    [user, data],
+  );
+  const hasOnboardingCompany = Boolean(onboardingPayload.name);
+
+  useEffect(() => {
+    if (!hasOnboardingCompany) return;
+    setCreateBusinessData((prev) => ({
+      name: onboardingPayload.name || prev.name,
+      taxId: onboardingPayload.taxId || prev.taxId,
+      address: onboardingPayload.address || prev.address,
+      city: onboardingPayload.city || prev.city,
+      phone: onboardingPayload.phone || prev.phone,
+      email: onboardingPayload.email || prev.email,
+      businessType: onboardingPayload.businessType || prev.businessType,
+    }));
+  }, [hasOnboardingCompany, onboardingPayload.name, onboardingPayload.taxId, onboardingPayload.address, onboardingPayload.city, onboardingPayload.phone, onboardingPayload.email, onboardingPayload.businessType]);
 
   const [showModuloVehiculos, setShowModuloVehiculos] = useState(false);
   const [showModuloClientes, setShowModuloClientes] = useState(false);
@@ -194,6 +268,40 @@ export function Gate() {
     currentBusiness?.business_id,
     switchBusiness,
     navigate,
+  ]);
+
+  // Tras el onboarding, crear la empresa automáticamente con los datos ya recogidos.
+  useEffect(() => {
+    if (!showTrulyEmptyBusinesses || !hasOnboardingCompany || autoProvisionAttempted.current) return;
+    autoProvisionAttempted.current = true;
+    setIsAutoProvisioning(true);
+
+    void createBusiness(onboardingPayload)
+      .then(async (result) => {
+        if (!result.success || !result.business?.business_id) return;
+        const createdType = String(result.business.businessType || onboardingPayload.businessType || '').trim();
+        if (isDeliveryBusinessType(createdType)) {
+          try {
+            await ensureDeliveryDefaultBrand(result.business.business_id, {
+              preferredName: onboardingPayload.name,
+            });
+          } catch {
+            /* noop */
+          }
+        }
+        await reloadBusinesses();
+        switchBusiness(result.business.business_id);
+        navigate('/saas/dashboard', { replace: true });
+      })
+      .finally(() => setIsAutoProvisioning(false));
+  }, [
+    showTrulyEmptyBusinesses,
+    hasOnboardingCompany,
+    createBusiness,
+    reloadBusinesses,
+    switchBusiness,
+    navigate,
+    onboardingPayload,
   ]);
 
 
@@ -345,22 +453,36 @@ export function Gate() {
           </div>
         ) : showTrulyEmptyBusinesses ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center shadow-sm dark:border-gray-600 dark:bg-gray-800">
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-700">
-              <Building2 className="h-7 w-7 text-gray-500 dark:text-gray-400" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Crea tu primera empresa</h1>
-            <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
-              Configura tu negocio para acceder al panel de Vertial.
-            </p>
-            <ACCESO__Button
-              className="mt-6"
-              variant="primary"
-              size="lg"
-              onClick={() => setShowCreateBusiness(true)}
-            >
-              <Plus className="h-4 w-4" />
-              Nueva empresa
-            </ACCESO__Button>
+            {isAutoProvisioning || hasOnboardingCompany ? (
+              <>
+                <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-blue-600" />
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  Activando tu espacio
+                </h1>
+                <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                  Usamos los datos de tu alta ({onboardingPayload.name}) para preparar tu empresa en Vertial.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-700">
+                  <Building2 className="h-7 w-7 text-gray-500 dark:text-gray-400" />
+                </div>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Crea tu primera empresa</h1>
+                <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+                  Configura tu negocio para acceder al panel de Vertial.
+                </p>
+                <ACCESO__Button
+                  className="mt-6"
+                  variant="primary"
+                  size="lg"
+                  onClick={() => setShowCreateBusiness(true)}
+                >
+                  <Plus className="h-4 w-4" />
+                  Nueva empresa
+                </ACCESO__Button>
+              </>
+            )}
           </div>
         ) : hasApiBusinesses && businesses.length > 1 ? (
           <div className="space-y-6 pb-24">

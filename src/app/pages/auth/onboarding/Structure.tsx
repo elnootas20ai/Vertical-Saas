@@ -116,8 +116,8 @@ export function Structure() {
         className="flex-1 min-h-0 flex flex-col gap-4"
       >
         <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-          Estos datos definen cuántas empresas, puntos de venta, trabajadores y líneas comerciales incluye tu
-          suscripción. Así evitas bloqueos al crear tiendas o marcas después de pagar.
+          Estos datos definen cuántas empresas, puntos de venta, trabajadores y marcas incluye tu suscripción. Así
+          evitas bloqueos al crear tiendas o marcas después de pagar.
         </p>
 
         <div className="bg-white dark:bg-gray-800 border-2 border-amber-300 dark:border-amber-700 rounded-xl shadow-sm overflow-hidden">
@@ -130,8 +130,7 @@ export function Structure() {
                 Tu operativa en números
               </h3>
               <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-400 leading-snug">
-                La marca principal «General» siempre está incluida. Las líneas extra son, por ejemplo, Pizzería o
-                Burger.
+                La marca «General» siempre está incluida. Las marcas extra son, por ejemplo, Pizzería o Burger.
               </p>
             </div>
           </div>
@@ -191,7 +190,7 @@ export function Structure() {
             <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/30">
               <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
                 <Layers className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Líneas comerciales extra</span>
+                <span>Marcas extra</span>
               </label>
               <NumberStepper
                 id="structure-brand-count"
@@ -201,7 +200,7 @@ export function Structure() {
                 onChange={(n) => setFormData({ ...formData, commercialBrandCount: n })}
               />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-snug">
-                Además de «General». Pon 0 si solo tienes una línea de negocio.
+                Además de «General» (ej. Pizzería, Burger). Pon 0 si solo tienes una marca.
               </p>
             </div>
           </div>
@@ -209,8 +208,8 @@ export function Structure() {
 
         {formData.commercialBrandCount > 0 || formData.locationCount > 1 || formData.businessCount > 1 ? (
           <p className="text-xs text-violet-800 dark:text-violet-200 bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 rounded-lg px-3 py-2 leading-snug">
-            Con varias empresas, varios PDV o líneas comerciales extra te recomendaremos el plan PRO en el siguiente
-            paso de precio.
+            Con varias empresas, varios PDV o marcas extra te recomendaremos el plan PRO en el siguiente paso de
+            precio.
           </p>
         ) : (
           <p className="text-xs text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 leading-snug">

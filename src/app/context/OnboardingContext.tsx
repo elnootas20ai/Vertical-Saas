@@ -50,7 +50,7 @@ export interface OnboardingData {
     locationCount: number;
     /** Empresas en la cuenta (CIF distintos o marcas bajo un grupo). */
     businessCount: number;
-    /** Líneas comerciales además de la marca «General» (p. ej. Pizzería, Burger). */
+    /** Marcas comerciales además de «General» (p. ej. Pizzería, Burger). */
     commercialBrandCount: number;
     monthlyOperations: string;
     activeItems: string;

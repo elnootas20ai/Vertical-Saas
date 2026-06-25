@@ -72,29 +72,34 @@ export function Confirmation() {
     if (completionStarted.current) return;
     completionStarted.current = true;
 
-    const countdownTimer = window.setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) {
-          window.clearInterval(countdownTimer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    void updateOnboardingData(data as unknown as Record<string, unknown>).catch((error) => {
-      console.error('Error saving onboarding:', error);
-    });
+    let countdownTimer: number | undefined;
+    let finalTimer: number | undefined;
 
     const goToSaas = () => {
       navigate('/saas/dashboard', { replace: true });
     };
 
-    const finalTimer = window.setTimeout(goToSaas, 10000);
+    void updateOnboardingData(data as unknown as Record<string, unknown>)
+      .catch((error) => {
+        console.error('Error saving onboarding:', error);
+      })
+      .finally(() => {
+        countdownTimer = window.setInterval(() => {
+          setCountdown((prev) => {
+            if (prev <= 1) {
+              if (countdownTimer) window.clearInterval(countdownTimer);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+
+        finalTimer = window.setTimeout(goToSaas, 10000);
+      });
 
     return () => {
-      window.clearTimeout(finalTimer);
-      window.clearInterval(countdownTimer);
+      if (finalTimer) window.clearTimeout(finalTimer);
+      if (countdownTimer) window.clearInterval(countdownTimer);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep]);

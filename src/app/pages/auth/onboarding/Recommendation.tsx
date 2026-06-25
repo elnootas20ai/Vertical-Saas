@@ -140,7 +140,7 @@ export function Recommendation() {
             {(data.businessMetrics.commercialBrandCount ?? 0) > 0 ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
                 <Layers className="w-3.5 h-3.5" />
-                {data.businessMetrics.commercialBrandCount} línea
+                {data.businessMetrics.commercialBrandCount} marca
                 {data.businessMetrics.commercialBrandCount !== 1 ? 's' : ''} extra
               </span>
             ) : null}
@@ -176,9 +176,16 @@ export function Recommendation() {
             >
               Anual <span className="text-green-600 font-bold">-20%</span>
             </button>
-            <span className="ml-auto text-2xl font-bold text-gray-900 dark:text-gray-100">
-              {pricing.total}€<span className="text-sm font-normal text-gray-500">/mes</span>
-            </span>
+            <div className="ml-auto text-right">
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {pricing.total}€<span className="text-sm font-normal text-gray-500">/mes</span>
+              </p>
+              {billingMode === 'annual' ? (
+                <p className="mt-0.5 text-xs font-medium text-green-700 dark:text-green-400">
+                  {pricing.total * 12}€ al año · -20% aplicado
+                </p>
+              ) : null}
+            </div>
           </div>
 
           {(pricing.extraUsers > 0 ||
@@ -186,13 +193,14 @@ export function Recommendation() {
             pricing.extraBusinesses > 0 ||
             pricing.extraBrands > 0) && (
             <p className="shrink-0 text-xs text-gray-600 dark:text-gray-400 mb-2 leading-relaxed">
+              {billingMode === 'annual' ? 'Con descuento anual (-20%): ' : ''}
               Plan {recommendation.plan.name} {pricing.baseCost}€
               {pricing.extraUsers > 0 && ` + ${pricing.extraUsers} trabajador(es) extra (${pricing.extraUsersCost}€)`}
               {pricing.extraPdv > 0 && ` + ${pricing.extraPdv} PDV extra (${pricing.extraPdvCost}€)`}
               {pricing.extraBusinesses > 0 &&
                 ` + ${pricing.extraBusinesses} empresa(s) extra (${pricing.extraBusinessesCost}€)`}
               {pricing.extraBrands > 0 &&
-                ` + ${pricing.extraBrands} línea(s) comercial extra (${pricing.extraBrandsCost}€)`}
+                ` + ${pricing.extraBrands} marca(s) extra (${pricing.extraBrandsCost}€)`}
             </p>
           )}
 

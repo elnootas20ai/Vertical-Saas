@@ -11,7 +11,6 @@ import {
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import {
   calculateOnboardingPricing,
-  getPlansForBusinessType,
   recommendOnboardingPlan,
 } from '../../../lib/onboardingPlanRecommendation';
 
@@ -87,14 +86,12 @@ export function PaymentInfo() {
     return { recommendation, billingMode, pricing };
   }, [data]);
 
-  // Formatear número de tarjeta (espacios cada 4 dígitos)
   const formatCardNumber = (value: string) => {
     const cleaned = value.replace(/\s/g, '');
     const chunks = cleaned.match(/.{1,4}/g);
     return chunks ? chunks.join(' ') : cleaned;
   };
 
-  // Formatear fecha de expiración (MM/YY)
   const formatExpiryDate = (value: string) => {
     const cleaned = value.replace(/\D/g, '');
     if (cleaned.length >= 2) {
@@ -144,7 +141,7 @@ export function PaymentInfo() {
       const [month, year] = formData.expiryDate.split('/').map(Number);
       const currentYear = new Date().getFullYear() % 100;
       const currentMonth = new Date().getMonth() + 1;
-      
+
       if (month < 1 || month > 12) {
         newErrors.expiryDate = 'Mes inválido';
       } else if (year < currentYear || (year === currentYear && month < currentMonth)) {
@@ -209,104 +206,115 @@ export function PaymentInfo() {
     navigate('/auth/onboarding/recommendation');
   };
 
+  const summaryLines = [
+    `Plan ${orderSummary.recommendation.plan.name}: ${orderSummary.pricing.baseCost}€`,
+    orderSummary.pricing.extraPdv > 0
+      ? `+${orderSummary.pricing.extraPdv} PDV: ${orderSummary.pricing.extraPdvCost}€`
+      : null,
+    orderSummary.pricing.extraBusinesses > 0
+      ? `+${orderSummary.pricing.extraBusinesses} empresa(s): ${orderSummary.pricing.extraBusinessesCost}€`
+      : null,
+    orderSummary.pricing.extraBrands > 0
+      ? `+${orderSummary.pricing.extraBrands} marca(s): ${orderSummary.pricing.extraBrandsCost}€`
+      : null,
+    orderSummary.pricing.extraUsers > 0
+      ? `+${orderSummary.pricing.extraUsers} trabajador(es): ${orderSummary.pricing.extraUsersCost}€`
+      : null,
+  ].filter(Boolean);
+
   return (
     <OnboardingStepShell
       stepIndex={STEP_INDEX}
       maxWidth="max-w-2xl"
       footer={
-        <div className="flex gap-3">
-          <ACCESO__Button type="button" onClick={handleBack} variant="outline" fullWidth>
-            ← Atrás
-          </ACCESO__Button>
-          <ACCESO__Button
-            type="submit"
-            form="payment-form"
-            variant="primary"
-            fullWidth
-            disabled={isSubmitting}
-          >
-            {isSubmitting ? 'Guardando...' : 'Continuar'}
-          </ACCESO__Button>
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <Shield className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span className="flex items-center gap-1.5">
+              <Lock className="h-3 w-3" />
+              Pago seguro · cifrado de nivel bancario
+            </span>
+          </div>
+          <div className="flex gap-3">
+            <ACCESO__Button type="button" onClick={handleBack} variant="outline" fullWidth>
+              ← Atrás
+            </ACCESO__Button>
+            <ACCESO__Button
+              type="submit"
+              form="payment-form"
+              variant="primary"
+              fullWidth
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Guardando...' : 'Continuar'}
+            </ACCESO__Button>
+          </div>
         </div>
       }
     >
       <OnboardingStepHeading
+        compact
         stepLabel="Paso 6 · Pago"
         title="Información de pago"
         subtitle="Datos de tarjeta. Trámite seguro y cifrado."
       />
 
-      <form
-        id="payment-form"
-        onSubmit={handleSubmit}
-        className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto overscroll-contain scrollbar-visible pr-0.5"
-      >
-        {submitError && (
+      <form id="payment-form" onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
+        {submitError ? (
           <div
-            className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-100 flex gap-2"
+            className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100 flex gap-2"
             role="alert"
           >
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
             <span>{submitError}</span>
           </div>
-        )}
+        ) : null}
 
-        <OnboardingContentCard className="space-y-3">
-          <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3 dark:border-gray-700">
-            <div>
+        <OnboardingContentCard className="!p-3 sm:!p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Resumen de tu suscripción</p>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                 Plan {orderSummary.recommendation.plan.name} ·{' '}
-                {orderSummary.billingMode === 'monthly' ? 'facturación mensual' : 'facturación anual (-20%)'}
+                {orderSummary.billingMode === 'monthly' ? 'mensual' : 'anual (-20%)'}
               </p>
             </div>
-            <p className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
-              {orderSummary.pricing.total}€
-              <span className="text-xs font-normal text-gray-500">/mes</span>
-            </p>
+            <div className="text-right shrink-0">
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                {orderSummary.pricing.total}€
+                <span className="text-[11px] font-normal text-gray-500">/mes</span>
+              </p>
+              {orderSummary.billingMode === 'annual' ? (
+                <p className="text-[10px] font-medium text-green-700 dark:text-green-400">
+                  {orderSummary.pricing.total * 12}€ al año
+                </p>
+              ) : null}
+            </div>
           </div>
-          <ul className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
-            <li>Plan {orderSummary.recommendation.plan.name}: {orderSummary.pricing.baseCost}€</li>
-            {orderSummary.pricing.extraUsers > 0 ? (
-              <li>
-                +{orderSummary.pricing.extraUsers} trabajador(es) extra: {orderSummary.pricing.extraUsersCost}€
-              </li>
-            ) : null}
-            {orderSummary.pricing.extraPdv > 0 ? (
-              <li>+{orderSummary.pricing.extraPdv} PDV extra: {orderSummary.pricing.extraPdvCost}€</li>
-            ) : null}
-            {orderSummary.pricing.extraBusinesses > 0 ? (
-              <li>
-                +{orderSummary.pricing.extraBusinesses} empresa(s) extra: {orderSummary.pricing.extraBusinessesCost}€
-              </li>
-            ) : null}
-            {orderSummary.pricing.extraBrands > 0 ? (
-              <li>
-                +{orderSummary.pricing.extraBrands} línea(s) comercial extra: {orderSummary.pricing.extraBrandsCost}€
-              </li>
-            ) : null}
-          </ul>
-          <p className="text-[11px] text-gray-500 dark:text-gray-500 leading-snug">
+          {summaryLines.length > 0 ? (
+            <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-400">{summaryLines.join(' · ')}</p>
+          ) : null}
+          <p className="text-[10px] text-gray-500 dark:text-gray-500 leading-snug">
             {data.businessMetrics.businessCount ?? 1} empresa · {data.businessMetrics.locationCount} PDV ·{' '}
             {data.businessMetrics.userCount} trabajadores
             {(data.businessMetrics.commercialBrandCount ?? 0) > 0
-              ? ` · ${data.businessMetrics.commercialBrandCount} línea(s) extra`
+              ? ` · ${data.businessMetrics.commercialBrandCount} marca(s) extra`
               : ''}
           </p>
         </OnboardingContentCard>
 
-        <OnboardingContentCard className="space-y-4">
-          <div className="flex items-center gap-2 border-b border-gray-100 pb-3 dark:border-gray-700">
-            <CreditCard className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+        <OnboardingContentCard className="!p-3 sm:!p-4 space-y-2.5">
+          <div className="flex items-center gap-2 border-b border-gray-100 pb-2 dark:border-gray-700">
+            <CreditCard className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Tarjeta de crédito o débito</p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
+            <label className="mb-1 block text-xs font-medium text-gray-900 dark:text-gray-100">
               Número de tarjeta *
             </label>
             <div className="relative">
-              <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <CreditCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 placeholder="0000 0000 0000 0000"
@@ -315,18 +323,16 @@ export function PaymentInfo() {
                 className={`${inputClass(Boolean(errors.cardNumber))} pl-10`}
               />
             </div>
-            {errors.cardNumber && (
-              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
+            {errors.cardNumber ? (
+              <p className="mt-1 flex items-center gap-1 text-xs text-red-600">
+                <AlertCircle className="h-3 w-3" />
                 {errors.cardNumber}
               </p>
-            )}
+            ) : null}
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
-              Titular *
-            </label>
+            <label className="mb-1 block text-xs font-medium text-gray-900 dark:text-gray-100">Titular *</label>
             <input
               type="text"
               placeholder="Nombre del titular"
@@ -337,19 +343,17 @@ export function PaymentInfo() {
               }}
               className={inputClass(Boolean(errors.cardHolderName))}
             />
-            {errors.cardHolderName && (
-              <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
+            {errors.cardHolderName ? (
+              <p className="mt-1 flex items-center gap-1 text-xs text-red-600">
+                <AlertCircle className="h-3 w-3" />
                 {errors.cardHolderName}
               </p>
-            )}
+            ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
-                Caducidad *
-              </label>
+              <label className="mb-1 block text-xs font-medium text-gray-900 dark:text-gray-100">Caducidad *</label>
               <input
                 type="text"
                 placeholder="MM/AA"
@@ -357,18 +361,16 @@ export function PaymentInfo() {
                 onChange={handleExpiryDateChange}
                 className={inputClass(Boolean(errors.expiryDate))}
               />
-              {errors.expiryDate && (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
+              {errors.expiryDate ? (
+                <p className="mt-1 flex items-center gap-1 text-xs text-red-600">
+                  <AlertCircle className="h-3 w-3" />
                   {errors.expiryDate}
                 </p>
-              )}
+              ) : null}
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-900 dark:text-gray-100 mb-1.5">
-                CVV *
-              </label>
+              <label className="mb-1 block text-xs font-medium text-gray-900 dark:text-gray-100">CVV *</label>
               <input
                 type="text"
                 placeholder="CVV"
@@ -376,17 +378,17 @@ export function PaymentInfo() {
                 onChange={handleCvvChange}
                 className={inputClass(Boolean(errors.cvv))}
               />
-              {errors.cvv && (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
+              {errors.cvv ? (
+                <p className="mt-1 flex items-center gap-1 text-xs text-red-600">
+                  <AlertCircle className="h-3 w-3" />
                   {errors.cvv}
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
 
-          <div className="border-t border-gray-100 pt-3 dark:border-gray-700">
-            <label className="flex items-start gap-2 cursor-pointer">
+          <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
+            <label className="flex cursor-pointer items-start gap-2">
               <input
                 type="checkbox"
                 checked={formData.acceptTerms}
@@ -394,28 +396,20 @@ export function PaymentInfo() {
                   setFormData({ ...formData, acceptTerms: e.target.checked });
                   setErrors({ ...errors, acceptTerms: '' });
                 }}
-                className="mt-0.5 w-4 h-4 border-2 border-gray-300 rounded shrink-0"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-gray-300"
               />
-              <span className="text-xs text-gray-700 dark:text-gray-300 leading-snug">
+              <span className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
                 Confirmo los datos y autorizo guardar este método de pago según los términos aplicables.
               </span>
             </label>
-            {errors.acceptTerms && (
-              <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
+            {errors.acceptTerms ? (
+              <p className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
+                <AlertCircle className="h-3 w-3" />
                 {errors.acceptTerms}
               </p>
-            )}
+            ) : null}
           </div>
         </OnboardingContentCard>
-
-        <div className="shrink-0 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
-          <Shield className="w-4 h-4 text-emerald-600 shrink-0 dark:text-emerald-400" />
-          <span className="flex items-center gap-1.5">
-            <Lock className="w-3 h-3" />
-            Pago seguro · cifrado de nivel bancario
-          </span>
-        </div>
       </form>
     </OnboardingStepShell>
   );

@@ -78,7 +78,7 @@ describe('onboarding plan recommendation', () => {
     expect(rec.exceedsPlanLimits).toBe(true);
   });
 
-  it('calcula total con plan PRO y ampliaciones de infraestructura', () => {
+  it('calcula total mensual con plan PRO y ampliaciones de infraestructura', () => {
     const proPlan = {
       id: 'pro',
       name: 'PRO',
@@ -106,5 +106,35 @@ describe('onboarding plan recommendation', () => {
     expect(pricing.extraBrands).toBe(1);
     expect(pricing.extraBrandsCost).toBe(19);
     expect(pricing.total).toBe(349 + 49 + 89 + 19);
+  });
+
+  it('calcula total anual con -20% en plan y ampliaciones', () => {
+    const proPlan = {
+      id: 'pro',
+      name: 'PRO',
+      priceMonthly: 349,
+      priceAnnual: 279,
+      maxUsers: 12,
+      maxLocations: 2,
+      maxBusinesses: 3,
+      maxCommercialBrands: 1,
+      features: [],
+    };
+    const pricing = calculateOnboardingPricing({
+      plan: proPlan,
+      billingMode: 'annual',
+      userCount: 4,
+      locationCount: 4,
+      businessCount: 4,
+      commercialBrandCount: 4,
+    });
+    expect(pricing.baseCost).toBe(279);
+    expect(pricing.extraPdv).toBe(2);
+    expect(pricing.extraPdvCost).toBe(78);
+    expect(pricing.extraBusinesses).toBe(1);
+    expect(pricing.extraBusinessesCost).toBe(71);
+    expect(pricing.extraBrands).toBe(3);
+    expect(pricing.extraBrandsCost).toBe(45);
+    expect(pricing.total).toBe(473);
   });
 });

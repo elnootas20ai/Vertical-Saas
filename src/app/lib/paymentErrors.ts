@@ -22,7 +22,19 @@ export function sanitizePaymentError(raw: unknown): string {
   if (raw == null || raw === '') return PUBLIC_PAYMENT_UNAVAILABLE;
   const text = String(raw).trim();
   if (!text) return PUBLIC_PAYMENT_UNAVAILABLE;
+  if (isIgnorableSessionError(text)) return PUBLIC_PAYMENT_UNAVAILABLE;
   if (text.length > 200) return PUBLIC_PAYMENT_UNAVAILABLE;
   if (TECHNICAL_PATTERNS.some((re) => re.test(text))) return PUBLIC_PAYMENT_UNAVAILABLE;
   return text;
+}
+
+/** Errores de sesión JWT: no mostrar en UI de facturación (no son fallos de pago). */
+export function isIgnorableSessionError(raw: unknown): boolean {
+  const text = String(raw || '').trim().toLowerCase();
+  return (
+    text.includes('token expirado') ||
+    text.includes('token inválido') ||
+    text.includes('token invalido') ||
+    text === 'unauthorized'
+  );
 }

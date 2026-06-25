@@ -91,7 +91,7 @@ const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
     maxCommercialBrands: 1,
     features: [
       'Hasta 3 empresas · 2 PDV',
-      '1 línea comercial extra (p. ej. Pizzería)',
+      '1 marca extra (p. ej. Pizzería)',
       'Hasta 12 trabajadores',
       'API y webhooks',
       'Soporte prioritario',
@@ -271,7 +271,7 @@ function planTierForInfrastructure(
   if (modules.workshop && userCount > 3) tier = Math.max(tier, 1);
   if (moduleCount >= 5) tier = Math.max(tier, 1);
 
-  // PRO: varias empresas, varios PDV o líneas comerciales extra (Pizzería, Burger…)
+  // PRO: varias empresas, varios PDV o marcas extra (Pizzería, Burger…)
   if (commercialBrandCount > 0 || businessCount > 1 || locationCount > 1) {
     tier = 2;
   }
@@ -344,7 +344,7 @@ export function buildRecommendationReason(params: {
   );
   if (metrics.commercialBrandCount > 0) {
     parts.push(
-      `${metrics.commercialBrandCount} línea${metrics.commercialBrandCount !== 1 ? 's' : ''} comercial${metrics.commercialBrandCount !== 1 ? 'es' : ''} extra`,
+      `${metrics.commercialBrandCount} marca${metrics.commercialBrandCount !== 1 ? 's' : ''} extra`,
     );
   }
 
@@ -354,7 +354,7 @@ export function buildRecommendationReason(params: {
   }
 
   if (metrics.commercialBrandCount > 0 && plan.maxCommercialBrands === 0) {
-    return `Con líneas comerciales extra necesitas al menos el plan PRO. Tu operativa: ${parts.join(' · ')}.`;
+    return `Con marcas extra necesitas al menos el plan PRO. Tu operativa: ${parts.join(' · ')}.`;
   }
 
   if (isDeliveryBusinessType(businessType)) {

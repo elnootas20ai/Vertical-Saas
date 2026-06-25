@@ -105,6 +105,10 @@ import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
 import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
+import {
+  provisionBusinessFromOnboarding,
+  resolveBusinessNameFromOnboarding,
+} from '../shared/billing/onboardingBusiness.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -1241,9 +1245,28 @@ export async function saveBillingCard(req, res) {
       updatedAt: new Date().toISOString(),
     });
 
+    let accountAfterProvision = savedAccount;
+    try {
+      const provision = await provisionBusinessFromOnboarding(req, savedAccount);
+      if (provision.ok && provision.businessId) {
+        const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
+        accountAfterProvision = await saveAccount(req, {
+          ...savedAccount,
+          companyName: resolvedName || savedAccount.companyName,
+          onboardingData: {
+            ...(savedAccount.onboardingData || {}),
+            businessId: provision.businessId,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    } catch (provisionErr) {
+      console.error('[AUTH] Error provisionando empresa desde onboarding (tarjeta):', provisionErr?.message);
+    }
+
     return res.json({
       ok: true,
-      user: sanitizeAccount(savedAccount),
+      user: sanitizeAccount(accountAfterProvision),
       card: sanitizeCard(savedCard),
     });
   } catch (error) {
@@ -2552,13 +2575,36 @@ export async function saveOnboarding(req, res) {
     if (wasIncomplete && willComplete && nextOnboardingData) {
       nextSubscription = buildSubscriptionFromOnboarding(nextOnboardingData, account.subscription || {});
     }
-    const savedAccount = await saveAccount(req, {
+    let savedAccount = await saveAccount(req, {
       ...account,
       onboardingCompleted: willComplete,
       onboardingData: nextOnboardingData,
       subscription: nextSubscription,
+      companyName:
+        resolveBusinessNameFromOnboarding({
+          ...account,
+          onboardingData: nextOnboardingData,
+        }) || account.companyName,
       updatedAt: new Date().toISOString(),
     });
+
+    if (willComplete) {
+      try {
+        const provision = await provisionBusinessFromOnboarding(req, savedAccount);
+        if (provision.ok && provision.businessId) {
+          savedAccount = await saveAccount(req, {
+            ...savedAccount,
+            onboardingData: {
+              ...(savedAccount.onboardingData || {}),
+              businessId: provision.businessId,
+            },
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (provisionErr) {
+        console.error('[AUTH] Error provisionando empresa desde onboarding:', provisionErr?.message);
+      }
+    }
 
     const nextVerificationDocCount = Array.isArray(
       savedAccount.onboardingData?.companyProfile?.verificationDocuments,

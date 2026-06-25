@@ -2,6 +2,7 @@ import { Check } from 'lucide-react';
 import { VertialLogo } from '../../VertialLogo';
 import {
   ONBOARDING_VISUALS,
+  getOnboardingHeroBackground,
   type OnboardingVisual,
   type OnboardingVisualKey,
   getOnboardingVisualForStep,
@@ -12,6 +13,16 @@ type Props = {
   stepIndex?: number;
   visual?: Partial<OnboardingVisual>;
   className?: string;
+};
+
+const GLOW_BY_THEME: Record<string, { primary: string; secondary: string }> = {
+  vertial: { primary: 'bg-blue-500/25', secondary: 'bg-emerald-500/15' },
+  indigo: { primary: 'bg-indigo-500/30', secondary: 'bg-blue-500/20' },
+  ocean: { primary: 'bg-blue-500/25', secondary: 'bg-cyan-500/20' },
+  teal: { primary: 'bg-teal-500/25', secondary: 'bg-blue-500/20' },
+  amber: { primary: 'bg-amber-500/20', secondary: 'bg-blue-500/20' },
+  violet: { primary: 'bg-violet-500/25', secondary: 'bg-indigo-500/20' },
+  emerald: { primary: 'bg-emerald-500/25', secondary: 'bg-teal-500/20' },
 };
 
 export function OnboardingHeroPanel({ visualKey, stepIndex, visual: visualOverride, className = '' }: Props) {
@@ -25,8 +36,11 @@ export function OnboardingHeroPanel({ visualKey, stepIndex, visual: visualOverri
   const content: OnboardingVisual = {
     ...base,
     ...visualOverride,
+    gradientTheme: visualOverride?.gradientTheme ?? base.gradientTheme,
     highlights: visualOverride?.highlights ?? base.highlights,
   };
+
+  const glow = GLOW_BY_THEME[content.gradientTheme] ?? GLOW_BY_THEME.vertial;
 
   return (
     <aside
@@ -35,9 +49,7 @@ export function OnboardingHeroPanel({ visualKey, stepIndex, visual: visualOverri
     >
       <div
         className="absolute inset-0 bg-cover bg-center scale-105"
-        style={{
-          backgroundImage: `linear-gradient(160deg, rgba(15,23,42,0.92) 0%, rgba(30,58,138,0.78) 45%, rgba(15,20,25,0.94) 100%), url('${content.image}')`,
-        }}
+        style={{ backgroundImage: getOnboardingHeroBackground(content) }}
       />
 
       <div
@@ -49,8 +61,18 @@ export function OnboardingHeroPanel({ visualKey, stepIndex, visual: visualOverri
         }}
       />
 
-      <div className="absolute -top-24 -right-24 h-72 w-72 rounded-full bg-blue-500/25 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 h-56 w-56 rounded-full bg-emerald-500/15 blur-3xl pointer-events-none" />
+      <div className={`absolute -top-24 -right-24 h-72 w-72 rounded-full blur-3xl pointer-events-none ${glow.primary}`} />
+      <div className={`absolute top-1/3 -left-16 h-64 w-64 rounded-full blur-3xl pointer-events-none ${glow.secondary}`} />
+      <div className="absolute bottom-0 left-0 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
+      {!content.image ? (
+        <div
+          className="absolute inset-0 opacity-35 pointer-events-none"
+          style={{
+            backgroundImage:
+              'radial-gradient(circle at 70% 18%, rgba(96,165,250,0.4) 0%, transparent 42%), radial-gradient(circle at 18% 82%, rgba(52,211,153,0.28) 0%, transparent 38%)',
+          }}
+        />
+      ) : null}
 
       <div className="relative z-10 flex flex-1 flex-col justify-between p-8 xl:p-10">
         <div>

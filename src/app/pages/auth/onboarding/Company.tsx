@@ -111,59 +111,61 @@ export function Company() {
         id="company-form"
         onSubmit={handleContinue}
         autoComplete="off"
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 content-start [&_.acceso-field]:!mb-0"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pb-6">
+          <div className="grid grid-cols-1 gap-y-3 md:grid-cols-2 md:gap-x-4 md:gap-y-3.5">
             <div className="md:col-span-2">
+              <ACCESO__Input
+                label="Nombre comercial *"
+                type="text"
+                placeholder="Nombre comercial de tu negocio"
+                icon={<Building2 className="w-5 h-5" />}
+                value={formData.tradeName}
+                onChange={(e) => setFormData({ ...formData, tradeName: e.target.value })}
+                autoComplete="off"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <ACCESO__Input
+                label="Razón social"
+                type="text"
+                placeholder="Razón social (opcional)"
+                icon={<FileText className="w-5 h-5" />}
+                value={formData.legalName}
+                onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
+                autoComplete="off"
+              />
+            </div>
+
             <ACCESO__Input
-              label="Nombre comercial *"
+              label="CIF/NIF *"
               type="text"
-              placeholder="Nombre comercial de tu negocio"
-              icon={<Building2 className="w-5 h-5" />}
-              value={formData.tradeName}
-              onChange={(e) => setFormData({ ...formData, tradeName: e.target.value })}
+              placeholder="Ej: B12345674 o 12345678Z"
+              value={formData.taxId}
+              onChange={handleTaxIdChange}
+              onBlur={handleTaxIdBlur}
+              maxLength={14}
+              inputMode="text"
+              error={taxIdError ?? undefined}
+              helperText={taxIdError ? undefined : 'DNI, NIE o CIF (9 caracteres)'}
               autoComplete="off"
               required
             />
-            </div>
-
-            <div className="md:col-span-2">
             <ACCESO__Input
-              label="Razón social"
+              label="Provincia *"
               type="text"
-              placeholder="Razón social (opcional)"
-              icon={<FileText className="w-5 h-5" />}
-              value={formData.legalName}
-              onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
+              placeholder="Provincia"
+              icon={<MapPin className="w-5 h-5" />}
+              value={formData.province}
+              onChange={(e) => setFormData({ ...formData, province: e.target.value })}
               autoComplete="off"
+              required
             />
-            </div>
 
-              <ACCESO__Input
-                label="CIF/NIF *"
-                type="text"
-                placeholder="Ej: B12345674 o 12345678Z"
-                value={formData.taxId}
-                onChange={handleTaxIdChange}
-                onBlur={handleTaxIdBlur}
-                maxLength={14}
-                inputMode="text"
-                error={taxIdError ?? undefined}
-                helperText={taxIdError ? undefined : 'DNI, NIE o CIF (9 caracteres)'}
-                autoComplete="off"
-                required
-              />
-              <ACCESO__Input
-                label="Provincia *"
-                type="text"
-                placeholder="Provincia"
-                icon={<MapPin className="w-5 h-5" />}
-                value={formData.province}
-                onChange={(e) => setFormData({ ...formData, province: e.target.value })}
-                autoComplete="off"
-                required
-              />
-
-            <div className="md:col-span-2">
+            <div className="md:col-span-2 pt-1">
               <OnboardingCompanyVerification
                 documents={formData.verificationDocuments ?? []}
                 note={formData.verificationNote ?? ''}
@@ -176,44 +178,53 @@ export function Company() {
               />
             </div>
 
-            <div className="md:col-span-2">
-            <ACCESO__AddressAutocomplete
-              label="Dirección"
-              placeholder="Empieza a escribir una dirección…"
-              value={formData.address}
-              onChange={(val) => setFormData((prev) => ({ ...prev, address: val }))}
-              onPlaceSelect={(place) =>
-                setFormData((prev) => ({
-                  ...prev,
-                  address: place.address,
-                  ...(place.province ? { province: place.province } : {}),
-                  ...(place.city ? { city: place.city } : {}),
-                }))
-              }
-            />
+            <div className="md:col-span-2 space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Ubicación y contacto
+                <span className="ml-1.5 font-normal normal-case tracking-normal text-gray-400 dark:text-gray-500">
+                  (opcional)
+                </span>
+              </p>
+
+              <ACCESO__AddressAutocomplete
+                label="Dirección"
+                placeholder="Empieza a escribir una dirección…"
+                value={formData.address}
+                onChange={(val) => setFormData((prev) => ({ ...prev, address: val }))}
+                onPlaceSelect={(place) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    address: place.address,
+                    ...(place.province ? { province: place.province } : {}),
+                    ...(place.city ? { city: place.city } : {}),
+                  }))
+                }
+              />
+
+              <div className="grid grid-cols-1 gap-y-3 md:grid-cols-2 md:gap-x-4 md:gap-y-0 md:items-start">
+                <ACCESO__Input
+                  label="Email empresa"
+                  type="email"
+                  placeholder="Email de contacto (opcional)"
+                  icon={<Mail className="w-5 h-5" />}
+                  value={formData.companyEmail}
+                  onChange={(e) => setFormData({ ...formData, companyEmail: e.target.value })}
+                  autoComplete="off"
+                />
+                <ACCESO__Input
+                  label="Teléfono empresa"
+                  type="tel"
+                  placeholder="Teléfono de contacto (opcional)"
+                  icon={<Phone className="w-5 h-5" />}
+                  value={formData.companyPhone}
+                  onChange={(e) => setFormData({ ...formData, companyPhone: e.target.value })}
+                  autoComplete="off"
+                />
+              </div>
             </div>
 
-              <ACCESO__Input
-                label="Email empresa"
-                type="email"
-                placeholder="Email de contacto (opcional)"
-                icon={<Mail className="w-5 h-5" />}
-                value={formData.companyEmail}
-                onChange={(e) => setFormData({ ...formData, companyEmail: e.target.value })}
-                autoComplete="off"
-              />
-              <ACCESO__Input
-                label="Teléfono empresa"
-                type="tel"
-                placeholder="Teléfono de contacto (opcional)"
-                icon={<Phone className="w-5 h-5" />}
-                value={formData.companyPhone}
-                onChange={(e) => setFormData({ ...formData, companyPhone: e.target.value })}
-                autoComplete="off"
-              />
-
             {data.businessType === 'carDealership' && (
-              <div className="md:col-span-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="md:col-span-2 border-t border-gray-200 pt-4 dark:border-gray-700">
                 <ACCESO__Checkbox
                   label="Soy socio ANCOVE"
                   checked={formData.isAncovePartner}
@@ -221,7 +232,7 @@ export function Company() {
                 />
 
                 {formData.isAncovePartner && (
-                  <div className="mt-4 ml-8 space-y-3">
+                  <div className="ml-8 mt-4 space-y-3">
                     <ACCESO__Input
                       label="Número de socio ANCOVE"
                       type="text"
@@ -230,14 +241,16 @@ export function Company() {
                       value={formData.ancoveMemberNumber}
                       onChange={(e) => setFormData({ ...formData, ancoveMemberNumber: e.target.value })}
                     />
-                    <p className="text-xs text-gray-600 dark:text-gray-400 bg-blue-50 border border-blue-200 rounded-lg p-2">
+                    <p className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-gray-600 dark:border-blue-900 dark:bg-blue-950/40 dark:text-gray-400">
                       Activaremos ventajas ANCOVE cuando esté validado.
                     </p>
                   </div>
                 )}
               </div>
             )}
-          </form>
+          </div>
+        </div>
+      </form>
     </OnboardingStepShell>
   );
 }

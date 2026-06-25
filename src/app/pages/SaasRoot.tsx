@@ -84,6 +84,7 @@ function SaasContent() {
   const isLoadingBusinesses = businessCtx?.isLoading ?? true;
   const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
   const createBusiness = businessCtx?.createBusiness;
+  const reloadBusinesses = businessCtx?.reloadBusinesses;
 
   const location = useLocation();
 
@@ -276,6 +277,8 @@ function SaasContent() {
 
           }
 
+          await reloadBusinesses?.();
+
         })
 
         .catch(() => {
@@ -311,6 +314,8 @@ function SaasContent() {
     user,
 
     createBusiness,
+
+    reloadBusinesses,
 
     navigate,
 
@@ -357,6 +362,7 @@ function SaasContent() {
     if (isUserAccount || isLinkedWorker) return;
     if (!businessesFetchSettled || isLoadingBusinesses) return;
     if (businesses.length > 0) return;
+    if (isAutoCreating || autoCreateAttempted.current) return;
     navigate('/auth/gate', { replace: true });
   }, [
     isInitializing,
@@ -367,6 +373,7 @@ function SaasContent() {
     businessesFetchSettled,
     isLoadingBusinesses,
     businesses.length,
+    isAutoCreating,
     navigate,
   ]);
 
@@ -401,6 +408,13 @@ function SaasContent() {
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
+    if (isAutoCreating || autoCreateAttempted.current) {
+      return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Preparando tu empresa" />
+        </div>
+      );
+    }
     return <Navigate to="/auth/gate" replace />;
   }
 

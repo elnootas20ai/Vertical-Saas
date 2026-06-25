@@ -137,7 +137,7 @@ import {
   purchaseSubscriptionAddon,
 } from '../../lib/subscriptionApi';
 import { isBlockingSubscriptionStatus } from '../../lib/billingRecovery';
-import { PUBLIC_PAYMENT_UNAVAILABLE, sanitizePaymentError } from '../../lib/paymentErrors';
+import { PUBLIC_PAYMENT_UNAVAILABLE, isIgnorableSessionError, sanitizePaymentError } from '../../lib/paymentErrors';
 import {
   getPlanPricingConfig,
   DEFAULT_PLANS,
@@ -470,9 +470,10 @@ function TabBilling() {
         }
       } catch (error) {
         if (!cancelled) {
-          setBillingFeedback(
-            sanitizePaymentError(error instanceof Error ? error.message : 'No se pudo cargar la facturación.'),
-          );
+          const msg = error instanceof Error ? error.message : '';
+          if (!isIgnorableSessionError(msg)) {
+            setBillingFeedback(sanitizePaymentError(msg || 'No se pudo cargar la facturación.'));
+          }
         }
       } finally {
         if (!cancelled) setIsLoadingBilling(false);
@@ -1147,7 +1148,7 @@ function TabBilling() {
           </div>
         </div>
 
-        {billingFeedback && (
+        {billingFeedback && !isIgnorableSessionError(billingFeedback) && (
           <div className={`mb-4 flex items-center gap-2 rounded-xl px-4 py-3 text-sm ${
             billingFeedback === PUBLIC_PAYMENT_UNAVAILABLE ||
             billingFeedback.includes('error') ||

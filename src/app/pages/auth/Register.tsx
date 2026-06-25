@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useTheme } from 'next-themes';
 import { Mail, Lock, User, Phone, CheckCircle, Eye, EyeOff, Sparkles, Building2, Gift } from 'lucide-react';
 import { validateReferralCode } from '../../lib/affiliatesApi';
@@ -246,33 +246,33 @@ export function Register() {
   };
 
   return (
-    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'}>
-      <div className="flex flex-1 flex-col items-center p-6 py-8 lg:px-10 lg:py-10">
-      <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 sm:p-8 shadow-sm">
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center mb-6">
-              <VertialLogo size="lg" />
+    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'} scrollable={false}>
+      <div className="flex min-h-dvh max-h-dvh flex-col items-center justify-center overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1 lg:px-8">
+      <div className="w-full max-w-md shrink-0">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+          <div className="text-center mb-4">
+            <div className="flex items-center justify-center mb-3">
+              <VertialLogo size="md" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
               {isUserAccount ? 'Crear cuenta de trabajador' : 'Crear cuenta de empresa'}
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
               {isUserAccount
                 ? 'Alta personal — podrás unirte a tu empresa cuando te inviten'
                 : 'Crea tu espacio de trabajo en minutos'}
             </p>
-            <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+            <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
               {isUserAccount ? (
-                <><User className="w-3.5 h-3.5" /> Cuenta de trabajador</>
+                <><User className="w-3 h-3" /> Cuenta de trabajador</>
               ) : (
-                <><Building2 className="w-3.5 h-3.5" /> Cuenta de empresa</>
+                <><Building2 className="w-3 h-3" /> Cuenta de empresa</>
               )}
             </div>
           </div>
 
           {isGoogleFlow && (
-            <div className="mb-6 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4">
+            <div className="mb-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
               <div className="flex items-center gap-3">
                 {googleAvatar ? (
                   <img src={googleAvatar} alt="" className="w-10 h-10 rounded-full border-2 border-blue-200" />
@@ -303,13 +303,13 @@ export function Register() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div className="grid grid-cols-2 gap-2.5">
               <ACCESO__Input
                 label="Nombre"
                 type="text"
                 placeholder="Juan"
-                icon={<User className="w-5 h-5" />}
+                icon={<User className="w-4 h-4" />}
                 value={formData.firstName}
                 onChange={(e) => {
                   setFormData({ ...formData, firstName: e.target.value });
@@ -330,12 +330,13 @@ export function Register() {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div className="relative">
               <ACCESO__Input
                 label="Email"
                 type="email"
                 placeholder="tu@email.com"
-                icon={<Mail className="w-5 h-5" />}
+                icon={<Mail className="w-4 h-4" />}
                 value={formData.email}
                 onChange={(e) => {
                   if (!isGoogleFlow) {
@@ -355,10 +356,10 @@ export function Register() {
 
             {isUserAccount ? (
               <ACCESO__Input
-                label="Teléfono (opcional)"
+                label="Teléfono (opc.)"
                 type="tel"
                 placeholder="+34 600 000 000"
-                icon={<Phone className="w-5 h-5" />}
+                icon={<Phone className="w-4 h-4" />}
                 value={formData.phone}
                 onChange={(e) => {
                   setFormData({ ...formData, phone: e.target.value });
@@ -371,7 +372,7 @@ export function Register() {
                 label="Teléfono"
                 type="tel"
                 placeholder="+34 600 000 000"
-                icon={<Phone className="w-5 h-5" />}
+                icon={<Phone className="w-4 h-4" />}
                 value={formData.phone}
                 onChange={(e) => {
                   setFormData({ ...formData, phone: e.target.value });
@@ -380,81 +381,81 @@ export function Register() {
                 error={errors.phone}
               />
             )}
+            </div>
 
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="text-xs text-gray-500 dark:text-gray-400 leading-snug max-w-[min(100%,20rem)]">
-                  Recomendación: al menos 8 caracteres, combinando mayúsculas, minúsculas, números y símbolos.
-                </p>
-                <button
-                  type="button"
-                  onClick={applyGeneratedPassword}
-                  className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-colors"
-                >
-                  <Sparkles className="w-3.5 h-3.5" aria-hidden />
-                  Generar contraseña
-                </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Contraseña</span>
+                  <button
+                    type="button"
+                    onClick={applyGeneratedPassword}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300"
+                  >
+                    <Sparkles className="w-3 h-3" aria-hidden />
+                    Generar
+                  </button>
+                </div>
+                <ACCESO__Input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  placeholder="Mín. 8 caracteres"
+                  icon={<Lock className="w-4 h-4" />}
+                  value={formData.password}
+                  onChange={(e) => {
+                    setFormData({ ...formData, password: e.target.value });
+                    setErrors({ ...errors, password: '' });
+                  }}
+                  error={errors.password}
+                  suffix={
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  }
+                />
               </div>
+
               <ACCESO__Input
-                label="Contraseña"
-                type={showPassword ? 'text' : 'password'}
+                label="Repetir"
+                type={showConfirmPassword ? 'text' : 'password'}
                 autoComplete="new-password"
-                placeholder="Mínimo 8 caracteres"
-                icon={<Lock className="w-5 h-5" />}
-                value={formData.password}
+                placeholder="Repite contraseña"
+                icon={<Lock className="w-4 h-4" />}
+                value={formData.confirmPassword}
                 onChange={(e) => {
-                  setFormData({ ...formData, password: e.target.value });
-                  setErrors({ ...errors, password: '' });
+                  setFormData({ ...formData, confirmPassword: e.target.value });
+                  setErrors({ ...errors, confirmPassword: '' });
                 }}
-                helperText="Usa al menos 8 caracteres con letras y números"
-                error={errors.password}
+                error={errors.confirmPassword}
                 suffix={
                   <button
                     type="button"
                     tabIndex={-1}
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
                   >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 }
               />
             </div>
 
-            <ACCESO__Input
-              label="Repetir contraseña"
-              type={showConfirmPassword ? 'text' : 'password'}
-              autoComplete="new-password"
-              placeholder="Repite tu contraseña"
-              icon={<Lock className="w-5 h-5" />}
-              value={formData.confirmPassword}
-              onChange={(e) => {
-                setFormData({ ...formData, confirmPassword: e.target.value });
-                setErrors({ ...errors, confirmPassword: '' });
-              }}
-              error={errors.confirmPassword}
-              suffix={
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  aria-label={showConfirmPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  onClick={() => setShowConfirmPassword((v) => !v)}
-                >
-                  {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-              }
-            />
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Código de referido (opcional)
-              </label>
-              <div className="relative">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2">
-                  <Gift className="w-5 h-5 text-gray-400" />
-                </div>
+            <details className="group rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2">
+              <summary className="cursor-pointer list-none text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5" />
+                  Código de referido (opcional)
+                </span>
+                <span className="text-[10px] text-gray-400 group-open:hidden">Mostrar</span>
+              </summary>
+              <div className="relative mt-2">
                 <input
                   type="text"
                   placeholder="Ej: REF-A7K2N3"
@@ -464,26 +465,26 @@ export function Register() {
                     setFormData({ ...formData, referralCode: val });
                     checkReferralCode(val);
                   }}
-                  className="w-full pl-10 pr-10 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm font-mono tracking-wider bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm font-mono tracking-wider bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 {formData.referralCode.trim() && (
                   <div className="absolute right-3 top-1/2 -translate-y-1/2">
                     {validatingReferral ? (
-                      <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                     ) : referralInfo?.valid ? (
-                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <CheckCircle className="w-3.5 h-3.5 text-green-500" />
                     ) : (
-                      <span className="text-xs text-red-500 font-medium">No válido</span>
+                      <span className="text-[10px] text-red-500 font-medium">No válido</span>
                     )}
                   </div>
                 )}
               </div>
-              {referralInfo?.valid && referralInfo.name && (
-                <p className="mt-1 text-xs text-green-600 dark:text-green-400">
+              {referralInfo?.valid && referralInfo.name ? (
+                <p className="mt-1 text-[11px] text-green-600 dark:text-green-400">
                   Referido por: {referralInfo.name}
                 </p>
-              )}
-            </div>
+              ) : null}
+            </details>
 
             <div>
               <div className="flex items-start gap-2">
@@ -495,29 +496,20 @@ export function Register() {
                   }}
                   aria-label="He leído y acepto los acuerdos legales"
                 />
-                <p className="text-sm leading-snug text-gray-700 dark:text-gray-300">
-                  He leído y acepto los{' '}
-                  <Link
-                    to="/legal"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    acuerdos legales
-                  </Link>{' '}
-                  (términos, privacidad, aviso legal y cookies).{' '}
+                <p className="text-xs leading-snug text-gray-700 dark:text-gray-300">
+                  Acepto los{' '}
                   <button
                     type="button"
                     onClick={() => setLegalModalOpen(true)}
                     className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
                   >
-                    Ver más
+                    acuerdos legales
                   </button>
                 </p>
               </div>
-              {errors.acceptTerms && (
-                <p className="mt-1 text-sm text-red-600">{errors.acceptTerms}</p>
-              )}
+              {errors.acceptTerms ? (
+                <p className="mt-1 text-xs text-red-600">{errors.acceptTerms}</p>
+              ) : null}
             </div>
 
             <LegalAgreementsModal isOpen={legalModalOpen} onClose={() => setLegalModalOpen(false)} />
@@ -538,58 +530,57 @@ export function Register() {
 
             {!isGoogleFlow && (
               <>
-                <div className="relative my-6">
+                <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-gray-200 dark:border-gray-700" />
                   </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">o</span>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="px-3 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">o</span>
                   </div>
                 </div>
 
                 <div className="flex justify-center w-full">
                   {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
-                    <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
-                      <span className="inline-block w-5 h-5 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
+                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 py-2 px-3 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="inline-block w-4 h-4 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
                       <span>Cargando Google…</span>
                     </div>
                   ) : !googleReady && googleTimedOut ? (
-                    <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-3 px-4 text-sm text-amber-800 text-center">
-                      Google no cargó a tiempo. Revisa red o bloqueadores; puedes registrarte con email.
+                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
+                      Google no cargó. Regístrate con email.
                     </div>
                   ) : (
-                    <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm flex justify-center" />
+                    <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
                   )}
                 </div>
                 {!googleClientConfigured && (
-                  <div className="w-full py-2 px-3 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
-                    Google no disponible en este entorno (revisa{' '}
-                    <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> al hacer{' '}
-                    <strong>build</strong>).
+                  <div className="w-full py-1.5 px-2 border border-gray-200 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center">
+                    Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
                   </div>
                 )}
               </>
             )}
           </form>
 
-          <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-            ¿Ya tienes cuenta?{' '}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-400">
             <button
-              onClick={() => navigate('/auth/login')}
-              className="font-medium text-[#0f1419] dark:text-gray-100 hover:underline"
+              type="button"
+              onClick={() => navigate('/auth/entry')}
+              className="font-medium hover:underline"
             >
-              Iniciar sesión
+              ← Volver
             </button>
-          </p>
-        </div>
-
-        <div className="mt-6 text-center">
-          <ACCESO__Button
-            variant="ghost"
-            onClick={() => navigate('/auth/entry')}
-          >
-            ← Volver
-          </ACCESO__Button>
+            <p>
+              ¿Ya tienes cuenta?{' '}
+              <button
+                type="button"
+                onClick={() => navigate('/auth/login')}
+                className="font-semibold text-[#0f1419] dark:text-gray-100 hover:underline"
+              >
+                Iniciar sesión
+              </button>
+            </p>
+          </div>
         </div>
       </div>
       </div>

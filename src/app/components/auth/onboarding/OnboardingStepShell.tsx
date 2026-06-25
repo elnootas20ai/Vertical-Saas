@@ -43,8 +43,8 @@ export function OnboardingStepShell({
           </div>
         </header>
 
-        <main className="flex flex-1 min-h-0 flex-col overflow-hidden px-4 sm:px-6 py-4">
-          <div className={`mx-auto flex w-full ${maxWidth} flex-1 min-h-0 flex-col overflow-hidden`}>
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
+          <div className={`mx-auto flex w-full ${maxWidth} min-h-0 flex-1 flex-col gap-3 overflow-hidden`}>
             {children}
           </div>
         </main>
@@ -63,23 +63,35 @@ export function OnboardingStepHeading({
   title,
   subtitle,
   stepLabel,
+  compact = false,
 }: {
   title: string;
   subtitle?: string;
   stepLabel?: string;
+  compact?: boolean;
 }) {
   return (
-    <div className="mb-4 shrink-0">
+    <div className={`shrink-0 ${compact ? 'mb-2' : 'mb-4'}`}>
       {stepLabel ? (
-        <p className="mb-2 inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+        <p className="mb-1.5 inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
           {stepLabel}
         </p>
       ) : null}
-      <h1 className="text-xl font-bold leading-tight text-gray-900 dark:text-gray-100 sm:text-2xl">
+      <h1
+        className={`font-bold leading-tight text-gray-900 dark:text-gray-100 ${
+          compact ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'
+        }`}
+      >
         {title}
       </h1>
       {subtitle ? (
-        <p className="mt-1.5 text-sm leading-relaxed text-gray-600 dark:text-gray-400">{subtitle}</p>
+        <p
+          className={`text-gray-600 dark:text-gray-400 leading-snug ${
+            compact ? 'mt-1 text-xs sm:text-sm' : 'mt-1.5 text-sm leading-relaxed'
+          }`}
+        >
+          {subtitle}
+        </p>
       ) : null}
     </div>
   );
