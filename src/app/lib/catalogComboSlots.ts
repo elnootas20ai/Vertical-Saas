@@ -688,6 +688,63 @@ export function normalizeComboItemsForSave(
   }));
 }
 
+export type ComboMainFamily = 'pizza' | 'burger';
+
+/** Pizza vs burger según categoría de catálogo (TPV menú). */
+export function mainFamilyForCatalogCategory(category: string): ComboMainFamily {
+  const key = foldCategory(normalizeImportCategory(category));
+  if (/burger|hamburg|top burger/.test(key)) return 'burger';
+  return 'pizza';
+}
+
+export function comboMenuSectionKey(section: ComboMenuCatalogSection): string {
+  return `${section.slotKind}::${section.catalogCategory}`;
+}
+
+export function unitsNeededInComboSection(section: ComboMenuCatalogSection): number {
+  return section.expectedCount > 0 ? section.expectedCount : section.slotQuota;
+}
+
+export function isComboMenuSectionDone(
+  section: ComboMenuCatalogSection,
+  comboItems: CatalogComboRef[],
+  catalog: CatalogItem[],
+): boolean {
+  const need = unitsNeededInComboSection(section);
+  if (need <= 0) return true;
+  return totalUnitsInCatalogSection(section, comboItems, catalog) >= need;
+}
+
+export function inferMainFamilyFromComboSelections(
+  comboItems: CatalogComboRef[],
+  catalog: CatalogItem[],
+): ComboMainFamily | null {
+  const mains = comboItemsInSlotKind('main', comboItems, catalog);
+  if (mains.length === 0) return null;
+  const product = catalog.find((c) => c._id === mains[0].productId);
+  if (!product) return null;
+  return mainFamilyForCatalogCategory(product.category || '');
+}
+
+export function comboMenuHasMainFamilyChoice(sections: ComboMenuCatalogSection[]): boolean {
+  const mains = sections.filter((s) => s.slotKind === 'main' && s.slotQuota > 0);
+  const hasPizza = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'pizza');
+  const hasBurger = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'burger');
+  return hasPizza && hasBurger;
+}
+
+export function filterComboMenuSectionsForMainFamily(
+  sections: ComboMenuCatalogSection[],
+  family: ComboMainFamily | null,
+): ComboMenuCatalogSection[] {
+  if (!family) {
+    return sections.filter((s) => s.slotKind !== 'main');
+  }
+  return sections.filter(
+    (s) => s.slotKind !== 'main' || mainFamilyForCatalogCategory(s.catalogCategory) === family,
+  );
+}
+
 /** Secciones del menú para elegir productos al vender en TPV. */
 export function resolveTpvComboMenuSections(
   comboItem: Pick<CatalogItem, 'customFields' | 'comboItems'>,
@@ -707,6 +764,7 @@ export function isTpvComboCatalogItem(
   item: Pick<CatalogItem, 'itemType' | 'category' | 'comboItems' | 'name' | 'customFields'>,
 ): boolean {
   if (item.customFields?.halfHalf === true) return false;
+  if (item.customFields?.buildYourOwn === true) return false;
   const foldedName = String(item.name || '')
     .trim()
     .toLowerCase()

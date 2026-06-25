@@ -76,7 +76,25 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogIngredients(pizzaWithoutRecipe, undefined, master, undefined, undefined, undefined, {
       productIngredientsOnly: true,
       tpvFallbackWhenEmpty: true,
-    })).toEqual(['Tomate', 'Cebolla']);
+    })).toEqual([]);
+  });
+
+  it('TPV no usa la lista maestra global cuando la ficha del producto está vacía', () => {
+    const master = [
+      { id: '1', name: 'Tomate', role: 'base', brandIds: ['mod'], productParts: ['pizzas'] },
+      { id: '2', name: 'Cebolla', role: 'base', brandIds: ['mod'], productParts: ['pizzas'] },
+    ];
+    const margarita = { category: 'Pizzas', brandIds: ['mod'], customFields: { ingredients: 'Tomate, Mozzarella' } };
+    const carbonara = { category: 'Pizzas', brandIds: ['mod'], customFields: {} };
+    const opts = {
+      productIngredientsOnly: true,
+      tpvFallbackWhenEmpty: true,
+    };
+    expect(parseCatalogIngredients(margarita, undefined, master, undefined, undefined, undefined, opts)).toEqual([
+      'Tomate',
+      'Mozzarella',
+    ]);
+    expect(parseCatalogIngredients(carbonara, undefined, master, undefined, undefined, undefined, opts)).toEqual([]);
   });
 
   it('TPV combina ingredientes de productos del combo si la ficha está vacía', () => {

@@ -1982,6 +1982,8 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       ).length,
     };
 
+    const userFinance = financeDocs.filter((d) => d.user_id === userId && !d.deletedAt);
+
     const pendingSales = saleDocs.filter((s) => s.status === 'pending');
     const pendingFinanceMovements = userFinance.filter((d) => d.status === 'pending' && !d.deletedAt);
     const cobrosPendientes = pendingFinanceMovements.reduce(
@@ -2007,7 +2009,6 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     // ── GENERAL KPIs ──
 
     // Finance: cobros (income) y pagos (expenses) del usuario
-    const userFinance = financeDocs.filter((d) => d.user_id === userId && !d.deletedAt);
     const incomeToday = userFinance
       .filter((d) => d.type === 'cobro' && d.date === todayStr)
       .reduce((s, d) => s + Number(d.totalAmount || 0), 0);

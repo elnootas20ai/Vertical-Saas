@@ -9,6 +9,14 @@ import {
   findDuplicateEmailAccounts,
   pickPrimaryAccountByEmail,
 } from './accountEmailRules.js';
+import {
+  clientMatchesBusinessScope,
+  clientSearchPrefersPhone,
+  normalizeClientBusinessScopeId,
+  scoreClientSearchMatch,
+} from '../shared/clients/clientSearchMatch.js';
+
+export { clientMatchesBusinessScope };
 
 export const ACCOUNTS_DB = 'accounts';
 export const BUSINESSES_DB = 'businesses';
@@ -3255,19 +3263,6 @@ function sanitizeContactPerson(contact) {
   };
 }
 
-function normalizeClientBusinessScopeId(value) {
-  return String(value || '').replace(/^business:/, '').trim();
-}
-
-/** Cliente visible para la empresa activa. Sin business_id → legacy, visible en todas las empresas del titular. */
-export function clientMatchesBusinessScope(doc, businessId, _options = {}) {
-  const bid = normalizeClientBusinessScopeId(businessId);
-  if (!bid) return true;
-  const docBid = normalizeClientBusinessScopeId(doc?.businessId || doc?.business_id);
-  if (!docBid) return true;
-  return docBid === bid;
-}
-
 export function buildClientDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || data.id || `client-${uuidv4()}`;
@@ -3527,99 +3522,6 @@ function foldSearchText(s) {
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
-}
-
-/** Texto plegado para buscar por nombre (sin email: evita falsos positivos tipo "uri" en securitas@…). */
-function clientNameSearchHaystack(doc) {
-  const parts = [];
-  const push = (v) => {
-    const s = String(v || '').trim();
-    if (s) parts.push(s);
-  };
-  push(doc.name);
-  push(doc.legalName);
-  push(doc.nombre);
-  push(doc.fullName);
-  push(doc.displayName);
-  if (Array.isArray(doc.contacts)) {
-    for (const c of doc.contacts) {
-      if (c && typeof c === 'object') {
-        push(c.name);
-        push(c.nombre);
-      }
-    }
-  }
-  return foldSearchText(parts.join(' '));
-}
-
-function clientEmailSearchHaystack(doc) {
-  return foldSearchText(String(doc.email || '').trim());
-}
-
-/**
- * Coincidencia por nombre: prefijo de palabra (nunca substring dentro de la palabra).
- * Evita "uriel" → "Curiel" / "uri" → "Seguridad".
- */
-function foldedNameQueryMatches(qFold, haystackFold) {
-  if (!qFold || qFold.length < 2 || !haystackFold) return false;
-  const tokens = qFold.split(/\s+/).filter((t) => t.length >= 2);
-  const parts = tokens.length > 0 ? tokens : [qFold];
-  const words = haystackFold.split(/[^a-z0-9]+/).filter(Boolean);
-
-  return parts.every((token) =>
-    words.some((w) => w === token || w.startsWith(token)),
-  );
-}
-
-/** true = búsqueda por teléfono; false = solo nombre (letras). */
-function clientSearchPrefersPhone(raw, qDigits) {
-  const letters = String(raw || '').replace(/[^a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/g, '');
-  if (qDigits.length >= 3 && letters.length === 0) return true;
-  if (letters.length >= 2 && qDigits.length < 3) return false;
-  return qDigits.length > letters.length;
-}
-
-function scoreClientSearchMatch(doc, raw, qFold, qDigits, preferPhone) {
-  let score = 0;
-  const nameHay = clientNameSearchHaystack(doc);
-  const words = nameHay.split(/[^a-z0-9]+/).filter(Boolean);
-
-  if (!preferPhone && qFold.length >= 2) {
-    if (nameHay === qFold) score += 200;
-    else if (words.some((w) => w === qFold)) score += 180;
-    else if (words.some((w) => w.startsWith(qFold))) score += 160;
-    else if (foldedNameQueryMatches(qFold, nameHay)) score += 120;
-  }
-
-  if (preferPhone && qDigits.length >= 3) {
-    for (const h of clientPhoneDigitHaystacks(doc)) {
-      if (h === qDigits) score += 200;
-      else if (h.endsWith(qDigits)) score += 170;
-      else if (h.startsWith(qDigits)) score += 150;
-      else if (qDigits.length >= 6 && h.includes(qDigits)) score += 130;
-    }
-    // Mismo teléfono pero nombre también cuadra (ej. "612 uriel")
-    if (qFold.length >= 2 && foldedNameQueryMatches(qFold, nameHay)) score += 50;
-  }
-
-  if (raw.includes('@')) {
-    const emailHay = clientEmailSearchHaystack(doc);
-    if (emailHay.includes(qFold)) score += 100;
-  }
-
-  return score;
-}
-
-function clientPhoneDigitHaystacks(doc) {
-  const list = [String(doc.phone || '').replace(/\D/g, '')];
-  if (Array.isArray(doc.contacts)) {
-    for (const c of doc.contacts) {
-      if (c && typeof c === 'object') {
-        list.push(String(c.phone || c.telefono || '').replace(/\D/g, ''));
-      }
-    }
-  }
-  return list.filter(Boolean);
 }
 
 /** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
@@ -9494,6 +9396,9 @@ export function sanitizeCatalogItemForTpv(doc) {
   }
   if (rawCf.halfHalf === true) {
     customFields.halfHalf = true;
+  }
+  if (rawCf.buildYourOwn === true) {
+    customFields.buildYourOwn = true;
   }
   return {
     _id: doc._id,

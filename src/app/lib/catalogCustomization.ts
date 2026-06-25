@@ -15,6 +15,8 @@ export interface CartLineCustomization {
   comboSelections?: import('./deliveryApi').CatalogComboRef[];
   /** Pizza mitad y mitad: 2 sabores elegidos en TPV (producto suelto). */
   halfHalfPizza?: HalfHalfPizzaSelection;
+  /** Pizza al gusto: ingredientes base elegidos en TPV (sin receta fija). */
+  addedBaseIngredients?: string[];
 }
 
 export type HalfHalfPizzaSelection = {
@@ -80,7 +82,7 @@ const CUSTOMIZABLE_KEYS = ['pizza', 'pizzas', 'hamburguesa', 'hamburguesas', 'bu
 
 type TpvBrandHint = { _id: string; deliveryLineKind?: string; catalogCategories?: string[] };
 
-function productBrandIdsFromItem(item: Pick<CatalogItem, 'brandIds'>): string[] {
+export function productBrandIdsFromItem(item: Pick<CatalogItem, 'brandIds'>): string[] {
   return Array.isArray(item.brandIds)
     ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
@@ -173,14 +175,35 @@ function foldCatalogCategoryLabel(value: string): string {
     .replace(/\p{M}/gu, '');
 }
 
+function foldCatalogProductName(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
 /** Producto de catálogo «Mitad y mitad»: un precio, 2 sabores de pizza en TPV. */
 export function isTpvHalfHalfCatalogItem(
   item: Pick<CatalogItem, 'itemType' | 'category' | 'name' | 'customFields'>,
 ): boolean {
+  if (item.customFields?.buildYourOwn === true) return false;
   if (item.customFields?.halfHalf === true) return true;
   if (item.itemType === 'combo') return false;
-  const name = foldCatalogCategoryLabel(item.name || '');
+  const name = foldCatalogProductName(item.name || '');
   if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/.test(name)) return true;
+  return false;
+}
+
+/** Pizza al gusto: el cliente elige ingredientes base en TPV (sin receta fija en ficha). */
+export function isTpvBuildYourOwnCatalogItem(
+  item: Pick<CatalogItem, 'itemType' | 'category' | 'name' | 'customFields'>,
+): boolean {
+  if (item.customFields?.halfHalf === true) return false;
+  if (item.customFields?.buildYourOwn === true) return true;
+  if (item.itemType === 'combo') return false;
+  const name = foldCatalogProductName(item.name || '');
+  if (/al\s*gusto|a\s*gusto|build\s*your\s*own/.test(name)) return true;
   return false;
 }
 
@@ -230,6 +253,7 @@ export function isCustomizableCatalogItem(
   item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'customFields'>,
   brands?: TpvBrandHint[],
 ): boolean {
+  if (isTpvBuildYourOwnCatalogItem(item)) return true;
   if (hasProductTpvIngredients(item)) return true;
   return resolveTpvCategoryTemplateKey(item, brands) !== null;
 }
@@ -968,7 +992,7 @@ export type ParseCatalogResolveOptions = {
   productIngredientsOnly?: boolean;
   /** TPV: todos los extras del negocio; ignora suplementos del producto. */
   storeExtrasOnly?: boolean;
-  /** TPV: si la ficha está vacía, usar combo + ingredientes base del negocio + plantilla. */
+  /** TPV: si la ficha está vacía, usar solo combo/menú/mitades (nunca la lista maestra global). */
   tpvFallbackWhenEmpty?: boolean;
   /** Catálogo completo (combos → ingredientes de productos incluidos). */
   catalogItems?: CatalogItem[];
@@ -1033,6 +1057,20 @@ export function mergeComboProductIngredients(
   return out;
 }
 
+/** Ingredientes unidos desde mitades de pizza mitad y mitad. */
+export function mergeHalfHalfProductIngredients(
+  selection: HalfHalfPizzaSelection,
+  catalog: CatalogItem[],
+): string[] {
+  return mergeComboProductIngredients(
+    [
+      { productId: selection.firstProductId, productName: selection.firstProductName, quantity: 1 },
+      { productId: selection.secondProductId, productName: selection.secondProductName, quantity: 1 },
+    ],
+    catalog,
+  );
+}
+
 export function parseCatalogIngredients(
   item: CatalogItem,
   templates?: TpvCategoryTemplates,
@@ -1054,16 +1092,12 @@ export function parseCatalogIngredients(
     if (options.tpvFallbackWhenEmpty) {
       const catalog = options.catalogItems;
       if (catalog?.length) {
+        if (options.halfHalfPizza) {
+          const fromHalf = mergeHalfHalfProductIngredients(options.halfHalfPizza, catalog);
+          if (fromHalf.length > 0) return fromHalf;
+        }
         const fromCombo = mergeComboComponentIngredients(item, catalog, options.comboSelections);
         if (fromCombo.length > 0) return fromCombo;
-      }
-      if (templateKey && storeIngredients && storeIngredients.length > 0) {
-        const fromMaster = tpvBaseIngredientNames(storeIngredients, brandIds, templateKey);
-        if (fromMaster.length > 0) return fromMaster;
-      }
-      if (templateKey && templates?.[templateKey]) {
-        const fromTemplate = parseIngredientsText(templates[templateKey]?.ingredients);
-        if (fromTemplate.length > 0) return fromTemplate;
       }
     }
     return [];
@@ -1178,7 +1212,8 @@ export function customizationSignature(customization: CartLineCustomization): st
   const half = customization.halfHalfPizza
     ? `${customization.halfHalfPizza.firstProductId}|${customization.halfHalfPizza.secondProductId}`
     : '';
-  return `${removed}::${added}::${combo}::${half}::${customization.notes.trim()}`;
+  const addedBase = [...(customization.addedBaseIngredients || [])].sort().join('|');
+  return `${removed}::${added}::${combo}::${half}::${addedBase}::${customization.notes.trim()}`;
 }
 
 export function buildOrderExtras(customization: CartLineCustomization): string[] {
@@ -1192,6 +1227,9 @@ export function buildOrderExtras(customization: CartLineCustomization): string[]
     const label = String(ref.productName || '').trim();
     if (!label) continue;
     out.push(`▸ ${label}${ref.quantity > 1 ? ` ×${ref.quantity}` : ''}`);
+  }
+  for (const ing of customization.addedBaseIngredients ?? []) {
+    out.push(`+ ${ing}`);
   }
   for (const s of customization.addedSupplements) {
     out.push(`+ ${s.name}`);
@@ -1211,6 +1249,12 @@ export function buildOrderIngredients(
   brands?: TpvBrandHint[],
   catalogItems?: CatalogItem[],
 ): { name: string; quantity: string }[] {
+  if (isTpvBuildYourOwnCatalogItem(item)) {
+    return (customization.addedBaseIngredients ?? []).map((name) => ({
+      name,
+      quantity: 'normal',
+    }));
+  }
   return parseCatalogIngredients(
     item,
     templates,
@@ -1223,6 +1267,7 @@ export function buildOrderIngredients(
       tpvFallbackWhenEmpty: true,
       catalogItems,
       comboSelections: customization.comboSelections,
+      halfHalfPizza: customization.halfHalfPizza,
     },
   ).map((name) => ({
     name,

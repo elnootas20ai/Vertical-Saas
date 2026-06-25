@@ -39,10 +39,12 @@ import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaM
 import { filterOrdersForRegisterSession } from '../../lib/registerShiftSalesBreakdown';
 import {
   buildTpvRegisterSummaryForDay,
+  dedupeOpenRegisterSessions,
   isLocalCalendarDay,
   localCalendarDayKey,
   localDayBoundsForKey,
   sessionActiveOnCalendarDay,
+  sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -137,43 +139,33 @@ function groupSessionsByStore(
   daySessions: TpvRegisterSession[],
   pointsOfSale: PointOfSale[],
   selectedDate: string,
+  options?: { excludeOpen?: boolean },
 ): StoreDayGroup[] {
+  const filtered = options?.excludeOpen
+    ? daySessions.filter((s) => s.status !== 'open')
+    : daySessions;
+
   const byPdv = new Map<string, TpvRegisterSession[]>();
-  for (const s of daySessions) {
+  for (const s of filtered) {
     const id = String(s.pointOfSaleId || '_sin_tienda').trim();
     const list = byPdv.get(id) || [];
     list.push(s);
     byPdv.set(id, list);
   }
 
-  const storeIds = new Set<string>();
-  for (const p of pointsOfSale) storeIds.add(p._id);
-  for (const id of byPdv.keys()) if (id !== '_sin_tienda') storeIds.add(id);
-
   const groups: StoreDayGroup[] = [];
-  for (const pdvId of storeIds) {
+  for (const [pdvId, rawSessions] of byPdv) {
     const pdv = pointsOfSale.find((p) => p._id === pdvId);
-    const storeName = pdv?.name || daySessions.find((s) => s.pointOfSaleId === pdvId)?.pointOfSaleName || 'Tienda';
-    const sessions = (byPdv.get(pdvId) || []).sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
+    const storeName = pdv?.name || rawSessions[0]?.pointOfSaleName || 'Tienda';
+    const sessions = sortRegisterSessionsForDisplay(rawSessions);
     const openCount = sessions.filter((s) => s.status === 'open').length;
     const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
     groups.push({ pdvId, storeName, sessions, openCount, totalSales });
   }
 
-  for (const [pdvId, sessions] of byPdv) {
-    if (pdvId === '_sin_tienda' || storeIds.has(pdvId)) continue;
-    groups.push({
-      pdvId,
-      storeName: sessions[0]?.pointOfSaleName || 'Tienda',
-      sessions: sessions.sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt))),
-      openCount: sessions.filter((s) => s.status === 'open').length,
-      totalSales: sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0),
-    });
-  }
-
   return groups.sort((a, b) => {
     if (a.openCount !== b.openCount) return b.openCount - a.openCount;
-    if (a.sessions.length !== b.sessions.length) return b.sessions.length - a.sessions.length;
+    if (a.totalSales !== b.totalSales) return b.totalSales - a.totalSales;
     return a.storeName.localeCompare(b.storeName, 'es');
   });
 }
@@ -199,6 +191,93 @@ function turnBadgeClass(session: TpvRegisterSession): string {
   if (session.closingValidationStatus === 'rejected') return 'bg-red-500 text-white ring-red-200 dark:ring-red-900';
   if (session.closingValidationStatus === 'validated') return 'bg-blue-600 text-white ring-blue-200 dark:ring-blue-900';
   return 'bg-gray-600 text-white ring-gray-200 dark:ring-gray-700';
+}
+
+function OpenRegisterHero({
+  sessions,
+  selectedDate,
+  expandedSessionId,
+  onToggleSession,
+  onViewClosing,
+}: {
+  sessions: TpvRegisterSession[];
+  selectedDate: string;
+  expandedSessionId: string | null;
+  onToggleSession: (id: string) => void;
+  onViewClosing: (session: TpvRegisterSession) => void;
+}) {
+  if (sessions.length === 0) return null;
+
+  return (
+    <section className="rounded-2xl border-2 border-emerald-400 dark:border-emerald-600 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/40 dark:to-gray-900 p-4 sm:p-5 space-y-3 shadow-sm">
+      <div className="flex items-center gap-2">
+        <div className="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
+          <Radio className="w-5 h-5 text-white animate-pulse" />
+        </div>
+        <div>
+          <h2 className="text-sm font-bold text-emerald-900 dark:text-emerald-100 uppercase tracking-wide">
+            Caja abierta ahora
+          </h2>
+          <p className="text-xs text-emerald-700 dark:text-emerald-300">
+            {sessions.length === 1
+              ? 'Un turno activo en este momento'
+              : `${sessions.length} turnos activos en tiendas distintas`}
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {sessions.map((session) => {
+          const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
+          const expected = calcTpvExpectedCash(session);
+          const expanded = expandedSessionId === session._id;
+          const openedTime = new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' });
+
+          return (
+            <div
+              key={session._id}
+              data-caja-turn={session._id}
+              className={`rounded-xl border-2 overflow-hidden transition-all ${
+                expanded
+                  ? 'border-emerald-600 bg-white dark:bg-gray-800 shadow-lg'
+                  : 'border-emerald-300 dark:border-emerald-700 bg-white/90 dark:bg-gray-800/90'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onToggleSession(session._id)}
+                className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors"
+              >
+                <div className="w-11 h-11 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
+                  <Store className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-gray-900 dark:text-gray-100 truncate">
+                    {session.pointOfSaleName || 'Tienda'}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {session.workerName} · {session.terminalName} · desde {openedTime}
+                  </p>
+                </div>
+                <div className="text-right shrink-0 hidden sm:block">
+                  <div className="text-lg font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                    {summary.totalSales.toFixed(2)}€
+                  </div>
+                  <div className="text-[10px] text-gray-500 tabular-nums">Efectivo: {expected.toFixed(2)}€</div>
+                </div>
+                {expanded ? <ChevronUp className="w-5 h-5 text-gray-400 shrink-0" /> : <ChevronDown className="w-5 h-5 text-gray-400 shrink-0" />}
+              </button>
+              {expanded && (
+                <div className="border-t border-emerald-100 dark:border-emerald-900/50 p-4">
+                  <RegisterCard session={session} onViewClosing={onViewClosing} detailOnly />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
 function StoreDayBlock({
@@ -227,22 +306,15 @@ function StoreDayBlock({
             <h3 className="font-bold text-gray-900 dark:text-gray-100">{group.storeName}</h3>
             <p className="text-[11px] text-gray-500">
               {group.sessions.length === 0
-                ? 'Sin turnos este día'
-                : `${group.sessions.length} turno${group.sessions.length > 1 ? 's' : ''}${group.openCount > 0 ? ` · ${group.openCount} abierta${group.openCount > 1 ? 's' : ''} ahora` : ''}`}
+                ? 'Sin turnos cerrados este día'
+                : `${group.sessions.length} turno${group.sessions.length > 1 ? 's' : ''} cerrado${group.sessions.length > 1 ? 's' : ''} o pendiente${group.sessions.length > 1 ? 's' : ''}`}
               {group.totalSales > 0 ? ` · ${group.totalSales.toFixed(2)}€` : ''}
             </p>
           </div>
         </div>
-        {group.openCount > 0 && (
-          <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700 animate-pulse">
-            En vivo
-          </span>
-        )}
       </div>
 
-      {group.sessions.length === 0 ? (
-        <p className="px-4 py-6 text-sm text-center text-gray-400">Nadie abrió caja aquí este día</p>
-      ) : (
+      {group.sessions.length === 0 ? null : (
         <div className="p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/30">
           {group.sessions.map((session, turnIndex) => {
             const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
@@ -697,6 +769,7 @@ export function CajaPage() {
   const [dismissingEmpty, setDismissingEmpty] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
+  const userCollapsedOpenRef = useRef(false);
 
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
   const handleViewClosing = useCallback((session: TpvRegisterSession) => {
@@ -815,31 +888,46 @@ export function CajaPage() {
     return list;
   }, [sessions, selectedDate, onlyOpenNow, filterPdv]);
 
+  const openSessionsNow = useMemo(() => {
+    let list = sessions.filter((s) => s.status === 'open');
+    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
+    return dedupeOpenRegisterSessions(list);
+  }, [sessions, filterPdv]);
+
+  const openOnSelectedDay = useMemo(() => {
+    let list = sessions.filter((s) => sessionOnDate(s, selectedDate) && s.status === 'open');
+    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
+    return dedupeOpenRegisterSessions(list);
+  }, [sessions, selectedDate, filterPdv]);
+
   const storeGroups = useMemo(() => {
-    const groups = groupSessionsByStore(daySessions, pointsOfSale, selectedDate);
+    const groups = groupSessionsByStore(daySessions, pointsOfSale, selectedDate, {
+      excludeOpen: openOnSelectedDay.length > 0 && !onlyOpenNow,
+    });
     if (filterPdv) return groups.filter((g) => g.pdvId === filterPdv);
     return groups;
-  }, [daySessions, pointsOfSale, filterPdv, selectedDate]);
+  }, [daySessions, pointsOfSale, filterPdv, selectedDate, openOnSelectedDay.length, onlyOpenNow]);
 
-  const openSessions = useMemo(() => sessions.filter(s => s.status === 'open'), [sessions]);
+  const openSessions = openSessionsNow;
   const openDriverSessions = useMemo(() => driverSessions.filter(s => s.status === 'open'), [driverSessions]);
   const pendingValidation = useMemo(() => sessions.filter(isMeaningfulPendingClose), [sessions]);
   const emptyPendingClosures = useMemo(() => sessions.filter(isEmptyTestClose), [sessions]);
 
   const dayStats = useMemo(() => {
     const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
-    const storesWithActivity = new Set(allDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
-    const openNow = allDay.filter((s) => s.status === 'open').length;
-    const sales = allDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
-    const diff = allDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
+    const scopedDay = filterPdv ? allDay.filter((s) => s.pointOfSaleId === filterPdv) : allDay;
+    const storesWithActivity = new Set(scopedDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
+    const openNow = dedupeOpenRegisterSessions(scopedDay.filter((s) => s.status === 'open')).length;
+    const sales = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
+    const diff = scopedDay.filter((s) => s.status === 'closed').reduce((sum, s) => sum + (s.difference || 0), 0);
     return {
-      stores: filterPdv ? 1 : Math.max(storesWithActivity, storeGroups.length),
-      turns: allDay.length,
+      stores: storesWithActivity,
+      turns: scopedDay.length,
       openNow,
       sales,
       diff,
     };
-  }, [sessions, selectedDate, filterPdv, storeGroups.length]);
+  }, [sessions, selectedDate, filterPdv]);
 
   const dayAggregatorRows = useMemo(
     () => buildDailyAggregatorRows(closingPlatforms, orders, selectedDate, sessions),
@@ -933,9 +1021,28 @@ export function CajaPage() {
     }
   };
 
+  useEffect(() => {
+    userCollapsedOpenRef.current = false;
+    setExpandedSessionId(null);
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (loading || userCollapsedOpenRef.current) return;
+    if (openOnSelectedDay.length >= 1) {
+      setExpandedSessionId((prev) => (
+        prev && openOnSelectedDay.some((s) => s._id === prev) ? prev : openOnSelectedDay[0]._id
+      ));
+    }
+  }, [loading, openOnSelectedDay]);
+
   const handleToggleSession = useCallback((id: string) => {
     setExpandedSessionId((prev) => {
       const next = prev === id ? null : id;
+      if (next === null && openOnSelectedDay.some((s) => s._id === id)) {
+        userCollapsedOpenRef.current = true;
+      } else if (next !== null) {
+        userCollapsedOpenRef.current = false;
+      }
       if (next) {
         requestAnimationFrame(() => {
           document.querySelector(`[data-caja-turn="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -943,7 +1050,7 @@ export function CajaPage() {
       }
       return next;
     });
-  }, []);
+  }, [openOnSelectedDay]);
 
   if (loading) {
     return (
@@ -983,12 +1090,12 @@ export function CajaPage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Elige un día → mira cada tienda → abre un turno para ver movimientos y cierre
+              Arriba la caja activa; abajo el historial de turnos del día que elijas
             </p>
           </div>
           {openSessions.length > 0 && (
             <span className="shrink-0 mt-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-              {openSessions.length} abierta{openSessions.length > 1 ? 's' : ''} ahora
+              {openSessions.length} caja{openSessions.length > 1 ? 's' : ''} abierta{openSessions.length > 1 ? 's' : ''}
             </span>
           )}
           {refreshing && (
@@ -1061,7 +1168,7 @@ export function CajaPage() {
             </div>
             <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
               <div className="text-2xl font-bold text-emerald-600">{dayStats.openNow}</div>
-              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Abiertas ahora</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Abiertas hoy</div>
             </div>
             <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
               <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.sales.toFixed(0)}€</div>
@@ -1069,6 +1176,16 @@ export function CajaPage() {
             </div>
           </div>
         </section>
+
+        {openOnSelectedDay.length > 0 && (
+          <OpenRegisterHero
+            sessions={openOnSelectedDay}
+            selectedDate={selectedDate}
+            expandedSessionId={expandedSessionId}
+            onToggleSession={handleToggleSession}
+            onViewClosing={handleViewClosing}
+          />
+        )}
 
         {pendingValidation.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -1095,12 +1212,14 @@ export function CajaPage() {
           </div>
         )}
 
-        {/* ── 2. TIENDAS ── */}
+        {/* ── Historial del día ── */}
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2">
-              <Store className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-              <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide">2 · Tiendas y turnos</h2>
+              <History className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide">
+                {onlyOpenNow ? 'Solo abiertas' : 'Historial del día'}
+              </h2>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {pointsOfSale.length > 0 && (
@@ -1129,15 +1248,25 @@ export function CajaPage() {
             </div>
           </div>
 
-          <p className="text-xs text-gray-500 -mt-1">
-            Plegado = tarjeta compacta con borde discontinuo y botón «Desplegar». Abierto = barra índigo con «Plegar».
-          </p>
+          {!onlyOpenNow && openOnSelectedDay.length > 0 && storeGroups.length > 0 && (
+            <p className="text-xs text-gray-500 -mt-1">
+              Turnos cerrados o pendientes de validación. La caja activa está arriba.
+            </p>
+          )}
 
-          {storeGroups.length === 0 ? (
+          {onlyOpenNow && openOnSelectedDay.length === 0 ? (
             <div className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 text-gray-400">
               <Store className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p className="text-sm">Ningún turno de caja este día</p>
-              {onlyOpenNow && <p className="text-xs mt-1">Prueba quitando el filtro «Solo abiertas ahora»</p>}
+              <p className="text-sm">Ninguna caja abierta este día</p>
+            </div>
+          ) : onlyOpenNow ? null : storeGroups.length === 0 ? (
+            <div className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 text-gray-400">
+              <Store className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">
+                {openOnSelectedDay.length > 0
+                  ? 'Solo hay caja abierta hoy — mírala arriba'
+                  : 'Ningún turno de caja este día'}
+              </p>
             </div>
           ) : (
             <div className="space-y-4">

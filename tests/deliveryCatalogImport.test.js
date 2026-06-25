@@ -15,8 +15,18 @@ import {
 describe('deliveryCatalogImport', () => {
   it('normalizeImportCategory maps delivery categories and fixes Dato N', () => {
     expect(normalizeImportCategory('bebida')).toBe('Bebidas');
+    expect(normalizeImportCategory('Refrescos')).toBe('Bebidas');
+    expect(normalizeImportCategory('Cervezas')).toBe('Bebidas');
     expect(normalizeImportCategory('Pizzas')).toBe('Pizzas');
     expect(normalizeImportCategory('Dato 14')).toBe('Principales');
+  });
+
+  it('resolveCatalogImportBrandIds clears brand for drink synonyms', () => {
+    const brands = [
+      { _id: 'b1', name: 'modomio', active: true, catalogCategories: ['Pizzas'], isDefault: false },
+    ];
+    expect(resolveCatalogImportBrandIds([], 'Refrescos', brands)).toEqual([]);
+    expect(resolveCatalogImportBrandIds([], 'Cervezas', brands, 'Mahou 33cl')).toEqual([]);
   });
 
   it('readImportLineText prefers linea over marca', () => {
@@ -29,6 +39,15 @@ describe('deliveryCatalogImport', () => {
   it('isCommercialLineBrand ignores supplier-only brands', () => {
     expect(isCommercialLineBrand({ name: 'Coca-Cola' })).toBe(false);
     expect(isCommercialLineBrand({ name: 'modomio', catalogCategories: ['Pizzas'] })).toBe(true);
+  });
+
+  it('asigna Burgers a la línea blackburger por tipo o nombre', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] },
+      { _id: 'bb', name: 'blackburger', active: true, deliveryLineKind: 'burger_fastfood', catalogCategories: ['Burgers'] },
+    ];
+    expect(inferCommercialLineBrandId('Burgers', brands)).toBe('bb');
+    expect(inferCommercialLineBrandId('Pizzas', brands)).toBe('mod');
   });
 
   it('resolveCatalogImportBrandIds assigns shared categories without line', () => {
@@ -64,6 +83,15 @@ describe('deliveryCatalogImport', () => {
       'Entrantes',
       'Bebidas',
     ]);
+  });
+
+  it('resolveCommercialLineIdsFromText matches partial names (Black Burger → blackburger)', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] },
+      { _id: 'bb', name: 'blackburger', active: true, catalogCategories: ['Burgers'] },
+    ];
+    expect(resolveCommercialLineIdsFromText('Black Burger', brands).brandIds).toEqual(['bb']);
+    expect(resolveCommercialLineIdsFromText('modomio', brands).brandIds).toEqual(['mod']);
   });
 
   it('assigns BlackBurger products to blackburger line even when inactive', () => {
@@ -256,6 +284,23 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(result.issues.some((i) => i.field === 'categoria' && i.message.includes('Dato'))).toBe(true);
     expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('fantasma') && i.severity === 'warning')).toBe(true);
     expect(result.issues.some((i) => i.field === 'sku')).toBe(true);
+  });
+
+  it('partitionDeliveryCatalogImportEntries imports valid rows and skips bad ones', async () => {
+    const { partitionDeliveryCatalogImportEntries } = await import('../src/app/lib/deliveryCatalogExcelTemplate.ts');
+    const brands = [{ _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] }];
+    const { validEntries, issues } = partitionDeliveryCatalogImportEntries(
+      [
+        { name: 'Coca-Cola', category: 'Refrescos', linea: '', price: '2.50' },
+        { name: 'Agua', category: 'Bebidas', linea: '', price: '1.80' },
+        { name: 'Sin precio', category: 'Bebidas', linea: '', price: '' },
+        { name: 'Pizza', category: 'Pizzas', linea: 'modomio', price: '9.00' },
+      ],
+      brands,
+    );
+    expect(validEntries).toHaveLength(3);
+    expect(validEntries.map((e) => e.name)).toEqual(['Coca-Cola', 'Agua', 'Pizza']);
+    expect(issues.some((i) => i.field === 'precio' && i.severity === 'error')).toBe(true);
   });
 
   it('collectIngredientEntriesFromCatalogImport groups by commercial line', async () => {

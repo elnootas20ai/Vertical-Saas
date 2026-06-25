@@ -76,7 +76,7 @@ import {
   DELIVERY_CATALOG_HEADER_ALIASES,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
-  validateDeliveryCatalogImportEntries,
+  partitionDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
 import {
   DELIVERY_STOCK_HEADER_ALIASES,
@@ -389,21 +389,30 @@ export function ConfiguracionGeneral() {
     const isDelivery = businessType === 'delivery';
     let brandCache = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
 
+    let importRows = entries;
     if (isDelivery) {
-      const validation = validateDeliveryCatalogImportEntries(entries, brandCache);
-      if (!validation.ok) {
+      const { validEntries, issues } = partitionDeliveryCatalogImportEntries(entries, brandCache);
+      importRows = validEntries;
+      const blocked = issues.filter((i) => i.severity === 'error');
+      if (validEntries.length === 0) {
         toast.error('Revisa la plantilla antes de importar', {
-          description: formatDeliveryCatalogImportValidationToast(validation),
+          description: formatDeliveryCatalogImportValidationToast({ ok: false, issues }),
           duration: 12000,
         });
         return 0;
+      }
+      if (blocked.length > 0) {
+        toast.message(
+          `Se importan ${validEntries.length} fila(s). ${blocked.length} omitida(s) por error en el Excel.`,
+          { duration: 9000 },
+        );
       }
     }
 
     const unmatchedCommercialBrands: string[] = [];
     const items: Record<string, unknown>[] = [];
 
-    for (const entry of entries) {
+    for (const entry of importRows) {
       if (isDelivery && bizId) {
         const mapped = await mapImportEntryToCatalogItem(entry, { businessId: bizId, brandCache });
         if (!mapped) continue;

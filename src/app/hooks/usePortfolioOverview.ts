@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AuthUser } from '../lib/authApi';
 import type { Business } from '../lib/businessApi';
 import type { Brand } from '../lib/brandApi';
@@ -9,6 +9,7 @@ import {
   type PointOfSale,
 } from '../lib/deliveryApi';
 import { listFinanceMovements } from '../lib/financeApi';
+import type { FinanceMovementRecord } from '../lib/financeTypes';
 import { listBankAccounts } from '../lib/bankAccountsApi';
 import { getTotalBalance } from '../lib/bankAccountTypes';
 import {
@@ -40,6 +41,12 @@ import {
   type TeamDashboardSnapshot,
   EMPTY_TEAM_DASHBOARD_SNAPSHOT,
 } from '../lib/teamDashboardApi';
+import {
+  usePortfolioDashboardLive,
+  type PortfolioReloadOptions,
+} from './usePortfolioDashboardLive';
+
+export type { PortfolioReloadOptions };
 
 export type PortfolioStore = {
   id: string;
@@ -235,25 +242,73 @@ function pdvCreatedAtMap(pointsOfSale: PointOfSale[]): Map<string, string> {
   return m;
 }
 
+function wcIdsForPdvs(
+  pdvIds: string[],
+  pdvToWc: Map<string, string>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const pdvId of pdvIds) {
+    const wc = pdvToWc.get(pdvId);
+    if (wc) ids.add(wc);
+  }
+  return ids;
+}
+
+/** Finanzas + EBITDA reales del mes para una empresa (incluye legacy sin businessId si solo hay una). */
+function financeForBusiness(
+  movements: FinanceMovementRecord[],
+  monthKey: string,
+  businessId: string,
+  accountBusinessCount: number,
+): PortfolioFinanceTotals {
+  const base = sumFinanceMonthForBusiness(movements, monthKey, businessId);
+  let scoped = movements.filter(
+    (m) => String(m.businessId || '').replace(/^business:/, '').trim() === businessId,
+  );
+  if (accountBusinessCount === 1) {
+    scoped = [
+      ...scoped,
+      ...movements.filter((m) => !String(m.businessId || '').replace(/^business:/, '').trim()),
+    ];
+  }
+  const ebitda = computeEbitdaForMonth(scoped, monthKey, { level: 'all' });
+  return {
+    ...base,
+    ebitdaMonth: Math.round(ebitda.ebitda * 100) / 100,
+    ebitdaMarginMonth: Math.round(ebitda.ebitdaMargin * 10) / 10,
+  };
+}
+
 export function usePortfolioOverview(
   user: AuthUser | null | undefined,
   businesses: Business[],
+  options?: { live?: boolean },
 ) {
   const [rows, setRows] = useState<PortfolioBusiness[]>([]);
   const [finance, setFinance] = useState<PortfolioFinanceTotals>(EMPTY_FINANCE);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
+  const businessIdsKey = useMemo(
+    () => businesses.map((b) => b.business_id).filter(Boolean).join('|'),
+    [businesses],
+  );
+
+  const reload = useCallback(async (reloadOpts?: PortfolioReloadOptions) => {
+    const silent = reloadOpts?.silent === true;
     if (!user?.user_id || businesses.length === 0) {
       setRows([]);
       setFinance(EMPTY_FINANCE);
       setLoading(false);
+      setIsRefreshing(false);
       setError(null);
       return;
     }
 
-    setLoading(true);
+    if (silent) setIsRefreshing(true);
+    else setLoading(true);
     setError(null);
 
     const todayKey = localCalendarDayKey();
@@ -262,6 +317,7 @@ export function usePortfolioOverview(
     const monthEnd = `${todayKey}T23:59:59.999Z`;
     const lookbackMs = 45 * 24 * 60 * 60 * 1000;
     const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
+    let loaded: PortfolioBusiness[] = [];
 
     try {
       const structures = await Promise.all(
@@ -311,10 +367,19 @@ export function usePortfolioOverview(
       );
 
       const ownerId = String(user.user_id || '').trim();
-      const [financeMovements, bankAccounts] = await Promise.all([
-        listFinanceMovements(ownerId).catch(() => []),
-        listBankAccounts(ownerId).catch(() => []),
-      ]);
+      let financeMovements: FinanceMovementRecord[] = [];
+      let bankAccounts: Awaited<ReturnType<typeof listBankAccounts>> = [];
+      let financeLoadWarning: string | null = null;
+      try {
+        [financeMovements, bankAccounts] = await Promise.all([
+          listFinanceMovements(ownerId).catch(() => []),
+          listBankAccounts(ownerId).catch(() => []),
+        ]);
+      } catch {
+        financeLoadWarning = 'No se pudieron cargar las finanzas consolidadas';
+        financeMovements = [];
+        bankAccounts = [];
+      }
       const financeTotals = consolidatePortfolioFinance(
         financeMovements,
         monthKey,
@@ -328,9 +393,13 @@ export function usePortfolioOverview(
               return bid && businesses.some((b) => b.business_id === bid);
             })
           : financeMovements;
-      const ebitdaTotals = computeEbitdaForMonth(scopedForEbitda, monthKey, { level: 'all' });
-      financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
-      financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
+      try {
+        const ebitdaTotals = computeEbitdaForMonth(scopedForEbitda, monthKey, { level: 'all' });
+        financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
+        financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
+      } catch {
+        financeLoadWarning = financeLoadWarning || 'EBITDA no disponible en este momento';
+      }
 
       const ordersByUser = new Map<
         string,
@@ -364,7 +433,7 @@ export function usePortfolioOverview(
         }),
       );
 
-      const loaded: PortfolioBusiness[] = await Promise.all(
+      loaded = await Promise.all(
         structures.map(async (s) => {
           const orders = s.isDelivery && s.dataUserId ? ordersByUser.get(s.dataUserId) || [] : [];
           const stores = mapStores(
@@ -379,18 +448,21 @@ export function usePortfolioOverview(
           let metrics = emptyPortfolioMetrics();
           let billing: CompanyBillingBreakdown | null = null;
 
-          if (s.isDelivery && s.dataUserId && s.pdvIds.length > 0) {
+          if (s.isDelivery && s.dataUserId && (s.pdvIds.length > 0 || stores.length > 0)) {
             const sessions = sessionsByUser.get(s.dataUserId) || [];
             const createdMap = pdvCreatedAtMap(s.pointsOfSale);
             const primaryPdv = pickPrimaryPdvIdFromList(s.pdvIds, createdMap);
-            metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey);
-            metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
-
             const pdvToWc = new Map<string, string>();
             for (const p of s.pointsOfSale) {
               const wcId = String(p.workCenterId || '').trim();
               if (wcId) pdvToWc.set(p._id, wcId);
             }
+            const wcScope = stores.length > 0
+              ? new Set(stores.map((st) => st.id))
+              : wcIdsForPdvs(s.pdvIds, pdvToWc);
+            metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey, wcScope);
+            metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
+
             const activeByStore = new Map(stores.map((st) => [st.id, st.delivery.activeOrders]));
             billing = computeCompanyBillingBreakdown(
               orders,
@@ -414,10 +486,11 @@ export function usePortfolioOverview(
             () => ({ ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: members.length }),
           );
 
-          const rowFinance = sumFinanceMonthForBusiness(
+          const rowFinance = financeForBusiness(
             financeMovements,
             monthKey,
             s.business.business_id,
+            businesses.length,
           );
 
           return {
@@ -441,28 +514,42 @@ export function usePortfolioOverview(
 
       setFinance(financeTotals);
       setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
+      setLastUpdatedAt(new Date());
+      setError(financeLoadWarning);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo cargar el panorama');
-      setRows([]);
-      setFinance(EMPTY_FINANCE);
+      if (loaded.length > 0) {
+        setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
+      } else {
+        setRows([]);
+        setFinance(EMPTY_FINANCE);
+      }
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
-  }, [user, businesses]);
+  }, [user?.user_id, businessIdsKey, businesses]);
+
+  const { liveSseOk, scheduleSilentRefresh } = usePortfolioDashboardLive({
+    enabled: options?.live ?? false,
+    authUserId: user?.user_id ?? null,
+    onRefresh: reload,
+  });
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   useEffect(() => {
-    const onChange = () => void reload();
+    if (!options?.live) return;
+    const onChange = () => scheduleSilentRefresh();
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChange);
     window.addEventListener(DELIVERY_BRANDS_CHANGED, onChange);
     return () => {
       window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChange);
       window.removeEventListener(DELIVERY_BRANDS_CHANGED, onChange);
     };
-  }, [reload]);
+  }, [options?.live, scheduleSilentRefresh]);
 
   const totals: PortfolioTotals = {
     businesses: rows.length,
@@ -482,5 +569,5 @@ export function usePortfolioOverview(
     payslipsThisMonth: rows.reduce((s, r) => s + r.team.payslipsThisMonth, 0),
   };
 
-  return { rows, totals, finance, loading, error, reload };
+  return { rows, totals, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload };
 }

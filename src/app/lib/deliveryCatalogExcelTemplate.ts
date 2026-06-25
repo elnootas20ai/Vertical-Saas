@@ -63,7 +63,7 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
 export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   name: ['nombre', 'name', 'producto', 'product', 'articulo', 'nombre producto', 'product name'],
   sku: ['sku', 'codigo', 'codigo sku', 'ref', 'referencia', 'cod'],
-  category: ['categoria', 'category', 'seccion', 'familia', 'tipo', 'categoria tpv'],
+  category: ['categoria', 'category', 'seccion', 'familia', 'tipo', 'categoria tpv', 'grupo', 'departamento'],
   linea: ['linea', 'line', 'marca', 'organizador', 'linea comercial', 'linea tpv', 'brand line'],
   price: ['precio', 'price', 'pvp', 'precio venta', 'unit price', 'precio unitario'],
   ingredients: ['ingredientes', 'ingredients', 'ingrediente', 'receta', 'componentes'],
@@ -332,11 +332,16 @@ export function downloadDeliveryCatalogImportTemplate(commercialLines: ImportBra
 }
 
 export function parseImportPrice(raw: string): number {
-  const cleaned = String(raw || '')
+  let cleaned = String(raw || '')
     .trim()
     .replace(/\s/g, '')
-    .replace(/[€$£]/g, '')
-    .replace(',', '.');
+    .replace(/[€$£]/g, '');
+  // Formato europeo: 1.234,56
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(cleaned)) {
+    cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+  } else {
+    cleaned = cleaned.replace(',', '.');
+  }
   const price = Number(cleaned);
   return Number.isFinite(price) ? price : NaN;
 }
@@ -346,105 +351,138 @@ function isTemplateExampleImportRow(entry: Record<string, string>): boolean {
   return /^ejemplo\s*[·\-–—]/i.test(name);
 }
 
+type CatalogImportRowContext = {
+  commercial: ImportBrandLike[];
+  lineNames: Set<string>;
+  brands: ImportBrandLike[];
+  seenSkus: Set<string>;
+};
+
+function collectDeliveryCatalogImportRowIssues(
+  entry: Record<string, string>,
+  row: number,
+  ctx: CatalogImportRowContext,
+): DeliveryCatalogImportIssue[] {
+  const issues: DeliveryCatalogImportIssue[] = [];
+  const name = String(entry.name || '').trim();
+  const categoryRaw = String(entry.category || '').trim();
+  const category = normalizeImportCategory(categoryRaw);
+  const lineText = readImportLineText(entry);
+  const priceRaw = String(entry.price || entry.unitPrice || '').trim();
+  const price = parseImportPrice(priceRaw);
+  const sku = String(entry.sku || '').trim().toLowerCase();
+
+  if (!name) {
+    issues.push({ row, field: 'nombre', message: 'Falta el nombre del producto', severity: 'error' });
+  } else if (/^ejemplo · borra/i.test(name) || /^ejemplo ·/i.test(name)) {
+    issues.push({
+      row,
+      field: 'nombre',
+      message: 'Parece fila de ejemplo de la plantilla — cámbiala o bórrala',
+      severity: 'warning',
+    });
+  }
+
+  if (!categoryRaw) {
+    issues.push({ row, field: 'categoria', message: 'Falta la categoría TPV', severity: 'error' });
+  } else if (/^dato\s*\d+$/i.test(categoryRaw)) {
+    issues.push({
+      row,
+      field: 'categoria',
+      message: `«${categoryRaw}» no es una categoría válida (revisa la columna categoria)`,
+      severity: 'error',
+    });
+  }
+
+  if (!priceRaw) {
+    issues.push({ row, field: 'precio', message: 'Falta el precio', severity: 'error' });
+  } else if (!Number.isFinite(price) || price < 0) {
+    issues.push({ row, field: 'precio', message: 'Precio no válido (usa formato 9.50)', severity: 'error' });
+  } else if (price <= 0) {
+    issues.push({
+      row,
+      field: 'precio',
+      message: 'Precio 0: el producto no se podrá vender en TPV',
+      severity: 'warning',
+    });
+  }
+
+  if (sku) {
+    if (ctx.seenSkus.has(sku)) {
+      issues.push({ row, field: 'sku', message: `SKU duplicado «${entry.sku}» en el archivo`, severity: 'error' });
+    } else {
+      ctx.seenSkus.add(sku);
+    }
+  }
+
+  if (lineText) {
+    const { unmatchedNames } = resolveCommercialLineIdsFromText(lineText, ctx.brands);
+    if (unmatchedNames.length > 0) {
+      issues.push({
+        row,
+        field: 'linea',
+        message: `Línea «${unmatchedNames[0]}» no coincide con Ajustes → Marca (${[...ctx.lineNames].slice(0, 5).join(', ') || 'sin líneas'}). Se asignará por categoría.`,
+        severity: 'warning',
+      });
+    }
+    if (shouldClearBrandForCategory(category)) {
+      issues.push({
+        row,
+        field: 'linea',
+        message: `Categoría «${category}» es compartida: deja linea vacía`,
+        severity: 'warning',
+      });
+    }
+  } else if (isImportComboCategory(category)) {
+    issues.push({
+      row,
+      field: 'linea',
+      message: 'Menú/combo: indica la linea comercial (modomio, BlackBurger…)',
+      severity: 'warning',
+    });
+  } else if (!shouldClearBrandForCategory(category) && ctx.commercial.length > 0) {
+    issues.push({
+      row,
+      field: 'linea',
+      message: `Sin linea: se asignará por categoría o a la línea principal`,
+      severity: 'warning',
+    });
+  }
+
+  return issues;
+}
+
+/** Importa filas válidas aunque otras del mismo Excel fallen (p. ej. una pizza sin precio). */
+export function partitionDeliveryCatalogImportEntries(
+  entries: Record<string, string>[],
+  brands: ImportBrandLike[],
+): { validEntries: Record<string, string>[]; issues: DeliveryCatalogImportIssue[] } {
+  const issues: DeliveryCatalogImportIssue[] = [];
+  const validEntries: Record<string, string>[] = [];
+  const ctx: CatalogImportRowContext = {
+    commercial: organizerBrandsForCatalogTemplate(brands),
+    lineNames: new Set(allCommercialLineBrands(brands).map((b) => String(b.name || '').trim().toLowerCase())),
+    brands,
+    seenSkus: new Set<string>(),
+  };
+
+  entries.forEach((entry, index) => {
+    if (isTemplateExampleImportRow(entry)) return;
+    const rowIssues = collectDeliveryCatalogImportRowIssues(entry, index + 2, ctx);
+    issues.push(...rowIssues);
+    if (!rowIssues.some((i) => i.severity === 'error')) {
+      validEntries.push(entry);
+    }
+  });
+
+  return { validEntries, issues };
+}
+
 export function validateDeliveryCatalogImportEntries(
   entries: Record<string, string>[],
   brands: ImportBrandLike[],
 ): DeliveryCatalogImportValidation {
-  const issues: DeliveryCatalogImportIssue[] = [];
-  const commercial = organizerBrandsForCatalogTemplate(brands);
-  const linePool = allCommercialLineBrands(brands);
-  const lineNames = new Set(linePool.map((b) => String(b.name || '').trim().toLowerCase()));
-  const seenSkus = new Set<string>();
-
-  entries.forEach((entry, index) => {
-    if (isTemplateExampleImportRow(entry)) return;
-
-    const row = index + 2;
-    const name = String(entry.name || '').trim();
-    const categoryRaw = String(entry.category || '').trim();
-    const category = normalizeImportCategory(categoryRaw);
-    const lineText = readImportLineText(entry);
-    const priceRaw = String(entry.price || entry.unitPrice || '').trim();
-    const price = parseImportPrice(priceRaw);
-    const sku = String(entry.sku || '').trim().toLowerCase();
-
-    if (!name) {
-      issues.push({ row, field: 'nombre', message: 'Falta el nombre del producto', severity: 'error' });
-    } else if (/^ejemplo · borra/i.test(name) || /^ejemplo ·/i.test(name)) {
-      issues.push({
-        row,
-        field: 'nombre',
-        message: 'Parece fila de ejemplo de la plantilla — cámbiala o bórrala',
-        severity: 'warning',
-      });
-    }
-
-    if (!categoryRaw) {
-      issues.push({ row, field: 'categoria', message: 'Falta la categoría TPV', severity: 'error' });
-    } else if (/^dato\s*\d+$/i.test(categoryRaw)) {
-      issues.push({
-        row,
-        field: 'categoria',
-        message: `«${categoryRaw}» no es una categoría válida (revisa la columna categoria)`,
-        severity: 'error',
-      });
-    }
-
-    if (!priceRaw) {
-      issues.push({ row, field: 'precio', message: 'Falta el precio', severity: 'error' });
-    } else if (!Number.isFinite(price) || price < 0) {
-      issues.push({ row, field: 'precio', message: 'Precio no válido (usa formato 9.50)', severity: 'error' });
-    } else if (price <= 0) {
-      issues.push({
-        row,
-        field: 'precio',
-        message: 'Precio 0: el producto no se podrá vender en TPV',
-        severity: 'warning',
-      });
-    }
-
-    if (sku) {
-      if (seenSkus.has(sku)) {
-        issues.push({ row, field: 'sku', message: `SKU duplicado «${entry.sku}» en el archivo`, severity: 'error' });
-      }
-      seenSkus.add(sku);
-    }
-
-    if (lineText) {
-      const { unmatchedNames } = resolveCommercialLineIdsFromText(lineText, brands);
-      if (unmatchedNames.length > 0) {
-        issues.push({
-          row,
-          field: 'linea',
-          message: `Línea «${unmatchedNames[0]}» no coincide con Ajustes → Marca (${[...lineNames].slice(0, 5).join(', ') || 'sin líneas'}). Se asignará por categoría.`,
-          severity: 'warning',
-        });
-      }
-      if (shouldClearBrandForCategory(category)) {
-        issues.push({
-          row,
-          field: 'linea',
-          message: `Categoría «${category}» es compartida: deja linea vacía`,
-          severity: 'warning',
-        });
-      }
-    } else if (isImportComboCategory(category)) {
-      issues.push({
-        row,
-        field: 'linea',
-        message: 'Menú/combo: indica la linea comercial (modomio, BlackBurger…)',
-        severity: 'warning',
-      });
-    } else if (!shouldClearBrandForCategory(category) && commercial.length > 0) {
-      issues.push({
-        row,
-        field: 'linea',
-        message: `Sin linea: se asignará por categoría o a la línea principal`,
-        severity: 'warning',
-      });
-    }
-  });
-
+  const { issues } = partitionDeliveryCatalogImportEntries(entries, brands);
   return {
     ok: issues.every((i) => i.severity !== 'error'),
     issues,

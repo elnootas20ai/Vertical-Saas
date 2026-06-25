@@ -60,10 +60,13 @@ import {
   categoriesForTpvScope,
   defaultTpvSectionId,
   parseTpvSectionId,
+  tpvSectionProductCount,
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
+import { resolveTpvRegisterScope } from '../../lib/tpvRegisterScope';
 import { shouldUseDeliveryStores, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
@@ -200,7 +203,7 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
 
 function TpvRapidoCeoBoard() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const {
     pointsOfSale,
     retailWorkCenters,
@@ -259,8 +262,10 @@ function TpvRapidoCeoBoard() {
 
   useEffect(() => {
     if (!businessId || !dataUserId) return;
-    prefetchTpvCatalog(dataUserId, businessId);
-  }, [businessId, dataUserId]);
+    prefetchTpvCatalog(dataUserId, businessId, {
+      accountBusinessCount: businesses.length,
+    });
+  }, [businessId, dataUserId, businesses.length]);
 
   const storeRows = useMemo(
     () => buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId),
@@ -369,30 +374,30 @@ export function TpvRapidoOrderFlow({
   const register = registerOverride ?? registerFromGate;
 
   const { addClient, clients, clientsTotalCount } = useApp();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
   const goBack = onBack ?? (() => navigate('/saas/delivery-ops'));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
+  const registerScope = useMemo(
+    () => resolveTpvRegisterScope({ currentBusiness, tabletBinding, authUser: user }),
+    [currentBusiness, tabletBinding, user],
+  );
   const isDeliveryBusiness = useMemo(
     () => shouldUseDeliveryStores(
       { business: currentBusiness, userOnboarding: user?.onboarding },
-      { tabletBusinessId: tabletBinding?.businessId ?? null, hasDeliveryPdvs: true },
+      { tabletBusinessId: (registerScope.scopeBusinessId || tabletBinding?.businessId) ?? null, hasDeliveryPdvs: true },
     ),
-    [currentBusiness, user?.onboarding, tabletBinding?.businessId],
+    [currentBusiness, user?.onboarding, registerScope.scopeBusinessId, tabletBinding?.businessId],
   );
-  const userId = useMemo(() => {
-    const resolved = resolveBusinessDataUserId(user, currentBusiness);
-    if (resolved) return resolved;
-    return String(tabletBinding?.dataUserId || '').trim();
-  }, [user, currentBusiness, tabletBinding?.dataUserId]);
-  const businessId = useMemo(() => {
-    const fromBusiness = resolveBusinessScopeId(currentBusiness);
-    if (fromBusiness) return fromBusiness;
-    return String(tabletBinding?.businessId || '').trim();
-  }, [currentBusiness, tabletBinding?.businessId]);
-  const clientSearchBusinessId = isDeliveryBusiness ? (businessId || undefined) : undefined;
+  const userId = registerScope.effectiveDataUserId;
+  const businessId = registerScope.scopeBusinessId;
+  const clientSearchUserId = useMemo(
+    () => userId || resolveBusinessDataUserId(user, currentBusiness),
+    [userId, user, currentBusiness],
+  );
+  const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessId);
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(new Set());
@@ -415,7 +420,7 @@ export function TpvRapidoOrderFlow({
 
   const { results, isSearching, searchError, selectedClient, selectClient, clearSelection, clearResults } =
     useClientPhoneSearch({
-      userId,
+      userId: clientSearchUserId,
       phone: phoneInput,
       businessId: clientSearchBusinessId,
       enabled: !showCreateForm,
@@ -514,7 +519,9 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
-  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId);
+  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId, {
+    accountBusinessCount: businesses.length,
+  });
 
   const reloadDeliveryCustomization = useCallback(() => {
     if (!userId) return;
@@ -546,10 +553,33 @@ export function TpvRapidoOrderFlow({
   );
 
   useEffect(() => {
+    brandInitRef.current = false;
+    setSelectedSectionId('');
+    setSelectedCategory(null);
+    setProductPickerReset((n) => n + 1);
+  }, [businessId]);
+
+  useEffect(() => {
     if (brandInitRef.current || catalogSections.length === 0) return;
     brandInitRef.current = true;
-    setSelectedSectionId(defaultTpvSectionId(catalogSections));
-  }, [catalogSections]);
+    setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
+  }, [catalogSections, catalog]);
+
+  useEffect(() => {
+    if (!selectedSectionId || loadingCatalog || catalog.length === 0) return;
+    const scope = parseTpvSectionId(selectedSectionId);
+    if (!scope || tpvSectionProductCount(catalog, scope) > 0) return;
+    const fallback = defaultTpvSectionId(catalogSections, catalog);
+    if (fallback && fallback !== selectedSectionId) {
+      setSelectedSectionId(fallback);
+      setSelectedCategory(null);
+    }
+  }, [selectedSectionId, loadingCatalog, catalog, catalogSections]);
+
+  useEffect(() => {
+    if (!userId || !businessId) return;
+    prefetchTpvCatalog(userId, businessId, { accountBusinessCount: businesses.length });
+  }, [userId, businessId, businesses.length]);
 
   useEffect(() => {
     if (!userId) return;
@@ -611,7 +641,7 @@ export function TpvRapidoOrderFlow({
       setRecentOrdersPool([]);
       return;
     }
-    const pdvId = String(register.session?.pointOfSaleId || '').trim();
+    const pdvId = String(register?.session?.pointOfSaleId || '').trim();
     const today = new Date().toISOString().slice(0, 10);
     let cancelled = false;
     filterDeliveryOrdersRequest(userId, {
@@ -629,7 +659,7 @@ export function TpvRapidoOrderFlow({
     return () => {
       cancelled = true;
     };
-  }, [userId, register.session?.pointOfSaleId]);
+  }, [userId, register?.session?.pointOfSaleId]);
 
   // ─── Autofocus phone on mount or reset ─────────────────────────────────────
   useEffect(() => {
@@ -932,10 +962,11 @@ export function TpvRapidoOrderFlow({
         ...(halfHalfTarget.initial ?? EMPTY_CART_CUSTOMIZATION),
         halfHalfPizza: selection,
       };
-      commitCartLine(halfHalfTarget.item, customization, halfHalfTarget.lineId);
+      const { item, lineId } = halfHalfTarget;
       setHalfHalfTarget(null);
+      setCustomizeTarget({ item, lineId, initial: customization });
     },
-    [halfHalfTarget, commitCartLine],
+    [halfHalfTarget],
   );
 
   const handleComboConfirm = useCallback(
@@ -1490,7 +1521,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register.session, user?.fullName, user?.user_id, user?.id, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients],
+    [selectedClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register?.session, user?.fullName, user?.user_id, user?.id, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands],
   );
 
   // ─── Reset ────────────────────────────────────────────────────────────────
@@ -1531,6 +1562,10 @@ export function TpvRapidoOrderFlow({
     setTimeout(() => phoneRef.current?.focus(), 150);
   }, [clearSelection, clearResults, catalogSections]);
 
+  const handleCancelOrder = useCallback(() => {
+    goBack();
+  }, [goBack]);
+
   // ─── Success screen ───────────────────────────────────────────────────────
   if (createdOrder) {
     return (
@@ -1560,7 +1595,7 @@ export function TpvRapidoOrderFlow({
                 <OrderTicketButtons
                   order={createdOrder}
                   business={businessTicketInfoFrom(currentBusiness)}
-                  salesPointName={createdOrder.salesPointName || register.session?.pointOfSaleName}
+                  salesPointName={createdOrder.salesPointName || register?.session?.pointOfSaleName}
                   cashierName={createdOrder.takenByName}
                   layout="grid"
                   className="w-full"
@@ -1684,10 +1719,10 @@ export function TpvRapidoOrderFlow({
         <div className="flex gap-1">
           <button
             type="button"
-            onClick={handleReset}
-            className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+            onClick={handleCancelOrder}
+            className={`px-3 rounded-lg border-2 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
           >
-            Cancelar
+            Cancelar pedido
           </button>
           <button
             type="button"
@@ -1718,6 +1753,7 @@ export function TpvRapidoOrderFlow({
       contentFill={tabletMode && isProductsFocus}
       topSlot={tpvTopActions}
       footerSlot={stickyFooter}
+      hideBack
     >
       <div className={`w-full min-w-0 ${tabletMode ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-4 px-2 md:px-4'}`}>
         {!tabletMode && register && register.clockedInWorkers.length > 0 && (
@@ -2157,7 +2193,8 @@ export function TpvRapidoOrderFlow({
               removeFromCart={decrementCatalogInCart}
               formatPrice={formatPrice}
               hasPricedProducts={hasPricedProducts}
-              onImportCatalog={() => navigate('/saas/catalog')}
+              onImportCatalog={tabletMode ? undefined : () => navigate('/saas/catalog')}
+              hideCatalogAdminLink={tabletMode}
               cartPanel={(
                 <div className={`flex flex-col h-full min-h-0 ${tabletMode ? 'p-2.5' : 'p-3'} ${cartShake ? 'animate-shake' : ''}`}>
                   <div className={`flex items-center justify-between shrink-0 ${tabletMode ? 'mb-2' : 'mb-1.5'}`}>
@@ -2548,6 +2585,7 @@ function TpvFullscreenShell({
   embedded = false,
   tabletMode = false,
   contentFill = false,
+  hideBack = false,
 }: {
   children: ReactNode;
   onBack: () => void;
@@ -2558,27 +2596,32 @@ function TpvFullscreenShell({
   tabletMode?: boolean;
   /** Tablet: bloquear scroll del shell y delegarlo al grid de productos. */
   contentFill?: boolean;
+  /** Oculta «Volver» arriba; la salida va en el footer (Cancelar pedido). */
+  hideBack?: boolean;
 }) {
   const minimalHeader = tabletMode && embedded;
-  const header = (
+  const showHeader = !hideBack || !!topSlot;
+  const header = showHeader ? (
     <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 pt-[max(0px,env(safe-area-inset-top))]">
       <div className={`mx-auto flex items-center gap-1.5 ${minimalHeader ? 'px-1.5 py-0.5' : `max-w-[1320px] px-3 ${tabletMode ? 'py-1.5' : 'py-2.5'}`}`}>
-        <button
-          type="button"
-          onClick={onBack}
-          className={`inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors touch-manipulation ${
-            minimalHeader ? 'min-h-[28px] min-w-[28px] p-1' : `gap-1.5 px-2.5 ${tabletMode ? 'min-h-[36px] py-1.5 text-xs' : 'py-1.5 text-sm'}`
-          }`}
-          title="Volver"
-        >
-          <ArrowLeft className={minimalHeader ? 'w-4 h-4' : 'w-4 h-4'} />
-          {!minimalHeader && 'Volver'}
-        </button>
+        {!hideBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className={`inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors touch-manipulation ${
+              minimalHeader ? 'min-h-[28px] min-w-[28px] p-1' : `gap-1.5 px-2.5 ${tabletMode ? 'min-h-[36px] py-1.5 text-xs' : 'py-1.5 text-sm'}`
+            }`}
+            title="Volver"
+          >
+            <ArrowLeft className={minimalHeader ? 'w-4 h-4' : 'w-4 h-4'} />
+            {!minimalHeader && 'Volver'}
+          </button>
+        ) : null}
         <div className="flex-1 min-w-0" />
         {topSlot}
       </div>
     </div>
-  );
+  ) : null;
 
   if (embedded) {
     const contentClass =

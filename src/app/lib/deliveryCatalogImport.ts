@@ -282,6 +282,9 @@ export async function mapImportEntryToCatalogItem(
     available: true,
     webVisible: true,
     module: 'catalog',
+    ...(options.businessId
+      ? { business_id: options.businessId, vertical: 'delivery' }
+      : {}),
   };
 
   const ingredientsRaw = String(entry.ingredients || entry.ingredientes || '').trim();

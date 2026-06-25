@@ -21,7 +21,7 @@ const BTN =
   'flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50';
 
 const BTN_COMPACT =
-  'flex flex-1 items-center justify-center gap-1 px-2 py-1.5 min-h-[36px] rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-[11px] font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50';
+  'flex flex-1 items-center justify-center gap-1 px-1.5 py-1 min-h-[32px] rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-[10px] font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 touch-manipulation';
 
 const BTN_TABLET =
   'flex flex-1 items-center justify-center gap-1.5 px-2.5 py-2.5 min-h-[44px] rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 touch-manipulation';

@@ -197,3 +197,34 @@ export function registerSessionSpansMultipleDays(
     : localCalendarDayKey(new Date(session.closedAt || now));
   return openKey !== endKey;
 }
+
+/** Una caja abierta por tienda (la más reciente si hay duplicados). */
+export function dedupeOpenRegisterSessions(sessions: TpvRegisterSession[]): TpvRegisterSession[] {
+  const byPdv = new Map<string, TpvRegisterSession>();
+  for (const s of sessions) {
+    if (s.status !== 'open') continue;
+    const pdv = String(s.pointOfSaleId || '_').trim() || '_';
+    const prev = byPdv.get(pdv);
+    if (!prev || String(s.openedAt).localeCompare(String(prev.openedAt)) > 0) {
+      byPdv.set(pdv, s);
+    }
+  }
+  return [...byPdv.values()].sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
+}
+
+function registerSessionDisplayRank(session: TpvRegisterSession): number {
+  if (session.status === 'open') return 0;
+  if (session.closingValidationStatus === 'pending') return 1;
+  if (session.closingValidationStatus === 'rejected') return 2;
+  return 3;
+}
+
+/** Orden de turnos: abiertos → pendientes → cerrados (más reciente primero). */
+export function sortRegisterSessionsForDisplay(sessions: TpvRegisterSession[]): TpvRegisterSession[] {
+  return [...sessions].sort((a, b) => {
+    const ra = registerSessionDisplayRank(a);
+    const rb = registerSessionDisplayRank(b);
+    if (ra !== rb) return ra - rb;
+    return String(b.openedAt).localeCompare(String(a.openedAt));
+  });
+}

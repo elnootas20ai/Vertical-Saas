@@ -12,7 +12,7 @@ import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsA
 import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
 import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
 import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
-import { listDeliveryOrdersRequest, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
+import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
   LineChart, Line, XAxis, YAxis, CartesianGrid, Area, AreaChart,
@@ -56,6 +56,9 @@ import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
 import { DashboardViewProvider, useDashboardView } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
+import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { listFinanceMovements } from '../../lib/financeApi';
 import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
 import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
@@ -669,6 +672,65 @@ function UnifiedDashboard() {
   const [clockinsLoading, setClockinsLoading] = useState(false);
   const [teamSnapshot, setTeamSnapshot] = useState<TeamDashboardSnapshot | null>(null);
   const [teamLoading, setTeamLoading] = useState(false);
+  const [deliveryMetrics, setDeliveryMetrics] = useState<PortfolioMetrics | null>(null);
+
+  const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
+
+  useEffect(() => {
+    if (!isDeliveryVertical || !authUser || !currentBusiness) {
+      setDeliveryMetrics(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
+      if (!dataUserId) return;
+      const todayKey = localCalendarDayKey();
+      const monthKey = todayKey.slice(0, 7);
+      const monthStart = `${monthKey}-01T00:00:00.000Z`;
+      const lookbackMs = 45 * 24 * 60 * 60 * 1000;
+      const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
+      const monthEnd = `${todayKey}T23:59:59.999Z`;
+      try {
+        const [{ pointsOfSale, workCenters }, orderResult] = await Promise.all([
+          loadDeliveryStores(authUser, currentBusiness).catch(() => ({
+            dataUserId: '',
+            workCenters: [],
+            pointsOfSale: [],
+          })),
+          filterDeliveryOrdersRequest(dataUserId, {
+            dateFrom: orderFetchFrom,
+            dateTo: monthEnd,
+            limit: 3000,
+          }).catch(() => ({ orders: [], total: 0 })),
+        ]);
+        const pdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
+        const storeIds = workCenters
+          .filter((wc) => !wc.deletedAt && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'))
+          .map((wc) => wc._id);
+        const wcScope = new Set(storeIds);
+        if (pdvIds.length === 0 && wcScope.size === 0) {
+          if (!cancelled) setDeliveryMetrics(emptyPortfolioMetrics());
+          return;
+        }
+        const createdMap = new Map(pointsOfSale.map((p) => [p._id, String(p.createdAt || '')]));
+        const primaryPdv = pickPrimaryPdvIdFromList(pdvIds, createdMap);
+        const metrics = computePortfolioMetrics(
+          orderResult.orders,
+          pdvIds,
+          primaryPdv,
+          todayKey,
+          wcScope,
+        );
+        if (!cancelled) setDeliveryMetrics(metrics);
+      } catch {
+        if (!cancelled) setDeliveryMetrics(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isDeliveryVertical, authUser, currentBusiness?.business_id, currentBusiness?.businessType]);
 
   useEffect(() => {
     try {
@@ -857,9 +919,13 @@ function UnifiedDashboard() {
     return new Date(v.soldAt) >= firstOfMonth;
   }), [vehicles, firstOfMonth]);
 
-  const salesToday       = sk?.salesToday ?? 0;
+  const salesToday       = isDeliveryVertical && deliveryMetrics
+    ? deliveryMetrics.revenueToday
+    : (sk?.salesToday ?? 0);
   const salesTodayCount  = sk?.salesTodayCount ?? 0;
-  const salesMonth       = sk?.salesMonth ?? soldThisMonth.reduce((s, v) => s + (v.salePrice || 0), 0);
+  const salesMonth       = isDeliveryVertical && deliveryMetrics
+    ? deliveryMetrics.revenueMonth
+    : (sk?.salesMonth ?? soldThisMonth.reduce((s, v) => s + (v.salePrice || 0), 0));
   const expensesMonth    = sk?.expensesMonth ?? 0;
   const estimatedProfit  = sk?.estimatedProfit ?? (salesMonth - expensesMonth);
   const cashBalance      = sk?.cashBalance ?? 0;
@@ -867,7 +933,9 @@ function UnifiedDashboard() {
   const activeWorkers    = sk?.activeWorkers ?? 0;
   const totalClockinsToday = sk?.totalClockinsToday ?? 0;
   const openIncidents    = sk?.openIncidents ?? 0;
-  const pendingDeliveriesKpi = sk?.pendingDeliveries ?? 0;
+  const pendingDeliveriesKpi = isDeliveryVertical && deliveryMetrics
+    ? deliveryMetrics.activeOrders
+    : (sk?.pendingDeliveries ?? 0);
   const stockCount       = sk?.stockCount ?? vehicles.filter(v => v.status === 'listo').length;
   const oportunidades    = sk?.oportunidades ?? leads.filter(l => l.status !== 'won' && l.status !== 'lost').length;
   const cobrosCount      = sk?.cobrosCount ?? sales.filter(s => s.status === 'pending').length;

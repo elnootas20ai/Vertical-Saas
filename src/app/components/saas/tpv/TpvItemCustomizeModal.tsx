@@ -6,8 +6,12 @@ import {
   type CatalogSupplement,
   cartLineUnitPrice,
   isCustomizableCatalogItem,
+  isTpvBuildYourOwnCatalogItem,
   parseCatalogIngredients,
   parseCatalogSupplements,
+  productBrandIdsFromItem,
+  resolveTpvCategoryTemplateKey,
+  tpvBaseIngredientNames,
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -64,18 +68,32 @@ export function TpvItemCustomizeModal({
 }: TpvItemCustomizeModalProps) {
   useModalClose(true, onClose);
 
+  const buildYourOwn = isTpvBuildYourOwnCatalogItem(item);
   const customizable =
+    buildYourOwn ||
     isCustomizableCatalogItem(item, brands) ||
     (initial?.comboSelections?.length ?? 0) > 0;
   const tpvResolveOptions = useMemo(
     () => ({
-      productIngredientsOnly: true,
+      productIngredientsOnly: !buildYourOwn,
       storeExtrasOnly: true,
       tpvFallbackWhenEmpty: true,
       catalogItems,
       comboSelections: initial?.comboSelections,
+      halfHalfPizza: initial?.halfHalfPizza,
     }),
-    [catalogItems, initial?.comboSelections],
+    [buildYourOwn, catalogItems, initial?.comboSelections, initial?.halfHalfPizza],
+  );
+  const templateKey = useMemo(
+    () => resolveTpvCategoryTemplateKey(item, brands, tpvResolveOptions),
+    [item, brands, tpvResolveOptions],
+  );
+  const buildYourOwnPool = useMemo(
+    () =>
+      buildYourOwn
+        ? tpvBaseIngredientNames(storeIngredients, productBrandIdsFromItem(item), templateKey)
+        : [],
+    [buildYourOwn, storeIngredients, item, templateKey],
   );
   const ingredients = useMemo(
     () =>
@@ -106,28 +124,42 @@ export function TpvItemCustomizeModal({
   );
 
   const [removed, setRemoved] = useState<string[]>(initial?.removedIngredients || []);
+  const [addedBase, setAddedBase] = useState<string[]>(initial?.addedBaseIngredients || []);
   const [added, setAdded] = useState<CatalogSupplement[]>(initial?.addedSupplements || []);
   const [notes, setNotes] = useState(initial?.notes || '');
-  const [activeTab, setActiveTab] = useState<CustomizeTab>(() =>
-    defaultTabForItem(customizable, ingredients.length, supplements.length),
-  );
+  const [activeTab, setActiveTab] = useState<CustomizeTab>(() => {
+    if (buildYourOwn) {
+      return buildYourOwnPool.length > 0 ? 'ingredients' : 'extras';
+    }
+    return defaultTabForItem(customizable, ingredients.length, supplements.length);
+  });
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     setRemoved(initial?.removedIngredients || []);
+    setAddedBase(initial?.addedBaseIngredients || []);
     setAdded(initial?.addedSupplements || []);
     setNotes(initial?.notes || '');
-    setActiveTab(defaultTabForItem(customizable, ingredients.length, supplements.length));
+    setActiveTab(
+      buildYourOwn
+        ? buildYourOwnPool.length > 0
+          ? 'ingredients'
+          : 'extras'
+        : defaultTabForItem(customizable, ingredients.length, supplements.length),
+    );
     setSearchQuery('');
-  }, [item._id, initial, customizable, ingredients.length, supplements.length]);
+  }, [item._id, initial, customizable, ingredients.length, supplements.length, buildYourOwn, buildYourOwnPool.length]);
 
   useEffect(() => {
     setSearchQuery('');
   }, [activeTab]);
 
   const filteredIngredients = useMemo(
-    () => ingredients.filter((name) => matchesSearch(name, searchQuery)),
-    [ingredients, searchQuery],
+    () =>
+      (buildYourOwn ? buildYourOwnPool : ingredients).filter((name) =>
+        matchesSearch(name, searchQuery),
+      ),
+    [buildYourOwn, buildYourOwnPool, ingredients, searchQuery],
   );
   const filteredSupplements = useMemo(
     () => supplements.filter((sup) => matchesSearch(sup.name, searchQuery)),
@@ -135,10 +167,12 @@ export function TpvItemCustomizeModal({
   );
 
   const customization: CartLineCustomization = {
-    removedIngredients: removed,
+    removedIngredients: buildYourOwn ? [] : removed,
+    addedBaseIngredients: buildYourOwn ? addedBase : undefined,
     addedSupplements: added,
     notes: notes.trim(),
     comboSelections: initial?.comboSelections,
+    halfHalfPizza: initial?.halfHalfPizza,
   };
 
   const basePrice = Number(item.unitPrice || 0);
@@ -146,6 +180,12 @@ export function TpvItemCustomizeModal({
   const unitTotal = cartLineUnitPrice(basePrice, customization);
 
   const toggleIngredient = (name: string) => {
+    if (buildYourOwn) {
+      setAddedBase((prev) =>
+        prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+      );
+      return;
+    }
     setRemoved((prev) =>
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
@@ -160,11 +200,13 @@ export function TpvItemCustomizeModal({
 
   const categoryLabel = String(item.category || '').trim() || 'Producto';
   const removedCount = removed.length;
+  const addedBaseCount = addedBase.length;
   const addedCount = added.length;
   const hasConfiguredExtras = supplements.length > 0;
   const showSearchBar =
     customizable &&
-    ((activeTab === 'ingredients' && ingredients.length > 0) ||
+    ((activeTab === 'ingredients' &&
+      (buildYourOwn ? buildYourOwnPool.length > 0 : ingredients.length > 0)) ||
       (activeTab === 'extras' && supplements.length > 0));
 
   const tabBtn = (tab: CustomizeTab, label: string, hint: string, badge?: number) => {
@@ -223,6 +265,13 @@ export function TpvItemCustomizeModal({
                 <span className="inline-flex px-2.5 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-300">
                   {categoryLabel}
                 </span>
+                {(initial?.halfHalfPizza?.firstProductName ||
+                  initial?.halfHalfPizza?.secondProductName) && (
+                  <span className="inline-flex px-2.5 py-0.5 rounded-lg bg-amber-100 dark:bg-amber-950/50 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                    ½ {initial?.halfHalfPizza?.firstProductName} · ½{' '}
+                    {initial?.halfHalfPizza?.secondProductName}
+                  </span>
+                )}
                 {(initial?.comboSelections?.length ?? 0) > 0 && (
                   <span className="inline-flex px-2.5 py-0.5 rounded-lg bg-indigo-100 dark:bg-indigo-950/50 text-xs font-semibold text-indigo-800 dark:text-indigo-200">
                     {initial!.comboSelections!.map((c) => c.productName).join(' · ')}
@@ -251,9 +300,9 @@ export function TpvItemCustomizeModal({
           <div className="shrink-0 px-4 pt-4 pb-2 flex flex-col sm:flex-row gap-2">
             {tabBtn(
               'ingredients',
-              'Quitar',
-              'Toca lo que NO quieres',
-              removedCount,
+              buildYourOwn ? 'Ingredientes' : 'Quitar',
+              buildYourOwn ? 'Toca lo que quieres añadir' : 'Toca lo que NO quieres',
+              buildYourOwn ? addedBaseCount : removedCount,
             )}
             {tabBtn(
               'extras',
@@ -314,17 +363,31 @@ export function TpvItemCustomizeModal({
             <section className="space-y-4">
               <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 px-4 py-3">
                 <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                  Ingredientes incluidos
+                  {buildYourOwn ? 'Elige ingredientes' : 'Ingredientes incluidos'}
                 </p>
                 <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-1">
-                  Toca un ingrediente para <strong>quitarlo</strong> del producto. Los tachados no irán a cocina.
+                  {buildYourOwn ? (
+                    <>
+                      Toca un ingrediente para <strong>añadirlo</strong> a la pizza al gusto.
+                    </>
+                  ) : (
+                    <>
+                      Toca un ingrediente para <strong>quitarlo</strong> del producto. Los tachados no irán a cocina.
+                    </>
+                  )}
                 </p>
               </div>
-              {ingredients.length === 0 ? (
+              {(buildYourOwn ? buildYourOwnPool : ingredients).length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 leading-relaxed">
-                  Sin ingredientes para quitar. En <strong>Catálogo</strong> abre la ficha de «{item.name}» y rellena
-                  ingredientes, o impórtalos en Excel (columna <strong>ingredientes</strong>). También puedes marcar
-                  ingredientes incluidos (sin cobro) en Catálogo → <strong>Ingredientes TPV</strong>.
+                  {buildYourOwn
+                    ? 'Configura ingredientes base en Catálogo → Ingredientes TPV (paso 1, sin precio extra).'
+                    : (
+                      <>
+                        Sin ingredientes para quitar. En <strong>Catálogo</strong> abre la ficha de «{item.name}» y rellena
+                        ingredientes, o impórtalos en Excel (columna <strong>ingredientes</strong>). También puedes marcar
+                        ingredientes incluidos (sin cobro) en Catálogo → <strong>Ingredientes TPV</strong>.
+                      </>
+                    )}
                 </p>
               ) : filteredIngredients.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
@@ -333,21 +396,27 @@ export function TpvItemCustomizeModal({
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {filteredIngredients.map((name) => {
-                    const isRemoved = removed.includes(name);
+                    const isActive = buildYourOwn ? addedBase.includes(name) : removed.includes(name);
                     return (
                       <button
                         key={name}
                         type="button"
                         onClick={() => toggleIngredient(name)}
                         className={`min-h-[52px] px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-all active:scale-[0.98] ${
-                          isRemoved
-                            ? 'border-red-400 bg-red-50 text-red-800 line-through dark:bg-red-950/40 dark:border-red-700 dark:text-red-300'
+                          isActive
+                            ? buildYourOwn
+                              ? 'border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-600 dark:text-emerald-200'
+                              : 'border-red-400 bg-red-50 text-red-800 line-through dark:bg-red-950/40 dark:border-red-700 dark:text-red-300'
                             : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 shadow-sm'
                         }`}
                       >
                         <span className="flex items-center justify-center gap-1.5">
-                          {isRemoved ? (
-                            <Minus className="w-4 h-4 shrink-0" />
+                          {isActive ? (
+                            buildYourOwn ? (
+                              <Plus className="w-4 h-4 shrink-0" />
+                            ) : (
+                              <Minus className="w-4 h-4 shrink-0" />
+                            )
                           ) : (
                             <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                           )}

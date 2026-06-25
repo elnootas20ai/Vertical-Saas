@@ -6,6 +6,7 @@ import {
   type DeliveryActivationFlags,
 } from '../lib/deliveryActivationChecklist';
 import { listCatalogItemsRequest } from '../lib/deliveryApi';
+import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope';
 import {
   DELIVERY_BRANDS_CHANGED,
   DELIVERY_CATALOG_CHANGED,
@@ -183,14 +184,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         const { hasActiveRetailStore, hasActivePdv, retailStores } =
           snapshotDeliveryStoreActivation(storeState);
 
-        const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
-        const catalogForBusiness = catalog.filter((item) => {
-          const ids = (item.brandIds ?? []).map((id) => String(id).trim()).filter(Boolean);
-          if (ids.length === 0) {
-            return Boolean(item.name?.trim()) && brandIds.size > 0;
-          }
-          return ids.some((id) => brandIds.has(id));
-        });
+        const catalogForBusiness = filterCatalogItemsForBusinessScope(
+          catalog,
+          businessId,
+          brands,
+          { accountBusinessCount: businessesCount },
+        );
         const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
         const primaryBrand =

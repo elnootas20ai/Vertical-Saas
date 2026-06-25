@@ -94,10 +94,24 @@ export function readImportLineText(entry: Record<string, string | unknown>): str
 const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   bebidas: 'Bebidas',
   bebida: 'Bebidas',
-  complementos: 'Complementos',
-  complemento: 'Complementos',
+  refrescos: 'Bebidas',
+  refresco: 'Bebidas',
+  cervezas: 'Bebidas',
+  cerveza: 'Bebidas',
+  zumos: 'Bebidas',
+  zumo: 'Bebidas',
+  drinks: 'Bebidas',
+  drink: 'Bebidas',
+  beverages: 'Bebidas',
+  beverage: 'Bebidas',
+  sodas: 'Bebidas',
+  soda: 'Bebidas',
   sides: 'Complementos',
   side: 'Complementos',
+  guarniciones: 'Complementos',
+  guarnicion: 'Complementos',
+  complementos: 'Complementos',
+  complemento: 'Complementos',
   postres: 'Postres',
   postre: 'Postres',
   extras: 'Extras',
@@ -137,6 +151,32 @@ export function normalizeImportCategory(value: string): string {
   return raw;
 }
 
+function compactFoldKey(s: string): string {
+  return foldKey(s).replace(/[^a-z0-9]/g, '');
+}
+
+function matchCommercialLinePart(part: string, searchIn: ImportBrandLike[]): ImportBrandLike | undefined {
+  const key = foldKey(part);
+  if (!key) return undefined;
+
+  const byId = searchIn.find((b) => b._id === part || b.id === part);
+  if (byId) return byId;
+
+  const exact = searchIn.find((b) => foldKey(b.name) === key);
+  if (exact) return exact;
+
+  const compactPart = compactFoldKey(part);
+  if (!compactPart) return undefined;
+
+  const partial = searchIn.filter((b) => {
+    const compactName = compactFoldKey(b.name);
+    if (!compactName) return false;
+    return compactName.includes(compactPart) || compactPart.includes(compactName);
+  });
+  if (partial.length === 1) return partial[0];
+  return undefined;
+}
+
 export function resolveCommercialLineIdsFromText(
   lineText: string,
   brands: ImportBrandLike[],
@@ -152,10 +192,7 @@ export function resolveCommercialLineIdsFromText(
   const unmatchedNames: string[] = [];
 
   for (const part of parts) {
-    const key = foldKey(part);
-    const hit =
-      searchIn.find((b) => b._id === part || b.id === part) ||
-      searchIn.find((b) => foldKey(b.name) === key);
+    const hit = matchCommercialLinePart(part, searchIn);
     if (!hit) {
       unmatchedNames.push(part);
       continue;
@@ -167,7 +204,7 @@ export function resolveCommercialLineIdsFromText(
 }
 
 export function shouldClearBrandForCategory(category: string): boolean {
-  const c = foldKey(category);
+  const c = foldKey(normalizeImportCategory(category));
   return (
     c === 'bebidas' ||
     c === 'bebida' ||
@@ -249,6 +286,20 @@ export function inferCommercialLineBrandId(
   const catKey = foldKey(category);
   const byName = pool.find((b) => foldKey(b.name) === catKey);
   if (byName?._id) return byName._id;
+
+  if (catKey === 'pizzas' || catKey === 'pizza') {
+    const pizzaLine =
+      pool.find((b) => b.deliveryLineKind === 'pizza')
+      ?? pool.find((b) => /pizza|modomio/.test(foldKey(b.name)));
+    if (pizzaLine?._id) return pizzaLine._id;
+  }
+
+  if (catKey === 'burgers' || catKey === 'hamburguesas' || catKey === 'burger') {
+    const burgerLine =
+      pool.find((b) => b.deliveryLineKind === 'burger_fastfood')
+      ?? pool.find((b) => /black\s*burger|blackburger|burger/.test(foldKey(b.name)));
+    if (burgerLine?._id) return burgerLine._id;
+  }
 
   const byCatalogCat = commercialAll.filter((b) => brandHasCatalogCategory(b, category));
   if (byCatalogCat.length === 1) return byCatalogCat[0]._id;

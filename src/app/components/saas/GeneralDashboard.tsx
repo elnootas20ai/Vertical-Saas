@@ -20,7 +20,7 @@ import {
   FileText,
   Wallet,
 } from 'lucide-react';
-import { fmtEuro } from '../../lib/portfolioMetrics';
+import { fmtEuro, fmtPercent, type PortfolioFinanceTotals } from '../../lib/portfolioMetrics';
 import { Layout } from './Layout';
 import { BUSINESS_TYPE_COLORS, BUSINESS_TYPE_LABELS } from './BusinessCarousel';
 import { useAuth } from '../../context/AuthContext';
@@ -46,7 +46,8 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const { user } = useAuth();
   const { businesses, switchBusiness } = useBusiness();
 
-  const { rows, totals, finance, loading, error, reload } = usePortfolioOverview(user, businesses);
+  const { rows, totals, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload } =
+    usePortfolioOverview(user, businesses, { live: true });
   const { canViewEbitda, isBasicPlan, planLabel } = useDashboardPlanAccess();
   const portfolioPlan = usePortfolioPlanAccess();
 
@@ -74,6 +75,43 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       return false;
     });
   }, [rows, businessFilter, search]);
+
+  const filteredFinance = useMemo((): PortfolioFinanceTotals => {
+    if (filteredRows.length === 0) {
+      return {
+        incomeMonth: 0,
+        expensesMonth: 0,
+        profitMonth: 0,
+        ebitdaMonth: 0,
+        ebitdaMarginMonth: 0,
+        pendingAmount: 0,
+        cashBalance: finance.cashBalance,
+      };
+    }
+    const sum = (pick: (f: PortfolioBusiness['finance']) => number) =>
+      filteredRows.reduce((s, r) => s + pick(r.finance), 0);
+    const incomeMonth = sum((f) => f.incomeMonth);
+    const expensesMonth = sum((f) => f.expensesMonth);
+    const ebitdaMonth = sum((f) => f.ebitdaMonth);
+    return {
+      incomeMonth,
+      expensesMonth,
+      profitMonth: incomeMonth - expensesMonth,
+      ebitdaMonth,
+      ebitdaMarginMonth: incomeMonth > 0 ? Math.round((ebitdaMonth / incomeMonth) * 1000) / 10 : 0,
+      pendingAmount: sum((f) => f.pendingAmount),
+      cashBalance: finance.cashBalance,
+    };
+  }, [filteredRows, finance.cashBalance]);
+
+  const displayFinance = businessFilter === 'all' ? finance : filteredFinance;
+  const liveStatusText = liveSseOk
+    ? 'En vivo'
+    : isRefreshing
+      ? 'Actualizando…'
+      : lastUpdatedAt
+        ? `Actualizado ${lastUpdatedAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} · cada 90s`
+        : null;
 
   const filteredTotals = useMemo((): PortfolioTotals => {
     return {
@@ -137,7 +175,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   return (
     <Layout
       title="Visión general"
-      subtitle={`${businesses.length} empresas · Plan ${portfolioPlan.planLabel} · resumen del mes`}
+      subtitle={`${businesses.length} empresas · Plan ${portfolioPlan.planLabel} · resumen del mes${liveStatusText ? ` · ${liveStatusText}` : ''}`}
     >
       <div className="flex flex-col gap-4 -mt-1">
         <PortfolioPlanBanner
@@ -154,16 +192,16 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
               <Wallet className="w-4 h-4 text-indigo-500" />
-              Finanzas consolidadas del mes
+              {businessFilter === 'all' ? 'Finanzas consolidadas del mes' : 'Finanzas de la selección'}
             </h3>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => void reload()}
-                disabled={loading}
+                disabled={loading && !isRefreshing}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 ${loading || isRefreshing ? 'animate-spin' : ''}`} />
                 Actualizar
               </button>
               <button
@@ -176,18 +214,18 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             </div>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <MoneyCard label="Ingresos" value={fmtEuro(finance.incomeMonth)} tone="emerald" icon={<TrendingUp className="w-4 h-4" />} />
-            <MoneyCard label="Gastos" value={fmtEuro(finance.expensesMonth)} tone="rose" icon={<TrendingDown className="w-4 h-4" />} />
+            <MoneyCard label="Ingresos" value={fmtEuro(displayFinance.incomeMonth)} tone="emerald" icon={<TrendingUp className="w-4 h-4" />} />
+            <MoneyCard label="Gastos" value={fmtEuro(displayFinance.expensesMonth)} tone="rose" icon={<TrendingDown className="w-4 h-4" />} />
             {canViewEbitda ? (
               <>
-                <MoneyCard label="EBITDA mes" value={fmtEuro(finance.ebitdaMonth)} tone={finance.ebitdaMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
-                <MoneyCard label="Margen EBITDA" value={`${finance.ebitdaMarginMonth.toFixed(1)}%`} tone="blue" icon={<TrendingUp className="w-4 h-4" />} />
+                <MoneyCard label="EBITDA mes" value={fmtEuro(displayFinance.ebitdaMonth)} tone={displayFinance.ebitdaMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
+                <MoneyCard label="Margen EBITDA" value={fmtPercent(displayFinance.ebitdaMarginMonth)} tone="blue" icon={<TrendingUp className="w-4 h-4" />} />
               </>
             ) : (
-              <MoneyCard label="Resultado" value={fmtEuro(finance.profitMonth)} tone={finance.profitMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
+              <MoneyCard label="Resultado" value={fmtEuro(displayFinance.profitMonth)} tone={displayFinance.profitMonth >= 0 ? 'emerald' : 'rose'} icon={<Banknote className="w-4 h-4" />} />
             )}
-            <MoneyCard label="Pendiente cobro" value={fmtEuro(finance.pendingAmount)} tone="amber" icon={<Receipt className="w-4 h-4" />} />
-            <MoneyCard label="Saldo bancos" value={fmtEuro(finance.cashBalance)} tone="blue" icon={<Wallet className="w-4 h-4" />} />
+            <MoneyCard label="Pendiente cobro" value={fmtEuro(displayFinance.pendingAmount)} tone="amber" icon={<Receipt className="w-4 h-4" />} />
+            <MoneyCard label="Saldo bancos" value={fmtEuro(displayFinance.cashBalance)} tone="blue" icon={<Wallet className="w-4 h-4" />} />
           </div>
           {isBasicPlan && (
             <p className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-3">
@@ -221,12 +259,20 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
               Comparativa por empresa
             </h3>
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 dark:border-gray-700">
                   <th className="pb-2 pr-3">Empresa</th>
                   <th className="pb-2 pr-3 text-right">Ingresos fin.</th>
                   <th className="pb-2 pr-3 text-right">Gastos fin.</th>
+                  {canViewEbitda ? (
+                    <>
+                      <th className="pb-2 pr-3 text-right">EBITDA</th>
+                      <th className="pb-2 pr-3 text-right">Margen</th>
+                    </>
+                  ) : (
+                    <th className="pb-2 pr-3 text-right">Resultado</th>
+                  )}
                   <th className="pb-2 pr-3 text-right">Ingresos delivery</th>
                   <th className="pb-2 pr-3 text-right">Entregados</th>
                   <th className="pb-2 pr-3 text-right">Pedidos</th>
@@ -242,6 +288,18 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                     <td className="py-2.5 pr-3 font-semibold text-gray-900 dark:text-gray-100">{r.business.name}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtEuro(r.finance.incomeMonth)}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-rose-600 dark:text-rose-400">{fmtEuro(r.finance.expensesMonth)}</td>
+                    {canViewEbitda ? (
+                      <>
+                        <td className={`py-2.5 pr-3 text-right tabular-nums font-semibold ${r.finance.ebitdaMonth >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                          {fmtEuro(r.finance.ebitdaMonth)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right tabular-nums text-indigo-600 dark:text-indigo-400">{fmtPercent(r.finance.ebitdaMarginMonth)}</td>
+                      </>
+                    ) : (
+                      <td className={`py-2.5 pr-3 text-right tabular-nums ${r.finance.profitMonth >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {fmtEuro(r.finance.profitMonth)}
+                      </td>
+                    )}
                     <td className="py-2.5 pr-3 text-right tabular-nums">{fmtEuro(r.metrics.revenueMonth)}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">{r.metrics.deliveredMonth}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{r.metrics.ordersMonth}</td>
@@ -307,6 +365,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                 key={row.businessId}
                 row={row}
                 expanded={expandedIds.has(row.businessId)}
+                canViewEbitda={canViewEbitda}
                 onToggleExpand={() => toggleExpanded(row.businessId)}
                 onEnter={() => enterBusiness(row.businessId)}
                 onOpenBrands={() => openBrands(row.businessId)}
@@ -422,6 +481,7 @@ function FilterChip({
 function BusinessCard({
   row,
   expanded,
+  canViewEbitda,
   onToggleExpand,
   onEnter,
   onOpenBrands,
@@ -434,6 +494,7 @@ function BusinessCard({
 }: {
   row: PortfolioBusiness;
   expanded: boolean;
+  canViewEbitda: boolean;
   onToggleExpand: () => void;
   onEnter: () => void;
   onOpenBrands: () => void;
@@ -489,6 +550,14 @@ function BusinessCard({
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtEuro(m.revenueMonth)} delivery</span>
               <span className="text-gray-300">·</span>
               <span>{fmtEuro(f.incomeMonth)} ing. fin. · {fmtEuro(f.expensesMonth)} gastos</span>
+              {canViewEbitda ? (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className={f.ebitdaMonth >= 0 ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-rose-600 font-semibold'}>
+                    EBITDA {fmtEuro(f.ebitdaMonth)} ({fmtPercent(f.ebitdaMarginMonth)})
+                  </span>
+                </>
+              ) : null}
               <span className="text-gray-300">·</span>
               <span>{m.ordersMonth} pedidos · {m.deliveredMonth} entregados</span>
               <span className="text-gray-300">·</span>
@@ -529,7 +598,14 @@ function BusinessCard({
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
               <MetricPill label="Ingresos fin." value={fmtEuro(f.incomeMonth)} highlight />
               <MetricPill label="Gastos fin." value={fmtEuro(f.expensesMonth)} />
-              <MetricPill label="Resultado fin." value={fmtEuro(f.profitMonth)} highlight={f.profitMonth >= 0} />
+              {canViewEbitda ? (
+                <>
+                  <MetricPill label="EBITDA mes" value={fmtEuro(f.ebitdaMonth)} highlight={f.ebitdaMonth >= 0} />
+                  <MetricPill label="Margen EBITDA" value={fmtPercent(f.ebitdaMarginMonth)} />
+                </>
+              ) : (
+                <MetricPill label="Resultado fin." value={fmtEuro(f.profitMonth)} highlight={f.profitMonth >= 0} />
+              )}
               <MetricPill label="Pendiente cobro" value={fmtEuro(f.pendingAmount)} />
             </div>
 

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { filterCatalogItemsForBusinessScope } from '../../lib/catalogBusinessScope';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
 import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
@@ -37,7 +38,7 @@ import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
   downloadDeliveryCatalogImportTemplate,
-  validateDeliveryCatalogImportEntries,
+  partitionDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
 import {
   catalogCategorySuggestions,
@@ -191,7 +192,7 @@ const SAMPLE_PNG_BASE64 =
 interface CreateCatalogItemModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: Partial<CatalogItem>) => Promise<void>;
+  onCreate: (data: Partial<CatalogItem>, options?: { keepOpen?: boolean }) => Promise<void>;
   editItem?: CatalogItem | null;
   brands: Brand[];
   businessId: string;
@@ -215,6 +216,7 @@ function CreateCatalogItemModal({
 }: CreateCatalogItemModalProps) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [sessionCreated, setSessionCreated] = useState<Array<{ name: string; price: number }>>([]);
   const createModalWasOpenRef = useRef(false);
   const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
   const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
@@ -241,11 +243,13 @@ function CreateCatalogItemModal({
     ingredients: '',
     supplements: [] as Array<{ id: string; name: string; price: string }>,
     halfHalf: false,
+    buildYourOwn: false,
   });
 
   useEffect(() => {
     if (!isOpen) {
       createModalWasOpenRef.current = false;
+      setSessionCreated([]);
       return;
     }
 
@@ -283,6 +287,7 @@ function CreateCatalogItemModal({
           price: String(s.price),
         })),
         halfHalf: editItem.customFields?.halfHalf === true,
+        buildYourOwn: editItem.customFields?.buildYourOwn === true,
       });
       setStep(1);
       return;
@@ -290,6 +295,7 @@ function CreateCatalogItemModal({
 
     if (!justOpened) return;
 
+    setSessionCreated([]);
     setComboItems([]);
     setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
@@ -301,7 +307,7 @@ function CreateCatalogItemModal({
       showNewBrand: false,
       unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
       image: '', allergens: [], notes: '', webVisible: true, available: true,
-      ingredients: '', supplements: [], halfHalf: false,
+      ingredients: '', supplements: [], halfHalf: false, buildYourOwn: false,
     });
     setStep(1);
   }, [editItem, isOpen]);
@@ -319,6 +325,11 @@ function CreateCatalogItemModal({
     [brands, form.selectedBrandIds, catalogCategoriesInUse],
   );
 
+  const activeBrands = useMemo(
+    () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
+    [brands],
+  );
+
   useEffect(() => {
     if (!isOpen || editItem) return;
     if (form.selectedBrandIds.length !== 1) return;
@@ -327,12 +338,20 @@ function CreateCatalogItemModal({
     setForm((f) => (f.category.trim() ? f : { ...f, category: suggested }));
   }, [isOpen, editItem, form.selectedBrandIds, brands]);
 
-  useModalClose(isOpen, onClose);
-
-  const activeBrands = useMemo(
-    () => sortBrandsForDisplay(brands.filter((b) => b.active !== false)),
-    [brands],
+  const normalizedCategory = useMemo(
+    () => normalizeImportCategory(form.category),
+    [form.category],
   );
+  const isSharedCatalogCategory = shouldClearBrandForCategory(normalizedCategory);
+  const requiresCommercialBrand = activeBrands.length > 0 && !isSharedCatalogCategory;
+
+  useEffect(() => {
+    if (!isOpen || editItem || !isSharedCatalogCategory) return;
+    if (form.selectedBrandIds.length === 0) return;
+    setForm((f) => ({ ...f, selectedBrandIds: [] }));
+  }, [isOpen, editItem, isSharedCatalogCategory, form.selectedBrandIds.length]);
+
+  useModalClose(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -366,24 +385,26 @@ function CreateCatalogItemModal({
     }));
   };
 
-  const handleFinalSubmit = async () => {
+  const handleFinalSubmit = async (keepOpen = false) => {
     if (!form.name.trim()) {
       toast.error('El nombre es obligatorio');
       if (!isEditMode) setStep(1);
       return;
     }
-    if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) {
+    if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
       toast.error('Selecciona la línea comercial (marca) del producto');
       if (!isEditMode) setStep(1);
       return;
     }
     setSubmitting(true);
     try {
-      const category = normalizeImportCategory(form.category);
-      const brandIds =
-        shouldClearBrandForCategory(category) && form.selectedBrandIds.length === 0
-          ? []
-          : [...form.selectedBrandIds];
+      const category = normalizedCategory;
+      const brandIds = resolveCatalogImportBrandIds(
+        form.selectedBrandIds,
+        category,
+        brands,
+        form.name.trim(),
+      );
       const customizable = isCatalogTpvConfigurable(
         {
           category,
@@ -409,10 +430,13 @@ function CreateCatalogItemModal({
           : {}),
         ...(form.itemType === 'product' &&
         (form.halfHalf || /mitad\s*y\s*mitad/i.test(form.name.trim()))
-          ? { halfHalf: true }
-          : form.itemType === 'product'
-            ? { halfHalf: false }
-            : {}),
+          ? { halfHalf: true, buildYourOwn: false }
+          : form.itemType === 'product' &&
+              (form.buildYourOwn || /al\s*gusto|a\s*gusto/i.test(form.name.trim()))
+            ? { buildYourOwn: true, halfHalf: false }
+            : form.itemType === 'product'
+              ? { halfHalf: false, buildYourOwn: false }
+              : {}),
       };
       await onCreate({
         ...editItem,
@@ -435,7 +459,37 @@ function CreateCatalogItemModal({
         active: editItem?.active ?? true,
         webVisible: form.webVisible,
         available: form.available,
-      });
+      }, keepOpen && !isEditMode ? { keepOpen: true } : undefined);
+
+      if (keepOpen && !isEditMode) {
+        const savedName = form.name.trim();
+        const savedPrice = Number(form.unitPrice) || 0;
+        setSessionCreated((prev) => [...prev, { name: savedName, price: savedPrice }]);
+        setComboItems([]);
+        setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+        setComboStructureConfirmed(true);
+        setForm((f) => ({
+          ...f,
+          name: '',
+          description: '',
+          unitPrice: '',
+          staffPrice: '',
+          costPrice: '',
+          stockQuantity: '',
+          minStock: '',
+          image: '',
+          allergens: [],
+          notes: '',
+          ingredients: '',
+          supplements: [],
+          halfHalf: false,
+          buildYourOwn: false,
+          webVisible: true,
+          available: true,
+        }));
+        setStep(1);
+        toast.success(`«${savedName}» guardado. Añade otro artículo a «${category}».`);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -444,7 +498,7 @@ function CreateCatalogItemModal({
   const canNext = () => {
     if (step === 1) {
       if (!form.name.trim()) return false;
-      if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) return false;
+      if (requiresCommercialBrand && form.selectedBrandIds.length === 0) return false;
       return true;
     }
     return true;
@@ -456,7 +510,7 @@ function CreateCatalogItemModal({
         toast.error('Indica el nombre del producto para continuar');
         return;
       }
-      if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) {
+      if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
         toast.error('Selecciona la línea comercial (marca) del producto');
         return;
       }
@@ -465,7 +519,20 @@ function CreateCatalogItemModal({
     setStep((s) => s + 1);
   };
 
-  const renderBrandPicker = () => (
+  const renderBrandPicker = () => {
+    if (isSharedCatalogCategory) {
+      return (
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-3 py-2.5">
+          <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+            Categoría compartida del TPV
+          </p>
+          <p className="text-xs text-blue-800/80 dark:text-blue-300/80 mt-0.5">
+            «{normalizedCategory}» aparece en la pestaña compartida del TPV (sin línea comercial).
+          </p>
+        </div>
+      );
+    }
+    return (
     <div>
       <label className={labelClass}>Marca comercial</label>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -562,7 +629,8 @@ function CreateCatalogItemModal({
         </button>
       )}
     </div>
-  );
+    );
+  };
 
   const renderCategoryUnit = () => (
     <>
@@ -614,6 +682,7 @@ function CreateCatalogItemModal({
           setForm((f) => ({
             ...f,
             halfHalf: !f.halfHalf,
+            buildYourOwn: false,
             category: f.category || (/pizza/i.test(f.name) ? 'Pizzas' : f.category),
           }))
         }
@@ -632,6 +701,40 @@ function CreateCatalogItemModal({
           </div>
           <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.halfHalf ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
             <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.halfHalf ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const renderBuildYourOwnProductToggle = () => {
+    if (form.itemType !== 'product') return null;
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          setForm((f) => ({
+            ...f,
+            buildYourOwn: !f.buildYourOwn,
+            halfHalf: false,
+            category: f.category || (/pizza/i.test(f.name) ? 'Pizzas' : f.category),
+          }))
+        }
+        className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+          form.buildYourOwn
+            ? 'border-orange-400 bg-orange-50 dark:bg-orange-950/25'
+            : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-bold text-gray-900 dark:text-gray-100">Pizza al gusto</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              En TPV el cliente elige ingredientes base · precio fijo del producto
+            </p>
+          </div>
+          <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.buildYourOwn ? 'bg-orange-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.buildYourOwn ? 'translate-x-5' : 'translate-x-0.5'}`} />
           </div>
         </div>
       </button>
@@ -903,6 +1006,7 @@ function CreateCatalogItemModal({
                   <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                 </div>
                 {renderHalfHalfProductToggle()}
+                {renderBuildYourOwnProductToggle()}
                 <div>
                   <label className={labelClass}>Descripción</label>
                   <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -978,6 +1082,23 @@ function CreateCatalogItemModal({
             </div>
           ) : step === 1 ? (
             <div className="space-y-5">
+              {sessionCreated.length > 0 ? (
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2.5">
+                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                    {sessionCreated.length} artículo(s) guardado(s) en «{normalizedCategory || form.category || 'esta sección'}»
+                  </p>
+                  <ul className="mt-1.5 space-y-0.5 text-xs text-emerald-900 dark:text-emerald-200">
+                    {sessionCreated.slice(-4).map((item) => (
+                      <li key={`${item.name}-${item.price}`}>
+                        {item.name} · {item.price.toFixed(2)}€
+                      </li>
+                    ))}
+                    {sessionCreated.length > 4 ? (
+                      <li className="text-emerald-700 dark:text-emerald-400">+{sessionCreated.length - 4} más</li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
               {renderBrandPicker()}
               {renderCategoryUnit()}
               <div>
@@ -1009,6 +1130,7 @@ function CreateCatalogItemModal({
                 <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
               </div>
               {renderHalfHalfProductToggle()}
+              {renderBuildYourOwnProductToggle()}
               <div>
                 <label className={labelClass}>Descripción</label>
                 <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -1134,7 +1256,7 @@ function CreateCatalogItemModal({
               <div className="flex-1" />
               <button
                 type="button"
-                onClick={handleFinalSubmit}
+                onClick={() => void handleFinalSubmit(false)}
                 disabled={submitting}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
               >
@@ -1163,14 +1285,24 @@ function CreateCatalogItemModal({
                   Siguiente
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleFinalSubmit}
-                  disabled={submitting}
-                  className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
-                >
-                  {submitting ? 'Guardando…' : 'Crear artículo'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleFinalSubmit(true)}
+                    disabled={submitting}
+                    className="px-5 py-3 border-2 border-green-600 text-green-700 dark:text-green-400 rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait hover:bg-green-50 dark:hover:bg-green-950/30"
+                  >
+                    {submitting ? 'Guardando…' : 'Guardar y añadir otro'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleFinalSubmit(false)}
+                    disabled={submitting}
+                    className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-semibold transition-colors disabled:opacity-60 disabled:cursor-wait"
+                  >
+                    {submitting ? 'Guardando…' : sessionCreated.length > 0 ? 'Guardar y cerrar' : 'Crear artículo'}
+                  </button>
+                </>
               )}
             </>
           )}
@@ -1831,7 +1963,7 @@ export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const CATALOG_TABS = ['catalog', 'stock', 'staff-consumption', 'suppliers', 'purchase-orders', 'invoices', 'ingredientes', 'escandallo'] as const;
   const { user } = useAuth();
-  const { currentBusiness, businessesFetchSettled } = useBusiness();
+  const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const activeStore = useActiveStoreScope();
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
@@ -1846,7 +1978,15 @@ export function CatalogPage() {
   );
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandsLoading, setBrandsLoading] = useState(false);
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const accountBusinessCount = businesses.length;
+  const [allCatalogItems, setAllCatalogItems] = useState<CatalogItem[]>([]);
+  const catalogItems = useMemo(
+    () =>
+      filterCatalogItemsForBusinessScope(allCatalogItems, businessId, brands, {
+        accountBusinessCount,
+      }),
+    [allCatalogItems, businessId, brands, accountBusinessCount],
+  );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2020,18 +2160,35 @@ export function CatalogPage() {
       return finish({ count: 0, report });
     }
 
-    const validation = validateDeliveryCatalogImportEntries(productRows, brands);
-    if (!validation.ok) {
+    const { validEntries: importRows, issues: importIssues } = partitionDeliveryCatalogImportEntries(
+      productRows,
+      brands,
+    );
+
+    if (importRows.length === 0) {
+      const validation = { ok: false, issues: importIssues };
       const report = catalogImportReportFromValidation(validation);
-      toast.error('Revisa la plantilla antes de importar');
+      toast.error(
+        importIssues.some((i) => i.severity === 'error')
+          ? 'Ninguna fila válida en el Excel — revisa nombre, categoría y precio'
+          : 'No hay productos para importar',
+      );
       return finish({ count: 0, report });
     }
-    const warnings = validation.issues.filter((i) => i.severity === 'warning');
+
+    const warnings = importIssues.filter((i) => i.severity === 'warning');
+    const errors = importIssues.filter((i) => i.severity === 'error');
     const warningLines = warnings.map((w) => ({
       row: w.row,
       field: w.field,
       message: w.message,
     }));
+    if (errors.length > 0) {
+      toast.message(
+        `Se importan ${importRows.length} fila(s). ${errors.length} fila(s) omitida(s) por error (revisa el informe).`,
+        { duration: 9000 },
+      );
+    }
 
     const zipProvided = Object.keys(imageZipMap).length > 0;
     const unmatchedImageRefs: string[] = [];
@@ -2039,8 +2196,8 @@ export function CatalogPage() {
     const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
 
-    for (let index = 0; index < productRows.length; index += 1) {
-      const entry = productRows[index];
+    for (let index = 0; index < importRows.length; index += 1) {
+      const entry = importRows[index];
       const mapped = await mapImportEntryToCatalogItem(entry, {
         businessId: businessId || '',
         brandCache,
@@ -2118,10 +2275,18 @@ export function CatalogPage() {
       }
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
+      setCatalogSectionsOpen((prev) => {
+        const next = new Set(prev);
+        for (const item of items) {
+          const cat = String(item.category || '').trim();
+          if (cat) next.add(cat);
+        }
+        return next;
+      });
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
       const parts = [];
       if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
-      if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s) con ingredientes`);
+      if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s)`);
       toast.success(
         `${parts.join(' · ')}` +
           (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
@@ -2138,21 +2303,36 @@ export function CatalogPage() {
       at: Date.now(),
       summary:
         totalOk > 0
-          ? warningLines.length > 0
-            ? `Importación completada con ${warningLines.length} aviso(s)`
+          ? errors.length > 0 || warningLines.length > 0
+            ? `Importación completada: ${totalOk} producto(s) · ${errors.length} fila(s) omitida(s)${warningLines.length > 0 ? ` · ${warningLines.length} aviso(s)` : ''}`
             : 'Importación completada'
           : result.errors > 0
-            ? `${result.errors} producto(s) no se importaron`
+            ? result.errors > 0 &&
+              (result.errorDetails || []).every((e) =>
+                String(e.error || '').toLowerCase().includes('sku duplicado'),
+              )
+              ? 'Esos productos ya existen en el catálogo (mismo SKU). No se duplicaron.'
+              : `${result.errors} producto(s) no se importaron`
             : 'Importación sin cambios',
-      errors: bulkReport?.errors ?? [],
+      errors: [
+        ...errors.map((e) => ({ row: e.row, field: e.field, message: e.message })),
+        ...(bulkReport?.errors ?? []),
+      ],
       warnings: warningLines,
       created: result.created,
       updated: result.updated ?? 0,
-      failed: result.errors,
+      failed: result.errors + errors.length,
     };
 
     if (result.errors > 0 && totalOk === 0) {
-      toast.error(successReport.summary);
+      const allDuplicateSku = (result.errorDetails || []).every((e) =>
+        String(e.error || '').toLowerCase().includes('sku duplicado'),
+      );
+      if (allDuplicateSku) {
+        toast.info(successReport.summary, { duration: 10000 });
+      } else {
+        toast.error(successReport.summary);
+      }
     } else if (result.errors > 0) {
       toast.warning(`${result.errors} producto(s) no se importaron`);
     }
@@ -2245,18 +2425,26 @@ export function CatalogPage() {
   }, [businessesFetchSettled, businessId, loadBrands]);
 
   const loadCatalog = useCallback(async () => {
-    if (!dataUserId) return;
+    if (!dataUserId || !businessId) return;
+    const requestUserId = dataUserId;
+    const requestBusinessId = businessId;
     try {
       const [items, wh] = await Promise.all([
-        listCatalogItemsRequest(dataUserId),
-        listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
+        listCatalogItemsRequest(requestUserId),
+        listWarehousesRequest(requestUserId).catch(() => [] as Warehouse[]),
       ]);
-      setCatalogItems(items);
+      if (
+        requestUserId !== resolveBusinessDataUserId(user, currentBusiness)
+        || requestBusinessId !== resolveBusinessScopeId(currentBusiness)
+      ) {
+        return;
+      }
+      setAllCatalogItems(items);
       setWarehouses(wh);
     } catch {
       toast.error('Error al cargar el catálogo');
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId, user, currentBusiness]);
 
   const loadSuppliers = useCallback(async () => {
     if (!dataUserId) return;
@@ -2313,7 +2501,7 @@ export function CatalogPage() {
     invoicesFetchedRef.current = false;
     suppliersLoadStartedRef.current = false;
     invoicesLoadStartedRef.current = false;
-    setCatalogItems([]);
+    setAllCatalogItems([]);
     setSuppliers([]);
     setInvoices([]);
     setInvoiceFinanceLinks(new Set());
@@ -2392,10 +2580,13 @@ export function CatalogPage() {
 
   // ── CRUD: Catalog Items ─────────────────────────────────────────────────────
 
-  const handleCreateItem = async (data: Partial<CatalogItem>) => {
+  const handleCreateItem = async (
+    data: Partial<CatalogItem>,
+    options?: { keepOpen?: boolean },
+  ) => {
     if (!dataUserId) {
       toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
-      return;
+      throw new Error('Sesión no válida');
     }
     const payload: Partial<CatalogItem> = {
       ...data,
@@ -2407,22 +2598,29 @@ export function CatalogPage() {
     try {
       if (editingItem) {
         const updated = await updateCatalogItemRequest(dataUserId, { ...editingItem, ...payload } as CatalogItem);
-        setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+        setAllCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
         setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
         toast.success('Artículo actualizado');
       } else {
         const created = await createCatalogItemRequest(dataUserId, payload as CatalogItem);
-        setCatalogItems(prev => [created, ...prev]);
-        toast.success('Artículo creado');
-        if (isDelivery && businessId && (created.brandIds?.length ?? 0) > 0) {
-          void syncTpvOrganizersAfterCatalogImport(businessId, [created]).catch(() => null);
+        setAllCatalogItems(prev => [created, ...prev]);
+        if (!options?.keepOpen) {
+          toast.success('Artículo creado');
+        }
+        if (isDelivery && businessId) {
+          const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
+          const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
+          if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
         }
       }
-      setShowCreateItem(false);
-      setEditingItem(null);
+      if (!options?.keepOpen) {
+        setShowCreateItem(false);
+        setEditingItem(null);
+      }
       notifyDeliveryCatalogChanged(dataUserId, businessId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el artículo');
+      throw err;
     }
   };
 
@@ -2486,7 +2684,7 @@ export function CatalogPage() {
       setDeletingItemIds((prev) => new Set(prev).add(item._id));
       try {
         await deleteCatalogItemRequest(dataUserId, item._id);
-        setCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
+        setAllCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
         notifyDeliveryCatalogChanged(dataUserId, businessId);
         toast.success('Artículo eliminado');
       } catch {
@@ -2528,7 +2726,7 @@ export function CatalogPage() {
     if (!dataUserId) return;
     try {
       const updated = await updateCatalogItemRequest(dataUserId, { ...item, [field]: !item[field] });
-      setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+      setAllCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
       setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       const labels: Record<string, [string, string]> = {
@@ -2568,7 +2766,7 @@ export function CatalogPage() {
           : {}),
       },
     });
-    setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
+    setAllCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
     setDetailItem(updated);
     notifyDeliveryCatalogChanged(dataUserId, businessId);
   };
@@ -2577,7 +2775,7 @@ export function CatalogPage() {
     if (!dataUserId) return;
     try {
       const updated = await updateCatalogItemRequest(dataUserId, { ...item, stockQuantity: newQuantity });
-      setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
+      setAllCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
       setStockAdjustItem(null);
       toast.success(`Stock de "${item.name}" actualizado a ${newQuantity}`);
     } catch {
@@ -2790,7 +2988,7 @@ export function CatalogPage() {
           try {
             const patched = applyCatalogMoveTarget(item, target);
             const updated = await updateCatalogItemRequest(dataUserId, patched);
-            setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
+            setAllCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
             setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
             moved += 1;
           } catch {

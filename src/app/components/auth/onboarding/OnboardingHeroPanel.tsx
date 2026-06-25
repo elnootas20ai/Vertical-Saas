@@ -44,7 +44,7 @@ export function OnboardingHeroPanel({ visualKey, stepIndex, visual: visualOverri
 
   return (
     <aside
-      className={`relative hidden lg:flex flex-col overflow-hidden bg-[#0f1419] ${className}`}
+      className={`relative hidden 2xl:flex flex-col overflow-hidden bg-[#0f1419] ${className}`}
       aria-hidden
     >
       <div

@@ -50,9 +50,9 @@ const ACCENT_STYLES: Record<
 };
 
 const BTN_PRIMARY =
-  'w-full min-h-[3rem] px-5 py-3.5 rounded-xl font-semibold text-sm transition-colors';
+  'w-full min-h-[2.75rem] sm:min-h-[3rem] px-4 sm:px-5 py-3 rounded-xl font-semibold text-sm leading-tight transition-colors';
 const BTN_SECONDARY =
-  'w-full min-h-[3rem] px-5 py-3 rounded-xl border-2 font-medium text-sm transition-colors flex items-center justify-center gap-2';
+  'w-full min-h-[2.75rem] sm:min-h-[3rem] px-4 sm:px-5 py-3 rounded-xl border-2 font-medium text-sm leading-tight transition-colors flex items-center justify-center gap-2 text-center';
 
 function EntryRoleCard({
   accent,
@@ -78,19 +78,20 @@ function EntryRoleCard({
   const styles = ACCENT_STYLES[accent];
 
   return (
-    <div className="flex flex-col h-full p-6 lg:p-7 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm">
-      <div
-        className={`w-14 h-14 rounded-xl flex items-center justify-center mb-4 shrink-0 ${styles.iconWrap}`}
-      >
-        <Icon className={`w-7 h-7 ${styles.icon}`} />
+    <div className="flex flex-col h-full p-5 sm:p-6 xl:p-7 bg-white dark:bg-gray-800 border border-gray-200/90 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-start gap-3 sm:gap-4 mb-3 sm:mb-4">
+        <div
+          className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shrink-0 ${styles.iconWrap}`}
+        >
+          <Icon className={`w-6 h-6 sm:w-7 sm:h-7 ${styles.icon}`} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">{title}</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-gray-600 dark:text-gray-400">{description}</p>
+        </div>
       </div>
 
-      <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">{title}</h2>
-      <p className="text-sm leading-relaxed text-gray-600 dark:text-gray-400 mb-6 flex-1 min-h-[4.5rem]">
-        {description}
-      </p>
-
-      <div className="mt-auto space-y-3 shrink-0">
+      <div className="mt-auto space-y-2.5 sm:space-y-3 shrink-0 pt-2">
         <button type="button" onClick={onPrimary} className={`${BTN_PRIMARY} ${styles.primary}`}>
           {primaryLabel}
         </button>
@@ -120,28 +121,28 @@ export function Entry() {
   if (view === 'register') {
     return (
       <AccesoSplitLayout visualKey="register-company">
-        <div className="flex flex-1 flex-col items-center p-6 py-8 lg:px-10 lg:py-10">
+        <div className="flex flex-1 flex-col items-center px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
         <div className="w-full max-w-3xl">
-          <div className="text-center mb-10">
-            <div className="flex items-center justify-center mb-6">
+          <div className="text-center mb-6 sm:mb-8 2xl:mb-10">
+            <div className="hidden 2xl:flex items-center justify-center mb-5">
               <VertialLogo size="xl" />
             </div>
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <h1 className="text-xl sm:text-2xl 2xl:text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Crear cuenta
             </h1>
-            <p className="text-lg text-gray-600 dark:text-gray-400">
+            <p className="text-sm sm:text-base 2xl:text-lg text-gray-600 dark:text-gray-400">
               Elige si gestionas la empresa o te unes como empleado
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 lg:gap-6 mb-6 sm:mb-8 items-stretch">
             <button
               type="button"
               onClick={() => setSelectedType('company')}
-              className={`group relative flex flex-col h-full p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
+              className={`group relative flex flex-col h-full p-5 sm:p-6 2xl:p-8 bg-white dark:bg-gray-800 border rounded-2xl shadow-sm hover:shadow-md transition-all text-left ${
                 selectedType === 'company'
                   ? 'border-[#0f1419] ring-2 ring-gray-200 dark:ring-gray-700'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                  : 'border-gray-200/90 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
               }`}
             >
               {selectedType === 'company' && (
@@ -173,10 +174,10 @@ export function Entry() {
             <button
               type="button"
               onClick={() => setSelectedType('user')}
-              className={`group relative flex flex-col h-full p-8 bg-white dark:bg-gray-800 border-2 rounded-2xl transition-all text-left ${
+              className={`group relative flex flex-col h-full p-5 sm:p-6 2xl:p-8 bg-white dark:bg-gray-800 border rounded-2xl shadow-sm hover:shadow-md transition-all text-left ${
                 selectedType === 'user'
                   ? 'border-blue-600 ring-2 ring-blue-100 dark:ring-blue-900/50'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                  : 'border-gray-200/90 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
               }`}
             >
               {selectedType === 'user' && (
@@ -237,21 +238,21 @@ export function Entry() {
 
   return (
     <AccesoSplitLayout visualKey="entry">
-      <div className="flex flex-1 flex-col p-6 py-8 lg:px-10 lg:py-10">
-      <div className="w-full max-w-5xl mx-auto">
-        <div className="text-center mb-10">
-          <div className="flex items-center justify-center mb-6">
+      <div className="flex flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
+      <div className="w-full max-w-6xl mx-auto">
+        <div className="text-center mb-6 sm:mb-8 2xl:mb-10">
+          <div className="hidden 2xl:flex items-center justify-center mb-5">
             <VertialLogo size="xl" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 dark:text-gray-100 mb-3">
+          <h1 className="text-xl sm:text-2xl 2xl:text-4xl font-bold text-gray-900 dark:text-gray-100 mb-2 sm:mb-3 tracking-tight">
             ¿Cómo entras en Vertial?
           </h1>
-          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+          <p className="text-sm sm:text-base 2xl:text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto leading-relaxed px-1">
             Tres accesos distintos: empresa, trabajador o panel de afiliado. Elige el tuyo.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-2 gap-4 sm:gap-5 lg:gap-6 items-stretch [&>*:last-child]:md:col-span-2 [&>*:last-child]:md:max-w-lg [&>*:last-child]:md:mx-auto [&>*:last-child]:xl:col-span-1 [&>*:last-child]:xl:max-w-none [&>*:last-child]:xl:mx-0 [&>*:last-child]:2xl:col-span-2 [&>*:last-child]:2xl:max-w-xl [&>*:last-child]:2xl:mx-auto">
           <EntryRoleCard
             accent="neutral"
             icon={Building2}

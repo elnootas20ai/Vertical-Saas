@@ -1,19 +1,27 @@
-import { useMemo, useState } from 'react';
-import { Check, Minus, Plus, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, ChevronDown, ChevronUp, Minus, Plus, X } from 'lucide-react';
 import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
   COMBO_SLOT_META,
   catalogProductsForComboSection,
   categoriesMatch,
   comboItemsInCatalogSection,
+  comboMenuHasMainFamilyChoice,
+  comboMenuSectionKey,
+  filterComboMenuSectionsForMainFamily,
   inferComboSlotKind,
+  inferMainFamilyFromComboSelections,
   isComboMenuComplete,
+  isComboMenuSectionDone,
+  mainFamilyForCatalogCategory,
   normalizeComboItemsForSave,
   resolveComboRefSlotKind,
   resolveTpvComboMenuSections,
   totalUnitsInCatalogSection,
   totalUnitsInSlotKind,
+  type ComboMainFamily,
   type ComboMenuCatalogSection,
+  unitsNeededInComboSection,
 } from '../../../lib/catalogComboSlots';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { TpvModalRoot } from './TpvModalRoot';
@@ -109,6 +117,24 @@ function removeFromSection(
   return normalizeComboItemsForSave(next, catalogItems);
 }
 
+function firstOpenSection(
+  sections: ComboMenuCatalogSection[],
+  selections: CatalogComboRef[],
+  catalog: CatalogItem[],
+): string | null {
+  const incomplete = sections.find((s) => !isComboMenuSectionDone(s, selections, catalog));
+  return incomplete ? comboMenuSectionKey(incomplete) : null;
+}
+
+function defaultMainFamily(sections: ComboMenuCatalogSection[]): ComboMainFamily | null {
+  const mains = sections.filter((s) => s.slotKind === 'main' && s.slotQuota > 0);
+  const hasPizza = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'pizza');
+  const hasBurger = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'burger');
+  if (hasPizza && !hasBurger) return 'pizza';
+  if (hasBurger && !hasPizza) return 'burger';
+  return null;
+}
+
 export function TpvComboCustomizeModal({
   item,
   catalogItems,
@@ -129,28 +155,102 @@ export function TpvComboCustomizeModal({
     [menuSections],
   );
 
+  const needsMainFamilyPick = useMemo(
+    () => comboMenuHasMainFamilyChoice(visibleSections),
+    [visibleSections],
+  );
+
   const [selections, setSelections] = useState<CatalogComboRef[]>(() => {
     const seed = initialSelections?.length ? initialSelections : item.comboItems ?? [];
     return normalizeComboItemsForSave(seed, catalogItems);
   });
 
+  const [mainFamily, setMainFamily] = useState<ComboMainFamily | null>(() => {
+    const fromSelections = inferMainFamilyFromComboSelections(selections, catalogItems);
+    if (fromSelections) return fromSelections;
+    return defaultMainFamily(visibleSections);
+  });
+
+  const displaySections = useMemo(
+    () => filterComboMenuSectionsForMainFamily(visibleSections, mainFamily),
+    [visibleSections, mainFamily],
+  );
+
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (needsMainFamilyPick && !mainFamily) return;
+    setExpandedKey((prev) => {
+      if (prev) {
+        const section = displaySections.find((s) => comboMenuSectionKey(s) === prev);
+        if (section && !isComboMenuSectionDone(section, selections, catalogItems)) return prev;
+      }
+      return firstOpenSection(displaySections, selections, catalogItems);
+    });
+  }, [needsMainFamilyPick, mainFamily, displaySections, selections, catalogItems]);
+
   const menuComplete = isComboMenuComplete(menuSections, selections, catalogItems);
   const basePrice = Number(item.unitPrice || 0);
 
   const progress = useMemo(() => {
-    const required = visibleSections.filter(
-      (s) => (s.expectedCount > 0 ? s.expectedCount : s.slotQuota) > 0 && s.required,
+    const required = displaySections.filter(
+      (s) => unitsNeededInComboSection(s) > 0 && s.required,
     );
     if (required.length === 0) return { done: 0, total: 0, pct: 100 };
     let done = 0;
     for (const section of required) {
-      const need = section.expectedCount > 0 ? section.expectedCount : section.slotQuota;
-      const picked = comboItemsInCatalogSection(section, selections, catalogItems);
-      const have = picked.reduce((sum, r) => sum + Math.max(1, r.quantity || 1), 0);
-      if (have >= need) done += 1;
+      if (isComboMenuSectionDone(section, selections, catalogItems)) done += 1;
     }
     return { done, total: required.length, pct: Math.round((done / required.length) * 100) };
-  }, [visibleSections, selections, catalogItems]);
+  }, [displaySections, selections, catalogItems]);
+
+  const handleMainFamilyPick = useCallback(
+    (family: ComboMainFamily) => {
+      setMainFamily(family);
+      const mainSection = visibleSections.find(
+        (s) =>
+          s.slotKind === 'main' && mainFamilyForCatalogCategory(s.catalogCategory) === family,
+      );
+      if (mainSection) {
+        setExpandedKey(comboMenuSectionKey(mainSection));
+      }
+    },
+    [visibleSections],
+  );
+
+  const handlePick = useCallback(
+    (section: ComboMenuCatalogSection, product: CatalogItem) => {
+      const key = comboMenuSectionKey(section);
+      const wasDone = isComboMenuSectionDone(section, selections, catalogItems);
+      const next = pickProductInSection(section, product, selections, catalogItems);
+      if (!next) return;
+      setSelections(next);
+      if (!wasDone && isComboMenuSectionDone(section, next, catalogItems)) {
+        const idx = displaySections.findIndex((s) => comboMenuSectionKey(s) === key);
+        const following = displaySections
+          .slice(idx + 1)
+          .find((s) => !isComboMenuSectionDone(s, next, catalogItems));
+        setExpandedKey(following ? comboMenuSectionKey(following) : null);
+      }
+    },
+    [selections, catalogItems, displaySections],
+  );
+
+  const toggleSection = useCallback((section: ComboMenuCatalogSection) => {
+    const key = comboMenuSectionKey(section);
+    setExpandedKey((prev) => (prev === key ? null : key));
+  }, []);
+
+  const handleChangeMainFamily = useCallback(() => {
+    setMainFamily(null);
+    setSelections((prev) =>
+      normalizeComboItemsForSave(
+        prev.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== 'main'),
+        catalogItems,
+      ),
+    );
+    setExpandedKey(null);
+  }, [catalogItems]);
 
   return (
     <TpvModalRoot>
@@ -162,17 +262,19 @@ export function TpvComboCustomizeModal({
         aria-labelledby="tpv-combo-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-          <div className="flex items-start justify-between gap-4">
+        <div className="shrink-0 px-4 sm:px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-1">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-0.5">
                 Menú / combo
               </p>
-              <h2 id="tpv-combo-title" className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
+              <h2
+                id="tpv-combo-title"
+                className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight"
+              >
                 {item.name}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Elige los productos incluidos ·{' '}
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
                   {formatPrice(basePrice)}
                 </span>
@@ -189,14 +291,14 @@ export function TpvComboCustomizeModal({
           </div>
 
           {progress.total > 0 && (
-            <div className="mt-4">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-gray-500 dark:text-gray-400 mb-1.5">
-                <span>Secciones obligatorias</span>
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">
+                <span>Progreso</span>
                 <span className="tabular-nums">
                   {progress.done}/{progress.total}
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+              <div className="h-1 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-emerald-500 transition-all duration-300"
                   style={{ width: `${progress.pct}%` }}
@@ -206,132 +308,189 @@ export function TpvComboCustomizeModal({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-4 sm:px-5 py-4 space-y-4">
-          {visibleSections.length === 0 ? (
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-3 sm:px-4 py-3 space-y-2">
+          {needsMainFamilyPick && !mainFamily && (
+            <section className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 p-4">
+              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 text-center mb-3">
+                ¿Pizza o burger?
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleMainFamilyPick('pizza')}
+                  className="min-h-[72px] flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-bold text-gray-900 dark:text-gray-100 touch-manipulation active:scale-[0.98] transition-all"
+                >
+                  <span className="text-2xl" aria-hidden>
+                    🍕
+                  </span>
+                  <span className="text-sm">Pizza</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMainFamilyPick('burger')}
+                  className="min-h-[72px] flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-bold text-gray-900 dark:text-gray-100 touch-manipulation active:scale-[0.98] transition-all"
+                >
+                  <span className="text-2xl" aria-hidden>
+                    🍔
+                  </span>
+                  <span className="text-sm">Burger</span>
+                </button>
+              </div>
+            </section>
+          )}
+
+          {mainFamily && needsMainFamilyPick && (
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                Principal
+              </span>
+              <button
+                type="button"
+                onClick={handleChangeMainFamily}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200"
+              >
+                {mainFamily === 'pizza' ? '🍕 Pizza' : '🍔 Burger'}
+                <span className="text-gray-400 font-normal">· cambiar</span>
+              </button>
+            </div>
+          )}
+
+          {displaySections.length === 0 && (!needsMainFamilyPick || mainFamily) ? (
             <p className="text-sm text-gray-500 text-center py-8">
               No hay productos en el catálogo para componer este menú.
             </p>
           ) : (
-            visibleSections.map((section) => {
+            displaySections.map((section) => {
               const meta = COMBO_SLOT_META[section.slotKind];
-              const need = section.expectedCount > 0 ? section.expectedCount : section.slotQuota;
+              const need = unitsNeededInComboSection(section);
               const picked = comboItemsInCatalogSection(section, selections, catalogItems);
               const have = picked.reduce((sum, r) => sum + Math.max(1, r.quantity || 1), 0);
               const products = catalogProductsForComboSection(section, catalogItems, item._id);
               const done = need <= 0 || have >= need;
+              const key = comboMenuSectionKey(section);
+              const expanded = expandedKey === key;
 
               return (
                 <section
-                  key={`${section.slotKind}-${section.catalogCategory}`}
-                  className={`rounded-2xl border overflow-hidden transition-colors ${
-                    done && need > 0
-                      ? 'border-emerald-200 dark:border-emerald-800'
-                      : 'border-gray-200 dark:border-gray-700'
+                  key={key}
+                  className={`rounded-xl border overflow-hidden transition-colors ${
+                    done ? 'border-emerald-200 dark:border-emerald-800' : 'border-gray-200 dark:border-gray-700'
                   }`}
                 >
-                  <div
-                    className={`px-4 py-3 flex items-center justify-between gap-3 ${
-                      done && need > 0
-                        ? 'bg-emerald-50 dark:bg-emerald-950/30'
-                        : 'bg-gray-50 dark:bg-gray-800/80'
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section)}
+                    className={`w-full px-3 py-2.5 flex items-center gap-2 text-left touch-manipulation ${
+                      done
+                        ? 'bg-emerald-50/80 dark:bg-emerald-950/25'
+                        : expanded
+                          ? 'bg-gray-50 dark:bg-gray-800/80'
+                          : 'bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/50'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-gray-900 text-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                        {meta.emoji}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                          {section.catalogCategory}
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white dark:bg-gray-900 text-lg border border-gray-100 dark:border-gray-700">
+                      {meta.emoji}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-tight">
+                        {section.catalogCategory}
+                      </p>
+                      {done ? (
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium truncate mt-0.5">
+                          {picked
+                            .map((r) => `${r.productName}${r.quantity > 1 ? ` ×${r.quantity}` : ''}`)
+                            .join(' · ')}
                         </p>
-                        {need > 0 && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            {have}/{need}{' '}
-                            {section.required ? (
-                              <span className="text-amber-700 dark:text-amber-300 font-semibold">· obligatorio</span>
-                            ) : (
-                              '· opcional'
-                            )}
-                          </p>
-                        )}
+                      ) : need > 0 ? (
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                          Elige {need === 1 ? '1' : need}
+                          {section.required ? ' · obligatorio' : ''}
+                        </p>
+                      ) : null}
+                    </div>
+                    {done ? (
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-200 shrink-0">
+                        <Check className="w-3 h-3" />
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold tabular-nums text-gray-400 shrink-0">
+                        {have}/{need}
+                      </span>
+                    )}
+                    {expanded ? (
+                      <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                    )}
+                  </button>
+
+                  {expanded && (
+                    <div className="border-t border-gray-100 dark:border-gray-800">
+                      {picked.length > 0 && (
+                        <div className="px-3 py-2 flex flex-wrap gap-1.5 bg-white dark:bg-gray-900/40">
+                          {picked.map((ref) => (
+                            <span
+                              key={ref.productId}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-[11px] font-semibold text-emerald-900 dark:text-emerald-100"
+                            >
+                              {ref.productName}
+                              {ref.quantity > 1 ? ` ×${ref.quantity}` : ''}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelections((prev) =>
+                                    removeFromSection(section, ref, prev, catalogItems),
+                                  );
+                                }}
+                                className="p-0.5 rounded hover:bg-emerald-200 dark:hover:bg-emerald-800"
+                                aria-label={`Quitar ${ref.productName}`}
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="p-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {products.map((product) => {
+                          const selected = picked.find((r) => r.productId === product._id);
+                          const atMax = need > 0 && have >= need && !selected;
+                          return (
+                            <button
+                              key={product._id}
+                              type="button"
+                              disabled={atMax}
+                              onClick={() => handlePick(section, product)}
+                              className={`min-h-[44px] px-2 py-2 rounded-lg border text-left text-[11px] sm:text-xs font-semibold transition-all touch-manipulation active:scale-[0.98] ${
+                                selected
+                                  ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100'
+                                  : atMax
+                                    ? 'border-gray-100 dark:border-gray-800 text-gray-400 opacity-50 cursor-not-allowed'
+                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-400'
+                              }`}
+                            >
+                              <span className="line-clamp-2 leading-snug">{product.name}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
-                    {done && need > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-200 shrink-0">
-                        <Check className="w-3.5 h-3.5" />
-                        Listo
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {picked.length > 0 && (
-                    <div className="px-4 py-2.5 flex flex-wrap gap-2 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900/40">
-                      {picked.map((ref) => (
-                        <span
-                          key={ref.productId}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-xs font-semibold text-emerald-900 dark:text-emerald-100"
-                        >
-                          {ref.productName}
-                          {ref.quantity > 1 ? ` ×${ref.quantity}` : ''}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelections((prev) => removeFromSection(section, ref, prev, catalogItems))
-                            }
-                            className="p-0.5 rounded-md hover:bg-emerald-200 dark:hover:bg-emerald-800"
-                            aria-label={`Quitar ${ref.productName}`}
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
                   )}
-
-                  <div className="p-3 sm:p-4 grid grid-cols-2 lg:grid-cols-3 gap-2">
-                    {products.map((product) => {
-                      const selected = picked.find((r) => r.productId === product._id);
-                      const atMax = need > 0 && have >= need && !selected;
-                      return (
-                        <button
-                          key={product._id}
-                          type="button"
-                          disabled={atMax}
-                          onClick={() => {
-                            const next = pickProductInSection(section, product, selections, catalogItems);
-                            if (next) setSelections(next);
-                          }}
-                          className={`min-h-[52px] px-3 py-2.5 rounded-xl border-2 text-left text-xs sm:text-sm font-semibold transition-all touch-manipulation active:scale-[0.98] ${
-                            selected
-                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 shadow-sm'
-                              : atMax
-                                ? 'border-gray-100 dark:border-gray-800 text-gray-400 opacity-50 cursor-not-allowed'
-                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20'
-                          }`}
-                        >
-                          <span className="line-clamp-3 leading-snug">{product.name}</span>
-                          {selected && selected.quantity > 1 ? (
-                            <span className="mt-1 inline-block text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
-                              ×{selected.quantity}
-                            </span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
                 </section>
               );
             })
           )}
-          <div className="h-2 shrink-0" aria-hidden />
+          <div className="h-1 shrink-0" aria-hidden />
         </div>
 
-        <div className="shrink-0 px-4 sm:px-5 py-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-[0_-8px_24px_rgba(0,0,0,0.06)] dark:shadow-[0_-8px_24px_rgba(0,0,0,0.35)]">
+        <div className="shrink-0 px-3 sm:px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
           <button
             type="button"
-            disabled={!menuComplete}
+            disabled={!menuComplete || (needsMainFamilyPick && !mainFamily)}
             onClick={() => onConfirm(selections)}
-            className="w-full min-h-[52px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-base touch-manipulation shadow-lg shadow-emerald-600/20"
+            className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm touch-manipulation"
           >
             <Plus className="w-5 h-5" />
             {menuComplete ? 'Continuar' : 'Completa el menú'}

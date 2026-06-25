@@ -1,4 +1,5 @@
 import type { DeliveryOrder, DeliveryOrderStatus, TpvRegisterSession } from './deliveryApi';
+import { dedupeOpenRegisterSessions } from './tpvCajaScope';
 
 export type PortfolioMetrics = {
   revenueToday: number;
@@ -51,16 +52,18 @@ export function orderBelongsToPdvScope(
   pdvIds: Set<string>,
   primaryPdvId: string | null,
   pdvWorkCenterId?: string | null,
+  wcIdsInScope?: Set<string>,
 ): boolean {
-  if (pdvIds.size === 0) return false;
   const oid = String(order.salesPointId || '').trim();
-  if (!oid) {
-    return primaryPdvId ? pdvIds.has(primaryPdvId) : false;
+  if (oid) {
+    if (pdvIds.has(oid)) return true;
+    if (wcIdsInScope?.has(oid)) return true;
+    const wcId = String(pdvWorkCenterId || '').trim();
+    if (wcId && oid === wcId) return true;
+    return false;
   }
-  if (pdvIds.has(oid)) return true;
-  const wcId = String(pdvWorkCenterId || '').trim();
-  if (wcId && oid === wcId) return true;
-  return false;
+  if (pdvIds.size === 0 && (!wcIdsInScope || wcIdsInScope.size === 0)) return false;
+  return primaryPdvId ? pdvIds.has(primaryPdvId) : false;
 }
 
 function isToday(iso: string, todayKey: string): boolean {
@@ -139,12 +142,15 @@ export function computePortfolioMetrics(
   pdvIds: string[],
   primaryPdvId: string | null,
   todayKey: string,
+  wcIdsInScope?: Set<string>,
 ): PortfolioMetrics {
   const pdvSet = new Set(pdvIds);
-  if (!pdvSet.size) return emptyPortfolioMetrics();
+  if (!pdvSet.size && (!wcIdsInScope || wcIdsInScope.size === 0)) return emptyPortfolioMetrics();
 
   const monthKey = todayKey.slice(0, 7);
-  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, primaryPdvId));
+  const scoped = orders.filter((o) =>
+    orderBelongsToPdvScope(o, pdvSet, primaryPdvId, null, wcIdsInScope),
+  );
   const todayCreated = scoped.filter((o) => isToday(o.createdAt, todayKey));
   const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
   const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
@@ -198,8 +204,8 @@ export function applyTpvCashMetrics(
   pdvIds: string[],
 ): PortfolioMetrics {
   const pdvSet = new Set(pdvIds);
-  const open = sessions.filter(
-    (s) => s.status === 'open' && pdvSet.has(String(s.pointOfSaleId || '').trim()),
+  const open = dedupeOpenRegisterSessions(
+    sessions.filter((s) => s.status === 'open' && pdvSet.has(String(s.pointOfSaleId || '').trim())),
   );
   const cashIn = open.reduce((sum, s) => {
     const sales = (s.transactions || [])
@@ -444,7 +450,9 @@ export function computeCompanyBillingBreakdown(
   const monthKey = todayKey.slice(0, 7);
   const pdvSet = new Set(pdvIds);
   const knownWcIds = new Set(storeRows.map((s) => s.id));
-  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, primaryPdvId));
+  const scoped = orders.filter((o) =>
+    orderBelongsToPdvScope(o, pdvSet, primaryPdvId, null, knownWcIds),
+  );
 
   const brandMatrix = new Map<string, Map<string, BillingCellAcc>>();
   const storeTotals = new Map<string, BillingCellAcc>();

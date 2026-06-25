@@ -5,12 +5,16 @@ import {
   catalogProductsForComboSection,
   catalogProductsForComboSlot,
   COMBO_MENU_PRESETS,
+  comboMenuHasMainFamilyChoice,
   DEFAULT_COMBO_STRUCTURE,
   expectedCountForComboSlot,
+  filterComboMenuSectionsForMainFamily,
   groupComboItemsBySlot,
   inferComboMenuPresetId,
   inferComboSlotKind,
+  inferMainFamilyFromComboSelections,
   isComboMenuComplete,
+  mainFamilyForCatalogCategory,
   normalizeComboItemsForSave,
   resolveComboRefSlotKind,
   structureFromSectionDraft,
@@ -192,5 +196,22 @@ describe('catalogComboSlots', () => {
       { productId: 'b1', productName: 'Coca', quantity: 1, slotKind: 'drink' },
     ];
     expect(isComboMenuComplete(sections, full, catalog)).toBe(true);
+  });
+
+  it('TPV menú: pizza vs burger y filtro de secciones', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'b1', name: 'Classic', category: 'Burgers' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    expect(comboMenuHasMainFamilyChoice(sections)).toBe(true);
+    expect(mainFamilyForCatalogCategory('Pizzas')).toBe('pizza');
+    expect(mainFamilyForCatalogCategory('Top Burgers')).toBe('burger');
+    const pizzaOnly = filterComboMenuSectionsForMainFamily(sections, 'pizza');
+    expect(pizzaOnly.some((s) => s.catalogCategory === 'Pizzas')).toBe(true);
+    expect(pizzaOnly.some((s) => s.catalogCategory === 'Burgers')).toBe(false);
+    expect(pizzaOnly.some((s) => s.catalogCategory === 'Bebidas')).toBe(true);
+    const picks = [{ productId: 'b1', productName: 'Classic', quantity: 1, slotKind: 'main' }];
+    expect(inferMainFamilyFromComboSelections(picks, catalog)).toBe('burger');
   });
 });

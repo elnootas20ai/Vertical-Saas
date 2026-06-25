@@ -1330,8 +1330,7 @@ export async function bulkCreateCatalogItems(req, res) {
 
       if (repeatedSku) {
         const existing = existingBySku.get(skuComposite);
-        const importIngredients = String(doc.customFields?.ingredients || '').trim();
-        if (existing && importIngredients) {
+        if (existing) {
           docsToUpdate.push({ existing, doc, index: idx });
           return;
         }
@@ -1376,7 +1375,15 @@ export async function bulkCreateCatalogItems(req, res) {
         const mergedDoc = buildCatalogItemDocument(
           userId,
           {
-            ...existing,
+            name: doc.name || existing.name,
+            category: doc.category || existing.category,
+            unitPrice: doc.unitPrice ?? existing.unitPrice,
+            costPrice: doc.costPrice ?? existing.costPrice,
+            brandIds: Array.isArray(doc.brandIds) && doc.brandIds.length > 0 ? doc.brandIds : existing.brandIds,
+            description: doc.description || existing.description,
+            business_id: doc.business_id || existing.business_id,
+            vertical: doc.vertical || existing.vertical,
+            itemType: doc.itemType || existing.itemType,
             customFields: {
               ...(existing.customFields && typeof existing.customFields === 'object' ? existing.customFields : {}),
               ...(doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {}),
@@ -1390,7 +1397,7 @@ export async function bulkCreateCatalogItems(req, res) {
         errors.push({
           index,
           name: doc?.name,
-          error: error.message || 'Error al actualizar ingredientes',
+          error: error.message || 'Error al actualizar artículo importado',
         });
       }
     }

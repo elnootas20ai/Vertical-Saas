@@ -10,11 +10,7 @@ import {
 } from '../../../lib/tpvCatalogNavigation';
 import { brandTint } from '../../../lib/brandUtils';
 import { isTpvComboCatalogItem } from '../../../lib/catalogComboSlots';
-import { isTpvHalfHalfCatalogItem } from '../../../lib/catalogCustomization';
-
-function isBrandScopeSection(section: TpvCatalogSection): boolean {
-  return section.scope.kind === 'all' || section.scope.kind === 'brand';
-}
+import { isTpvHalfHalfCatalogItem, isTpvBuildYourOwnCatalogItem } from '../../../lib/catalogCustomization';
 
 function BrandSectionChip({
   section,
@@ -94,6 +90,8 @@ type TpvProductPickerProps = {
   cartPanel: ReactNode;
   hasPricedProducts: boolean;
   onImportCatalog?: () => void;
+  /** TPV trabajador: sin enlace al módulo Catálogo (solo gerente). */
+  hideCatalogAdminLink?: boolean;
   /** TPV tablet: layout denso, catálogo + carrito en fila y más espacio útil. */
   compact?: boolean;
 };
@@ -129,6 +127,7 @@ const ProductTile = memo(function ProductTile({
   const inCart = qty > 0;
   const isCombo = isTpvComboCatalogItem(item);
   const isHalfHalf = isTpvHalfHalfCatalogItem(item);
+  const isBuildYourOwn = isTpvBuildYourOwnCatalogItem(item);
 
   return (
     <article
@@ -167,7 +166,12 @@ const ProductTile = memo(function ProductTile({
               ½½
             </span>
           )}
-          {isCombo && !isHalfHalf && (
+          {isBuildYourOwn && !isHalfHalf && (
+            <span className={`absolute top-1 left-1 rounded-md bg-orange-600 text-white font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[8px]'}`}>
+              Gusto
+            </span>
+          )}
+          {isCombo && !isHalfHalf && !isBuildYourOwn && (
             <span className={`absolute top-1 left-1 rounded-md bg-indigo-600 text-white font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-1.5 py-0.5 text-[8px]'}`}>
               Menú
             </span>
@@ -283,6 +287,7 @@ export function TpvProductPicker({
   cartPanel,
   hasPricedProducts,
   onImportCatalog,
+  hideCatalogAdminLink = false,
   compact = false,
 }: TpvProductPickerProps) {
   const [productSearch, setProductSearch] = useState('');
@@ -323,12 +328,14 @@ export function TpvProductPicker({
   const isSearchMode = productSearch.trim().length > 0;
   const searchTruncated =
     isSearchMode && filteredProducts.length >= TPV_PRODUCT_SEARCH_LIMIT;
-  const brandSections = useMemo(
-    () => sections.filter(isBrandScopeSection),
-    [sections],
-  );
-  const sharedSections = useMemo(
-    () => sections.filter((s) => s.scope.kind === 'shared'),
+  const topBarSections = useMemo(
+    () =>
+      sections.filter(
+        (s) =>
+          s.scope.kind === 'all'
+          || s.scope.kind === 'brand'
+          || s.scope.kind === 'shared',
+      ),
     [sections],
   );
 
@@ -367,10 +374,10 @@ export function TpvProductPicker({
           </div>
         </div>
 
-        {!isSearchMode && brandSections.length > 0 && (
+        {!isSearchMode && topBarSections.length > 0 && (
           <div className={`shrink-0 border-b border-gray-200 dark:border-gray-800 bg-gray-100/80 dark:bg-gray-950/50 ${compact ? 'px-2 py-1' : 'px-2 py-2'}`}>
             <div className={`flex overflow-x-auto scrollbar-hide items-end ${compact ? 'gap-1.5' : 'gap-2'}`}>
-              {brandSections.map((section) => (
+              {topBarSections.map((section) => (
                 <BrandSectionChip
                   key={section.id}
                   section={section}
@@ -382,36 +389,6 @@ export function TpvProductPicker({
                   }}
                 />
               ))}
-              {sharedSections.map((section) => {
-                const active = selectedSectionId === section.id;
-                const color =
-                  section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color)
-                    ? section.color
-                    : '#374151';
-                return (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() => {
-                      onSelectedSectionChange(section.id);
-                      onSelectedCategoryChange(null);
-                    }}
-                    className={`shrink-0 self-center rounded-md font-semibold uppercase tracking-wide truncate touch-manipulation ${
-                      compact
-                        ? 'px-2 py-1 min-h-[30px] text-[10px] max-w-[6rem] mb-4'
-                        : 'px-2.5 py-1.5 min-h-[32px] text-[9px] max-w-[7rem]'
-                    } ${
-                      active
-                        ? 'text-white'
-                        : 'bg-white/80 dark:bg-gray-800 text-gray-600 dark:text-gray-300'
-                    }`}
-                    style={active ? { backgroundColor: color } : undefined}
-                    title={section.label}
-                  >
-                    {section.label}
-                  </button>
-                );
-              })}
             </div>
           </div>
         )}
@@ -487,8 +464,12 @@ export function TpvProductPicker({
 
         {!hasPricedProducts && !isSearchMode && (
           <div className="mx-2 mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1.5">
-            <p className="text-[10px] text-amber-800 dark:text-amber-300">Sin precios en catálogo.</p>
-            {onImportCatalog && (
+            <p className="text-[10px] text-amber-800 dark:text-amber-300">
+              {hideCatalogAdminLink
+                ? 'No hay productos cargados. Avisad al gerente para que revise el catálogo.'
+                : 'Sin precios en catálogo.'}
+            </p>
+            {!hideCatalogAdminLink && onImportCatalog && (
               <button type="button" onClick={onImportCatalog} className="text-[10px] font-semibold text-amber-800 dark:text-amber-300 underline">
                 Ir al catálogo
               </button>

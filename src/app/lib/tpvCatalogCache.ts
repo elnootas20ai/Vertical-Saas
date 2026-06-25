@@ -2,10 +2,14 @@ import type { CatalogItem } from './deliveryApi';
 import { listCatalogItemsRequest } from './deliveryApi';
 import type { Brand } from './brandsApi';
 import { listBrandsRequest } from './brandsApi';
+import {
+  filterCatalogItemsForBusinessScope,
+  type CatalogBusinessScopeOptions,
+} from './catalogBusinessScope';
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v4:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v5:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
@@ -38,6 +42,9 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   }
   if (cf.halfHalf === true) {
     customFields.halfHalf = true;
+  }
+  if (cf.buildYourOwn === true) {
+    customFields.buildYourOwn = true;
   }
   return {
     ...item,
@@ -164,7 +171,7 @@ export function clearTpvCatalogCache(userId?: string, businessId?: string): void
 export async function fetchTpvCatalog(
   userId: string,
   businessId: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean } & CatalogBusinessScopeOptions,
 ): Promise<TpvCatalogSnapshot> {
   const key = cacheKey(userId, businessId);
   if (!options?.force) {
@@ -175,12 +182,17 @@ export async function fetchTpvCatalog(
   const existing = inflight.get(key);
   if (existing) return existing;
 
+  const scopeOptions: CatalogBusinessScopeOptions = {
+    accountBusinessCount: options?.accountBusinessCount,
+  };
+
   const promise = (async () => {
-    const [items, brands] = await Promise.all([
+    const [rawItems, brands] = await Promise.all([
       // Misma amplitud que Catálogo (sin filtrar solo module=catalog).
       listCatalogItemsRequest(userId, undefined, { view: 'tpv' }),
       businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
     ]);
+    const items = filterCatalogItemsForBusinessScope(rawItems, businessId, brands, scopeOptions);
     const snapshot: TpvCatalogSnapshot = {
       items,
       brands,
@@ -198,11 +210,15 @@ export async function fetchTpvCatalog(
 }
 
 /** Precarga en segundo plano al entrar al TPV (antes de «Nuevo pedido»). */
-export function prefetchTpvCatalog(userId: string, businessId: string): void {
+export function prefetchTpvCatalog(
+  userId: string,
+  businessId: string,
+  options?: CatalogBusinessScopeOptions,
+): void {
   const uid = String(userId || '').trim();
   if (!uid) return;
   const cached = readTpvCatalogCache(uid, businessId);
   const stale = !cached || Date.now() - cached.fetchedAt > MEMORY_TTL_MS / 2;
   if (!stale) return;
-  void fetchTpvCatalog(uid, businessId).catch(() => undefined);
+  void fetchTpvCatalog(uid, businessId, options).catch(() => undefined);
 }

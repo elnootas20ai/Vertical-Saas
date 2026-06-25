@@ -45,7 +45,7 @@ describe('categoriesForTpvScope', () => {
   });
 
   it('pestaña Todos incluye productos huérfanos de marca inactiva', () => {
-    const brands = [{ _id: 'brand-active', active: true, name: 'Activa' }];
+    const brands = [{ _id: 'brand-active', active: true, name: 'Activa', catalogCategories: ['Pizzas'] }];
     const catalog = [
       {
         _id: 'orphan-1',
@@ -57,10 +57,57 @@ describe('categoriesForTpvScope', () => {
       },
     ];
     const sections = buildTpvCatalogSections(brands, catalog);
-    expect(sections[0]?.label).toBe('Todos');
-    expect(defaultTpvSectionId(sections)).toBe('all');
+    expect(sections.some((s) => s.label === 'Todos')).toBe(true);
+    expect(defaultTpvSectionId(sections)).toBe('brand:brand-active');
+    expect(defaultTpvSectionId(sections, catalog)).toBe('all');
     const index = buildTpvProductSearchIndex(catalog);
     const visible = searchTpvProducts(index, catalog, '', { kind: 'all' }, null, {});
     expect(visible.map((i) => i._id)).toEqual(['orphan-1']);
+  });
+
+  it('modomio y blackburger aparecen en la barra superior junto a Todos', () => {
+    const brands = [
+      {
+        _id: 'mod',
+        name: 'modomio',
+        active: true,
+        isDefault: true,
+        catalogCategories: ['Pizzas', 'Entrantes'],
+      },
+      {
+        _id: 'bb',
+        name: 'blackburger',
+        active: true,
+        catalogCategories: ['Burgers', 'Complementos'],
+      },
+    ];
+    const catalog = [
+      { _id: 'p1', itemType: 'product', category: 'Pizzas', active: true, brandIds: ['mod'], unitPrice: 10 },
+      { _id: 'b1', itemType: 'product', category: 'Burgers', active: true, brandIds: ['bb'], unitPrice: 12 },
+      { _id: 'd1', itemType: 'product', category: 'Bebidas', active: true, brandIds: [], unitPrice: 2 },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog);
+    expect(sections.map((s) => s.label)).toEqual(['Todos', 'modomio', 'blackburger', 'Bebidas']);
+    expect(defaultTpvSectionId(sections)).toBe('brand:mod');
+    expect(defaultTpvSectionId(sections, catalog)).toBe('all');
+    const modCats = categoriesForTpvScope({ kind: 'brand', brandId: 'mod' }, brands, catalog);
+    expect(modCats).toEqual(['Pizzas']);
+    const bbCats = categoriesForTpvScope({ kind: 'brand', brandId: 'bb' }, brands, catalog);
+    expect(bbCats).toEqual(['Burgers']);
+  });
+
+  it('muestra modomio y blackburger aunque aún no tengan productos asignados', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, isDefault: true, catalogCategories: ['Pizzas'] },
+      { _id: 'bb', name: 'blackburger', active: true, catalogCategories: ['Burgers'] },
+    ];
+    const catalog = [
+      { _id: 'd1', itemType: 'product', category: 'Bebidas', active: true, brandIds: [], unitPrice: 2 },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog);
+    expect(sections.filter((s) => s.scope.kind === 'brand').map((s) => s.label)).toEqual([
+      'modomio',
+      'blackburger',
+    ]);
   });
 });

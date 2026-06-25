@@ -4,8 +4,8 @@ import { orderItemCustomizationParts } from '../../lib/deliveryTicketHelpers';
 type OrderItemDetailCardProps = {
   item: DeliveryOrderItem;
   formatPrice: (n: number) => string;
-  /** tablet = grande, ocupa altura disponible en el detalle TPV */
-  variant?: 'default' | 'tablet';
+  /** tablet = legible en desktop; compact = modal TPV tablet denso */
+  variant?: 'default' | 'tablet' | 'compact';
 };
 
 export function OrderItemDetailCard({ item, formatPrice, variant = 'default' }: OrderItemDetailCardProps) {
@@ -16,6 +16,44 @@ export function OrderItemDetailCard({ item, formatPrice, variant = 'default' }: 
     ...removed.map((name) => ({ key: `-${name}`, label: `sin ${name}`, tone: 'rem' as const })),
     ...(note ? [{ key: 'note', label: note, tone: 'note' as const }] : []),
   ];
+
+  if (variant === 'compact') {
+    return (
+      <article className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-2">
+        <div className="flex items-start gap-2">
+          <span className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-md bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold tabular-nums shrink-0">
+            {item.quantity}×
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 leading-snug">{item.name}</h4>
+              <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
+                {formatPrice(lineTotal)}
+              </span>
+            </div>
+            {chips.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {chips.map((chip) => (
+                  <span
+                    key={chip.key}
+                    className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold leading-tight ${
+                      chip.tone === 'add'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                        : chip.tone === 'rem'
+                          ? 'bg-red-50 text-red-700 line-through dark:bg-red-950/40 dark:text-red-300'
+                          : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+                    }`}
+                  >
+                    {chip.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </article>
+    );
+  }
 
   if (variant === 'tablet') {
     return (

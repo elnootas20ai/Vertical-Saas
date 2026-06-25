@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   catalogPizzasForHalfHalf,
   customizationSignature,
+  isTpvBuildYourOwnCatalogItem,
   isTpvHalfHalfCatalogItem,
 } from '../src/app/lib/catalogCustomization.js';
 
@@ -35,6 +36,41 @@ describe('isTpvHalfHalfCatalogItem', () => {
         name: 'Mitad y mitad',
         category: 'Combos',
         customFields: {},
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('isTpvBuildYourOwnCatalogItem', () => {
+  it('detects flag in customFields', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Especial',
+        category: 'Pizzas',
+        customFields: { buildYourOwn: true },
+      }),
+    ).toBe(true);
+  });
+
+  it('detects by name', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        customFields: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('does not overlap with half-half', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Mitad y mitad',
+        category: 'Pizzas',
+        customFields: { halfHalf: true },
       }),
     ).toBe(false);
   });

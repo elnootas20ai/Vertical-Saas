@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
@@ -6,7 +7,6 @@ import { useBusiness } from '../../../context/BusinessContext';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useLiveClock } from '../../../hooks/useLiveClock';
-import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   filterDeliveryOrdersRequest,
   updateDeliveryOrderRequest,
@@ -73,7 +73,7 @@ import {
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
-import { resolveBusinessScopeId } from '../../../lib/deliverySetup';
+import { resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 
 type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otro';
@@ -189,14 +189,14 @@ function PaymentMethodBoardChip({
   );
 }
 
-const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   icon: <Clock className="w-4 h-4" /> },
-  cocina:     { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', icon: <ChefHat className="w-4 h-4" /> },
-  listo:      { label: 'Montaje',    color: 'text-indigo-700',  bg: 'bg-indigo-50 border-indigo-200', icon: <Package className="w-4 h-4" /> },
-  en_reparto: { label: 'En reparto', color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',     icon: <Truck className="w-4 h-4" /> },
-  entregado:  { label: 'Entregado',  color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   icon: <CheckCircle2 className="w-4 h-4" /> },
-  cancelled:  { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     icon: <X className="w-4 h-4" /> },
-  incident:   { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       icon: <AlertTriangle className="w-4 h-4" /> },
+const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; Icon: LucideIcon }> = {
+  nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   Icon: Clock },
+  cocina:     { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', Icon: ChefHat },
+  listo:      { label: 'Montaje',    color: 'text-indigo-700',  bg: 'bg-indigo-50 border-indigo-200', Icon: Package },
+  en_reparto: { label: 'En reparto', color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',     Icon: Truck },
+  entregado:  { label: 'Entregado',  color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   Icon: CheckCircle2 },
+  cancelled:  { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     Icon: X },
+  incident:   { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       Icon: AlertTriangle },
 };
 
 const TABLET_NEXT_STATUS: Partial<Record<DeliveryOrderStatus, DeliveryOrderStatus>> = {
@@ -258,28 +258,28 @@ function formatElapsed(minutes: number): string {
   return `${h}h ${minutes % 60}m`;
 }
 
-const DELIVERY_TYPE_BADGE: Record<DeliveryType, { label: string; className: string; icon: React.ReactNode }> = {
+const DELIVERY_TYPE_BADGE: Record<DeliveryType, { label: string; className: string; Icon: LucideIcon }> = {
   recogida: {
     label: 'Recogida',
     className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200',
-    icon: <Store className="w-3 h-3" />,
+    Icon: Store,
   },
   domicilio: {
     label: 'Envío',
     className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200',
-    icon: <Truck className="w-3 h-3" />,
+    Icon: Truck,
   },
   sala: {
     label: 'Sala',
     className: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
-    icon: <ShoppingBag className="w-3 h-3" />,
+    Icon: ShoppingBag,
   },
 };
 
-const FULFILLMENT_FILTERS: { id: FulfillmentFilter; label: string; icon: React.ReactNode }[] = [
-  { id: 'all', label: 'Todos', icon: <ShoppingBag className="w-4 h-4" /> },
-  { id: 'recogida', label: 'Recogida', icon: <Store className="w-4 h-4" /> },
-  { id: 'domicilio', label: 'Envío', icon: <Truck className="w-4 h-4" /> },
+const FULFILLMENT_FILTERS: { id: FulfillmentFilter; label: string; Icon: LucideIcon }[] = [
+  { id: 'all', label: 'Todos', Icon: ShoppingBag },
+  { id: 'recogida', label: 'Recogida', Icon: Store },
+  { id: 'domicilio', label: 'Envío', Icon: Truck },
 ];
 
 function matchesFulfillmentFilter(order: DeliveryOrder, filter: FulfillmentFilter): boolean {
@@ -331,6 +331,7 @@ function OrderCard({
   const waitMinutes = orderWaitMinutes(order);
   const routeMinutes = order.departedAt ? elapsedMinutes(order.departedAt) : null;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
+  const TypeIcon = typeBadge.Icon;
   const channelBadge = order.channel && order.channel !== 'tpv' ? CHANNEL_BADGE[order.channel] : null;
   const isUrgent = order.priority === 'urgent' || order.priority === 'high';
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
@@ -384,7 +385,7 @@ function OrderCard({
               #{order.orderNumber}
             </span>
             <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded font-bold ${typeBadge.className} ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
-              {typeBadge.icon}
+              <TypeIcon className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
               {typeBadge.label}
             </span>
             {channelBadge && !compact && (
@@ -492,7 +493,7 @@ function OrderLane({
   compact = false,
 }: {
   title: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   count: number;
   borderClass: string;
   headerClass: string;
@@ -685,121 +686,127 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   correctingPayment?: boolean;
 }) {
   useModalClose(true, onClose);
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const compact = Boolean(readTpvTabletBinding());
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
   const displayLabel = LANE_STATUS_LABEL[order.status] || cfg.label;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
+  const StatusIcon = cfg.Icon;
+  const TypeIcon = typeBadge.Icon;
   const canCorrectPayment =
     Boolean(onCorrectPayment) && isCompletedBoardOrder(order) && orderAlreadyCobrado(order);
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
 
   return (
-    <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-2' : 'p-4 sm:p-6'}`}>
+    <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-0 sm:p-2' : 'p-4 sm:p-6'}`}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
-      <div className={`relative flex flex-col w-full bg-gray-50 dark:bg-gray-950 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden ${
-        compact ? 'max-w-lg max-h-[92dvh] rounded-b-none sm:rounded-2xl' : 'max-w-3xl max-h-[88dvh]'
+      <div className={`relative flex flex-col w-full bg-gray-50 dark:bg-gray-950 shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden ${
+        compact ? 'max-h-[94dvh] rounded-t-2xl sm:max-w-lg sm:rounded-2xl' : 'max-w-3xl max-h-[88dvh] rounded-2xl'
       }`}>
-        <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
-          <div className="flex items-center justify-between gap-2">
+        <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 ${compact ? 'px-3 py-1.5' : 'px-4 py-3'}`}>
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Detalle del pedido</p>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-lg' : 'text-xl'}`}>
+              {!compact && (
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Detalle del pedido</p>
+              )}
+              <div className="flex items-center gap-1 flex-wrap">
+                <h2 className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-base' : 'text-xl'}`}>
                   #{order.orderNumber}
                 </h2>
-                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${cfg.bg} ${cfg.color}`}>
-                  {cfg.icon} {displayLabel}
+                <span className={`inline-flex items-center gap-0.5 rounded-full font-bold ${cfg.bg} ${cfg.color} ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
+                  {compact ? null : <StatusIcon className="w-4 h-4" />} {displayLabel}
                 </span>
-                <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${typeBadge.className}`}>
-                  {typeBadge.icon} {typeBadge.label}
+                <span className={`inline-flex items-center gap-0.5 rounded-full font-bold ${typeBadge.className} ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
+                  <TypeIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} /> {typeBadge.label}
                 </span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-                  Espera{' '}
-                  <span className={`ml-1 tabular-nums font-bold ${timerTone(orderWaitMinutes(order))}`}>
-                    {formatElapsed(orderWaitMinutes(order))}
-                  </span>
+                <span className={`inline-flex items-center rounded-full font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
+                  {compact ? formatElapsed(orderWaitMinutes(order)) : (
+                    <>Espera <span className={`ml-1 tabular-nums font-bold ${timerTone(orderWaitMinutes(order))}`}>{formatElapsed(orderWaitMinutes(order))}</span></>
+                  )}
                 </span>
               </div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 touch-manipulation"
+              className={`hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shrink-0 touch-manipulation ${compact ? 'p-1.5' : 'p-2'}`}
             >
-              <X className="w-5 h-5 text-gray-500" />
+              <X className={`text-gray-500 ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} />
             </button>
           </div>
         </div>
 
-        <div className={`flex-1 min-h-0 flex flex-col gap-3 overflow-hidden ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
-          <div className={`shrink-0 grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
+        <div className={`flex-1 min-h-0 flex flex-col overflow-hidden ${compact ? 'gap-2 px-3 py-2' : 'gap-3 px-4 py-3'}`}>
+          <div className={`shrink-0 grid ${compact ? 'grid-cols-2 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-3'}`}>
             {order.customerName && (
-              <div className="flex items-start gap-2.5 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 min-w-0">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-50 dark:bg-cyan-950/40 shrink-0">
-                  <User className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
+              <div className={`flex items-start bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 min-w-0 ${compact ? 'gap-1.5 p-2' : 'gap-2.5 p-3 rounded-xl'}`}>
+                <span className={`flex items-center justify-center rounded-md bg-cyan-50 dark:bg-cyan-950/40 shrink-0 ${compact ? 'h-7 w-7' : 'h-9 w-9 rounded-lg'}`}>
+                  <User className={`text-cyan-600 dark:text-cyan-400 ${compact ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">{order.customerName}</p>
+                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-base'}`}>{order.customerName}</p>
                   {order.customerPhone && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate mt-0.5">{order.customerPhone}</p>
+                    <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px]' : 'text-sm mt-0.5'}`}>{order.customerPhone}</p>
                   )}
                   {order.customerAddress && (
-                    <p className="text-xs text-gray-500 leading-snug line-clamp-2 mt-0.5">{order.customerAddress}</p>
+                    <p className={`text-gray-500 leading-snug ${compact ? 'text-[10px] line-clamp-1 mt-px' : 'text-xs line-clamp-2 mt-0.5'}`}>{order.customerAddress}</p>
                   )}
                 </div>
               </div>
             )}
             {order.takenByName && (
-              <div className="flex items-center gap-2.5 px-3 py-3 bg-violet-50 dark:bg-violet-950/30 rounded-xl border border-violet-200/70 dark:border-violet-900 min-w-0">
-                <span className="w-9 h-9 rounded-full bg-violet-600 text-white text-sm font-bold flex items-center justify-center shrink-0">
+              <div className={`flex items-center bg-violet-50 dark:bg-violet-950/30 rounded-lg border border-violet-200/70 dark:border-violet-900 min-w-0 ${compact ? 'gap-1.5 px-2 py-2' : 'gap-2.5 px-3 py-3 rounded-xl'}`}>
+                <span className={`rounded-full bg-violet-600 text-white font-bold flex items-center justify-center shrink-0 ${compact ? 'w-7 h-7 text-[10px]' : 'w-9 h-9 text-sm'}`}>
                   {getWorkerInitials(order.takenByName)}
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-violet-600/80 dark:text-violet-400">Pedido cogido por</p>
-                  <p className="text-base font-bold text-gray-900 dark:text-gray-100 truncate">{order.takenByName}</p>
+                  {!compact && (
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-violet-600/80 dark:text-violet-400">Pedido cogido por</p>
+                  )}
+                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-base'}`}>{order.takenByName}</p>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
-            <h3 className="shrink-0 text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          <div className="flex-1 min-h-0 flex flex-col gap-1 overflow-hidden">
+            <h3 className={`shrink-0 font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 ${compact ? 'text-[10px]' : 'text-xs'}`}>
               Artículos · {order.items.length}
             </h3>
-            <div
-              className={`max-h-[min(280px,32dvh)] overflow-y-auto grid gap-3 content-start grid-cols-1 ${
-                !compact && order.items.length > 1 ? 'sm:grid-cols-2' : ''
-              }`}
-            >
+            <div className={`flex-1 min-h-0 overflow-y-auto touch-pan-y grid content-start grid-cols-1 ${compact ? 'gap-1.5' : 'gap-3 max-h-[min(280px,32dvh)]'} ${!compact && order.items.length > 1 ? 'sm:grid-cols-2' : ''}`}>
               {order.items.map((item) => (
-                <OrderItemDetailCard key={item.id} item={item} formatPrice={formatCurrency} variant="tablet" />
+                <OrderItemDetailCard
+                  key={item.id}
+                  item={item}
+                  formatPrice={formatCurrency}
+                  variant={compact ? 'compact' : 'default'}
+                />
               ))}
             </div>
           </div>
 
           {order.notes && (
-            <div className="shrink-0 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-300/70 dark:border-amber-800 rounded-xl">
-              <p className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-400">Nota del pedido</p>
-              <p className="text-sm font-semibold text-amber-900 dark:text-amber-100 leading-snug">{order.notes}</p>
+            <div className={`shrink-0 bg-amber-50 dark:bg-amber-950/30 border border-amber-300/70 dark:border-amber-800 rounded-lg ${compact ? 'px-2 py-1.5' : 'px-3 py-2 rounded-xl'}`}>
+              <p className={`font-bold uppercase text-amber-700 dark:text-amber-400 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>Nota</p>
+              <p className={`font-semibold text-amber-900 dark:text-amber-100 leading-snug ${compact ? 'text-xs' : 'text-sm'}`}>{order.notes}</p>
             </div>
           )}
 
-          <div className="shrink-0 rounded-xl border border-emerald-200/80 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 p-3 space-y-2">
-            <div className="flex items-end justify-between gap-3">
+          <div className={`shrink-0 rounded-lg border border-emerald-200/80 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 ${compact ? 'p-2 space-y-1.5' : 'p-3 space-y-2 rounded-xl'}`}>
+            <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">
-                  {order.ticketNumber ? `Ticket ${order.ticketNumber}` : 'Total del pedido'}
+                <p className={`text-gray-600 dark:text-gray-400 font-medium ${compact ? 'text-[10px]' : 'text-xs'}`}>
+                  {order.ticketNumber ? `Ticket ${order.ticketNumber}` : 'Total'}
                 </p>
                 {order.paymentMethod && (
-                  <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 mt-0.5">
+                  <p className={`font-semibold text-emerald-800 dark:text-emerald-300 ${compact ? 'text-[10px] mt-px' : 'text-xs mt-0.5'}`}>
                     {order.paymentStatus === 'paid' ? 'Cobrado' : 'Pago previsto'} ·{' '}
                     {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
                   </p>
                 )}
               </div>
-              <p className={`font-black text-emerald-700 dark:text-emerald-400 tabular-nums leading-none shrink-0 ${compact ? 'text-2xl' : 'text-3xl'}`}>
+              <p className={`font-black text-emerald-700 dark:text-emerald-400 tabular-nums leading-none shrink-0 ${compact ? 'text-lg' : 'text-3xl'}`}>
                 {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
               </p>
             </div>
@@ -809,13 +816,13 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
                 business={businessTicketInfoFrom(currentBusiness)}
                 salesPointName={order.salesPointName}
                 cashierName={order.takenByName}
-                layout="tablet"
+                layout={compact ? 'compact' : 'row'}
               />
             )}
           </div>
 
           {canCorrectPayment && (
-            <div className="shrink-0 grid grid-cols-3 gap-2">
+            <div className={`shrink-0 grid grid-cols-3 ${compact ? 'gap-1' : 'gap-2'}`}>
               {([
                 { method: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                 { method: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
@@ -843,15 +850,17 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
           )}
         </div>
 
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 flex gap-2 rounded-b-2xl">
+        <div className={`shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex gap-2 ${compact ? 'px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]' : 'px-4 py-3 rounded-b-2xl'}`}>
           {nextLabel && (
             <button
               type="button"
               onClick={() => onAdvance(order)}
               disabled={advancing}
-              className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-base font-bold disabled:opacity-50 touch-manipulation shadow-md"
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 touch-manipulation ${
+                compact ? 'px-2 py-2 text-sm' : 'px-3 py-3 rounded-xl text-base shadow-md gap-2'
+              }`}
             >
-              {advancing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
+              {advancing ? <Loader2 className={`animate-spin ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} /> : <ArrowRight className={compact ? 'w-4 h-4' : 'w-5 h-5'} />}
               {nextLabel}
             </button>
           )}
@@ -860,12 +869,14 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
             onClick={() => onDelete(order)}
             disabled={advancing}
             aria-label="Eliminar pedido"
-            className={`flex items-center justify-center gap-1.5 rounded-xl border-2 border-red-300 dark:border-red-900/60 text-red-600 dark:text-red-400 font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 touch-manipulation ${
-              nextLabel ? 'px-4 py-3 shrink-0' : 'flex-1 py-3 text-base'
+            className={`flex items-center justify-center rounded-lg border-2 border-red-300 dark:border-red-900/60 text-red-600 dark:text-red-400 font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 touch-manipulation ${
+              nextLabel
+                ? compact ? 'px-2.5 py-2 shrink-0' : 'px-4 py-3 shrink-0 rounded-xl'
+                : compact ? 'flex-1 py-2 text-sm' : 'flex-1 py-3 text-base rounded-xl'
             }`}
           >
-            <Trash2 className="w-5 h-5" />
-            {!nextLabel && 'Eliminar pedido'}
+            <Trash2 className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
+            {!nextLabel && !compact && 'Eliminar pedido'}
           </button>
         </div>
       </div>
@@ -886,7 +897,7 @@ export function WorkerTpvDelivery({
   onChangeStore,
 }: WorkerTpvDeliveryProps = {}) {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
@@ -904,8 +915,13 @@ export function WorkerTpvDelivery({
 
   useTpvSuppressBottomBar(view !== 'board');
 
-  const userId = resolveBusinessDataUserId(user, currentBusiness);
-  const businessId = resolveBusinessScopeId(currentBusiness);
+  const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
+  const registerScope = useMemo(
+    () => resolveTpvRegisterScope({ currentBusiness, tabletBinding, authUser: user }),
+    [currentBusiness, tabletBinding, user],
+  );
+  const userId = registerScope.effectiveDataUserId;
+  const businessId = registerScope.scopeBusinessId;
   const registerLive = useTpvRegisterIfOpen();
   const stickyRegisterRef = useRef<TpvRegisterContextType | null>(null);
   useEffect(() => {
@@ -915,7 +931,6 @@ export function WorkerTpvDelivery({
   }, [registerLive]);
   const register = registerLive ?? stickyRegisterRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
-  const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
@@ -1020,9 +1035,10 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!userId) return;
-    const bizId = businessId || String(tabletBinding?.businessId || '').trim();
-    prefetchTpvCatalog(userId, bizId);
-  }, [userId, businessId, tabletBinding?.businessId]);
+    prefetchTpvCatalog(userId, businessId, {
+      accountBusinessCount: businesses?.length,
+    });
+  }, [userId, businessId, businesses?.length]);
 
   useEffect(() => {
     if (!userId) {
@@ -1284,19 +1300,30 @@ export function WorkerTpvDelivery({
     [scopedActive, fulfillmentFilter, search],
   );
 
-  const completedTodayOrders = useMemo(
+  const completedShiftOrders = useMemo(
     () => orders
       .filter((o) => {
         if (o.status === 'cancelled') return false;
         if (!orderInRegisterSession(o, openSession)) return false;
         return isCompletedBoardOrder(o);
       })
-      .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
-      .filter((o) => matchesSearch(o, search))
       .sort((a, b) => new Date(b.deliveredAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.createdAt).getTime())
       .slice(0, 50),
-    [orders, openSession, fulfillmentFilter, search],
+    [orders, openSession],
   );
+
+  const completedTodayOrders = useMemo(
+    () => completedShiftOrders
+      .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
+      .filter((o) => matchesSearch(o, search)),
+    [completedShiftOrders, fulfillmentFilter, search],
+  );
+
+  useEffect(() => {
+    if (isTabletUi && completedShiftOrders.length > 0) {
+      setShowDelivered(true);
+    }
+  }, [isTabletUi, completedShiftOrders.length]);
 
   const filterCounts = useMemo(() => ({
     all: scopedActive.length,
@@ -1434,7 +1461,9 @@ export function WorkerTpvDelivery({
 
         {/* Filtro recogida / envío */}
         <div className={`flex rounded-md bg-gray-100 dark:bg-gray-800 ${isTabletUi ? 'p-0.5 gap-0.5' : 'p-1 gap-1.5 rounded-xl'}`}>
-          {FULFILLMENT_FILTERS.map((f) => (
+          {FULFILLMENT_FILTERS.map((f) => {
+            const FilterIcon = f.Icon;
+            return (
             <button
               key={f.id}
               type="button"
@@ -1451,7 +1480,7 @@ export function WorkerTpvDelivery({
                   : 'text-gray-600 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-700/60'
               }`}
             >
-              {!isTabletUi && f.icon}
+              {!isTabletUi && <FilterIcon className="w-4 h-4" />}
               {f.label}
               <span className={`rounded-full font-bold flex items-center justify-center ${
                 isTabletUi ? 'min-w-[1rem] h-4 px-0.5 text-[9px]' : 'min-w-[1.25rem] h-5 px-1 text-[10px]'
@@ -1459,7 +1488,8 @@ export function WorkerTpvDelivery({
                 {filterCounts[f.id]}
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -1526,7 +1556,7 @@ export function WorkerTpvDelivery({
         )}
       </div>
 
-      {/* Resumen + completados colapsables (solo desktop; en tablet solo KPIs) */}
+      {/* Resumen + completados colapsables */}
       <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${isTabletUi ? 'px-2 py-1' : 'px-3 py-2.5 pb-3'}`}>
         {!isTabletUi && (
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 px-1">
@@ -1537,7 +1567,14 @@ export function WorkerTpvDelivery({
           {[
             { label: 'Montaje', value: stats.montaje, color: 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300' },
             { label: 'Reparto', value: stats.delivery, color: 'text-cyan-700 bg-cyan-50 border-cyan-200 dark:bg-cyan-950/30 dark:border-cyan-900 dark:text-cyan-300' },
-            { label: 'Completados', value: stats.delivered, color: 'text-green-700 bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300' },
+            {
+              label: 'Completados',
+              value: stats.delivered,
+              color: showDelivered
+                ? 'text-green-800 bg-green-100 border-green-300 dark:bg-green-950/50 dark:border-green-700 dark:text-green-200 ring-1 ring-green-400/40'
+                : 'text-green-700 bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300',
+              onClick: () => setShowDelivered((v) => !v),
+            },
             {
               label: isTabletUi ? 'Espera' : 'Espera media',
               value: stats.avgWait != null ? `${stats.avgWait}m` : '—',
@@ -1545,50 +1582,81 @@ export function WorkerTpvDelivery({
                 ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300'
                 : 'text-gray-700 bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-700 dark:text-gray-300',
             },
-          ].map((s) => (
-            <div key={s.label} className={`rounded-lg border text-center ${s.color} ${isTabletUi ? 'px-1 py-1' : 'rounded-xl px-1.5 py-2'}`}>
-              <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-sm' : 'text-lg sm:text-xl'}`}>{s.value}</p>
-              <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[8px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>{s.label}</p>
-            </div>
-          ))}
+          ].map((s) => {
+            const Tile = (
+              <>
+                <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-sm' : 'text-lg sm:text-xl'}`}>{s.value}</p>
+                <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[8px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>{s.label}</p>
+              </>
+            );
+            if ('onClick' in s && s.onClick) {
+              return (
+                <button
+                  key={s.label}
+                  type="button"
+                  onClick={s.onClick}
+                  className={`rounded-lg border text-center touch-manipulation ${s.color} ${isTabletUi ? 'px-1 py-1' : 'rounded-xl px-1.5 py-2'}`}
+                  aria-expanded={showDelivered}
+                  title="Ver pedidos completados del turno"
+                >
+                  {Tile}
+                </button>
+              );
+            }
+            return (
+              <div key={s.label} className={`rounded-lg border text-center ${s.color} ${isTabletUi ? 'px-1 py-1' : 'rounded-xl px-1.5 py-2'}`}>
+                {Tile}
+              </div>
+            );
+          })}
         </div>
 
         {!isTabletUi && (
-          <>
-        <button
-          type="button"
-          onClick={() => setShowDelivered((v) => !v)}
-          className="mt-2.5 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left touch-manipulation"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-            <span className="text-xs sm:text-sm font-bold text-green-800 dark:text-green-300 truncate">
-              Completados en turno ({completedTodayOrders.length})
-            </span>
-          </div>
-          {showDelivered ? (
-            <ChevronUp className="w-4 h-4 text-green-700 shrink-0" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-green-700 shrink-0" />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={() => setShowDelivered((v) => !v)}
+            className="mt-2.5 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left touch-manipulation"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+              <span className="text-xs sm:text-sm font-bold text-green-800 dark:text-green-300 truncate">
+                Completados en turno ({completedShiftOrders.length})
+              </span>
+            </div>
+            {showDelivered ? (
+              <ChevronUp className="w-4 h-4 text-green-700 shrink-0" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-green-700 shrink-0" />
+            )}
+          </button>
+        )}
+
         {showDelivered && (
-          <div className="mt-2 max-h-44 overflow-y-auto space-y-1">
-            {completedTodayOrders.length === 0 ? (
+          <div className={`mt-2 overflow-y-auto space-y-1 ${isTabletUi ? 'max-h-32' : 'max-h-44'}`}>
+            {completedShiftOrders.length === 0 ? (
               <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">Sin entregas en turno</p>
             ) : (
-              completedTodayOrders.map((order) => {
+              completedShiftOrders.map((order) => {
                 const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
+                const dimmed =
+                  completedTodayOrders.every((o) => o._id !== order._id)
+                  && (fulfillmentFilter !== 'all' || search.trim().length > 0);
                 return (
                   <button
                     key={order._id}
                     type="button"
                     onClick={() => setSelectedOrder(order)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left touch-manipulation"
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left touch-manipulation ${
+                      dimmed
+                        ? 'bg-gray-50/70 dark:bg-gray-800/70 opacity-60'
+                        : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    } ${isTabletUi ? 'py-1.5 px-2' : ''}`}
                   >
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
-                      <p className="text-[11px] text-gray-500 truncate">
+                      <p className={`font-bold text-gray-900 dark:text-gray-100 font-mono ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                        #{order.orderNumber}
+                      </p>
+                      <p className={`text-gray-500 truncate ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
                         {order.customerName || 'Cliente'}
                         {' · '}
                         {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
@@ -1596,16 +1664,18 @@ export function WorkerTpvDelivery({
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-xs font-bold tabular-nums">{formatCurrency(resolveDeliveryOrderChargeTotal(order))}</p>
-                      <p className={`text-[10px] font-semibold ${statusCfg.color}`}>{statusCfg.label}</p>
+                      <p className={`font-bold tabular-nums ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                        {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
+                      </p>
+                      <p className={`font-semibold ${statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
+                        {statusCfg.label}
+                      </p>
                     </div>
                   </button>
                 );
               })
             )}
           </div>
-        )}
-          </>
         )}
       </div>
 

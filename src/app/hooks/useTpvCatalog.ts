@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { CatalogItem } from '../lib/deliveryApi';
 import type { Brand } from '../lib/brandsApi';
-import { DELIVERY_CATALOG_CHANGED } from '../lib/deliverySetup';
+import { DELIVERY_CATALOG_CHANGED, DELIVERY_BRANDS_CHANGED } from '../lib/deliverySetup';
 import {
   fetchTpvCatalog,
   readTpvCatalogCache,
@@ -11,37 +11,80 @@ import {
 
 const REVALIDATE_MS = 60_000;
 
-export function useTpvCatalog(userId: string | undefined, businessId: string) {
-  const initial = userId ? readTpvCatalogCache(userId, businessId) : null;
+export function useTpvCatalog(
+  userId: string | undefined,
+  businessId: string,
+  options?: { accountBusinessCount?: number },
+) {
+  const accountBusinessCount = options?.accountBusinessCount;
+  const scopeRef = useRef({ userId: '', businessId: '' });
+  scopeRef.current = {
+    userId: String(userId || '').trim(),
+    businessId: String(businessId || '').trim(),
+  };
+
+  const initial =
+    userId && businessId ? readTpvCatalogCache(userId, businessId) : null;
 
   const [catalog, setCatalog] = useState<CatalogItem[]>(() => initial?.items ?? []);
   const [brands, setBrands] = useState<Brand[]>(() => initial?.brands ?? []);
-  const [loadingCatalog, setLoadingCatalog] = useState(() => Boolean(userId && !initial));
+  const [loadingCatalog, setLoadingCatalog] = useState(() => Boolean(userId && businessId && !initial));
+
+  const applySnapshot = useCallback((snapshot: { items: CatalogItem[]; brands: Brand[] }) => {
+    setCatalog(snapshot.items);
+    setBrands(snapshot.brands);
+  }, []);
 
   const reloadCatalog = useCallback(
-    (options?: { force?: boolean; silent?: boolean }) => {
-      if (!userId) return Promise.resolve();
-      const showSpinner = !options?.silent && catalog.length === 0;
+    (reloadOptions?: { force?: boolean; silent?: boolean }) => {
+      const { userId: uid, businessId: bid } = scopeRef.current;
+      if (!uid || !bid) return Promise.resolve();
+
+      const showSpinner = !reloadOptions?.silent && catalog.length === 0;
       if (showSpinner) setLoadingCatalog(true);
-      return fetchTpvCatalog(userId, businessId, { force: options?.force })
+
+      return fetchTpvCatalog(uid, bid, {
+        force: reloadOptions?.force,
+        accountBusinessCount,
+      })
         .then((snapshot) => {
-          setCatalog(snapshot.items);
-          setBrands(snapshot.brands);
+          if (
+            scopeRef.current.userId !== uid
+            || scopeRef.current.businessId !== bid
+          ) {
+            return;
+          }
+          applySnapshot(snapshot);
         })
         .catch(() => {
-          if (!options?.silent && catalog.length === 0) {
+          if (
+            scopeRef.current.userId !== uid
+            || scopeRef.current.businessId !== bid
+          ) {
+            return;
+          }
+          if (!reloadOptions?.silent && catalog.length === 0) {
             toast.error('Error al cargar el catálogo');
           }
         })
         .finally(() => {
-          if (showSpinner) setLoadingCatalog(false);
+          if (
+            scopeRef.current.userId === uid
+            && scopeRef.current.businessId === bid
+            && showSpinner
+          ) {
+            setLoadingCatalog(false);
+          }
         });
     },
-    [userId, businessId, catalog.length],
+    [accountBusinessCount, applySnapshot, catalog.length],
   );
 
   useEffect(() => {
-    if (!userId) {
+    const uid = String(userId || '').trim();
+    const bid = String(businessId || '').trim();
+
+    if (!uid || !bid) {
       setCatalog([]);
       setBrands([]);
       setLoadingCatalog(false);
@@ -49,14 +92,15 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
     }
 
     let cancelled = false;
-    const cached = readTpvCatalogCache(userId, businessId);
 
+    setCatalog([]);
+    setBrands([]);
+    setLoadingCatalog(true);
+
+    const cached = readTpvCatalogCache(uid, bid);
     if (cached) {
-      setCatalog(cached.items);
-      setBrands(cached.brands);
+      applySnapshot(cached);
       setLoadingCatalog(false);
-    } else {
-      setLoadingCatalog(true);
     }
 
     const needsNetwork =
@@ -70,33 +114,44 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
       };
     }
 
-    void fetchTpvCatalog(userId, businessId)
+    void fetchTpvCatalog(uid, bid, { accountBusinessCount })
       .then((snapshot) => {
         if (cancelled) return;
-        setCatalog(snapshot.items);
-        setBrands(snapshot.brands);
+        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        applySnapshot(snapshot);
       })
       .catch(() => {
-        if (!cancelled && !cached) {
+        if (cancelled) return;
+        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        if (!cached) {
           toast.error('Error al cargar el catálogo');
         }
       })
       .finally(() => {
-        if (!cancelled) setLoadingCatalog(false);
+        if (cancelled) return;
+        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        setLoadingCatalog(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [userId, businessId]);
+  }, [userId, businessId, accountBusinessCount, applySnapshot]);
 
   useEffect(() => {
     if (!userId || typeof window === 'undefined') return;
     const onCatalogChanged = () => {
       void reloadCatalog({ force: true, silent: true });
     };
+    const onBrandsChanged = () => {
+      void reloadCatalog({ force: true, silent: true });
+    };
     window.addEventListener(DELIVERY_CATALOG_CHANGED, onCatalogChanged);
-    return () => window.removeEventListener(DELIVERY_CATALOG_CHANGED, onCatalogChanged);
+    window.addEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
+    return () => {
+      window.removeEventListener(DELIVERY_CATALOG_CHANGED, onCatalogChanged);
+      window.removeEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
+    };
   }, [userId, reloadCatalog]);
 
   return { catalog, brands, loadingCatalog, reloadCatalog };

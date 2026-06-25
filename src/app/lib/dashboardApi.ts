@@ -1,3 +1,4 @@
+import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -81,7 +82,7 @@ export interface DashboardServerData {
 const API_BASE = getApiBase();
 
 export async function fetchDashboardData(userId: string): Promise<DashboardServerData> {
-  const response = await fetch(
+  const response = await authFetch(
     `${API_BASE}/api/dashboard/kpis/${encodeURIComponent(userId)}`,
     {
       headers: {
