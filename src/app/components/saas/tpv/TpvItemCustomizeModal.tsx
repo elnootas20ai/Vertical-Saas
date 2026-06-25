@@ -11,6 +11,7 @@ import {
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { TpvModalRoot } from './TpvModalRoot';
 
 type CustomizeTab = 'ingredients' | 'extras' | 'notes';
 
@@ -196,13 +197,14 @@ export function TpvItemCustomizeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6">
+    <TpvModalRoot>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="relative w-full sm:max-w-3xl max-h-[94dvh] overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
+        className="relative w-full sm:max-w-3xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-customize-title"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Cabecera */}
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-white dark:from-gray-900 dark:to-gray-900">
@@ -290,7 +292,7 @@ export function TpvItemCustomizeModal({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-5 py-4">
           {!customizable && (
             <section>
               <label className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
@@ -475,6 +477,6 @@ export function TpvItemCustomizeModal({
           </button>
         </div>
       </div>
-    </div>
+    </TpvModalRoot>
   );
 }

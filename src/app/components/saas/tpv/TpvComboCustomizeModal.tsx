@@ -16,6 +16,7 @@ import {
   type ComboMenuCatalogSection,
 } from '../../../lib/catalogComboSlots';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { TpvModalRoot } from './TpvModalRoot';
 
 type TpvComboCustomizeModalProps = {
   item: CatalogItem;
@@ -152,13 +153,14 @@ export function TpvComboCustomizeModal({
   }, [visibleSections, selections, catalogItems]);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6">
+    <TpvModalRoot>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div
         className="relative flex flex-col w-full sm:max-w-4xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tpv-combo-title"
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
           <div className="flex items-start justify-between gap-4">
@@ -204,7 +206,7 @@ export function TpvComboCustomizeModal({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-5 py-4 space-y-4 scroll-smooth">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-4 sm:px-5 py-4 space-y-4">
           {visibleSections.length === 0 ? (
             <p className="text-sm text-gray-500 text-center py-8">
               No hay productos en el catálogo para componer este menú.
@@ -336,6 +338,6 @@ export function TpvComboCustomizeModal({
           </button>
         </div>
       </div>
-    </div>
+    </TpvModalRoot>
   );
 }

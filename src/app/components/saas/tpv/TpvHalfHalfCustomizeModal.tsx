@@ -6,6 +6,7 @@ import {
   type HalfHalfPizzaSelection,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { TpvModalRoot } from './TpvModalRoot';
 
 type TpvHalfHalfCustomizeModalProps = {
   item: CatalogItem;
@@ -61,9 +62,10 @@ export function TpvHalfHalfCustomizeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-sm">
+    <TpvModalRoot>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="bg-white dark:bg-gray-900 w-full sm:max-w-lg max-h-[92vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        className="relative bg-white dark:bg-gray-900 w-full sm:max-w-lg h-[92dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 p-4 border-b border-gray-200 dark:border-gray-800 shrink-0">
@@ -123,7 +125,7 @@ export function TpvHalfHalfCustomizeModal({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 min-h-0">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4">
           {pizzas.length === 0 ? (
             <p className="text-sm text-center text-gray-500 dark:text-gray-400 py-8">
               No hay pizzas en el catálogo. Importa o crea pizzas en categoría Pizzas primero.
@@ -182,6 +184,6 @@ export function TpvHalfHalfCustomizeModal({
           </button>
         </div>
       </div>
-    </div>
+    </TpvModalRoot>
   );
 }
