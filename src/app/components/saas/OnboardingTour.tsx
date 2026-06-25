@@ -4,6 +4,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { X, ChevronRight, ChevronLeft, Sparkles, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { useActivationChecklist } from '../../context/ActivationChecklistContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   armOnboardingTourForBusiness,
@@ -42,6 +43,10 @@ export function OnboardingTour({ onComplete }: Props) {
   const businessCtx = useBusinessOptional();
   const currentBusiness = businessCtx?.currentBusiness ?? null;
   const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
+  const { completionPct: checklistCompletionPct, totalSteps: checklistTotalSteps } =
+    useActivationChecklist();
+  const checklistComplete =
+    checklistTotalSteps > 0 && checklistCompletionPct >= 100;
 
   const steps = useMemo(
     () =>
@@ -101,6 +106,14 @@ export function OnboardingTour({ onComplete }: Props) {
 
     if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) {
       if (!showLockRef.current) setTourGate('loading');
+      return;
+    }
+
+    if (checklistComplete) {
+      markOnboardingTourCompleted(accountUserId, businessId);
+      setOnboardingTourActive(accountUserId, businessId, false);
+      showLockRef.current = false;
+      setTourGate('hide');
       return;
     }
 
@@ -166,6 +179,7 @@ export function OnboardingTour({ onComplete }: Props) {
     pausedThisSession,
     currentBusiness,
     user,
+    checklistComplete,
   ]);
 
   useEffect(() => {

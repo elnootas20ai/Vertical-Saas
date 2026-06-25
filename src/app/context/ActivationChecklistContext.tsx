@@ -19,8 +19,10 @@ import {
   activationInProgressKey,
   isActivationChecklistDismissed,
   isActivationChecklistForceVisible,
+  markOnboardingTourCompleted,
   setActivationChecklistDismissed,
   setActivationChecklistForceVisible,
+  setOnboardingTourActive,
 } from '../lib/onboardingLocalKeys';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import { useApp } from './AppContext';
@@ -351,11 +353,21 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     if (completionPct !== 100 || !accountUserId || !businessId) return;
+    markOnboardingTourCompleted(accountUserId, businessId);
+    setOnboardingTourActive(accountUserId, businessId, false);
     if (isDelivery) return;
     if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
     setIsDismissed(true);
     setActivationChecklistDismissed(accountUserId, businessId, true);
   }, [completionPct, accountUserId, businessId, isDelivery]);
+
+  /** Delivery al 100 %: ocultar checklist lateral (el tour de bienvenida ya no vuelve). */
+  useEffect(() => {
+    if (!isDelivery || completionPct !== 100 || !accountUserId || !businessId) return;
+    if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
+    setIsDismissed(true);
+    setActivationChecklistDismissed(accountUserId, businessId, true);
+  }, [isDelivery, completionPct, accountUserId, businessId]);
 
   const dismiss = useCallback(() => {
     setIsDismissed(true);
