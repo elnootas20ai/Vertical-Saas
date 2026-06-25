@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useTheme } from 'next-themes';
-import { Mail, Lock, User, Phone, CheckCircle, Eye, EyeOff, Sparkles, Building2, Gift } from 'lucide-react';
+import { Mail, Lock, User, Phone, CheckCircle, Eye, EyeOff, Building2, Gift } from 'lucide-react';
 import { validateReferralCode } from '../../lib/affiliatesApi';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
@@ -20,28 +20,6 @@ interface LocationState {
   googleUser?: GoogleUserProfile;
   googleCredential?: string;
   accountType?: AccountType;
-}
-
-const PW_LOWER = 'abcdefghijklmnopqrstuvwxyz';
-const PW_UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const PW_NUM = '0123456789';
-const PW_SYM = '!@#$%&*-_';
-
-/** Contraseña aleatoria fuerte (mayúsculas, minúsculas, números y símbolos). */
-function generateSecurePassword(length = 16): string {
-  const pools = [PW_LOWER, PW_UPPER, PW_NUM, PW_SYM];
-  const all = pools.join('');
-  const buf = new Uint32Array(Math.max(length, 32));
-  crypto.getRandomValues(buf);
-  const chars: string[] = pools.map((pool, i) => pool[buf[i] % pool.length]);
-  for (let i = chars.length; i < length; i++) {
-    chars.push(all[buf[i] % all.length]);
-  }
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = buf[i % buf.length] % (i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join('');
 }
 
 function destinationAfterSignup(opts: {
@@ -119,12 +97,6 @@ export function Register() {
   }, []);
 
   const isGoogleFlow = Boolean(googleCredential);
-
-  const applyGeneratedPassword = () => {
-    const pw = generateSecurePassword();
-    setFormData((prev) => ({ ...prev, password: pw, confirmPassword: pw }));
-    setErrors((prev) => ({ ...prev, password: '', confirmPassword: '' }));
-  };
 
   const handleGoogleCredential = useCallback(async (credential: string) => {
     setIsSubmitting(true);
@@ -246,10 +218,10 @@ export function Register() {
   };
 
   return (
-    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'} scrollable={false}>
-      <div className="flex min-h-dvh max-h-dvh flex-col items-center justify-center overflow-hidden p-4 sm:p-5 lg:min-h-0 lg:flex-1 lg:px-8">
-      <div className="w-full max-w-md shrink-0">
-        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-5 shadow-sm">
+    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'} scrollable>
+      <div className="flex min-h-dvh flex-col items-center justify-center p-4 sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
+      <div className="w-full max-w-lg shrink-0">
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm">
           <div className="text-center mb-4">
             <div className="flex items-center justify-center mb-3">
               <VertialLogo size="md" />
@@ -304,7 +276,7 @@ export function Register() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
               <ACCESO__Input
                 label="Nombre"
                 type="text"
@@ -330,8 +302,7 @@ export function Register() {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div className="relative">
+            <div className="relative min-w-0">
               <ACCESO__Input
                 label="Email"
                 type="email"
@@ -346,86 +317,59 @@ export function Register() {
                 }}
                 error={errors.email}
                 disabled={isGoogleFlow}
+                className={isGoogleFlow ? '!pr-10' : ''}
               />
               {isGoogleFlow && (
-                <div className="absolute right-3 top-8 flex items-center">
+                <div className="pointer-events-none absolute right-3 top-8 flex items-center">
                   <CheckCircle className="w-4 h-4 text-green-500" />
                 </div>
               )}
             </div>
 
-            {isUserAccount ? (
-              <ACCESO__Input
-                label="Teléfono (opc.)"
-                type="tel"
-                placeholder="+34 600 000 000"
-                icon={<Phone className="w-4 h-4" />}
-                value={formData.phone}
-                onChange={(e) => {
-                  setFormData({ ...formData, phone: e.target.value });
-                  setErrors({ ...errors, phone: '' });
-                }}
-                error={errors.phone}
-              />
-            ) : (
-              <ACCESO__Input
-                label="Teléfono"
-                type="tel"
-                placeholder="+34 600 000 000"
-                icon={<Phone className="w-4 h-4" />}
-                value={formData.phone}
-                onChange={(e) => {
-                  setFormData({ ...formData, phone: e.target.value });
-                  setErrors({ ...errors, phone: '' });
-                }}
-                error={errors.phone}
-              />
-            )}
-            </div>
+            <ACCESO__Input
+              label={isUserAccount ? 'Teléfono (opc.)' : 'Teléfono'}
+              type="tel"
+              placeholder="+34 600 000 000"
+              icon={<Phone className="w-4 h-4" />}
+              value={formData.phone}
+              onChange={(e) => {
+                setFormData({ ...formData, phone: e.target.value });
+                setErrors({ ...errors, phone: '' });
+              }}
+              error={errors.phone}
+            />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Contraseña</span>
+            <div className="space-y-3 min-w-0">
+              <ACCESO__Input
+                label="Contraseña"
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                placeholder="8 caracteres mínimo"
+                icon={<Lock className="w-4 h-4" />}
+                value={formData.password}
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  setErrors({ ...errors, password: '' });
+                }}
+                error={errors.password}
+                suffix={
                   <button
                     type="button"
-                    onClick={applyGeneratedPassword}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300"
+                    tabIndex={-1}
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
+                    onClick={() => setShowPassword((v) => !v)}
                   >
-                    <Sparkles className="w-3 h-3" aria-hidden />
-                    Generar
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                </div>
-                <ACCESO__Input
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  placeholder="Mín. 8 caracteres"
-                  icon={<Lock className="w-4 h-4" />}
-                  value={formData.password}
-                  onChange={(e) => {
-                    setFormData({ ...formData, password: e.target.value });
-                    setErrors({ ...errors, password: '' });
-                  }}
-                  error={errors.password}
-                  suffix={
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                      className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500"
-                      onClick={() => setShowPassword((v) => !v)}
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  }
-                />
-              </div>
+                }
+              />
 
               <ACCESO__Input
-                label="Repetir"
+                label="Repetir contraseña"
                 type={showConfirmPassword ? 'text' : 'password'}
                 autoComplete="new-password"
-                placeholder="Repite contraseña"
+                placeholder="Confirma tu contraseña"
                 icon={<Lock className="w-4 h-4" />}
                 value={formData.confirmPassword}
                 onChange={(e) => {

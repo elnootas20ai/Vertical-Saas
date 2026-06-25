@@ -188,6 +188,26 @@ export interface DeliveryStoresState {
   pointsOfSale: PointOfSale[];
 }
 
+/** Misma lógica que Ajustes → Tienda y TPV (evita checklist desincronizado). */
+export function snapshotDeliveryStoreActivation(
+  state: Pick<DeliveryStoresState, 'workCenters' | 'pointsOfSale'>,
+): { hasActiveRetailStore: boolean; hasActivePdv: boolean; retailStores: WorkCenter[] } {
+  const retailStores = state.workCenters.filter(
+    (wc) =>
+      wc.active !== false &&
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+  const activePdvs = state.pointsOfSale.filter(
+    (p) => p.active !== false && String(p._id || '').trim(),
+  );
+  return {
+    retailStores,
+    hasActiveRetailStore: retailStores.length > 0,
+    hasActivePdv: activePdvs.length > 0,
+  };
+}
+
 /** Quita prefijo Couch `business:` para comparar IDs de forma consistente. */
 export function normalizeBusinessScopeId(value: string | null | undefined): string {
   return String(value || '').replace(/^business:/, '').trim();

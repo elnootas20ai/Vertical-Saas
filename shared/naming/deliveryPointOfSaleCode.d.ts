@@ -31,6 +31,8 @@ export function parsePdvCodeParts(code: string): { prefix: string; seq: string }
 
 export function buildPdvCodeFromParts(prefix: string, seq: string): string;
 
+export function sanitizePdvCodeLiveInput(raw: string): string;
+
 export const PDV_CODE_STRICT_RE: RegExp;
 
 export function validatePdvCodeInput(raw: string): string | null;

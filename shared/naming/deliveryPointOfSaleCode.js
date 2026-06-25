@@ -157,6 +157,15 @@ export function buildPdvCodeFromParts(prefix, seq) {
   return `${p}-${s}`;
 }
 
+/** Mientras se escribe: siempre muestra el guion (mínimo «-»); letras + dígitos alrededor. */
+export function sanitizePdvCodeLiveInput(raw) {
+  const norm = normalizePdvCodeInput(raw);
+  if (!norm || norm === '-') return '-';
+  const { prefix, seq } = parsePdvCodeParts(norm);
+  if (!prefix && !seq) return '-';
+  return `${prefix}-${seq}`;
+}
+
 export function validatePdvCodeInput(raw) {
   const code = sanitizePdvCodeInput(raw);
   if (!code) return 'El código PDV es obligatorio';

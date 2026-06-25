@@ -189,7 +189,10 @@ export function SettingsWizardShell({
           </div>
 
           <div className={`shrink-0 border-b border-gray-200 bg-gray-50/90 dark:border-gray-700 dark:bg-gray-900/50 ${ui.steps}`}>
-            <div className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+              className="grid gap-2"
+              style={{ gridTemplateColumns: `repeat(${Math.max(steps.length, 1)}, minmax(0, 1fr))` }}
+            >
               {steps.map((step, index) => {
                 const active = step.id === activeStepId;
                 const completed = step.completed ?? index < activeIndex;
@@ -199,9 +202,7 @@ export function SettingsWizardShell({
                     key={step.id}
                     type="button"
                     onClick={() => onStepChange(step.id)}
-                    className={`flex shrink-0 items-center gap-2.5 rounded-xl border text-left transition-all ${
-                      size === 'large' ? 'px-4 py-2.5' : 'px-3 py-2'
-                    } ${
+                    className={`flex min-h-[4.25rem] w-full min-w-0 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-center transition-all sm:min-h-[4.5rem] sm:px-2.5 ${
                       active
                         ? 'border-gray-900 bg-white shadow-sm dark:border-gray-100 dark:bg-gray-800'
                         : completed
@@ -220,23 +221,12 @@ export function SettingsWizardShell({
                     >
                       {completed && !active ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : index + 1}
                     </span>
-                    <span className="min-w-0">
-                      <span
-                        className={`block font-bold leading-tight ${ui.stepTitle} ${
-                          active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'
-                        }`}
-                      >
-                        {step.title}
-                      </span>
-                      {step.hint ? (
-                        <span
-                          className={`block leading-tight text-gray-500 dark:text-gray-500 ${
-                            size === 'large' ? 'text-xs' : 'text-[10px]'
-                          }`}
-                        >
-                          {step.hint}
-                        </span>
-                      ) : null}
+                    <span
+                      className={`block w-full truncate font-bold leading-tight ${ui.stepTitle} ${
+                        active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {step.title}
                     </span>
                   </button>
                 );

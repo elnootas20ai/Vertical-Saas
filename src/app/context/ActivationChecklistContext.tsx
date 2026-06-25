@@ -5,15 +5,14 @@ import {
   EMPTY_DELIVERY_ACTIVATION_FLAGS,
   type DeliveryActivationFlags,
 } from '../lib/deliveryActivationChecklist';
-import { listCatalogItemsRequest, listPointsOfSaleRequest } from '../lib/deliveryApi';
+import { listCatalogItemsRequest } from '../lib/deliveryApi';
 import {
   DELIVERY_BRANDS_CHANGED,
   DELIVERY_CATALOG_CHANGED,
-  filterPointsOfSaleForWorkCenters,
+  loadDeliveryStores,
+  snapshotDeliveryStoreActivation,
   isDeliveryBusinessType,
-  workCentersStrictlyForBusiness,
 } from '../lib/deliverySetup';
-import { listWorkCentersForDelivery } from '../lib/workCentersApi';
 import { isBrandSetupComplete, isDefaultCommercialBrand } from '../lib/brandUtils';
 import { anyActiveRetailStoreHasOpeningHours } from '../lib/businessHoursUtils';
 import {
@@ -117,11 +116,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const { vehicles, clients, clientsTotalCount, leads, sales, documents } = useApp();
   const { user, listUsers } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  const businessesCount = useBusinessOptional()?.businesses?.length ?? 0;
   const [teamCount, setTeamCount] = useState(0);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [deliveryFlags, setDeliveryFlags] = useState<DeliveryActivationFlags | null>(null);
   const deliveryFlagsRef = useRef<DeliveryActivationFlags | null>(null);
-  const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountUserId = resolveAccountUserId(user);
   const businessId = currentBusiness?.business_id || '';
   const bizName = currentBusiness?.name ?? '';
@@ -168,22 +167,19 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
     const load = async () => {
       try {
-        const [allWorkCenters, rawPdvs, brands, catalog] = await Promise.all([
-          listWorkCentersForDelivery(dataUserId, currentBusiness),
-          listPointsOfSaleRequest(dataUserId).catch(() => []),
+        const [storeState, brands, catalog] = await Promise.all([
+          loadDeliveryStores(user, currentBusiness, {
+            includeInactivePdvs: true,
+            accountBusinessCount: businessesCount,
+          }),
           businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
           listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
         ]);
 
         if (cancelled) return;
 
-        const scopedCenters = workCentersStrictlyForBusiness(allWorkCenters, businessId);
-        const retailActive = scopedCenters.filter(
-          (wc) =>
-            wc.active !== false &&
-            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-        );
-        const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, scopedCenters);
+        const { hasActiveRetailStore, hasActivePdv, retailStores } =
+          snapshotDeliveryStoreActivation(storeState);
 
         const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
         const catalogForBusiness = catalog.filter((item) => {
@@ -200,7 +196,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           brands.find((b) => b.active !== false) ??
           brands[0] ??
           null;
-        const setupCtx = { isDelivery: true, retailStoreCount: retailActive.length };
+        const setupCtx = { isDelivery: true, retailStoreCount: retailStores.length };
         const brandReady = primaryBrand
           ? isBrandSetupComplete(primaryBrand, setupCtx)
           : false;
@@ -210,12 +206,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           hasTaxData: Boolean(bizTaxId.trim()),
           hasAddress: Boolean(bizAddress.trim()),
           hasPhone: Boolean(bizPhone.trim()),
-          hasActiveRetailStore: retailActive.length > 0,
-          hasActivePdv: scopedPdvs.length > 0,
+          hasActiveRetailStore,
+          hasActivePdv,
           brandSetupComplete: brandReady,
           hasCatalogProduct: catalogForBusiness.length > 0,
           hasPricedProduct: priced.length > 0,
-          hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailActive),
+          hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailStores),
         };
         deliveryFlagsRef.current = nextFlags;
         setDeliveryFlags(nextFlags);
@@ -228,11 +224,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
     void load();
     const scheduleLoad = () => {
-      if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
-      loadDebounceRef.current = setTimeout(() => {
-        loadDebounceRef.current = null;
-        void load();
-      }, 400);
+      void load();
     };
     const onBrandsChanged = () => {
       void load();
@@ -242,12 +234,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     window.addEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
     return () => {
       cancelled = true;
-      if (loadDebounceRef.current) clearTimeout(loadDebounceRef.current);
       window.removeEventListener('work-centers:changed', scheduleLoad);
       window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
       window.removeEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
     };
-  }, [isDelivery, dataUserId, businessId, bizName, bizTaxId, bizAddress, bizPhone, user, currentBusiness]);
+  }, [isDelivery, dataUserId, businessId, bizName, bizTaxId, bizAddress, bizPhone, user, currentBusiness, businessesCount]);
 
   const biz = currentBusiness;
 

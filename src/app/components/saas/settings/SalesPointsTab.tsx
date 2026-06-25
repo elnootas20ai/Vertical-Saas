@@ -48,6 +48,7 @@ import {
   pointOfSaleDisplayLabel,
   regenerateTerminalCodeRequest,
   sanitizePdvCodeInput,
+  sanitizePdvCodeLiveInput,
   sanitizeRetailTextField,
   sanitizeRetailTextFieldInput,
   sanitizeStoreDisplayName,
@@ -315,6 +316,8 @@ function WorkCenterModal({
   const simplifyPdvCreate = forcePointOfSale && !editItem;
   const showPdvLabelPreview =
     isOpen && !editItem && (simplifyPdvCreate || form.centerType === 'punto_de_venta');
+  const effectivePdvCode = pdvCode.trim() === '-' ? '' : pdvCode.trim();
+
   const pdvLabelPreview = useMemo(() => {
     if (!showPdvLabelPreview) return null;
     const rawName = form.name.trim();
@@ -322,7 +325,7 @@ function WorkCenterModal({
       return { code: '', displayName: '', label: '', needsName: true as const };
     }
     const code =
-      (showPdvCodeField && pdvCode.trim()) ||
+      (showPdvCodeField && effectivePdvCode) ||
       suggestNextPdvCode(rawName, [...existingPdvCodes]);
     const displayName = showPdvCodeField
       ? rawName
@@ -355,13 +358,12 @@ function WorkCenterModal({
     });
   };
 
-  const updatePdvCodeParts = (prefix: string, seq: string, padSeq = false) => {
+  const updatePdvCodeLive = (raw: string) => {
     clearFieldError('pdvCode');
-    const normalizedSeq = padSeq && seq.length === 1 ? seq.padStart(2, '0') : seq;
-    const next = buildPdvCodeFromParts(prefix, normalizedSeq);
-    if (!next) {
-      setPdvCodeManual(false);
-      setPdvCode('');
+    const next = sanitizePdvCodeLiveInput(raw);
+    if (next === '-') {
+      setPdvCodeManual(true);
+      setPdvCode('-');
       return;
     }
     setPdvCodeManual(true);
@@ -725,6 +727,7 @@ function WorkCenterModal({
       maxHeight={simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
       size={simplifyPdvCreate ? 'medium' : 'default'}
       preview={step === 'horarios' ? undefined : storePreview}
+      bodyOverflow={step === 'horarios' && includeOpeningHours ? 'hidden' : 'auto'}
       footer={
         <SettingsWizardFooter
           onCancel={onClose}
@@ -869,39 +872,25 @@ function WorkCenterModal({
                   <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.name}</p>
                 ) : null}
               </div>
-              {showPdvCodeField && (() => {
-                const { prefix: pdvPrefix, seq: pdvSeq } = parsePdvCodeParts(pdvCode);
-                return (
+              {showPdvCodeField && (
                 <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
                   <label className={labelClass}>Código PDV</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      className={`${inputClass('pdvCode')} w-[5.5rem] shrink-0 text-center font-mono uppercase tracking-widest`}
-                      placeholder="CDM"
-                      value={pdvPrefix}
-                      maxLength={3}
-                      aria-label="Prefijo del código PDV (3 letras)"
-                      onChange={(e) => updatePdvCodeParts(e.target.value, pdvSeq)}
-                    />
-                    <span className="shrink-0 select-none font-mono text-lg font-bold text-gray-400 dark:text-gray-500" aria-hidden>
-                      -
-                    </span>
-                    <input
-                      className={`${inputClass('pdvCode')} w-[4.5rem] shrink-0 text-center font-mono tracking-widest`}
-                      placeholder="01"
-                      value={pdvSeq}
-                      maxLength={2}
-                      inputMode="numeric"
-                      aria-label="Número del código PDV (2 dígitos)"
-                      onChange={(e) => updatePdvCodeParts(pdvPrefix, e.target.value)}
-                      onBlur={() => {
-                        if (pdvSeq.length === 1) updatePdvCodeParts(pdvPrefix, pdvSeq, true);
-                      }}
-                    />
-                    <span className="hidden text-xs text-gray-400 sm:inline">Formato fijo</span>
-                  </div>
+                  <input
+                    className={`${inputClass('pdvCode')} max-w-[8.5rem] font-mono uppercase tracking-widest`}
+                    placeholder="-"
+                    value={pdvCode || '-'}
+                    maxLength={PDV_RETAIL_LIMITS.pdvCodeMax + 1}
+                    aria-label="Código PDV (3 letras, guion, 2 números)"
+                    onChange={(e) => updatePdvCodeLive(e.target.value)}
+                    onBlur={() => {
+                      const { prefix, seq } = parsePdvCodeParts(pdvCode);
+                      if (seq.length === 1) {
+                        updatePdvCodeLive(buildPdvCodeFromParts(prefix, seq.padStart(2, '0')));
+                      }
+                    }}
+                  />
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    3 letras + guion + 2 números (ej. CDM-01). Se sugiere del nombre; solo puedes cambiar letras y número.
+                    3 letras + guion + 2 números (ej. CDM-01). El guion se mantiene; escribe letras y número.
                   </p>
                   {fieldErrors.pdvCode ? (
                     <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
@@ -909,8 +898,7 @@ function WorkCenterModal({
                     </p>
                   ) : null}
                 </div>
-                );
-              })()}
+              )}
               <div>
                 <label className={labelClass}>
                   Trabajadores{simplifyPdvCreate ? '' : ' previstos'} *
@@ -1498,7 +1486,8 @@ function WorkCenterModal({
                   clearFieldError('horarios');
                 }}
                 storeLabel={storeHoursLabel}
-                compact
+                wizard={simplifyPdvCreate}
+                compact={!simplifyPdvCreate}
               />
             </div>
           )}
