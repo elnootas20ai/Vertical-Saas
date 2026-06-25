@@ -35,8 +35,6 @@ import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../l
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
-  DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
-  DELIVERY_CATALOG_TEMPLATE_VERSION,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
   validateDeliveryCatalogImportEntries,
@@ -1848,13 +1846,7 @@ export function CatalogPage() {
 
   const handleDownloadCatalogTemplate = useCallback(() => {
     downloadDeliveryCatalogImportTemplate(templateOrganizerLines);
-    const linesHint =
-      templateOrganizerLines.length > 0
-        ? templateOrganizerLines.map((b) => b.name).join(', ')
-        : 'configura líneas en Ajustes → Marca';
-    toast.success(
-      `Plantilla v${DELIVERY_CATALOG_TEMPLATE_VERSION} · ${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas · ${linesHint}`,
-    );
+    toast.success('Plantilla catálogo');
   }, [templateOrganizerLines]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {

@@ -25,6 +25,17 @@ export function normalizeBrandNameKey(name: string): string {
     .replace(/\p{M}/gu, '');
 }
 
+/** Código corto PDV/informes a partir del nombre de marca (p. ej. «Crepería» → «CRE»). */
+export function suggestBrandShortCodeFromName(name: string, maxLen = 3): string {
+  const cleaned = String(name || '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toUpperCase();
+  if (!cleaned) return '';
+  return cleaned.slice(0, Math.max(1, maxLen));
+}
+
 export function isDefaultCommercialBrand(brand: Pick<Brand, 'name' | 'isDefault'>): boolean {
   return Boolean(brand.isDefault) || normalizeBrandNameKey(brand.name) === normalizeBrandNameKey(DEFAULT_COMMERCIAL_BRAND_NAME);
 }
@@ -43,14 +54,12 @@ export function canDeactivateBrand(
   return activeCount > 1;
 }
 
-/** Nueva línea comercial: inactiva si ya hay otra marca activa (como la 2.ª tienda). */
+/** Nueva línea comercial: activa al crear (salvo que se pida explícitamente inactiva). */
 export function resolveBrandActiveOnCreate(
-  existingBrands: Array<Pick<Brand, 'active'>>,
+  _existingBrands: Array<Pick<Brand, 'active'>>,
   requestedActive?: boolean,
 ): boolean {
-  if (requestedActive === false) return false;
-  const hasActive = existingBrands.some((b) => isBrandActive(b));
-  return hasActive ? false : true;
+  return requestedActive !== false;
 }
 
 /** Fondo de vista previa / cabecera según color de marca. */

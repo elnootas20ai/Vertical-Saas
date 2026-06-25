@@ -47,6 +47,7 @@ import {
   resolveBrandActiveOnCreate,
   isBrandSetupComplete,
   sortBrandsForDisplay,
+  suggestBrandShortCodeFromName,
 } from '../../../lib/brandUtils';
 import { DeliveryActivationGatePanel } from '../DeliveryActivationGatePanel';
 import { useActivationFocus } from '../../../hooks/useActivationFocus';
@@ -171,6 +172,22 @@ function BrandLineModal({
   const [logoFileName, setLogoFileName] = useState('');
   const [logoAspectHint, setLogoAspectHint] = useState(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const shortCodeTouchedRef = useRef(false);
+
+  const presetShortCodes = useMemo(
+    () => new Set(DELIVERY_BRAND_LINE_PRESETS.map((p) => p.shortCode).filter(Boolean)),
+    [],
+  );
+
+  const resolveShortCodeFromName = (name: string, fallback = '') => {
+    const fromName = suggestBrandShortCodeFromName(name);
+    return fromName || fallback;
+  };
+
+  const syncShortCodeFromName = (name: string, fallback = '') => {
+    if (shortCodeTouchedRef.current) return undefined;
+    return resolveShortCodeFromName(name, fallback);
+  };
 
   const wizardRows = useMemo(() => {
     if (showDeliveryWizard) {
@@ -197,15 +214,19 @@ function BrandLineModal({
   const applyPreset = (kindId: DeliveryBrandLineKindId) => {
     const preset = getDeliveryBrandLinePreset(kindId);
     if (!preset) return;
-    setForm((f) => ({
-      ...f,
-      deliveryLineKind: kindId,
-      catalogCategories: [...preset.typicalCategories],
-      name: shouldAutofillDefaultName(f.name) ? preset.suggestedName : f.name,
-      description: !f.description.trim() ? preset.description : f.description,
-      shortCode: !f.shortCode.trim() ? preset.shortCode : f.shortCode,
-      primaryColor: preset.primaryColor,
-    }));
+    setForm((f) => {
+      const nextName = shouldAutofillDefaultName(f.name) ? preset.suggestedName : f.name;
+      const nextShortCode = syncShortCodeFromName(nextName, preset.shortCode) ?? f.shortCode;
+      return {
+        ...f,
+        deliveryLineKind: kindId,
+        catalogCategories: [...preset.typicalCategories],
+        name: nextName,
+        description: !f.description.trim() ? preset.description : f.description,
+        shortCode: nextShortCode,
+        primaryColor: preset.primaryColor,
+      };
+    });
   };
 
   const nameSuggestions = useMemo(() => {
@@ -264,7 +285,23 @@ function BrandLineModal({
     setNewCategory('');
     setLogoFileName('');
     setLogoAspectHint(false);
+    shortCodeTouchedRef.current = false;
   }, [editingBrand, isOpen, showDeliveryWizard]);
+
+  useEffect(() => {
+    if (!isOpen || shortCodeTouchedRef.current) return;
+    setForm((f) => {
+      const suggested = resolveShortCodeFromName(f.name);
+      if (!suggested) return f;
+      const current = f.shortCode.trim().toUpperCase();
+      const isPresetCode = current && presetShortCodes.has(current);
+      if (!current || isPresetCode) {
+        if (current === suggested) return f;
+        return { ...f, shortCode: suggested };
+      }
+      return f;
+    });
+  }, [isOpen, form.name, presetShortCodes]);
 
   const allStoresMode = form.salesPointIds.length === 0;
   const setAllStores = () => setForm((f) => ({ ...f, salesPointIds: [] }));
@@ -311,6 +348,12 @@ function BrandLineModal({
 
   const goNext = () => {
     if (!validateStep(step)) return;
+    if (step === 'identidad') {
+      setForm((f) => {
+        const nextShortCode = syncShortCodeFromName(f.name);
+        return nextShortCode ? { ...f, shortCode: nextShortCode } : f;
+      });
+    }
     const idx = stepOrder.indexOf(step);
     if (idx >= 0 && idx < stepOrder.length - 1) setStep(stepOrder[idx + 1]);
   };
@@ -555,7 +598,13 @@ function BrandLineModal({
                           ? 'Ej. La Pizzería, Burger House, tu carta…'
                           : 'Ej. Pizza, Burger, Cafetería…'
                       }
-                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        setForm((f) => {
+                          const nextShortCode = syncShortCodeFromName(name);
+                          return nextShortCode ? { ...f, name, shortCode: nextShortCode } : { ...f, name };
+                        });
+                      }}
                       autoFocus={isDefault && defaultNameUnset}
                     />
                   </div>
@@ -568,7 +617,14 @@ function BrandLineModal({
                           <button
                             key={suggestion}
                             type="button"
-                            onClick={() => setForm((f) => ({ ...f, name: suggestion }))}
+                            onClick={() =>
+                              setForm((f) => {
+                                const nextShortCode = syncShortCodeFromName(suggestion);
+                                return nextShortCode
+                                  ? { ...f, name: suggestion, shortCode: nextShortCode }
+                                  : { ...f, name: suggestion };
+                              })
+                            }
                             className={settingsChipChoiceClass(active)}
                           >
                             {suggestion}
@@ -815,7 +871,10 @@ function BrandLineModal({
                     placeholder="Ej. PIZ, BUR (opcional)"
                     maxLength={12}
                     value={form.shortCode}
-                    onChange={(e) => setForm((f) => ({ ...f, shortCode: e.target.value.toUpperCase().replace(/\s/g, '') }))}
+                    onChange={(e) => {
+                      shortCodeTouchedRef.current = true;
+                      setForm((f) => ({ ...f, shortCode: e.target.value.toUpperCase().replace(/\s/g, '') }));
+                    }}
                   />
                 </div>
                 <div>
@@ -1097,7 +1156,7 @@ export function CompanyMarcaSettings() {
       logo: form.logo.trim(),
       website: form.website.trim(),
       primaryColor: form.primaryColor,
-      shortCode: form.shortCode.trim() || undefined,
+      shortCode: form.shortCode.trim() || suggestBrandShortCodeFromName(form.name) || undefined,
       salesPointIds: form.salesPointIds,
       deliveryLineKind: form.deliveryLineKind || undefined,
       catalogCategories: form.catalogCategories.length > 0 ? form.catalogCategories : undefined,
