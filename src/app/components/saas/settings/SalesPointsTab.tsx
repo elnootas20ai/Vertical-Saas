@@ -7,9 +7,8 @@ import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   isDeliveryAccountFromSources,
   bootstrapRetailStoreAfterCreate,
-  loadDeliveryStores,
+  loadTpvPointsOfSaleForBusiness,
   clearDeliveryStoresSessionCache,
-  markDeliveryPdvSessionConfirmed,
   notifyDeliveryWorkCentersChanged,
   selectDeliveryPointOfSale,
   DELIVERY_WORK_CENTERS_CHANGED,
@@ -68,7 +67,7 @@ import {
 } from '../../../lib/workCenterMoneyInput';
 import { AddButtonDropdown } from '../AddButtonDropdown';
 import { useActivationFocus } from '../../../hooks/useActivationFocus';
-import { ActivationFieldWrap, scrollToActivationField } from '../ActivationGuideUi';
+import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
@@ -1545,7 +1544,7 @@ export function SalesPointsTab() {
   isDeliveryAccountRef.current = isDeliveryAccount;
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
 
-  const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadDeliveryStores>>) => {
+  const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadTpvPointsOfSaleForBusiness>>) => {
     setWorkCenters(state.workCenters);
     const pdvList = state.pointsOfSale;
     setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
@@ -1596,7 +1595,7 @@ export function SalesPointsTab() {
 
       const skipPdvMerge = options?.skipPdvMerge === true;
       try {
-        const state = await loadDeliveryStores(userNow, bizNow, {
+        const state = await loadTpvPointsOfSaleForBusiness(userNow, bizNow, {
           skipPdvMerge,
           includeInactivePdvs: true,
           accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
@@ -1645,118 +1644,6 @@ export function SalesPointsTab() {
     };
   }, [loadData]);
 
-  const applyLinkedPdvToState = (wc: WorkCenter, pdv: NonNullable<Awaited<ReturnType<typeof ensureDeliveryPdvForWorkCenter>>>) => {
-    setDeliveryPdvsByWorkCenter((prev) => ({
-      ...prev,
-      [wc._id]: {
-        _id: pdv._id,
-        _rev: pdv._rev,
-        code: pdv.code,
-        name: String(pdv.name || ''),
-        address: pdv.address,
-        workCenterId: wc._id,
-        terminalCode: pdv.terminalCode,
-      },
-    }));
-    const pdvCode = String(pdv.code || '').trim();
-    if (pdvCode) {
-      setDeliveryPdvCodes((prev) => (prev.includes(pdvCode) ? prev : [...prev, pdvCode]));
-    }
-    clearDeliveryStoresSessionCache(resolveBusinessScopeId(currentBusiness ?? null));
-    notifyDeliveryWorkCentersChanged(resolveBusinessScopeId(currentBusiness ?? null));
-    notifyWorkCentersChanged();
-  };
-
-  /** Paso checklist 2/2: enlaza la caja (PDV) — independiente de tablet o datáfono. */
-  const handleLinkDeliveryPdv = async (wc: WorkCenter) => {
-    if (!dataUserId) {
-      toast.error('No se pudo identificar la cuenta. Recarga la página.');
-      return;
-    }
-    setRegeneratingTerminal(wc._id);
-    try {
-      const suggestedCode = suggestNextPdvCode(
-        sanitizeStoreDisplayName(String(wc.name || '')),
-        [...deliveryPdvCodes],
-      );
-      const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
-        business: currentBusiness ?? null,
-        pdvCode: suggestedCode || undefined,
-        pdvName: sanitizeStoreDisplayName(String(wc.name || '')),
-      });
-      if (!pdv?._id) {
-        toast.error(
-          'No se pudo activar la caja. Revisa que la tienda tenga dirección completa (mín. 5 caracteres) y guarda de nuevo.',
-        );
-        return;
-      }
-      applyLinkedPdvToState(wc, pdv);
-      markDeliveryPdvSessionConfirmed(dataUserId);
-      toast.success(`Caja del TPV activada — ${pointOfSaleDisplayLabel(pdv)}`);
-      await loadData();
-      if (activationFocus === 'pdv-link' || activationFocus === 'pdv-list') {
-        clearActivationFocus();
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'No se pudo activar la caja del TPV';
-      toast.error(
-        msg.includes('límite') || msg.includes('limite') || msg.includes('PLAN_LIMIT')
-          ? `${msg} La tienda ya cuenta como PDV; activar la caja no debería consumir otro cupo. Recarga e inténtalo de nuevo.`
-          : msg,
-      );
-    } finally {
-      setRegeneratingTerminal(null);
-    }
-  };
-
-  const handleEnsurePdvTabletCode = async (wc: WorkCenter) => {
-    if (!dataUserId) {
-      toast.error('No se pudo identificar la cuenta. Recarga la página.');
-      return;
-    }
-    setRegeneratingTerminal(wc._id);
-    try {
-      let pdv = deliveryPdvsByWorkCenter[wc._id];
-      if (!pdv?._id) {
-        const linked = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
-          business: currentBusiness ?? null,
-        });
-        if (!linked?._id) {
-          toast.error('Primero activa la caja del TPV en la tarjeta de la tienda');
-          return;
-        }
-        pdv = {
-          _id: linked._id,
-          _rev: linked._rev,
-          code: linked.code,
-          name: String(linked.name || ''),
-          address: linked.address,
-          workCenterId: wc._id,
-          terminalCode: linked.terminalCode,
-        };
-      }
-      let updated = pdv;
-      if (!updated.terminalCode) {
-        updated = await regenerateTerminalCodeRequest(dataUserId, updated._id);
-      }
-      if (!updated?.terminalCode) {
-        toast.error('No se pudo generar el código de tablet');
-        return;
-      }
-      applyLinkedPdvToState(wc, {
-        ...updated,
-        name: String(updated.name || pdv.name || ''),
-        address: updated.address ?? pdv.address,
-        workCenterId: wc._id,
-      });
-      toast.success(`Código tablet listo: ${updated.terminalCode}`);
-      void loadData();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo generar el código de tablet');
-    } finally {
-      setRegeneratingTerminal(null);
-    }
-  };
 
   const handleRegenerateTerminalCode = async (wc: WorkCenter) => {
     const linked = deliveryPdvsByWorkCenter[wc._id];
@@ -1959,14 +1846,6 @@ export function SalesPointsTab() {
       }
       clearActivationFocus();
       return;
-    }
-
-    if (activationFocus === 'pdv-list' || activationFocus === 'pdv-link') {
-      window.setTimeout(() => {
-        if (!scrollToActivationField('pdv-link', { focusInput: false })) {
-          scrollToActivationField('pdv-list', { focusInput: false });
-        }
-      }, 300);
     }
   }, [
     activationFocus,
@@ -2526,62 +2405,9 @@ export function SalesPointsTab() {
                   </div>
                 )}
                 {wc.centerType === 'punto_de_venta' && isDelivery && !deliveryPdvsByWorkCenter[wc._id] && (
-                  <ActivationFieldWrap fieldKey="pdv-link" activeKey={activationFocus}>
-                    <div className="rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 space-y-1.5">
-                      <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-200">
-                        Caja del TPV pendiente
-                      </p>
-                      <p className="text-[10px] leading-snug text-amber-900/90 dark:text-amber-100/90">
-                        La tienda ya está creada. Activa la caja para cobrar desde el PC (TPV rápido). No es el datáfono ni
-                        la tablet.
-                      </p>
-                      <button
-                        type="button"
-                        disabled={regeneratingTerminal === wc._id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleLinkDeliveryPdv(wc);
-                        }}
-                        className="text-[10px] font-semibold text-amber-900 dark:text-amber-100 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
-                      >
-                        {regeneratingTerminal === wc._id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Store className="w-3 h-3" />
-                        )}
-                        Activar caja del TPV
-                      </button>
-                    </div>
-                  </ActivationFieldWrap>
-                )}
-                {wc.centerType === 'punto_de_venta' &&
-                  isDelivery &&
-                  deliveryPdvsByWorkCenter[wc._id] &&
-                  !deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
-                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/90 dark:bg-gray-900/40 px-2.5 py-2 space-y-1.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300">
-                      Tablet TPV (opcional)
-                    </p>
-                    <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400">
-                      Solo si usarás una tablet física en el local. El TPV en el PC ya funciona sin esto.
-                    </p>
-                    <button
-                      type="button"
-                      disabled={regeneratingTerminal === wc._id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleEnsurePdvTabletCode(wc);
-                      }}
-                      className="text-[10px] font-semibold text-gray-800 dark:text-gray-200 hover:underline inline-flex items-center gap-1 disabled:opacity-50"
-                    >
-                      {regeneratingTerminal === wc._id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Monitor className="w-3 h-3" />
-                      )}
-                      Generar código tablet
-                    </button>
-                  </div>
+                  <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2">
+                    Falta el PDV de caja. Edita la tienda y guarda con dirección completa (mín. 5 caracteres).
+                  </p>
                 )}
                 {wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
                   <div className="rounded-lg border border-indigo-200 dark:border-indigo-800/60 bg-indigo-50/80 dark:bg-indigo-950/30 px-2.5 py-2 space-y-1.5">

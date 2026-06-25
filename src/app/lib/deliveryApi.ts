@@ -1202,6 +1202,21 @@ async function ensurePdvHasTabletCode(userId: string, pdv: PointOfSale): Promise
   }
 }
 
+/** Código tablet TPV listo en cada PDV (sin paso manual «Activar caja»). */
+export async function ensureTabletCodesForPointsOfSale(
+  userId: string,
+  pointsOfSale: PointOfSale[],
+): Promise<PointOfSale[]> {
+  const id = normalizeUserId(userId);
+  if (!id || !Array.isArray(pointsOfSale) || pointsOfSale.length === 0) return pointsOfSale;
+  const out = [...pointsOfSale];
+  for (let i = 0; i < out.length; i++) {
+    if (String(out[i].terminalCode || '').trim()) continue;
+    out[i] = await ensurePdvHasTabletCode(id, out[i]);
+  }
+  return out;
+}
+
 /**
  * Crea o enlaza el PDV de caja (delivery) para un centro de trabajo retail.
  * Idempotente: no duplica si ya hay PDV con el mismo `workCenterId` o nombre huérfano.

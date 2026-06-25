@@ -464,7 +464,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const handleSelectStoreRow = (row: DeliverySidebarStoreRow) => {
     if (row.needsPdv || !row.pdvId) {
-      toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) para activar la caja.');
+      toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) y guarda.');
       navigate('/saas/settings/tienda');
       return;
     }

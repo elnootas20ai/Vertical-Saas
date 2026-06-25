@@ -29,7 +29,7 @@ export function getDeliveryStepLock(
   if (!pdvReady) {
     return {
       locked: true,
-      lockedReason: 'Primero crea tu tienda y un PDV (caja) activos.',
+      lockedReason: 'Primero crea tu tienda activa en Ajustes → Tienda.',
       unlockRoute: DELIVERY_TIENDA_SETTINGS_PATH,
     };
   }

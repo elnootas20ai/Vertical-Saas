@@ -2481,7 +2481,7 @@ async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusin
 
   const wcId = String(pdvDoc.workCenterId || '').trim();
   const wc = wcId ? await findWorkCenterById(req, pdvDoc.workCenterId) : null;
-  let hint = 'Ve a Ajustes → Tienda y pulsa «Activar caja del TPV» en esa tienda.';
+  let hint = 'Ve a Ajustes → Tienda, edita la tienda y guarda con dirección completa (mín. 5 caracteres).';
   if (!wcId) hint = 'La caja no tiene tienda enlazada. ' + hint;
   else if (!wc) hint = 'La tienda enlazada ya no existe. Créala de nuevo en Ajustes → Tienda.';
 

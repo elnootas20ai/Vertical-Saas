@@ -52,14 +52,14 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
   'pdv-list': {
     fieldKey: 'pdv-list',
     label: 'Tiendas y cajas',
-    bannerTitle: 'Activa la caja del TPV',
-    bannerDetail: 'En la tarjeta de tu tienda, pulsa «Activar caja del TPV». No es datáfono ni tablet.',
+    bannerTitle: 'Revisa tus tiendas',
+    bannerDetail: 'En Ajustes → Tienda verás cada local con su PDV y código tablet si aplica.',
   },
   'pdv-link': {
-    fieldKey: 'pdv-link',
-    label: 'Activar caja TPV',
-    bannerTitle: 'Activa la caja del TPV',
-    bannerDetail: 'Pulsa el botón resaltado en la tarjeta de la tienda. Con eso ya puedes cobrar desde el PC.',
+    fieldKey: 'pdv-list',
+    label: 'Tienda y caja',
+    bannerTitle: 'Completa la tienda',
+    bannerDetail: 'Si falta el PDV, edita la tienda y guarda con dirección completa (mín. 5 caracteres).',
   },
   'store-hours': {
     fieldKey: 'store-hours',
@@ -141,9 +141,9 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
     clickHint: 'Ajustes → Tienda → «Nueva tienda / PDV»',
   },
   active_pdv: {
-    fieldKey: 'pdv-link',
+    fieldKey: 'create-store',
     route: '/saas/settings/tienda',
-    clickHint: 'En la tarjeta de tu tienda → «Activar caja del TPV» (no hace falta tablet)',
+    clickHint: 'Ajustes → Tienda → crea o edita la tienda (el PDV y TPV se preparan solos)',
   },
   // Delivery — marca
   brand_ready: {

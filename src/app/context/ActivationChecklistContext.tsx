@@ -9,7 +9,7 @@ import { listCatalogItemsRequest } from '../lib/deliveryApi';
 import {
   DELIVERY_BRANDS_CHANGED,
   DELIVERY_CATALOG_CHANGED,
-  loadDeliveryStores,
+  loadTpvPointsOfSaleForBusiness,
   snapshotDeliveryStoreActivation,
   isDeliveryBusinessType,
 } from '../lib/deliverySetup';
@@ -170,7 +170,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const load = async () => {
       try {
         const [storeState, brands, catalog] = await Promise.all([
-          loadDeliveryStores(user, currentBusiness, {
+          loadTpvPointsOfSaleForBusiness(user, currentBusiness, {
             includeInactivePdvs: true,
             accountBusinessCount: businessesCount,
           }),

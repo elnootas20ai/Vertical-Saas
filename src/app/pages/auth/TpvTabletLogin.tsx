@@ -195,7 +195,7 @@ export function TpvTabletLogin() {
               )}
             </div>
             <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? 'Entrando…' : binding ? 'Entrar al TPV' : 'Activar TPV'}
+              {isSubmitting ? 'Entrando…' : 'Entrar al TPV'}
             </ACCESO__Button>
           </form>
         </div>

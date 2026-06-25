@@ -12,6 +12,7 @@ import {
 import {
   dedupePointsOfSale,
   ensureDeliveryPdvForWorkCenter,
+  ensureTabletCodesForPointsOfSale,
   listPointsOfSaleRequest,
   mergePointsOfSaleWithRetailWorkCenters,
   suggestNextPdvDisplayName,
@@ -201,10 +202,12 @@ export function snapshotDeliveryStoreActivation(
   const activePdvs = state.pointsOfSale.filter(
     (p) => p.active !== false && String(p._id || '').trim(),
   );
+  const storeReady = retailStores.length > 0;
   return {
     retailStores,
-    hasActiveRetailStore: retailStores.length > 0,
-    hasActivePdv: activePdvs.length > 0,
+    hasActiveRetailStore: storeReady,
+    // Con tienda retail el PDV y código tablet se crean solos (sin «Activar caja»).
+    hasActivePdv: storeReady && activePdvs.length > 0,
   };
 }
 
@@ -416,6 +419,7 @@ export async function loadDeliveryStores(
     dedupeOpts,
   );
   pointsOfSale = filteredByWc;
+  pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
 
   return { dataUserId, workCenters, pointsOfSale };
 }
@@ -458,6 +462,8 @@ export async function loadTpvPointsOfSaleForBusiness(
     else pointsOfSale.push(ensured);
     pointsOfSale = dedupePointsOfSale(pointsOfSale);
   }
+
+  pointsOfSale = await ensureTabletCodesForPointsOfSale(state.dataUserId, pointsOfSale);
 
   const beforeScopeFilter = dedupePointsOfSale(pointsOfSale);
   pointsOfSale = dedupePointsOfSale(
