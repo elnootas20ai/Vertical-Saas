@@ -11,6 +11,7 @@ interface ClockedInWorkerBubblesProps {
   onSelect?: (workerId: string) => void;
   loading?: boolean;
   compact?: boolean;
+  ultraCompact?: boolean;
   label?: string;
 }
 
@@ -20,6 +21,7 @@ export function ClockedInWorkerBubbles({
   onSelect,
   loading = false,
   compact = false,
+  ultraCompact = false,
   label = 'En tienda',
 }: ClockedInWorkerBubblesProps) {
   const selectable = Boolean(onSelect);
@@ -39,7 +41,7 @@ export function ClockedInWorkerBubbles({
           )}
         </div>
       )}
-      <div className="flex items-center gap-1.5 flex-wrap min-h-[2rem]">
+      <div className={`flex items-center flex-wrap min-h-[2rem] ${ultraCompact ? 'gap-0.5' : 'gap-1.5'}`}>
         {workers.map((worker) => {
           const isSelected = normalizeClockinUserId(selectedId) === worker.id;
           const onBreak = worker.status === 'break';
@@ -50,7 +52,7 @@ export function ClockedInWorkerBubbles({
             <>
               <span
                 className={`rounded-full flex items-center justify-center font-bold shrink-0 ${
-                  compact ? 'w-7 h-7 text-[10px]' : 'w-8 h-8 text-[11px]'
+                  ultraCompact ? 'w-6 h-6 text-[9px]' : compact ? 'w-7 h-7 text-[10px]' : 'w-8 h-8 text-[11px]'
                 } ${
                   isSelected
                     ? 'bg-emerald-600 text-white'

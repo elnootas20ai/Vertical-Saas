@@ -71,6 +71,7 @@ import { pickPreferredMemberClockin, todayDateStr } from '../../lib/clockinHisto
 import { deriveEffectiveClockinStatus, isClockinPresent } from '../../lib/clockinStatus';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
+import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
@@ -1748,6 +1749,7 @@ function RegisterStatusBar({
   selectedOrderTakerId,
   onSelectOrderTaker,
   isTabletMode = false,
+  minimal = false,
 }: {
   session: TpvRegisterSession;
   onRequestClockIn: () => void;
@@ -1760,13 +1762,64 @@ function RegisterStatusBar({
   selectedOrderTakerId: string | null;
   onSelectOrderTaker: (workerId: string) => void;
   isTabletMode?: boolean;
+  /** Tablet en flujo de pedido: una sola fila mínima para dejar espacio al catálogo. */
+  minimal?: boolean;
 }) {
   const expected = calcTpvExpectedCash(session);
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
-  const actionBtn = isTabletMode
-    ? 'shrink-0 px-2.5 py-1.5 min-h-[36px] rounded-lg font-semibold text-[11px] transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap'
-    : 'px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1';
+  const actionBtn = minimal
+    ? 'shrink-0 p-1.5 min-h-[28px] min-w-[28px] rounded-md font-semibold transition-colors flex items-center justify-center touch-manipulation'
+    : isTabletMode
+      ? 'shrink-0 px-2.5 py-1.5 min-h-[36px] rounded-lg font-semibold text-[11px] transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap'
+      : 'px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1';
+
+  if (minimal) {
+    return (
+      <div className="relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 flex items-center gap-1.5 text-[10px] min-h-[30px]">
+        <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+          <CheckCircle2 className="w-3 h-3" />
+        </span>
+        {session.pointOfSaleName && (
+          <span className="text-gray-600 dark:text-gray-400 truncate max-w-[5rem] shrink min-w-0" title={session.pointOfSaleName}>
+            {session.pointOfSaleName}
+          </span>
+        )}
+        <span className="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">{expected.toFixed(2)}€</span>
+        {incidentCount > 0 && (
+          <span className="text-red-600 font-semibold flex items-center shrink-0" title={`${incidentCount} incidencia(s)`}>
+            <AlertTriangle className="w-3 h-3" />
+          </span>
+        )}
+        <div className="flex-1 min-w-0" />
+        <div className="flex items-center gap-0.5 shrink-0 overflow-x-auto scrollbar-hide">
+          <ClockedInWorkerBubbles
+            workers={clockedInWorkers}
+            selectedId={selectedOrderTakerId}
+            onSelect={onSelectOrderTaker}
+            loading={clockedInWorkersLoading}
+            compact
+            ultraCompact
+          />
+          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={`${actionBtn} bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400`}>
+            <LogIn className="w-3.5 h-3.5 shrink-0" />
+          </button>
+          <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={`${actionBtn} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400`}>
+            <Banknote className="w-3.5 h-3.5 shrink-0" />
+          </button>
+          <button type="button" onClick={onRequestCashCount} title="Arqueo" className={`${actionBtn} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400`}>
+            <Calculator className="w-3.5 h-3.5 shrink-0" />
+          </button>
+          <button type="button" onClick={onRequestIncident} title="Incidencia" className={`${actionBtn} bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400`}>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          </button>
+          <button type="button" onClick={onRequestClose} title="Cerrar caja" className={`${actionBtn} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400`}>
+            <Lock className="w-3.5 h-3.5 shrink-0" />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 flex flex-col gap-1.5 text-xs ${isTabletMode ? 'px-2 py-1.5' : 'px-3 sm:px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2'}`}>
@@ -2065,6 +2118,8 @@ export function TpvRegisterGate({
   );
 
   const isTabletSession = registerScope.isTabletSession;
+  const orderFlowActive = useTpvOrderFlowActive();
+  const compactRegisterChrome = isTabletSession && orderFlowActive;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
 
@@ -3208,8 +3263,9 @@ export function TpvRegisterGate({
           selectedOrderTakerId={selectedOrderTakerId}
           onSelectOrderTaker={setSelectedOrderTakerId}
           isTabletMode={isTabletSession}
+          minimal={compactRegisterChrome}
         />
-        {registerSessionSpansMultipleDays(activeSession) && (
+        {!compactRegisterChrome && registerSessionSpansMultipleDays(activeSession) && (
           <div className="relative z-20 bg-amber-100 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3 flex-wrap">
             <span>
               Caja abierta desde el{' '}
@@ -3225,8 +3281,8 @@ export function TpvRegisterGate({
             </button>
           </div>
         )}
-        <RegisterCashOpsStrip session={activeSession} />
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {!compactRegisterChrome && <RegisterCashOpsStrip session={activeSession} />}
+        <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden">
           {children}
         </div>
       </div>

@@ -10,6 +10,8 @@ import {
 
 type TpvChromeContextValue = {
   setSuppressBottomBar: (suppress: boolean) => void;
+  orderFlowActive: boolean;
+  setOrderFlowActive: (active: boolean) => void;
 };
 
 const TpvChromeContext = createContext<TpvChromeContextValue | null>(null);
@@ -23,10 +25,17 @@ export function TpvChromeScope({
   bottomBar?: ReactNode | null;
 }) {
   const [suppressBottomBar, setSuppressBottomBarState] = useState(false);
+  const [orderFlowActive, setOrderFlowActiveState] = useState(false);
   const setSuppressBottomBar = useCallback((suppress: boolean) => {
     setSuppressBottomBarState(suppress);
   }, []);
-  const value = useMemo(() => ({ setSuppressBottomBar }), [setSuppressBottomBar]);
+  const setOrderFlowActive = useCallback((active: boolean) => {
+    setOrderFlowActiveState(active);
+  }, []);
+  const value = useMemo(
+    () => ({ setSuppressBottomBar, orderFlowActive, setOrderFlowActive }),
+    [setSuppressBottomBar, orderFlowActive, setOrderFlowActive],
+  );
 
   return (
     <TpvChromeContext.Provider value={value}>
@@ -44,4 +53,18 @@ export function useTpvSuppressBottomBar(active: boolean) {
     ctx.setSuppressBottomBar(active);
     return () => ctx.setSuppressBottomBar(false);
   }, [active, ctx]);
+}
+
+/** Modo pedido activo: barra de caja mínima y más espacio para el catálogo. */
+export function useTpvOrderFlowChrome(active: boolean) {
+  const ctx = useContext(TpvChromeContext);
+  useEffect(() => {
+    if (!ctx) return;
+    ctx.setOrderFlowActive(active);
+    return () => ctx.setOrderFlowActive(false);
+  }, [active, ctx]);
+}
+
+export function useTpvOrderFlowActive(): boolean {
+  return useContext(TpvChromeContext)?.orderFlowActive ?? false;
 }
