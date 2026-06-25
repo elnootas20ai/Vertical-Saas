@@ -270,24 +270,35 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                     Buscar cliente (teléfono o nombre)
                   </label>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
-                    <input
-                      className={`${inputCls} pl-9`}
-                      value={clientLookup}
-                      onChange={(e) => {
-                        setClientLookup(e.target.value);
-                        update({ clientId: '' });
-                      }}
-                      placeholder="Ej. 612… o Iván Ortega"
-                      autoComplete="off"
-                    />
-                    {isSearching && (
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      </div>
-                    )}
-                  </div>
+                  <form autoComplete="off" onSubmit={(e) => e.preventDefault()} role="search">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                      <input
+                        id="delivery-order-client-search"
+                        name="vertial-client-search"
+                        type="search"
+                        inputMode="search"
+                        enterKeyHint="search"
+                        className={`${inputCls} pl-9`}
+                        value={clientLookup}
+                        onChange={(e) => {
+                          setClientLookup(e.target.value);
+                          update({ clientId: '' });
+                        }}
+                        placeholder="Ej. 612… o Iván Ortega"
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        data-1p-ignore
+                        data-lpignore="true"
+                      />
+                      {isSearching && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                  </form>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
                     Misma búsqueda que en TPV rápido (≥3 dígitos o ≥2 letras).
                   </p>
@@ -304,6 +315,8 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
                     update({ customerName: e.target.value, clientId: '' });
                   }}
                   placeholder="Nombre del cliente"
+                  name="vertial-order-customer-name"
+                  autoComplete="off"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">

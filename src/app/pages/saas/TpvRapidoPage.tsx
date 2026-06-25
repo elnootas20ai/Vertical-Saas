@@ -1664,15 +1664,25 @@ export function TpvRapidoOrderFlow({
         {currentStep === 'client' ? (
           <StepContainer step={1} title="Cliente" visible>
             <div className="flex flex-col gap-1">
-              <label className={LABEL_CLASS}>Teléfono o nombre del cliente</label>
-              <div className="flex gap-2">
+              <label className={LABEL_CLASS} htmlFor="tpv-client-search">
+                Teléfono o nombre del cliente
+              </label>
+              <form
+                className="flex gap-2"
+                autoComplete="off"
+                onSubmit={(e) => e.preventDefault()}
+                role="search"
+              >
                 <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   <input
                     ref={phoneRef}
-                    type="text"
+                    id="tpv-client-search"
+                    name="vertial-client-search"
+                    type="search"
                     inputMode="search"
+                    enterKeyHint="search"
                     value={phoneInput}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -1689,9 +1699,13 @@ export function TpvRapidoOrderFlow({
                     placeholder="Ej. 612… o María García"
                     className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
                     autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-1p-ignore
+                    data-lpignore="true"
                   />
                 </div>
-              </div>
+              </form>
               <p className="text-[11px] text-gray-500 dark:text-gray-400">
                 Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).
               </p>
@@ -1747,7 +1761,14 @@ export function TpvRapidoOrderFlow({
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">Nuevo cliente</h3>
                 <div>
                   <label className={LABEL_CLASS}>Nombre *</label>
-                  <input value={newClientName} onChange={(e) => setNewClientName(e.target.value)} className={INPUT_CLASS} placeholder="Nombre completo" />
+                  <input
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                    className={INPUT_CLASS}
+                    placeholder="Nombre completo"
+                    name="vertial-new-client-name"
+                    autoComplete="off"
+                  />
                 </div>
                 <div>
                   <label className={LABEL_CLASS}>Teléfono *</label>
@@ -1756,6 +1777,8 @@ export function TpvRapidoOrderFlow({
                     onChange={(e) => setNewClientPhone(e.target.value)}
                     type="tel"
                     inputMode="tel"
+                    name="vertial-new-client-phone"
+                    autoComplete="tel"
                     className={`${INPUT_CLASS} font-mono`}
                     placeholder="Solo números del móvil"
                   />
@@ -1776,7 +1799,13 @@ export function TpvRapidoOrderFlow({
                 </div>
                 <div>
                   <label className={LABEL_CLASS}>Forma de pago</label>
-                  <select value={newClientPayment} onChange={(e) => setNewClientPayment(e.target.value as PaymentMethod | '')} className={INPUT_CLASS}>
+                  <select
+                    value={newClientPayment}
+                    onChange={(e) => setNewClientPayment(e.target.value as PaymentMethod | '')}
+                    className={INPUT_CLASS}
+                    name="vertial-new-client-payment-preference"
+                    autoComplete="off"
+                  >
                     <option value="">Sin preferencia</option>
                     <option value="efectivo">Efectivo</option>
                     <option value="tarjeta">Tarjeta</option>
