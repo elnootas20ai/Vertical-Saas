@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useModalClose } from '../../hooks/useModalClose';
 import { X, ChevronRight, ChevronLeft, Sparkles, Rocket } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useActivationChecklist } from '../../context/ActivationChecklistContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
+import { ACTIVATION_FOCUS_PARAM } from '../../lib/activationGuide';
 import {
   armOnboardingTourForBusiness,
   isOnboardingTourActive,
@@ -39,6 +40,7 @@ interface Props {
 
 export function OnboardingTour({ onComplete }: Props) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const businessCtx = useBusinessOptional();
   const currentBusiness = businessCtx?.currentBusiness ?? null;
@@ -59,6 +61,10 @@ export function OnboardingTour({ onComplete }: Props) {
 
   const accountUserId = resolveAccountUserId(user);
   const businessId = String(currentBusiness?.business_id || '').trim();
+  const hasActivationFocus = useMemo(
+    () => new URLSearchParams(location.search).has(ACTIVATION_FOCUS_PARAM),
+    [location.search],
+  );
   const [stepIndex, setStepIndex] = useState(0);
   const [tourGate, setTourGate] = useState<'loading' | 'hide' | 'show'>('loading');
   const [exiting, setExiting] = useState(false);
@@ -127,7 +133,7 @@ export function OnboardingTour({ onComplete }: Props) {
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
-    if (alreadySeen) {
+    if (alreadySeen || hasActivationFocus) {
       if (!showLockRef.current) {
         setOnboardingTourActive(accountUserId, businessId, false);
         setTourGate('hide');
@@ -136,6 +142,7 @@ export function OnboardingTour({ onComplete }: Props) {
     }
 
     const wasActive = isOnboardingTourActive(accountUserId, businessId);
+    const savedStepIndex = resolveOnboardingTourStepIndex(steps, accountUserId, businessId);
 
     const openTour = () => {
       if (isOnboardingTourCompleted(accountUserId, businessId)) {
@@ -159,10 +166,10 @@ export function OnboardingTour({ onComplete }: Props) {
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (!pausedThisSession) {
-      if (wasActive) {
+      // Solo reanudar si ya pasó el paso de bienvenida; no reabrir welcome al navegar con «Ir».
+      if (wasActive && savedStepIndex > 0) {
         openTour();
-      } else {
-        setTourGate('hide');
+      } else if (!wasActive) {
         timer = setTimeout(openTour, 600);
       }
     } else {
@@ -180,6 +187,8 @@ export function OnboardingTour({ onComplete }: Props) {
     currentBusiness,
     user,
     checklistComplete,
+    hasActivationFocus,
+    steps,
   ]);
 
   useEffect(() => {
@@ -216,7 +225,7 @@ export function OnboardingTour({ onComplete }: Props) {
   }, [hideTourUi]);
 
   const pauseTour = useCallback(() => {
-    hideTourUi({ pauseForSession: true });
+    hideTourUi({ markCompleted: true });
   }, [hideTourUi]);
 
   const handleNext = useCallback(() => {
@@ -281,7 +290,7 @@ export function OnboardingTour({ onComplete }: Props) {
         <button
           onClick={pauseTour}
           className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors z-10"
-          title="Cerrar y continuar más tarde"
+          title="Cerrar tour (no volver a mostrar)"
         >
           <X className="w-4 h-4 text-gray-400 dark:text-gray-500" />
         </button>

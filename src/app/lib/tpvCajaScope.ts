@@ -159,6 +159,32 @@ export function registerSessionOrderLoadBounds(
   return { from: openedAt, to };
 }
 
+export function normalizeTpvSessionBusinessId(
+  session: Pick<{ business_id?: string; businessId?: string }, 'business_id' | 'businessId'> | null | undefined,
+): string {
+  if (!session) return '';
+  return String(session.business_id || session.businessId || '').trim();
+}
+
+/** Sesión de caja pertenece a la empresa activa (legacy: solo si el PDV es de esa empresa). */
+export function tpvSessionBelongsToBusiness(
+  session: Pick<{ business_id?: string; businessId?: string; pointOfSaleId?: string }, 'business_id' | 'businessId' | 'pointOfSaleId'>,
+  businessId: string,
+  scopedPdvIds?: Iterable<string>,
+): boolean {
+  const bid = String(businessId || '').trim();
+  if (!bid) return true;
+  const sessionBid = normalizeTpvSessionBusinessId(session);
+  if (sessionBid) return sessionBid === bid;
+  const pdvId = String(session.pointOfSaleId || '').trim();
+  if (!pdvId) return false;
+  if (!scopedPdvIds) return false;
+  for (const id of scopedPdvIds) {
+    if (String(id || '').trim() === pdvId) return true;
+  }
+  return false;
+}
+
 export function registerSessionSpansMultipleDays(
   session: Pick<TpvRegisterSession, 'openedAt' | 'status' | 'closedAt'>,
   now = new Date(),

@@ -9,6 +9,8 @@ import {
   TPV_PRODUCT_SEARCH_LIMIT,
 } from '../../../lib/tpvCatalogNavigation';
 import { brandTint } from '../../../lib/brandUtils';
+import { isTpvComboCatalogItem } from '../../../lib/catalogComboSlots';
+import { isTpvHalfHalfCatalogItem } from '../../../lib/catalogCustomization';
 
 type TpvProductPickerProps = {
   sections: TpvCatalogSection[];
@@ -59,6 +61,8 @@ const ProductTile = memo(function ProductTile({
   const price = Number(item.unitPrice || 0);
   const hasImage = Boolean(item.image?.trim());
   const inCart = qty > 0;
+  const isCombo = isTpvComboCatalogItem(item);
+  const isHalfHalf = isTpvHalfHalfCatalogItem(item);
 
   return (
     <article
@@ -88,6 +92,16 @@ const ProductTile = memo(function ProductTile({
           {inCart && (
             <span className="absolute top-1 right-1 min-w-[1.15rem] h-[1.15rem] px-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
               {qty}
+            </span>
+          )}
+          {isHalfHalf && (
+            <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-amber-600 text-white text-[8px] font-bold uppercase">
+              ½½
+            </span>
+          )}
+          {isCombo && !isHalfHalf && (
+            <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-indigo-600 text-white text-[8px] font-bold uppercase">
+              Menú
             </span>
           )}
           {disabled && (

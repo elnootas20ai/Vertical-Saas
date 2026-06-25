@@ -31,6 +31,9 @@ import { useTpvCatalog } from '../../hooks/useTpvCatalog';
 import { prefetchTpvCatalog } from '../../lib/tpvCatalogCache';
 import { TpvProductPicker } from '../../components/saas/tpv/TpvProductPicker';
 import { TpvItemCustomizeModal } from '../../components/saas/tpv/TpvItemCustomizeModal';
+import { TpvComboCustomizeModal } from '../../components/saas/tpv/TpvComboCustomizeModal';
+import { TpvHalfHalfCustomizeModal } from '../../components/saas/tpv/TpvHalfHalfCustomizeModal';
+import { isTpvComboCatalogItem } from '../../lib/catalogComboSlots';
 import {
   type CartLineCustomization,
   EMPTY_CART_CUSTOMIZATION,
@@ -40,6 +43,7 @@ import {
   cartLineUnitPrice,
   customizationSignature,
   isCustomizableCatalogItem,
+  isTpvHalfHalfCatalogItem,
   inferTpvDefaultExtraPrice,
   normalizeTpvCategoryTemplates,
   normalizeStoreIngredients,
@@ -445,6 +449,16 @@ export function TpvRapidoOrderFlow({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartShake, setCartShake] = useState(false);
   const [customizeTarget, setCustomizeTarget] = useState<{
+    item: CatalogItem;
+    lineId: string | null;
+    initial?: CartLineCustomization;
+  } | null>(null);
+  const [comboTarget, setComboTarget] = useState<{
+    item: CatalogItem;
+    lineId: string | null;
+    initial?: CartLineCustomization;
+  } | null>(null);
+  const [halfHalfTarget, setHalfHalfTarget] = useState<{
     item: CatalogItem;
     lineId: string | null;
     initial?: CartLineCustomization;
@@ -895,8 +909,43 @@ export function TpvRapidoOrderFlow({
 
   const handleProductPick = useCallback((item: CatalogItem) => {
     if (!item.active) return;
+    if (isTpvHalfHalfCatalogItem(item)) {
+      setHalfHalfTarget({ item, lineId: null, initial: EMPTY_CART_CUSTOMIZATION });
+      return;
+    }
+    if (isTpvComboCatalogItem(item)) {
+      setComboTarget({ item, lineId: null, initial: EMPTY_CART_CUSTOMIZATION });
+      return;
+    }
     setCustomizeTarget({ item, lineId: null, initial: EMPTY_CART_CUSTOMIZATION });
   }, []);
+
+  const handleHalfHalfConfirm = useCallback(
+    (selection: import('../../lib/catalogCustomization').HalfHalfPizzaSelection) => {
+      if (!halfHalfTarget) return;
+      const customization: CartLineCustomization = {
+        ...(halfHalfTarget.initial ?? EMPTY_CART_CUSTOMIZATION),
+        halfHalfPizza: selection,
+      };
+      commitCartLine(halfHalfTarget.item, customization, halfHalfTarget.lineId);
+      setHalfHalfTarget(null);
+    },
+    [halfHalfTarget, commitCartLine],
+  );
+
+  const handleComboConfirm = useCallback(
+    (selections: import('../../lib/deliveryApi').CatalogComboRef[]) => {
+      if (!comboTarget) return;
+      const customization: CartLineCustomization = {
+        ...(comboTarget.initial ?? EMPTY_CART_CUSTOMIZATION),
+        comboSelections: selections,
+      };
+      const { item, lineId } = comboTarget;
+      setComboTarget(null);
+      setCustomizeTarget({ item, lineId, initial: customization });
+    },
+    [comboTarget],
+  );
 
   const incrementCartLine = useCallback((lineId: string) => {
     setCart((prev) =>
@@ -1322,6 +1371,22 @@ export function TpvRapidoOrderFlow({
       const method = methodOverride || paymentMethod;
       if (!method) return;
 
+      const incompleteHalfHalf = cart.find(
+        (ci) =>
+          isTpvHalfHalfCatalogItem(ci.catalogItem) &&
+          (!ci.customization.halfHalfPizza?.firstProductId ||
+            !ci.customization.halfHalfPizza?.secondProductId),
+      );
+      if (incompleteHalfHalf) {
+        toast.error(`Elige las 2 mitades de «${incompleteHalfHalf.catalogItem.name}» antes de cobrar`);
+        setHalfHalfTarget({
+          item: incompleteHalfHalf.catalogItem,
+          lineId: incompleteHalfHalf.lineId,
+          initial: incompleteHalfHalf.customization,
+        });
+        return;
+      }
+
       const collectOnDelivery = deliveryType === 'domicilio';
 
       setSubmitting(true);
@@ -1346,6 +1411,7 @@ export function TpvRapidoOrderFlow({
               storeIngredients,
               tpvBrandIngredientSelection,
               brands,
+              catalog,
             ),
           };
         });
@@ -2119,6 +2185,22 @@ export function TpvRapidoOrderFlow({
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    if (isTpvHalfHalfCatalogItem(ci.catalogItem)) {
+                                      setHalfHalfTarget({
+                                        item: ci.catalogItem,
+                                        lineId: ci.lineId,
+                                        initial: ci.customization,
+                                      });
+                                      return;
+                                    }
+                                    if (isTpvComboCatalogItem(ci.catalogItem)) {
+                                      setComboTarget({
+                                        item: ci.catalogItem,
+                                        lineId: ci.lineId,
+                                        initial: ci.customization,
+                                      });
+                                      return;
+                                    }
                                     setCustomizeTarget({
                                       item: ci.catalogItem,
                                       lineId: ci.lineId,
@@ -2389,6 +2471,26 @@ export function TpvRapidoOrderFlow({
           </StepContainer>
         ) : null}
       </div>
+      {halfHalfTarget && (
+        <TpvHalfHalfCustomizeModal
+          item={halfHalfTarget.item}
+          catalogItems={catalog}
+          initial={halfHalfTarget.initial?.halfHalfPizza}
+          formatPrice={formatPrice}
+          onClose={() => setHalfHalfTarget(null)}
+          onConfirm={handleHalfHalfConfirm}
+        />
+      )}
+      {comboTarget && (
+        <TpvComboCustomizeModal
+          item={comboTarget.item}
+          catalogItems={catalog}
+          initialSelections={comboTarget.initial?.comboSelections}
+          formatPrice={formatPrice}
+          onClose={() => setComboTarget(null)}
+          onConfirm={handleComboConfirm}
+        />
+      )}
       {customizeTarget && (
         <TpvItemCustomizeModal
           item={customizeTarget.item}

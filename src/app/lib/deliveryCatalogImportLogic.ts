@@ -115,7 +115,18 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   café: 'Café',
   bolleria: 'Bollería',
   bollería: 'Bollería',
+  combos: 'Combos',
+  combo: 'Combos',
+  menus: 'Combos',
+  menu: 'Combos',
+  menú: 'Combos',
+  'menu del dia': 'Combos',
+  'menú del día': 'Combos',
 };
+
+export function isImportComboCategory(category: string): boolean {
+  return foldKey(normalizeImportCategory(category)) === 'combos';
+}
 
 export function normalizeImportCategory(value: string): string {
   const raw = String(value || '').trim();

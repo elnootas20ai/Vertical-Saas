@@ -9,6 +9,8 @@ import { useActivationChecklist, type OnboardingStep } from '../../context/Activ
 import { useBusiness } from '../../context/BusinessContext';
 import { isDeliveryBusinessType } from '../../lib/deliverySetup';
 import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
+import { useAuth } from '../../context/AuthContext';
+import { dismissOnboardingWelcomeTourForActivation } from '../../lib/onboardingLocalKeys';
 
 const ACTIVATION_CHECKLIST_EXPANDED_KEY = 'saas_activation_checklist_expanded';
 
@@ -187,17 +189,26 @@ function StepRow({
   step: OnboardingStep;
   onNavigate: (url: string) => void;
 }) {
+  const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const isCompleted = step.status === 'completed';
   const isActive = step.status === 'in_progress' && !step.locked;
   const isLocked = Boolean(step.locked) && !isCompleted;
   const route = step.locked && step.unlockRoute ? step.unlockRoute : step.route;
 
+  const navigateForActivation = (url: string) => {
+    const uid = String(user?.user_id || user?.id || '').trim();
+    const bid = String(currentBusiness?.business_id || '').trim();
+    dismissOnboardingWelcomeTourForActivation(uid, bid);
+    onNavigate(url);
+  };
+
   const handleStepClick = () => {
     if (isLocked && step.unlockRoute) {
-      onNavigate(step.unlockRoute);
+      navigateForActivation(step.unlockRoute);
       return;
     }
-    onNavigate(route);
+    navigateForActivation(route);
   };
 
   return (
@@ -302,7 +313,7 @@ function StepRow({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNavigate(buildActivationTargetUrl(route, sub.id));
+                        navigateForActivation(buildActivationTargetUrl(route, sub.id));
                       }}
                       className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-500 hover:bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
                       title={canDeepLink ? 'Ir y resaltar el campo' : 'Ir a la pantalla'}

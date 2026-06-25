@@ -7,6 +7,7 @@ import {
   orderInRegisterSession,
   orderLoadBoundsForOpenSession,
   sessionActiveOnCalendarDay,
+  tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
 
 describe('sessionActiveOnCalendarDay', () => {
@@ -65,6 +66,26 @@ describe('buildTpvRegisterSummaryForDay', () => {
     expect(day16.totalSales).toBe(10);
     expect(day17.totalSales).toBe(20);
     expect(filterSessionTransactionsForDay(session, '2026-06-17')).toHaveLength(1);
+  });
+});
+
+describe('tpvSessionBelongsToBusiness', () => {
+  it('matches by business_id on session', () => {
+    const pdvIds = new Set(['pdv-modomio']);
+    expect(tpvSessionBelongsToBusiness({ business_id: 'biz-a', pointOfSaleId: 'pdv-modomio' }, 'biz-a', pdvIds)).toBe(true);
+    expect(tpvSessionBelongsToBusiness({ business_id: 'biz-a', pointOfSaleId: 'pdv-modomio' }, 'biz-b', pdvIds)).toBe(false);
+  });
+
+  it('legacy session without business_id only if PDV belongs to company', () => {
+    const modomioPdvs = new Set(['pdv-modomio']);
+    expect(tpvSessionBelongsToBusiness({ pointOfSaleId: 'pdv-modomio', status: 'open' }, 'biz-modomio', modomioPdvs)).toBe(true);
+    expect(
+      tpvSessionBelongsToBusiness(
+        { pointOfSaleId: 'pdv-modomio', status: 'open' },
+        'biz-blackburger',
+        new Set(['pdv-blackburger']),
+      ),
+    ).toBe(false);
   });
 });
 

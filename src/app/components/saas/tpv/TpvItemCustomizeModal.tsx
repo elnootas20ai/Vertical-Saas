@@ -63,15 +63,18 @@ export function TpvItemCustomizeModal({
 }: TpvItemCustomizeModalProps) {
   useModalClose(true, onClose);
 
-  const customizable = isCustomizableCatalogItem(item, brands);
+  const customizable =
+    isCustomizableCatalogItem(item, brands) ||
+    (initial?.comboSelections?.length ?? 0) > 0;
   const tpvResolveOptions = useMemo(
     () => ({
       productIngredientsOnly: true,
       storeExtrasOnly: true,
       tpvFallbackWhenEmpty: true,
       catalogItems,
+      comboSelections: initial?.comboSelections,
     }),
-    [catalogItems],
+    [catalogItems, initial?.comboSelections],
   );
   const ingredients = useMemo(
     () =>
@@ -134,6 +137,7 @@ export function TpvItemCustomizeModal({
     removedIngredients: removed,
     addedSupplements: added,
     notes: notes.trim(),
+    comboSelections: initial?.comboSelections,
   };
 
   const basePrice = Number(item.unitPrice || 0);
@@ -217,6 +221,11 @@ export function TpvItemCustomizeModal({
                 <span className="inline-flex px-2.5 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-300">
                   {categoryLabel}
                 </span>
+                {(initial?.comboSelections?.length ?? 0) > 0 && (
+                  <span className="inline-flex px-2.5 py-0.5 rounded-lg bg-indigo-100 dark:bg-indigo-950/50 text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+                    {initial!.comboSelections!.map((c) => c.productName).join(' · ')}
+                  </span>
+                )}
                 <span className="text-sm text-gray-500 dark:text-gray-400">
                   Precio base{' '}
                   <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">

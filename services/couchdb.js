@@ -6446,6 +6446,10 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     salesByChannel: data.salesByChannel || existing?.salesByChannel || {},
     linkedOrderIds: Array.isArray(data.linkedOrderIds) ? data.linkedOrderIds : (existing?.linkedOrderIds || []),
 
+    business_id: String(
+      data.business_id || data.businessId || existing?.business_id || existing?.businessId || '',
+    ).trim(),
+
     summary: data.summary || existing?.summary || {},
 
     createdAt: existing?.createdAt || now,
@@ -6499,6 +6503,8 @@ export function sanitizeTpvRegisterSession(doc) {
     incidents: Array.isArray(doc.incidents) ? doc.incidents : [],
     salesByChannel: doc.salesByChannel || {},
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
+
+    business_id: String(doc.business_id || doc.businessId || '').trim(),
 
     summary: doc.summary || {},
 
@@ -6587,16 +6593,50 @@ export async function getNextDeliveryTicketNumber(req, userId) {
 }
 
 /** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */
-export function findOpenTpvRegisterSessionForPointOfSale(sessions, pointOfSaleId) {
+export function normalizeTpvSessionBusinessId(session) {
+  return String(session?.business_id || session?.businessId || '').trim();
+}
+
+/** Sesión pertenece a la empresa (legacy: solo si el PDV es de esa empresa). */
+export function tpvRegisterSessionBelongsToBusiness(session, businessId, scopedPdvIds) {
+  const bid = String(businessId || '').trim();
+  if (!bid) return true;
+  const sessionBid = normalizeTpvSessionBusinessId(session);
+  if (sessionBid) return sessionBid === bid;
+  const pdvId = String(session?.pointOfSaleId || '').trim();
+  if (!pdvId) return false;
+  if (!scopedPdvIds) return false;
+  const ids = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds);
+  return ids.has(pdvId);
+}
+
+export function filterTpvRegisterSessionsForBusiness(sessions, businessId, scopedPdvIds) {
+  const bid = String(businessId || '').trim();
+  if (!bid) return Array.isArray(sessions) ? sessions : [];
+  const ids = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds || []);
+  return (Array.isArray(sessions) ? sessions : []).filter((s) =>
+    tpvRegisterSessionBelongsToBusiness(s, bid, ids),
+  );
+}
+
+/** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */
+export function findOpenTpvRegisterSessionForPointOfSale(
+  sessions,
+  pointOfSaleId,
+  businessId = '',
+  scopedPdvIds = null,
+) {
   const pdvId = String(pointOfSaleId || '').trim();
   if (!pdvId) return null;
+  const bid = String(businessId || '').trim();
   const openForPdv = (Array.isArray(sessions) ? sessions : [])
     .filter(
       (s) =>
         s &&
         s.status === 'open' &&
         !s.deletedAt &&
-        String(s.pointOfSaleId || '').trim() === pdvId,
+        String(s.pointOfSaleId || '').trim() === pdvId &&
+        tpvRegisterSessionBelongsToBusiness(s, bid, scopedPdvIds),
     )
     .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
   return openForPdv[0] || null;
@@ -9187,6 +9227,7 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     lastPurchasePrice: Number(data.lastPurchasePrice ?? existing?.lastPurchasePrice ?? 0),
     lastPurchaseDate: String(data.lastPurchaseDate || existing?.lastPurchaseDate || ''),
     customFields: (data.customFields && typeof data.customFields === 'object') ? { ...data.customFields } : (existing?.customFields || {}),
+    business_id: String(data.business_id || data.businessId || existing?.business_id || existing?.businessId || '').trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -9242,6 +9283,7 @@ export function sanitizeCatalogItem(doc) {
     lastPurchasePrice: Number(doc.lastPurchasePrice || 0),
     lastPurchaseDate: doc.lastPurchaseDate || '',
     customFields: (doc.customFields && typeof doc.customFields === 'object') ? { ...doc.customFields } : {},
+    business_id: String(doc.business_id || doc.businessId || '').trim(),
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
@@ -9258,6 +9300,15 @@ export function sanitizeCatalogItemForTpv(doc) {
   }
   if (Array.isArray(rawCf.supplements) && rawCf.supplements.length > 0) {
     customFields.supplements = rawCf.supplements;
+  }
+  if (Array.isArray(rawCf.comboStructure) && rawCf.comboStructure.length > 0) {
+    customFields.comboStructure = rawCf.comboStructure;
+  }
+  if (rawCf.comboStructureConfirmed === true) {
+    customFields.comboStructureConfirmed = true;
+  }
+  if (rawCf.halfHalf === true) {
+    customFields.halfHalf = true;
   }
   return {
     _id: doc._id,

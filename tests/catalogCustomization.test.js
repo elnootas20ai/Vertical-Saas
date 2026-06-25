@@ -105,6 +105,44 @@ describe('catalogCustomization TPV', () => {
     ).toEqual(['Tomate', 'Mozzarella']);
   });
 
+  it('TPV menú usa comboSelections del pedido para ingredientes y extras de pago', () => {
+    const combo = {
+      _id: 'combo-1',
+      itemType: 'combo',
+      category: 'Combos',
+      brandIds: ['mod'],
+      customFields: {},
+      comboItems: [],
+    };
+    const catalog = [
+      {
+        _id: 'p1',
+        category: 'Pizzas',
+        brandIds: ['mod'],
+        customFields: { ingredients: 'Tomate, Mozzarella' },
+      },
+    ];
+    const comboSelections = [{ productId: 'p1', productName: 'Margarita', quantity: 1 }];
+    const master = [
+      { id: 'e1', name: 'Extra bacon', role: 'extra', brandIds: ['mod'], productParts: ['pizzas'] },
+    ];
+    expect(
+      parseCatalogIngredients(combo, undefined, master, undefined, undefined, [modomioBrand], {
+        productIngredientsOnly: true,
+        tpvFallbackWhenEmpty: true,
+        catalogItems: catalog,
+        comboSelections,
+      }),
+    ).toEqual(['Tomate', 'Mozzarella']);
+    expect(
+      parseCatalogSupplements(combo, undefined, undefined, undefined, master, 0.9, [modomioBrand], {
+        storeExtrasOnly: true,
+        catalogItems: catalog,
+        comboSelections,
+      }),
+    ).toEqual([{ id: 'e1', name: 'Extra bacon', price: 0.9 }]);
+  });
+
   it('TPV muestra todos los extras del negocio aunque el producto tenga suplementos propios', () => {
     const master = [
       { id: '2', name: 'Extra queso', role: 'extra', brandIds: ['mod'], productParts: ['pizzas'] },

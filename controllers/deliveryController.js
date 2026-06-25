@@ -43,6 +43,8 @@ import {
   filterPointsOfSaleLinkedToWorkCenters,
   findActivePointOfSaleForWorkCenter,
   findOrphanPointOfSaleByName,
+  filterTpvRegisterSessionsForBusiness,
+  tpvRegisterSessionBelongsToBusiness,
   generateTerminalCode,
   findPointOfSaleByTerminalCode,
   buildScaleDeviceDocument,
@@ -2176,6 +2178,12 @@ export async function listTpvRegisterSessions(req, res) {
     if (pdvFilter) {
       sessions = sessions.filter((s) => String(s.pointOfSaleId || '') === pdvFilter);
     }
+    const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
+    if (businessFilter) {
+      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
+      const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+      sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
+    }
     return res.json({ ok: true, sessions: sessions.map(sanitizeTpvRegisterSession) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar sesiones de caja TPV' });
@@ -2213,6 +2221,13 @@ export async function listCajaBootstrap(req, res) {
       tpvSessions = tpvSessions.filter((s) => String(s.pointOfSaleId || '') === pdvFilter);
     }
 
+    const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
+    if (businessFilter) {
+      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
+      const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+      tpvSessions = filterTpvRegisterSessionsForBusiness(tpvSessions, businessFilter, scopedPdvIds);
+    }
+
     return res.json({
       ok: true,
       sessions: tpvSessions.map(sanitizeTpvRegisterSession),
@@ -2234,13 +2249,26 @@ export async function createTpvRegisterSession(req, res) {
     if (!session || typeof session !== 'object') return badRequest(res, 'Falta el objeto session');
     const pdvId = String(session.pointOfSaleId || '').trim();
     if (!pdvId) return badRequest(res, 'Falta el punto de venta (tienda) de la caja');
+    const businessId = String(session.business_id || session.businessId || '').trim();
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
 
+    let scopedPdvIds = null;
+    if (businessId) {
+      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessId);
+      scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+      if (!scopedPdvIds.has(pdvId)) {
+        return badRequest(res, 'El punto de venta no pertenece a la empresa seleccionada');
+      }
+    }
+
     const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-    const openForPdv = (allSessions || []).filter(
+    const scopedSessions = businessId
+      ? filterTpvRegisterSessionsForBusiness(allSessions, businessId, scopedPdvIds)
+      : allSessions;
+    const openForPdv = (scopedSessions || []).filter(
       (s) => s.status === 'open' && !s.deletedAt && String(s.pointOfSaleId || '').trim() === pdvId,
     );
 
@@ -2264,7 +2292,15 @@ export async function createTpvRegisterSession(req, res) {
     }
 
     const refreshed = await listTpvRegisterSessionsByUser(req, userId);
-    const alreadyOpen = findOpenTpvRegisterSessionForPointOfSale(refreshed, pdvId);
+    const refreshedScoped = businessId
+      ? filterTpvRegisterSessionsForBusiness(refreshed, businessId, scopedPdvIds)
+      : refreshed;
+    const alreadyOpen = findOpenTpvRegisterSessionForPointOfSale(
+      refreshedScoped,
+      pdvId,
+      businessId,
+      scopedPdvIds,
+    );
     if (alreadyOpen) {
       const pdvLabel = alreadyOpen.pointOfSaleName || 'esta tienda';
       return res.status(409).json({
@@ -2275,7 +2311,10 @@ export async function createTpvRegisterSession(req, res) {
       });
     }
 
-    const doc = buildTpvRegisterSessionDocument(userId, session);
+    const doc = buildTpvRegisterSessionDocument(userId, {
+      ...session,
+      business_id: businessId || session.business_id || session.businessId || '',
+    });
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId,

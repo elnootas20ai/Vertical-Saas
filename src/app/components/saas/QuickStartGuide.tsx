@@ -7,6 +7,9 @@ import {
 } from 'lucide-react';
 import { useActivationChecklist, type OnboardingStep, type OnboardingSubStep } from '../../context/ActivationChecklistContext';
 import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
+import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
+import { dismissOnboardingWelcomeTourForActivation } from '../../lib/onboardingLocalKeys';
 
 const ICON_MAP: Record<string, typeof Building2> = {
   building: Building2,
@@ -272,7 +275,17 @@ function StepCard({
 
 function SubStepRow({ sub, stepRoute }: { sub: OnboardingSubStep; stepRoute: string }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
   const guide = getSubStepGuide(sub.id);
+
+  const goToActivation = () => {
+    const uid = String(user?.user_id || user?.id || '').trim();
+    const bid = String(currentBusiness?.business_id || '').trim();
+    dismissOnboardingWelcomeTourForActivation(uid, bid);
+    navigate(buildActivationTargetUrl(stepRoute, sub.id));
+  };
+
   return (
     <div className="flex items-start gap-2 rounded-md py-1">
       {sub.completed ? (
@@ -291,7 +304,7 @@ function SubStepRow({ sub, stepRoute }: { sub: OnboardingSubStep; stepRoute: str
       {!sub.completed && (
         <button
           type="button"
-          onClick={() => navigate(buildActivationTargetUrl(stepRoute, sub.id))}
+          onClick={goToActivation}
           className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-500 hover:bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
         >
           <MousePointerClick className="w-2.5 h-2.5" />

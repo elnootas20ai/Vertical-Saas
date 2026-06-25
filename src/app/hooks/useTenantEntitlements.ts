@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useApp, userCanUseDevPlanOverride } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
+import { useAuthOptional } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { isVertialSuperAdminEmail } from '../lib/superAdmin';
 import {
@@ -20,7 +20,8 @@ export function useTenantEntitlements(options?: {
   commercialBrandCount?: number;
 }): TenantEntitlementAccess {
   const { subscription, devUnlimitedPdv } = useApp();
-  const { user } = useAuth();
+  const auth = useAuthOptional();
+  const user = auth?.user ?? null;
   const { businesses } = useBusiness();
 
   const devUnlimited = userCanUseDevPlanOverride(user) && devUnlimitedPdv;

@@ -37,7 +37,6 @@ import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
   downloadDeliveryCatalogImportTemplate,
-  formatDeliveryCatalogImportValidationToast,
   validateDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
 import {
@@ -102,6 +101,14 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { CatalogImportReportPanel } from '../../components/saas/CatalogImportReportPanel';
+import {
+  catalogImportReportFromBulkErrors,
+  catalogImportReportFromValidation,
+  catalogImportReportSimple,
+  type CatalogImportReport,
+  type CatalogImportRunResult,
+} from '../../lib/catalogImportReport';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
@@ -208,6 +215,7 @@ function CreateCatalogItemModal({
 }: CreateCatalogItemModalProps) {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const createModalWasOpenRef = useRef(false);
   const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
   const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
   const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
@@ -232,9 +240,18 @@ function CreateCatalogItemModal({
     available: true,
     ingredients: '',
     supplements: [] as Array<{ id: string; name: string; price: string }>,
+    halfHalf: false,
   });
 
   useEffect(() => {
+    if (!isOpen) {
+      createModalWasOpenRef.current = false;
+      return;
+    }
+
+    const justOpened = !createModalWasOpenRef.current;
+    createModalWasOpenRef.current = true;
+
     if (editItem) {
       setComboItems(Array.isArray(editItem.comboItems) ? [...editItem.comboItems] : []);
       const items = Array.isArray(editItem.comboItems) ? editItem.comboItems.length : 0;
@@ -265,24 +282,37 @@ function CreateCatalogItemModal({
           name: s.name,
           price: String(s.price),
         })),
+        halfHalf: editItem.customFields?.halfHalf === true,
       });
-    } else {
-      setComboItems([]);
-      setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
-      setComboStructureConfirmed(true);
-      const defaultId = defaultBrandIdForCatalog(brands);
-      setForm({
-        itemType: 'product', name: '', description: '', category: '', unit: 'ud',
-        selectedBrandIds: defaultId ? [defaultId] : [],
-        newBrandName: '',
-        showNewBrand: false,
-        unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
-        image: '', allergens: [], notes: '', webVisible: true, available: true,
-        ingredients: '', supplements: [],
-      });
+      setStep(1);
+      return;
     }
+
+    if (!justOpened) return;
+
+    setComboItems([]);
+    setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
+    setComboStructureConfirmed(true);
+    const defaultId = defaultBrandIdForCatalog(brands);
+    setForm({
+      itemType: 'product', name: '', description: '', category: '', unit: 'ud',
+      selectedBrandIds: defaultId ? [defaultId] : [],
+      newBrandName: '',
+      showNewBrand: false,
+      unitPrice: '', staffPrice: '', costPrice: '', stockQuantity: '', minStock: '',
+      image: '', allergens: [], notes: '', webVisible: true, available: true,
+      ingredients: '', supplements: [], halfHalf: false,
+    });
     setStep(1);
-  }, [editItem, isOpen, brands]);
+  }, [editItem, isOpen]);
+
+  /** Si las marcas cargan después de abrir el modal, preselecciona la línea comercial por defecto. */
+  useEffect(() => {
+    if (!isOpen || editItem) return;
+    const defaultId = defaultBrandIdForCatalog(brands);
+    if (!defaultId) return;
+    setForm((f) => (f.selectedBrandIds.length > 0 ? f : { ...f, selectedBrandIds: [defaultId] }));
+  }, [isOpen, editItem, brands]);
 
   const categorySuggestions = useMemo(
     () => catalogCategorySuggestions(brands, form.selectedBrandIds, catalogCategoriesInUse),
@@ -342,6 +372,11 @@ function CreateCatalogItemModal({
       if (!isEditMode) setStep(1);
       return;
     }
+    if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) {
+      toast.error('Selecciona la línea comercial (marca) del producto');
+      if (!isEditMode) setStep(1);
+      return;
+    }
     setSubmitting(true);
     try {
       const category = normalizeImportCategory(form.category);
@@ -372,6 +407,12 @@ function CreateCatalogItemModal({
         ...(form.itemType === 'combo' || /combo/i.test(category)
           ? { comboStructure, comboStructureConfirmed }
           : {}),
+        ...(form.itemType === 'product' &&
+        (form.halfHalf || /mitad\s*y\s*mitad/i.test(form.name.trim()))
+          ? { halfHalf: true }
+          : form.itemType === 'product'
+            ? { halfHalf: false }
+            : {}),
       };
       await onCreate({
         ...editItem,
@@ -401,11 +442,27 @@ function CreateCatalogItemModal({
   };
 
   const canNext = () => {
-    if (step === 1) return form.name.trim().length > 0;
-    if (step === 2 && form.itemType !== 'service') {
+    if (step === 1) {
+      if (!form.name.trim()) return false;
+      if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) return false;
       return true;
     }
     return true;
+  };
+
+  const handleGoNext = () => {
+    if (step === 1) {
+      if (!form.name.trim()) {
+        toast.error('Indica el nombre del producto para continuar');
+        return;
+      }
+      if (activeBrands.length > 0 && form.selectedBrandIds.length === 0) {
+        toast.error('Selecciona la línea comercial (marca) del producto');
+        return;
+      }
+    }
+    if (!canNext()) return;
+    setStep((s) => s + 1);
   };
 
   const renderBrandPicker = () => (
@@ -547,6 +604,39 @@ function CreateCatalogItemModal({
       </div>
     </>
   );
+
+  const renderHalfHalfProductToggle = () => {
+    if (form.itemType !== 'product') return null;
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          setForm((f) => ({
+            ...f,
+            halfHalf: !f.halfHalf,
+            category: f.category || (/pizza/i.test(f.name) ? 'Pizzas' : f.category),
+          }))
+        }
+        className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+          form.halfHalf
+            ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/25'
+            : 'border-gray-200 dark:border-gray-700 hover:border-gray-400'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="font-bold text-gray-900 dark:text-gray-100">Mitad y mitad (2 sabores)</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              En TPV se eligen 2 pizzas de la carta · un solo precio · badge ½½
+            </p>
+          </div>
+          <div className={`w-11 h-6 rounded-full relative shrink-0 ${form.halfHalf ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
+            <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.halfHalf ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          </div>
+        </div>
+      </button>
+    );
+  };
 
   const toggleAllergen = (a: string) => {
     setForm(f => ({
@@ -812,6 +902,7 @@ function CreateCatalogItemModal({
                   <label className={labelClass}>Nombre del producto *</label>
                   <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                 </div>
+                {renderHalfHalfProductToggle()}
                 <div>
                   <label className={labelClass}>Descripción</label>
                   <textarea rows={3} className={`${inputClass} resize-none`} placeholder="Descripción detallada del producto..." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -915,8 +1006,9 @@ function CreateCatalogItemModal({
               </div>
               <div>
                 <label className={labelClass}>Nombre del producto *</label>
-                <input className={inputClass} placeholder="Ej: Hamburguesa clásica, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
+                <input className={inputClass} placeholder="Ej: Mitad y mitad, Margarita, Coca-Cola 33cl..." value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
               </div>
+              {renderHalfHalfProductToggle()}
               <div>
                 <label className={labelClass}>Descripción</label>
                 <textarea rows={2} className={`${inputClass} resize-none`} placeholder="Opcional: ingredientes, tamaño, etc." value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
@@ -1064,7 +1156,7 @@ function CreateCatalogItemModal({
               {step < totalSteps ? (
                 <button
                   type="button"
-                  onClick={() => setStep(s => s + 1)}
+                  onClick={handleGoNext}
                   disabled={!canNext()}
                   className="px-6 py-3 bg-gray-900 hover:bg-black text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -1830,6 +1922,7 @@ export function CatalogPage() {
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null);
   const [showAIModal, setShowAIModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [catalogImportReport, setCatalogImportReport] = useState<CatalogImportReport | null>(null);
   const [imageZipMap, setImageZipMap] = useState<Record<string, string>>({});
   const [loadingImageZip, setLoadingImageZip] = useState(false);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
@@ -1862,7 +1955,7 @@ export function CatalogPage() {
   }, [templateOrganizerLines]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     let brandCache = [...brands];
     const unmatchedCommercialBrands: string[] = [];
     const items: Partial<CatalogItem>[] = [];
@@ -1882,7 +1975,7 @@ export function CatalogPage() {
       toast.error('No hay productos válidos para importar');
       return;
     }
-    const result = await bulkCreateCatalogItemsRequest(user.id, items as Partial<CatalogItem>[]);
+    const result = await bulkCreateCatalogItemsRequest(dataUserId, items as Partial<CatalogItem>[]);
     if (result.created > 0) {
       if (businessId) {
         const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
@@ -1903,8 +1996,13 @@ export function CatalogPage() {
     }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    if (!user?.id) return 0;
+  const handleImportEntries = async (entries: Record<string, string>[]): Promise<CatalogImportRunResult> => {
+    const finish = (result: CatalogImportRunResult): CatalogImportRunResult => {
+      if (result.report) setCatalogImportReport(result.report);
+      return result;
+    };
+
+    if (!dataUserId) return finish({ count: 0, report: null });
 
     const productRows = entries.filter((entry) => {
       const name = String(entry.name || '').trim();
@@ -1914,25 +2012,26 @@ export function CatalogPage() {
     });
 
     if (productRows.length === 0) {
-      toast.error('No hay productos para importar', {
-        description: 'Borra las filas de ejemplo de la plantilla y pon tus productos, o revisa que nombre y precio estén rellenos.',
-      });
-      return 0;
+      const report = catalogImportReportSimple(
+        'No hay productos para importar',
+        [{ message: 'Borra las filas de ejemplo o revisa que nombre y precio estén rellenos.' }],
+      );
+      toast.error(report.summary);
+      return finish({ count: 0, report });
     }
 
     const validation = validateDeliveryCatalogImportEntries(productRows, brands);
     if (!validation.ok) {
-      const detail = formatDeliveryCatalogImportValidationToast(validation);
-      toast.error('Revisa la plantilla antes de importar', {
-        description: detail || 'Hay filas con errores',
-        duration: 12000,
-      });
-      return 0;
+      const report = catalogImportReportFromValidation(validation);
+      toast.error('Revisa la plantilla antes de importar');
+      return finish({ count: 0, report });
     }
     const warnings = validation.issues.filter((i) => i.severity === 'warning');
-    if (warnings.length > 0) {
-      toast.warning(`${warnings.length} aviso(s) en el Excel (se importará igual)`, { duration: 8000 });
-    }
+    const warningLines = warnings.map((w) => ({
+      row: w.row,
+      field: w.field,
+      message: w.message,
+    }));
 
     const zipProvided = Object.keys(imageZipMap).length > 0;
     const unmatchedImageRefs: string[] = [];
@@ -1966,21 +2065,22 @@ export function CatalogPage() {
     if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
 
     if (items.length === 0) {
-      toast.error('No hay productos válidos para importar');
-      return 0;
+      const report = catalogImportReportSimple('No hay productos válidos para importar');
+      toast.error(report.summary);
+      return finish({ count: 0, report });
     }
     if (zipProvided && unmatchedImageRefs.length > 0) {
       const sample = unmatchedImageRefs.slice(0, 6).join(', ');
       toast.warning(`ZIP: ${unmatchedImageRefs.length} producto(s) sin imagen coincidente. Se importarán igual. Ej: ${sample}`);
     }
-    let result = await bulkCreateCatalogItemsRequest(user.id, items);
+    let result = await bulkCreateCatalogItemsRequest(dataUserId, items);
     const suspiciousSingleCreate = items.length > 1 && result.created <= 1 && result.errors >= items.length - 1;
     if (suspiciousSingleCreate) {
       let recovered = 0;
       let recoveredErrors = 0;
       for (const item of items) {
         try {
-          await createCatalogItemRequest(user.id, item);
+          await createCatalogItemRequest(dataUserId, item);
           recovered += 1;
         } catch (error) {
           recoveredErrors += 1;
@@ -1997,7 +2097,8 @@ export function CatalogPage() {
       };
       toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
     }
-    if (result.created > 0 || (result.updated ?? 0) > 0) {
+    const totalOk = (result.created || 0) + (result.updated ?? 0);
+    if (totalOk > 0) {
       if (businessId) {
         const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
         const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
@@ -2005,7 +2106,7 @@ export function CatalogPage() {
       }
       const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
       if (withIngredients > 0 && businessId) {
-        const ingSync = await syncStoreIngredientsFromCatalogImport(user.id, businessId, items);
+        const ingSync = await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
         if (ingSync.added > 0 || ingSync.promoted > 0) {
           const parts = [];
           if (ingSync.added > 0) parts.push(`${ingSync.added} nuevo(s)`);
@@ -2027,16 +2128,36 @@ export function CatalogPage() {
           (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
       );
     }
-    if (result.errors > 0 && result.created === 0 && (result.updated ?? 0) === 0) {
-      toast.error(`${result.errors} producto(s) no se pudieron importar`, {
-        description:
-          'Si ya existían (mismo SKU), rellena la columna ingredientes y vuelve a importar para actualizarlos.',
-        duration: 12000,
-      });
+
+    const bulkReport = catalogImportReportFromBulkErrors(
+      result.errorDetails,
+      result.created,
+      result.updated ?? 0,
+    );
+    const successReport: CatalogImportReport = {
+      at: Date.now(),
+      summary:
+        totalOk > 0
+          ? warningLines.length > 0
+            ? `Importación completada con ${warningLines.length} aviso(s)`
+            : 'Importación completada'
+          : result.errors > 0
+            ? `${result.errors} producto(s) no se importaron`
+            : 'Importación sin cambios',
+      errors: bulkReport?.errors ?? [],
+      warnings: warningLines,
+      created: result.created,
+      updated: result.updated ?? 0,
+      failed: result.errors,
+    };
+
+    if (result.errors > 0 && totalOk === 0) {
+      toast.error(successReport.summary);
     } else if (result.errors > 0) {
-      toast.error(`${result.errors} producto(s) no se pudieron importar`);
+      toast.warning(`${result.errors} producto(s) no se importaron`);
     }
-    return (result.created || 0) + (result.updated || 0);
+
+    return finish({ count: totalOk, report: successReport });
   };
 
   const handleZipFileSelected = useCallback(async (file: File | null) => {
@@ -2272,20 +2393,30 @@ export function CatalogPage() {
   // ── CRUD: Catalog Items ─────────────────────────────────────────────────────
 
   const handleCreateItem = async (data: Partial<CatalogItem>) => {
-    if (!user?.id) {
+    if (!dataUserId) {
       toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
       return;
     }
+    const payload: Partial<CatalogItem> = {
+      ...data,
+      module: 'catalog',
+      ...(isDelivery
+        ? { vertical: 'delivery', business_id: businessId || undefined }
+        : {}),
+    };
     try {
       if (editingItem) {
-        const updated = await updateCatalogItemRequest(user.id, { ...editingItem, ...data } as CatalogItem);
+        const updated = await updateCatalogItemRequest(dataUserId, { ...editingItem, ...payload } as CatalogItem);
         setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
         setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
         toast.success('Artículo actualizado');
       } else {
-        const created = await createCatalogItemRequest(user.id, { ...data, module: 'catalog' } as any);
+        const created = await createCatalogItemRequest(dataUserId, payload as CatalogItem);
         setCatalogItems(prev => [created, ...prev]);
         toast.success('Artículo creado');
+        if (isDelivery && businessId && (created.brandIds?.length ?? 0) > 0) {
+          void syncTpvOrganizersAfterCatalogImport(businessId, [created]).catch(() => null);
+        }
       }
       setShowCreateItem(false);
       setEditingItem(null);
@@ -2296,7 +2427,7 @@ export function CatalogPage() {
   };
 
   const handleDeleteItem = (item: CatalogItem) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     if (bulkDeletingCatalog || deletingItemIds.has(item._id)) return;
     setCatalogDeleteGuard({ mode: 'single', item });
   };
@@ -2318,7 +2449,7 @@ export function CatalogPage() {
   }, []);
 
   const handleBulkDeleteSelected = () => {
-    if (!user?.id || bulkDeletingCatalog || bulkMovingCatalog) return;
+    if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog) return;
     const items = filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
     if (items.length === 0) {
       toast.error('Selecciona al menos un artículo');
@@ -2333,7 +2464,7 @@ export function CatalogPage() {
   };
 
   const handleDeleteAllFilteredCatalog = () => {
-    if (!user?.id || bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0) return;
+    if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0) return;
     setCatalogSelectMode(true);
     setSelectedCatalogIds(new Set(filteredCatalog.map((item) => item._id)));
     setBulkDeleteConfirmStep(true);
@@ -2348,13 +2479,13 @@ export function CatalogPage() {
   const executeCatalogDeleteAfterGuard = useCallback(async () => {
     const op = catalogDeleteOpRef.current;
     setCatalogDeleteGuard(null);
-    if (!user?.id || !op) return;
+    if (!dataUserId || !op) return;
 
     if (op.mode === 'single') {
       const item = op.item;
       setDeletingItemIds((prev) => new Set(prev).add(item._id));
       try {
-        await deleteCatalogItemRequest(user.id, item._id);
+        await deleteCatalogItemRequest(dataUserId, item._id);
         setCatalogItems((prev) => prev.filter((i) => i._id !== item._id));
         notifyDeliveryCatalogChanged(dataUserId, businessId);
         toast.success('Artículo eliminado');
@@ -2377,7 +2508,7 @@ export function CatalogPage() {
     try {
       for (const item of list) {
         try {
-          await deleteCatalogItemRequest(user.id, item._id);
+          await deleteCatalogItemRequest(dataUserId, item._id);
           deleted += 1;
         } catch {
           failed += 1;
@@ -2391,12 +2522,12 @@ export function CatalogPage() {
       setBulkDeletingCatalog(false);
       exitCatalogSelectMode();
     }
-  }, [user?.id, loadCatalog, exitCatalogSelectMode]);
+  }, [dataUserId, loadCatalog, exitCatalogSelectMode, businessId]);
 
   const handleToggleField = async (item: CatalogItem, field: 'webVisible' | 'available' | 'active') => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const updated = await updateCatalogItemRequest(user.id, { ...item, [field]: !item[field] });
+      const updated = await updateCatalogItemRequest(dataUserId, { ...item, [field]: !item[field] });
       setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
       setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
       notifyDeliveryCatalogChanged(dataUserId, businessId);
@@ -2418,9 +2549,9 @@ export function CatalogPage() {
     comboStructure?: ComboStructureSlot[];
     comboStructureConfirmed?: boolean;
   }) => {
-    if (!user?.id || !detailItem) throw new Error('missing item');
+    if (!dataUserId || !detailItem) throw new Error('missing item');
     const category = String(detailItem.category || '');
-    const updated = await updateCatalogItemRequest(user.id, {
+    const updated = await updateCatalogItemRequest(dataUserId, {
       ...detailItem,
       itemType:
         detailItem.itemType === 'combo' || /combo/i.test(category)
@@ -2443,9 +2574,9 @@ export function CatalogPage() {
   };
 
   const handleStockAdjust = async (item: CatalogItem, newQuantity: number) => {
-    if (!user?.id) return;
+    if (!dataUserId) return;
     try {
-      const updated = await updateCatalogItemRequest(user.id, { ...item, stockQuantity: newQuantity });
+      const updated = await updateCatalogItemRequest(dataUserId, { ...item, stockQuantity: newQuantity });
       setCatalogItems(prev => prev.map(i => i._id === updated._id ? updated : i));
       setStockAdjustItem(null);
       toast.success(`Stock de "${item.name}" actualizado a ${newQuantity}`);
@@ -2650,7 +2781,7 @@ export function CatalogPage() {
 
   const handleConfirmCatalogMove = useCallback(
     async (target: CatalogMoveTargetInput) => {
-      if (!user?.id || !catalogMoveItems?.length) return;
+      if (!dataUserId || !catalogMoveItems?.length) return;
       setBulkMovingCatalog(true);
       let moved = 0;
       let failed = 0;
@@ -2658,7 +2789,7 @@ export function CatalogPage() {
         for (const item of catalogMoveItems) {
           try {
             const patched = applyCatalogMoveTarget(item, target);
-            const updated = await updateCatalogItemRequest(user.id, patched);
+            const updated = await updateCatalogItemRequest(dataUserId, patched);
             setCatalogItems((prev) => prev.map((i) => (i._id === updated._id ? updated : i)));
             setDetailItem((prev) => (prev?._id === updated._id ? updated : prev));
             moved += 1;
@@ -2680,9 +2811,8 @@ export function CatalogPage() {
       }
     },
     [
-      user?.id,
-      catalogMoveItems,
       dataUserId,
+      catalogMoveItems,
       businessId,
       catalogSelectMode,
       exitCatalogSelectMode,
@@ -3562,6 +3692,14 @@ export function CatalogPage() {
             </button>
           </div>
         )}
+
+        {catalogImportReport && (
+          <CatalogImportReportPanel
+            report={catalogImportReport}
+            onDismiss={() => setCatalogImportReport(null)}
+          />
+        )}
+
         <Tabs tabs={tabsConfig} activeTab={activeTab} onChange={setActiveTab} />
 
         {activeTab === 'catalog' && (

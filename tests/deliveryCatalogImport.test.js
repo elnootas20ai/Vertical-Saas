@@ -306,4 +306,59 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(merged.find((i) => i.name === 'Tomate')?.role).toBe('extra');
     expect(merged.find((i) => i.name === 'Mozzarella')?.role).toBe('extra');
   });
+
+  it('mapImportEntryToCatalogItem creates combo from categoria Combos', async () => {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    const { mapImportEntryToCatalogItem } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const brands = [{ _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] }];
+    const result = await mapImportEntryToCatalogItem(
+      {
+        name: 'Menú Estándar',
+        category: 'Combos',
+        linea: 'modomio',
+        price: '14.90',
+      },
+      { businessId: 'biz-1', brandCache: brands },
+    );
+    expect(result?.item.itemType).toBe('combo');
+    expect(result?.item.category).toBe('Combos');
+    expect(result?.item.customFields?.comboStructureConfirmed).toBe(true);
+    expect(Array.isArray(result?.item.customFields?.comboStructure)).toBe(true);
+    expect(result?.item.customFields?.comboStructure.length).toBeGreaterThan(0);
+  });
+
+  it('mapImportEntryToCatalogItem respects tipo_menu duo', async () => {
+    globalThis.localStorage = {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    const { mapImportEntryToCatalogItem } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const brands = [{ _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] }];
+    const result = await mapImportEntryToCatalogItem(
+      {
+        name: 'Menú Dúo',
+        category: 'Menú',
+        linea: 'modomio',
+        price: '22.00',
+        tipo_menu: 'duo',
+      },
+      { businessId: 'biz-1', brandCache: brands },
+    );
+    expect(result?.item.itemType).toBe('combo');
+    const main = result?.item.customFields?.comboStructure?.find((s) => s.slotKind === 'main');
+    expect(main?.expectedCount).toBe(2);
+  });
+
+  it('normalizeImportCategory maps menu aliases to Combos', async () => {
+    const { normalizeImportCategory, isImportComboCategory } = await import(
+      '../src/app/lib/deliveryCatalogImportLogic.ts',
+    );
+    expect(normalizeImportCategory('menú')).toBe('Combos');
+    expect(isImportComboCategory('Combos')).toBe(true);
+  });
 });

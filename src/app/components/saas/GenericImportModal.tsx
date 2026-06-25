@@ -5,6 +5,10 @@ import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { autoMapImportFields, type ImportHeaderAliases } from '../../lib/importHeaderMapping';
+import type { CatalogImportReport } from '../../lib/catalogImportReport';
+import { CatalogImportReportPanel } from './CatalogImportReportPanel';
+
+export type CatalogImportHandlerResult = number | { count: number; report?: CatalogImportReport | null };
 
 export interface ImportFieldDef {
   key: string;
@@ -20,7 +24,7 @@ interface GenericImportModalProps {
   importLabel?: string;
   templateFileName?: string;
   fields: ImportFieldDef[];
-  onImport: (entries: Record<string, string>[]) => Promise<number | void> | number | void;
+  onImport: (entries: Record<string, string>[]) => Promise<CatalogImportHandlerResult | void> | CatalogImportHandlerResult | void;
   extraFileUpload?: {
     label: string;
     helpText?: string;
@@ -41,7 +45,7 @@ interface GenericImportModalProps {
   importSheetName?: string;
 }
 
-type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing';
+type ImportStep = 'upload' | 'mapping' | 'preview' | 'importing' | 'results';
 
 export function GenericImportModal({
   isOpen,
@@ -62,6 +66,7 @@ export function GenericImportModal({
   const [rawData, setRawData] = useState<string[][]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState<CatalogImportReport | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const extraFileRef = useRef<HTMLInputElement>(null);
 
@@ -73,6 +78,7 @@ export function GenericImportModal({
     setRawData([]);
     setMapping({});
     setImporting(false);
+    setImportReport(null);
     onClose();
   };
 
@@ -207,15 +213,36 @@ export function GenericImportModal({
       return;
     }
     setImporting(true);
+    setImportReport(null);
     setStep('importing');
     try {
-      const result = await onImport(mappedEntries);
-      const count = typeof result === 'number' ? result : mappedEntries.length;
-      if (count <= 0) {
-        setStep('preview');
+      const raw = await onImport(mappedEntries);
+      const count =
+        typeof raw === 'number' ? raw : typeof raw === 'object' && raw != null ? raw.count : mappedEntries.length;
+      const report =
+        typeof raw === 'object' && raw != null && 'report' in raw ? raw.report ?? null : null;
+
+      if (report && (report.errors.length > 0 || count <= 0)) {
+        setImportReport(report);
+        setStep('results');
         setImporting(false);
         return;
       }
+
+      if (count <= 0) {
+        setStep('preview');
+        setImporting(false);
+        toast.error('No se importó ninguna fila. Revisa el Excel.');
+        return;
+      }
+
+      if (report && report.warnings.length > 0) {
+        setImportReport(report);
+        setStep('results');
+        setImporting(false);
+        return;
+      }
+
       toast.success(`${count} entrada(s) importadas correctamente`);
       handleClose();
     } catch {
@@ -247,6 +274,7 @@ export function GenericImportModal({
                 {step === 'mapping' && 'Mapea las columnas del archivo'}
                 {step === 'preview' && `${mappedEntries.length} entradas listas para importar`}
                 {step === 'importing' && 'Importando datos...'}
+                {step === 'results' && 'Resultado de la importación'}
               </p>
             </div>
           </div>
@@ -462,11 +490,37 @@ export function GenericImportModal({
               </div>
             </div>
           )}
+
+          {step === 'results' && importReport && (
+            <div className="space-y-4">
+              <CatalogImportReportPanel report={importReport} compact />
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                También verás este informe en la página de Catálogo hasta que lo cierres.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         {step !== 'importing' && (
           <div className="border-t border-gray-200 dark:border-gray-700 p-6 flex gap-3 flex-shrink-0 bg-gray-50 dark:bg-gray-900">
+            {step === 'results' && (
+              <>
+                <button
+                  onClick={() => setStep('preview')}
+                  className="flex items-center gap-1.5 px-5 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" /> Corregir e importar de nuevo
+                </button>
+                <div className="flex-1" />
+                <button
+                  onClick={handleClose}
+                  className="px-6 py-2.5 bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white rounded-xl font-semibold transition-colors"
+                >
+                  Cerrar
+                </button>
+              </>
+            )}
             {step === 'upload' && (
               <button onClick={handleClose} className="px-5 py-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-white dark:hover:bg-gray-800 transition-colors">
                 Cancelar

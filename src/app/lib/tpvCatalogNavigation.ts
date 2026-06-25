@@ -149,11 +149,18 @@ export function categoriesForTpvScope(
 
   if (scope.kind === 'brand') {
     const brand = brands.find((b) => b._id === scope.brandId);
+    const fromItems = new Set<string>();
+    items.forEach((item) => {
+      if (item.category?.trim()) fromItems.add(item.category.trim());
+    });
     if (brand?.catalogCategories?.length) {
-      const ordered = brand.catalogCategories.filter((cat) =>
-        items.some((i) => i.category === cat),
-      );
-      if (ordered.length > 0) return ordered;
+      const ordered = brand.catalogCategories.filter((cat) => fromItems.has(cat));
+      const extra = [...fromItems]
+        .filter((cat) => !brand.catalogCategories!.includes(cat))
+        .sort((a, b) => a.localeCompare(b, 'es'));
+      if (ordered.length > 0 || extra.length > 0) {
+        return [...ordered, ...extra];
+      }
     }
   }
 

@@ -30,6 +30,15 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   if (Array.isArray(cf.supplements) && cf.supplements.length > 0) {
     customFields.supplements = cf.supplements;
   }
+  if (Array.isArray(cf.comboStructure) && cf.comboStructure.length > 0) {
+    customFields.comboStructure = cf.comboStructure;
+  }
+  if (cf.comboStructureConfirmed === true) {
+    customFields.comboStructureConfirmed = true;
+  }
+  if (cf.halfHalf === true) {
+    customFields.halfHalf = true;
+  }
   return {
     ...item,
     image: '',

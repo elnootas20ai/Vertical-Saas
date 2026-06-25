@@ -687,3 +687,43 @@ export function normalizeComboItemsForSave(
     slotKind: resolveComboRefSlotKind(ref, catalog),
   }));
 }
+
+/** Secciones del menú para elegir productos al vender en TPV. */
+export function resolveTpvComboMenuSections(
+  comboItem: Pick<CatalogItem, 'customFields' | 'comboItems'>,
+  catalog: CatalogItem[],
+): ComboMenuCatalogSection[] {
+  const structure = comboStructureFromCustomFields(
+    comboItem.customFields,
+    comboItem.comboItems?.length ?? 0,
+  );
+  const presetId = structure.length > 0 ? inferComboMenuPresetId(structure) : 'estandar';
+  const effectivePreset = presetId === 'custom' ? 'estandar' : presetId || 'estandar';
+  return buildComboMenuSections(effectivePreset, catalog);
+}
+
+/** Menú / combo vendible en TPV (tipo combo, categoría o productos incluidos). */
+export function isTpvComboCatalogItem(
+  item: Pick<CatalogItem, 'itemType' | 'category' | 'comboItems' | 'name' | 'customFields'>,
+): boolean {
+  if (item.customFields?.halfHalf === true) return false;
+  const foldedName = String(item.name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (
+    item.itemType !== 'combo' &&
+    /mitad\s*y\s*mitad|half\s*and\s*half|half-half/.test(foldedName)
+  ) {
+    return false;
+  }
+  if (item.itemType === 'combo') return true;
+  const cat = String(item.category || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (cat === 'combos' || cat === 'combo' || cat === 'menus' || cat === 'menu') return true;
+  return (item.comboItems?.length ?? 0) > 0;
+}

@@ -25,8 +25,14 @@ import {
   resolveCatalogImportBrandIds,
   resolveCommercialLineIdsFromText,
   shouldClearBrandForCategory,
+  isImportComboCategory,
 } from './deliveryCatalogImportLogic';
 import { parseImportPrice } from './deliveryCatalogExcelTemplate';
+import {
+  COMBO_MENU_PRESETS,
+  DEFAULT_COMBO_STRUCTURE,
+  type ComboStructureSlot,
+} from './catalogComboSlots';
 
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
@@ -40,12 +46,37 @@ export {
   inferCommercialLineBrandId,
   inferCommercialLineBrandIdFromProductName,
   isCommercialLineBrand,
+  isImportComboCategory,
   mergeBrandCatalogCategories,
   normalizeImportCategory,
   readImportLineText,
   resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
 } from './deliveryCatalogImportLogic';
+
+function foldImportKey(s: string): string {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/** Tipo de menú opcional en Excel: estandar | duo | familiar | con_postre */
+export function resolveImportComboStructure(entry: Record<string, string>): ComboStructureSlot[] {
+  const raw = String(
+    entry.tipo_menu || entry.tipoMenu || entry.menu || entry.combo || entry.tipo || '',
+  ).trim();
+  if (!raw) return DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s }));
+  const key = foldImportKey(raw);
+  const preset = COMBO_MENU_PRESETS.find(
+    (p) =>
+      p.id === key ||
+      foldImportKey(p.label) === key ||
+      foldImportKey(p.hint) === key,
+  );
+  return (preset?.structure ?? DEFAULT_COMBO_STRUCTURE).map((s) => ({ ...s }));
+}
 
 export type ResolveBrandIdsFromImportResult = {
   brandIds: string[];
@@ -226,9 +257,12 @@ export async function mapImportEntryToCatalogItem(
     name,
     category,
     brandIds: resolveCatalogImportBrandIds(explicitBrandIds, category, brandCache, name),
-    itemType: ['product', 'service', 'combo'].includes(String(entry.itemType || '').trim())
-      ? (String(entry.itemType).trim() as CatalogItem['itemType'])
-      : 'product',
+    itemType: (() => {
+      const explicit = String(entry.itemType || '').trim();
+      if (explicit === 'combo' || isImportComboCategory(category)) return 'combo' as const;
+      if (['product', 'service'].includes(explicit)) return explicit as CatalogItem['itemType'];
+      return 'product' as const;
+   })(),
     description: String(entry.description || '').trim(),
     unitPrice: (() => {
       const p = parseImportPrice(String(entry.price || entry.unitPrice || ''));
@@ -255,6 +289,14 @@ export async function mapImportEntryToCatalogItem(
     item.customFields = {
       ...(item.customFields || {}),
       ingredients: parseIngredientsBulkText(ingredientsRaw).join(', '),
+    };
+  }
+
+  if (item.itemType === 'combo') {
+    item.customFields = {
+      ...(item.customFields || {}),
+      comboStructure: resolveImportComboStructure(entry),
+      comboStructureConfirmed: true,
     };
   }
 

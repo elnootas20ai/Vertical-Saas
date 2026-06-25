@@ -241,6 +241,8 @@ export interface CatalogItem {
   stockSubcategory: string;
   isStockItem: boolean;
   customFields: Record<string, unknown>;
+  /** Empresa dueña del artículo (multi-marca / multi-empresa). */
+  business_id?: string;
   salesPointId?: string;
   salesPointName?: string;
   createdAt: string;
@@ -1726,6 +1728,9 @@ export interface TpvRegisterSession {
 
   linkedOrderIds?: string[];
 
+  /** Empresa a la que pertenece la sesión de caja (aislamiento multi-marca). */
+  business_id?: string;
+
   summary: TpvRegisterSummary;
 
   createdAt: string;
@@ -1739,12 +1744,13 @@ export function isTpvRegisterSessionOpen(session: TpvRegisterSession | null | un
 
 export async function listTpvRegisterSessionsRequest(
   userId: string,
-  options?: { salesPointId?: string },
+  options?: { salesPointId?: string; businessId?: string },
 ): Promise<TpvRegisterSession[]> {
   const id = normalizeUserId(userId);
-  const qs = options?.salesPointId?.trim()
-    ? `?salesPointId=${encodeURIComponent(options.salesPointId.trim())}`
-    : '';
+  const params = new URLSearchParams();
+  if (options?.salesPointId?.trim()) params.set('salesPointId', options.salesPointId.trim());
+  if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
     `/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`,
   );

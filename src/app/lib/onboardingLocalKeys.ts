@@ -338,6 +338,12 @@ export function markOnboardingTourCompleted(userId: string, businessId: string):
   }
 }
 
+/** Alta delivery / checklist: no volver a mostrar el popup de bienvenida al pulsar Ir. */
+export function dismissOnboardingWelcomeTourForActivation(userId: string, businessId: string): void {
+  markOnboardingTourCompleted(userId, businessId);
+  setOnboardingTourActive(userId, businessId, false);
+}
+
 export function clearOnboardingTourForBusiness(userId: string, businessId: string): void {
   if (!userId || !businessId) return;
   try {

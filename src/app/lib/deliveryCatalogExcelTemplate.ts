@@ -9,6 +9,7 @@ import {
   resolveCommercialLineIdsFromText,
   allCommercialLineBrands,
   shouldClearBrandForCategory,
+  isImportComboCategory,
   type ImportBrandLike,
 } from './deliveryCatalogImportLogic';
 
@@ -67,6 +68,7 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   price: ['precio', 'price', 'pvp', 'precio venta', 'unit price', 'precio unitario'],
   ingredients: ['ingredientes', 'ingredients', 'ingrediente', 'receta', 'componentes'],
   description: ['descripcion', 'description', 'desc', 'notas', 'observaciones'],
+  tipo_menu: ['tipo_menu', 'tipo menu', 'tipo menú', 'menu', 'menú', 'tamano menu', 'tamaño menú', 'combo tipo'],
 };
 
 export type DeliveryCatalogImportIssue = {
@@ -92,6 +94,7 @@ const CATEGORY_PRODUCT_EXAMPLES: Record<string, string> = {
   Complementos: 'Patatas fritas',
   Bebidas: 'Coca-Cola 33cl',
   Postres: 'Tiramisú',
+  Combos: 'Menú Estándar',
   Extras: 'Extra queso',
   Otros: 'Producto varios',
   Café: 'Café solo',
@@ -103,15 +106,19 @@ export function lineCategoriesForCatalogTemplate(brand: ImportBrandLike): string
   const fromBrand = (brand.catalogCategories ?? [])
     .map((c) => normalizeImportCategory(String(c || '')))
     .filter((c) => c && !shouldClearBrandForCategory(c));
-  if (fromBrand.length > 0) return [...new Set(fromBrand)];
+  if (fromBrand.length > 0) {
+    const cats = [...new Set(fromBrand)];
+    if (!cats.some((c) => c === 'Combos')) cats.push('Combos');
+    return cats;
+  }
 
   const preset = getDeliveryBrandLinePreset(brand.deliveryLineKind);
   const fromPreset = (preset?.typicalCategories ?? [])
     .map((c) => normalizeImportCategory(c))
     .filter((c) => c && !shouldClearBrandForCategory(c));
-  if (fromPreset.length > 0) return fromPreset;
+  if (fromPreset.length > 0) return [...fromPreset, 'Combos'];
 
-  return ['Principales', 'Entrantes'];
+  return ['Principales', 'Entrantes', 'Combos'];
 }
 
 function skuPrefixForLine(brand: ImportBrandLike): string {
@@ -168,6 +175,16 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
         i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
       ]);
     });
+
+    rows.push([
+      `Menú ${lineName}`,
+      `${prefix}-M01`,
+      'Combos',
+      lineName,
+      '14.90',
+      '',
+      'Menú TPV · borra o duplica · tipo_menu opcional: estandar, duo, familiar',
+    ]);
   }
 
   const sharedExamples: Array<[string, string, string, string]> = [
@@ -257,6 +274,11 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '  · nombre — nombre en TPV',
     '  · categoria — Pizzas, Burgers, Combos, Bebidas…',
     '  · precio — número (14.50)',
+    '',
+    'MENÚS / COMBOS (categoria = Combos):',
+    '  · linea obligatoria (modomio, BlackBurger…)',
+    '  · ingredientes vacío (el cliente elige pizza+bebida+etc. en TPV)',
+    '  · opcional: columna tipo_menu → estandar | duo | familiar | con_postre',
     '',
     'RECOMENDADO:',
     '  · sku — código único (PIZ-001). Mismo SKU = actualiza sin duplicar',
@@ -406,6 +428,13 @@ export function validateDeliveryCatalogImportEntries(
           severity: 'warning',
         });
       }
+    } else if (isImportComboCategory(category)) {
+      issues.push({
+        row,
+        field: 'linea',
+        message: 'Menú/combo: indica la linea comercial (modomio, BlackBurger…)',
+        severity: 'warning',
+      });
     } else if (!shouldClearBrandForCategory(category) && commercial.length > 0) {
       issues.push({
         row,

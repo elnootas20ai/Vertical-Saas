@@ -27,7 +27,7 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
-import { localCalendarDayKey, registerSessionSpansMultipleDays } from '../../lib/tpvCajaScope';
+import { localCalendarDayKey, registerSessionSpansMultipleDays, tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
 import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   buildAggregatorCashRows,
@@ -171,12 +171,23 @@ function tpvSessionMatchesStoreRef(
   return false;
 }
 
-function shouldKeepTpvSessionInList(session: TpvRegisterSession, scopedPdvs: PointOfSale[]): boolean {
-  if (isTpvRegisterSessionOpen(session)) return true;
+function shouldKeepTpvSessionInList(
+  session: TpvRegisterSession,
+  scopedPdvs: PointOfSale[],
+  businessId?: string,
+): boolean {
+  const pdvIds = new Set(scopedPdvs.map((p) => p._id));
+  if (businessId && !tpvSessionBelongsToBusiness(session, businessId, pdvIds)) {
+    return false;
+  }
   const pid = String(session.pointOfSaleId || '').trim();
-  if (!pid) return true;
-  if (scopedPdvs.some((p) => p._id === pid)) return true;
-  return scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid);
+  const matchesScopedPdv = () =>
+    Boolean(pid && (scopedPdvs.some((p) => p._id === pid) || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)));
+  if (isTpvRegisterSessionOpen(session)) {
+    return matchesScopedPdv();
+  }
+  if (!pid) return !businessId;
+  return matchesScopedPdv();
 }
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
@@ -2196,10 +2207,11 @@ export function TpvRegisterGate({
   useEffect(() => {
     if (!dataUserId) return;
     const refreshSessions = () => {
-      void listTpvRegisterSessionsRequest(dataUserId)
+      void listTpvRegisterSessionsRequest(dataUserId, { businessId: scopeBusinessIdRef.current || undefined })
         .then((sessData) => {
           setSessions((prev) => {
             const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
+            const bid = scopeBusinessIdRef.current;
             let next = sessData;
             if (isTabletSessionRef.current && tabletPdvId) {
               next = sessData.filter((s) => {
@@ -2207,7 +2219,7 @@ export function TpvRegisterGate({
                 return !pid || pid === tabletPdvId;
               });
             } else if (pointsOfSale.length > 0) {
-              next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale));
+              next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale, bid));
             }
             if (next.length === 0 && prev.length > 0) return prev;
             return next;
@@ -2222,7 +2234,7 @@ export function TpvRegisterGate({
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshSessions);
     };
-  }, [dataUserId, pointsOfSale]);
+  }, [dataUserId, pointsOfSale, scopeBusinessId]);
 
   const activeSession = useMemo(() => {
     const open = sessions.filter((s) => isTpvRegisterSessionOpen(s));
@@ -2442,7 +2454,7 @@ export function TpvRegisterGate({
         let storeState: Awaited<ReturnType<typeof loadDeliveryStores>>;
 
         if (tabletCacheReady) {
-          sessData = await listTpvRegisterSessionsRequest(uid);
+          sessData = await listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined });
           storeState = {
             dataUserId: uid,
             workCenters: [],
@@ -2450,7 +2462,7 @@ export function TpvRegisterGate({
           };
         } else {
           [sessData, storeState] = await Promise.all([
-            listTpvRegisterSessionsRequest(uid),
+            listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined }),
             workerUser
               ? loadTpvPointsOfSaleForBusiness(authUser, biz ?? null, {
                   ...loadOpts,
@@ -2503,7 +2515,7 @@ export function TpvRegisterGate({
           setPointsOfSale(
             mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
           );
-          setSessions(sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs)));
+          setSessions(sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)));
 
           writeRetailScopeCache(bidAtStart, {
             retailWorkCenters: scopedWorkCenters,
@@ -2568,6 +2580,7 @@ export function TpvRegisterGate({
     const total = calcDenominationTotal(data.counts);
     try {
       const created = await createTpvRegisterSessionRequest(dataUserId, {
+        business_id: resolveBusinessScopeId(currentBusiness) || scopeBusinessId || '',
         workerId: data.workerId || '',
         workerName: data.workerName,
         pointOfSaleId: data.pointOfSaleId,
@@ -2771,8 +2784,10 @@ export function TpvRegisterGate({
         } catch {
           if (attempt < 4) {
             try {
-              const refreshed = await listTpvRegisterSessionsRequest(uid);
-              setSessions(refreshed);
+              const refreshed = await listTpvRegisterSessionsRequest(uid, {
+                businessId: scopeBusinessIdRef.current || undefined,
+              });
+              setSessions(refreshed.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current)));
             } catch {
               /* reintento con copia local */
             }

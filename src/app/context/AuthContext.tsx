@@ -203,7 +203,19 @@ export interface AuthContextType {
   }>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+// HMR-safe singleton (mismo patrón que AppContext): evita "useAuth must be used within AuthProvider"
+// cuando Vite recarga el módulo y el Provider sigue en el árbol con la identidad antigua del contexto.
+const AUTH_CONTEXT_KEY = '__vertial_auth_ctx__';
+
+function getOrCreateAuthContext(): React.Context<AuthContextType | undefined> {
+  const g = globalThis as typeof globalThis & { [AUTH_CONTEXT_KEY]?: React.Context<AuthContextType | undefined> };
+  if (!g[AUTH_CONTEXT_KEY]) {
+    g[AUTH_CONTEXT_KEY] = createContext<AuthContextType | undefined>(undefined);
+  }
+  return g[AUTH_CONTEXT_KEY];
+}
+
+const AuthContext = getOrCreateAuthContext();
 
 function persistSession(nextUser: User | null) {
   if (nextUser) {
