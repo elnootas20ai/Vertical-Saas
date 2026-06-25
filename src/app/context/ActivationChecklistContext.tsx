@@ -355,19 +355,10 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     if (completionPct !== 100 || !accountUserId || !businessId) return;
     markOnboardingTourCompleted(accountUserId, businessId);
     setOnboardingTourActive(accountUserId, businessId, false);
-    if (isDelivery) return;
     if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
     setIsDismissed(true);
     setActivationChecklistDismissed(accountUserId, businessId, true);
-  }, [completionPct, accountUserId, businessId, isDelivery]);
-
-  /** Delivery al 100 %: ocultar checklist lateral (el tour de bienvenida ya no vuelve). */
-  useEffect(() => {
-    if (!isDelivery || completionPct !== 100 || !accountUserId || !businessId) return;
-    if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
-    setIsDismissed(true);
-    setActivationChecklistDismissed(accountUserId, businessId, true);
-  }, [isDelivery, completionPct, accountUserId, businessId]);
+  }, [completionPct, accountUserId, businessId]);
 
   const dismiss = useCallback(() => {
     setIsDismissed(true);
@@ -376,22 +367,6 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
       if (isDelivery) setActivationChecklistForceVisible(accountUserId, businessId, false);
     }
   }, [accountUserId, businessId, isDelivery]);
-
-  /** Delivery al 100 %: quitar ocultado automático antiguo (una vez) para poder repasar pasos. */
-  useEffect(() => {
-    if (!isDelivery || !accountUserId || !businessId || completionPct < 100) return;
-    if (!isActivationChecklistDismissed(accountUserId, businessId)) return;
-    try {
-      const migKey = `vertial_activation_redisplay:${accountUserId}:${businessId}`;
-      if (localStorage.getItem(migKey) === '1') return;
-      setActivationChecklistDismissed(accountUserId, businessId, false);
-      setIsDismissed(false);
-      localStorage.setItem(migKey, '1');
-    } catch {
-      setIsDismissed(false);
-      setActivationChecklistDismissed(accountUserId, businessId, false);
-    }
-  }, [isDelivery, accountUserId, businessId, completionPct]);
 
   const restore = useCallback(() => {
     setIsDismissed(false);
@@ -407,7 +382,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     setTimeout(() => setIsLoadingSample(false), 1500);
   }, []);
 
-  const isVisible = totalSteps > 0 && !isDismissed && (isDelivery || completionPct < 100 || forceVisible);
+  const isVisible =
+    totalSteps > 0 && !isDismissed && (completionPct < 100 || forceVisible);
 
   return (
     <ActivationChecklistContext.Provider

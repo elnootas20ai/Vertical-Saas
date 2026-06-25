@@ -1,4 +1,13 @@
 import { isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
+import {
+  mergeStoreIngredientNames,
+  parseIngredientsBulkText,
+  resolveBrandTpvCategoryKeys,
+  resolveIngredientRole,
+  type StoreIngredient,
+  type TpvCategoryTemplateKey,
+} from './catalogCustomization';
+import type { CatalogItem } from './deliveryApi';
 
 export type ImportBrandLike = {
   _id: string;
@@ -341,4 +350,84 @@ export function parseCatalogImportStockFields(entry: Record<string, string>) {
     unit,
     isStockItem: tracksStock,
   };
+}
+
+export type CatalogImportIngredientEntry = {
+  name: string;
+  brandIds: string[];
+  productParts: TpvCategoryTemplateKey[];
+};
+
+/** Ingredientes del Excel agrupados por línea comercial (marca TPV), no mezclados en una sola lista. */
+export function collectIngredientEntriesFromCatalogImport(
+  items: Array<Pick<CatalogItem, 'customFields' | 'brandIds'>>,
+  brands: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>,
+  partsDefault: TpvCategoryTemplateKey[] = ['pizzas', 'hamburguesas'],
+): CatalogImportIngredientEntry[] {
+  const allBrandIds = brands.map((b) => b._id);
+  const brandById = new Map(brands.map((b) => [b._id, b]));
+  const entries: CatalogImportIngredientEntry[] = [];
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    const text = String(item.customFields?.ingredients || '').trim();
+    if (!text) continue;
+    const names = parseIngredientsBulkText(text);
+    let itemBrandIds = (item.brandIds ?? [])
+      .map((id) => String(id || '').trim())
+      .filter((id) => allBrandIds.includes(id));
+
+    if (itemBrandIds.length === 0) {
+      itemBrandIds = allBrandIds.length === 1 ? [allBrandIds[0]] : [...allBrandIds];
+    }
+
+    for (const rawName of names) {
+      const name = rawName.trim();
+      if (!name) continue;
+      for (const brandId of itemBrandIds) {
+        const brand = brandById.get(brandId);
+        let parts = brand ? resolveBrandTpvCategoryKeys(brand) : [];
+        if (parts.length === 0) parts = partsDefault;
+        const key = `${name.toLowerCase()}::${brandId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ name, brandIds: [brandId], productParts: parts });
+      }
+    }
+  }
+
+  return entries;
+}
+
+function catalogImportIngredientKey(name: string, brandIds: string[]): string {
+  const brands = [...brandIds].map((id) => String(id || '').trim()).filter(Boolean).sort();
+  return `${String(name || '').trim().toLowerCase()}::${brands.join(',')}`;
+}
+
+/** Nuevos del Excel como extra de pago; los ya existentes del import pasan a extra también. */
+export function applyCatalogImportIngredientEntries(
+  existing: StoreIngredient[],
+  entries: CatalogImportIngredientEntry[],
+): { merged: StoreIngredient[]; added: number; promoted: number } {
+  const importKeys = new Set(
+    entries.map((e) => catalogImportIngredientKey(e.name, e.brandIds)),
+  );
+  let merged = existing;
+  const before = merged.length;
+  for (const entry of entries) {
+    merged = mergeStoreIngredientNames(merged, [entry.name], {
+      role: 'extra',
+      brandIds: entry.brandIds,
+      productParts: entry.productParts,
+    });
+  }
+  const added = merged.length - before;
+  let promoted = 0;
+  merged = merged.map((ing) => {
+    const key = catalogImportIngredientKey(ing.name, ing.brandIds ?? []);
+    if (!importKeys.has(key) || resolveIngredientRole(ing) === 'extra') return ing;
+    promoted += 1;
+    return { ...ing, role: 'extra' as const, escandalloOnly: false };
+  });
+  return { merged, added, promoted };
 }

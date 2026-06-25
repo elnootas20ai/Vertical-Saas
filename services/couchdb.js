@@ -5552,7 +5552,13 @@ export function sanitizeStoreIngredients(raw) {
     if (!entry || typeof entry !== 'object') return;
     const name = String(entry.name || '').trim();
     if (!name) return;
-    const key = name.toLowerCase();
+    const brandIds = Array.isArray(entry.brandIds)
+      ? [...new Set(entry.brandIds.map((x) => String(x || '').trim()).filter(Boolean))].sort()
+      : [];
+    const key =
+      brandIds.length > 0
+        ? `${name.toLowerCase()}::${brandIds.join(',')}`
+        : name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
     const role = ['escandallo', 'base', 'extra'].includes(String(entry.role || ''))
@@ -5573,9 +5579,6 @@ export function sanitizeStoreIngredients(raw) {
               .filter(Boolean),
           )
         : {};
-    const brandIds = Array.isArray(entry.brandIds)
-      ? [...new Set(entry.brandIds.map((x) => String(x || '').trim()).filter(Boolean))]
-      : [];
     const productParts = Array.isArray(entry.productParts)
       ? [...new Set(entry.productParts.filter((p) => p === 'pizzas' || p === 'hamburguesas'))]
       : [];

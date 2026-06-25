@@ -8,9 +8,7 @@ import {
 } from 'react';
 import { useLocation } from 'react-router';
 import { useBusiness } from './BusinessContext';
-import { useApp } from './AppContext';
-import { portfolioViewAllowed } from '../lib/tenantEntitlements';
-import { resolvePlanTier } from '../lib/pointOfSaleLimits';
+import { useTenantEntitlements } from '../hooks/useTenantEntitlements';
 import {
   DashboardViewContext,
   type DashboardViewContextValue,
@@ -34,18 +32,14 @@ function readPortfolioPreference(businessCount: number): boolean {
 
 export function DashboardViewProvider({ children }: { children: ReactNode }) {
   const { businesses, businessesFetchSettled, switchBusiness } = useBusiness();
-  const { subscription } = useApp();
+  const entitlements = useTenantEntitlements();
   const location = useLocation();
   const isDashboard = location.pathname === '/saas/dashboard';
 
-  const planTier = resolvePlanTier(
-    subscription?.selectedPlanId || '',
-    subscription?.planName || '',
-  );
-  const canUsePortfolioView = portfolioViewAllowed(planTier, businesses.length);
+  const canUsePortfolioView = businesses.length > 1 && entitlements.businesses > 1;
 
   const [isPortfolioView, setIsPortfolioViewState] = useState(() =>
-    readPortfolioPreference(businesses.length) && portfolioViewAllowed(planTier, businesses.length),
+    readPortfolioPreference(businesses.length) && businesses.length > 1 && entitlements.businesses > 1,
   );
 
   useEffect(() => {

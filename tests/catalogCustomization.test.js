@@ -45,7 +45,13 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogIngredients(item, undefined, master, undefined, undefined, [modomioBrand])).toEqual([
       'Mozzarella',
     ]);
-    expect(parseCatalogSupplements(item, undefined, undefined, undefined, master, 0.9, [modomioBrand])).toEqual([
+    expect(parseCatalogSupplements(item, undefined, undefined, undefined, master, 0.9, [modomioBrand])).toEqual(
+      [],
+    );
+    const masterMod = [
+      { id: '2', name: 'Extra bacon', role: 'extra', brandIds: ['mod'], productParts: ['pizzas'] },
+    ];
+    expect(parseCatalogSupplements(item, undefined, undefined, undefined, masterMod, 0.9, [modomioBrand])).toEqual([
       { id: '2', name: 'Extra bacon', price: 0.9 },
     ]);
   });
@@ -140,5 +146,44 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogSupplements(pizza, undefined, brandSupplements)).toEqual([
       { id: 's1', name: 'Extra aceitunas', price: 1.2 },
     ]);
+  });
+
+  it('no mezcla extras de pizza y burger entre marcas', () => {
+    const master = [
+      { id: 'p1', name: 'Extra mozzarella', role: 'extra', brandIds: ['mod'], productParts: ['pizzas'] },
+      { id: 'b1', name: 'Extra bacon', role: 'extra', brandIds: ['bb'], productParts: ['hamburguesas'] },
+    ];
+    const pizza = { category: 'Pizzas', brandIds: ['mod'], customFields: {} };
+    const burger = { category: 'Hamburguesas', brandIds: ['bb'], customFields: {} };
+    expect(parseCatalogSupplements(pizza, undefined, undefined, undefined, master, 0.9)).toEqual([
+      { id: 'p1', name: 'Extra mozzarella', price: 0.9 },
+    ]);
+    expect(parseCatalogSupplements(burger, undefined, undefined, undefined, master, 0.9)).toEqual([
+      { id: 'b1', name: 'Extra bacon', price: 0.9 },
+    ]);
+  });
+
+  it('explodeStoreIngredientsPerBrand crea una fila por línea comercial', async () => {
+    const { explodeStoreIngredientsPerBrand } = await import('../src/app/lib/catalogCustomization.ts');
+    const brands = [
+      { _id: 'mod', deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] },
+      { _id: 'bb', deliveryLineKind: 'burger_fastfood', catalogCategories: ['Hamburguesas'] },
+    ];
+    const split = explodeStoreIngredientsPerBrand(
+      [
+        {
+          id: 'ing-1',
+          name: 'Tomate',
+          role: 'extra',
+          brandIds: ['mod', 'bb'],
+          productParts: ['pizzas', 'hamburguesas'],
+        },
+      ],
+      brands,
+    );
+    expect(split).toHaveLength(2);
+    expect(split.map((r) => r.brandIds?.[0]).sort()).toEqual(['bb', 'mod']);
+    expect(split.find((r) => r.brandIds?.[0] === 'mod')?.productParts).toEqual(['pizzas']);
+    expect(split.find((r) => r.brandIds?.[0] === 'bb')?.productParts).toEqual(['hamburguesas']);
   });
 });

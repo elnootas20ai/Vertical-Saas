@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useBusiness } from '../context/BusinessContext';
-import { portfolioViewAllowed } from '../lib/tenantEntitlements';
 import type { SubscriptionPlanTier } from '../lib/pointOfSaleLimits';
 import { useTenantEntitlements } from './useTenantEntitlements';
 
@@ -15,7 +14,7 @@ export function usePortfolioPlanAccess() {
   return useMemo(() => {
     const maxBusinesses = entitlements.businesses;
     const planTier = entitlements.planTier;
-    const canUsePortfolioView = portfolioViewAllowed(planTier, count);
+    const canUsePortfolioView = count > 1 && maxBusinesses > 1;
     const portfolioLocked = count > 1 && !canUsePortfolioView;
     const atBusinessLimit = count >= maxBusinesses;
     const slotsRemaining = Math.max(0, maxBusinesses - count);

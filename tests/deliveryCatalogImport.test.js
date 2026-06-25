@@ -257,4 +257,53 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('fantasma') && i.severity === 'warning')).toBe(true);
     expect(result.issues.some((i) => i.field === 'sku')).toBe(true);
   });
+
+  it('collectIngredientEntriesFromCatalogImport groups by commercial line', async () => {
+    const { collectIngredientEntriesFromCatalogImport } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
+    const brands = [
+      { _id: 'mod', name: 'modomio', catalogCategories: ['Pizzas'], deliveryLineKind: 'pizza' },
+      { _id: 'bb', name: 'BlackBurger', catalogCategories: ['Hamburguesas'], deliveryLineKind: 'burger_fastfood' },
+    ];
+    const entries = collectIngredientEntriesFromCatalogImport(
+      [
+        {
+          brandIds: ['mod'],
+          customFields: { ingredients: 'Mozzarella, Tomate' },
+        },
+        {
+          brandIds: ['bb'],
+          customFields: { ingredients: 'Carne, Bacon' },
+        },
+      ],
+      brands,
+    );
+    expect(entries).toHaveLength(4);
+    expect(entries.filter((e) => e.brandIds[0] === 'mod').map((e) => e.name)).toEqual(['Mozzarella', 'Tomate']);
+    expect(entries.filter((e) => e.brandIds[0] === 'bb').map((e) => e.name)).toEqual(['Carne', 'Bacon']);
+    expect(entries.find((e) => e.name === 'Mozzarella')?.productParts).toEqual(['pizzas']);
+    expect(entries.find((e) => e.name === 'Carne')?.productParts).toEqual(['hamburguesas']);
+  });
+
+  it('applyCatalogImportIngredientEntries adds and promotes as extras de pago', async () => {
+    const { applyCatalogImportIngredientEntries } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
+    const existing = [
+      {
+        id: '1',
+        name: 'Tomate',
+        role: 'base',
+        escandalloOnly: false,
+        brandIds: ['mod'],
+        productParts: ['pizzas'],
+      },
+    ];
+    const entries = [
+      { name: 'Tomate', brandIds: ['mod'], productParts: ['pizzas'] },
+      { name: 'Mozzarella', brandIds: ['mod'], productParts: ['pizzas'] },
+    ];
+    const { merged, added, promoted } = applyCatalogImportIngredientEntries(existing, entries);
+    expect(added).toBe(1);
+    expect(promoted).toBe(1);
+    expect(merged.find((i) => i.name === 'Tomate')?.role).toBe('extra');
+    expect(merged.find((i) => i.name === 'Mozzarella')?.role).toBe('extra');
+  });
 });

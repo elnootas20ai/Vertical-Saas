@@ -244,14 +244,21 @@ export function TpvProductPicker({
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input
+              id="tpv-product-search"
+              name="vertial-product-search"
+              type="search"
               value={productSearch}
               onChange={(e) => {
                 const v = e.target.value;
                 setProductSearch(v);
                 if (v.trim()) onSelectedCategoryChange(null);
               }}
-              placeholder="Nombre, categoría, SKU o código…"
+              placeholder="Producto, categoría, SKU o código…"
               autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              data-1p-ignore
+              data-lpignore="true"
               className="w-full h-10 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
             />
           </div>

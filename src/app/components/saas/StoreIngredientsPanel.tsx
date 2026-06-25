@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import {
   Loader2,
@@ -8,21 +8,29 @@ import {
   Search,
   Euro,
   ChevronDown,
+  ChevronRight,
   Minus,
   Sparkles,
   ListPlus,
   Settings2,
   Save,
   AlertCircle,
+  Package,
 } from 'lucide-react';
 import {
   inferTpvDefaultExtraPrice,
   ingredientChargesExtra,
   normalizeStoreIngredients,
   normalizeTpvDefaultExtraPrice,
+  parseIngredientsBulkText,
   resolveIngredientRole,
   resolveStoreIngredientBrandIds,
+  filterStoreIngredientsByBrand,
+  countStoreIngredientsByBrand,
+  explodeStoreIngredientsPerBrand,
+  storeIngredientsNeedPerBrandSplit,
   unifyStoreIngredientsFromConfig,
+  resolveBrandTpvCategoryKeys,
   type StoreIngredient,
   type TpvCategoryTemplateKey,
 } from '../../lib/catalogCustomization';
@@ -31,7 +39,7 @@ import { notifyDeliveryConfigChanged } from '../../lib/deliverySetup';
 import { normalizeTenantUserId } from '../../lib/tenantUserId';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
-import { sortBrandsForDisplay } from '../../lib/brandUtils';
+import { brandTint, sortBrandsForDisplay } from '../../lib/brandUtils';
 
 const PART_OPTIONS: Array<{ value: TpvCategoryTemplateKey; label: string }> = [
   { value: 'pizzas', label: 'Pizzas' },
@@ -250,139 +258,160 @@ function IngredientRow({
   );
 }
 
-function SavePanel({
-  dirty,
-  saving,
-  hasExtras,
-  priceOk,
-  extraCount,
-  onSave,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  hasExtras: boolean;
-  priceOk: boolean;
-  extraCount: number;
-  onSave: () => void;
-}) {
-  const canSave = !saving && (!hasExtras || priceOk);
-
-  return (
-    <div
-      className={`rounded-2xl border-2 p-4 space-y-3 ${
-        dirty
-          ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-600 shadow-md shadow-amber-100/50 dark:shadow-none'
-          : 'border-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/30 dark:border-emerald-800'
-      }`}
-    >
-      {dirty ? (
-        <>
-          <div className="flex items-start gap-2.5">
-            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-bold text-amber-950 dark:text-amber-100">Cambios sin guardar</p>
-              <p className="text-xs text-amber-900/80 dark:text-amber-200/80 mt-1 leading-relaxed">
-                Lo que hagas aquí <strong>no llega al TPV</strong> hasta que pulses guardar.
-              </p>
-            </div>
-          </div>
-          {hasExtras && !priceOk && (
-            <p className="text-xs font-semibold text-red-600 dark:text-red-400 pl-7">
-              Pon el precio del extra antes de guardar.
-            </p>
-          )}
-        </>
-      ) : (
-        <div className="flex items-start gap-2.5">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">Guardado en el TPV</p>
-            <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80 mt-1">
-              {extraCount > 0
-                ? `${extraCount} extra(s) activos en el TPV tablet.`
-                : 'Sin extras de pago marcados todavía.'}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <button
-        type="button"
-        disabled={!canSave}
-        onClick={onSave}
-        className={`w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-sm font-bold touch-manipulation transition-all ${
-          dirty
-            ? 'bg-gray-900 hover:bg-gray-800 text-white shadow-lg dark:bg-amber-500 dark:hover:bg-amber-600 dark:text-white'
-            : 'bg-white dark:bg-gray-900 border-2 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200'
-        } disabled:opacity-50`}
-      >
-        {saving ? (
-          <Loader2 className="w-5 h-5 animate-spin" />
-        ) : (
-          <Save className="w-5 h-5" />
-        )}
-        {saving ? 'Guardando…' : dirty ? 'Guardar en el TPV' : 'Todo guardado'}
-      </button>
-
-      <ol className="text-[11px] text-gray-500 dark:text-gray-400 space-y-1 pl-4 list-decimal leading-relaxed">
-        <li>Marca ingredientes (extra o solo quitar)</li>
-        <li>Pulsa <strong className="text-gray-700 dark:text-gray-300">Guardar en el TPV</strong></li>
-      </ol>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
+function CatalogKpi({
+  icon,
   value,
-  tone = 'neutral',
+  label,
+  tone,
 }: {
-  label: string;
+  icon: ReactNode;
   value: string | number;
-  tone?: 'neutral' | 'amber' | 'slate';
+  label: string;
+  tone: 'blue' | 'amber' | 'slate' | 'green';
 }) {
   const tones = {
-    neutral: 'border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50',
-    amber: 'border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/30',
-    slate: 'border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/40',
+    blue: 'bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/30 dark:border-blue-800',
+    amber: 'bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-800',
+    slate: 'bg-slate-50 border-slate-200 text-slate-900 dark:bg-slate-950/30 dark:border-slate-800',
+    green: 'bg-green-50 border-green-200 text-green-900 dark:bg-green-950/30 dark:border-green-800',
+  };
+  const iconTones = {
+    blue: 'text-blue-600',
+    amber: 'text-amber-600',
+    slate: 'text-slate-600',
+    green: 'text-green-600',
   };
   return (
-    <div className={`rounded-xl border px-4 py-3 ${tones[tone]}`}>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">{label}</p>
-      <p className="text-2xl font-black text-gray-900 dark:text-gray-100 tabular-nums mt-0.5">{value}</p>
+    <div className={`p-4 border-2 rounded-xl ${tones[tone]}`}>
+      <div className={`mb-2 ${iconTones[tone]}`}>{icon}</div>
+      <div className="text-2xl font-bold tabular-nums">{value}</div>
+      <div className="text-xs mt-0.5 opacity-80">{label}</div>
     </div>
   );
 }
 
-function IngredientTileGrid({
+function IngredientCatalogTable({
+  rows,
+  onToggleExtra,
+}: {
+  rows: StoreIngredient[];
+  onToggleExtra: (id: string, asExtra: boolean) => void;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px]">
+        <thead>
+          <tr className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+              Ingrediente
+            </th>
+            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+              En el TPV
+            </th>
+            <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase">
+              Cambiar
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          {rows.map((ing) => {
+            const isExtra = ingredientChargesExtra(ing);
+            const label = String(ing.name || '').trim() || '(sin nombre)';
+            return (
+              <tr key={ing.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
+                        isExtra
+                          ? 'bg-amber-100 dark:bg-amber-950/50'
+                          : 'bg-gray-100 dark:bg-gray-700'
+                      }`}
+                    >
+                      {isExtra ? (
+                        <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      ) : (
+                        <Minus className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      )}
+                    </div>
+                    <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm leading-snug">
+                      {label}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold border ${
+                      isExtra
+                        ? 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800'
+                        : 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:border-blue-800'
+                    }`}
+                  >
+                    {isExtra ? 'Extra de pago' : 'Solo quitar'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onToggleExtra(ing.id, !isExtra)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                  >
+                    {isExtra ? 'Quitar cobro' : 'Marcar extra'}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function IngredientCatalogSections({
   items,
   search,
   listFilter,
+  sectionsOpen,
+  onToggleSection,
   onToggleExtra,
   onClearSearch,
   onClearFilter,
+  brandLabel,
 }: {
   items: StoreIngredient[];
   search: string;
   listFilter: ListFilter;
+  sectionsOpen: Set<string>;
+  onToggleSection: (key: string) => void;
   onToggleExtra: (id: string, asExtra: boolean) => void;
   onClearSearch?: () => void;
   onClearFilter?: () => void;
+  brandLabel?: string;
 }) {
+  const q = search.trim();
   const filtered = useMemo(
     () => filterVisibleItems(items, search, listFilter),
     [items, search, listFilter],
   );
+  const extraRows = filtered.filter((i) => ingredientChargesExtra(i));
+  const baseRows = filtered.filter((i) => !ingredientChargesExtra(i));
+
+  const sections = [
+    { key: 'extra', title: 'Extras de pago', rows: extraRows, tone: 'amber' as const },
+    { key: 'base', title: 'Incluidos (solo quitar)', rows: baseRows, tone: 'blue' as const },
+  ];
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-gray-50/50 dark:bg-gray-900/20 px-8 py-16 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-4">
-          <ListPlus className="w-7 h-7 text-gray-400" />
-        </div>
-        <p className="text-base font-bold text-gray-800 dark:text-gray-200">Empieza añadiendo ingredientes</p>
-        <p className="text-sm text-gray-500 mt-2 max-w-xs">
-          Pega una lista a la izquierda o usa las opciones avanzadas.
+      <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+        <Package className="w-12 h-12 text-gray-300 mb-3" />
+        <p className="font-semibold">
+          {brandLabel ? `Sin ingredientes en ${brandLabel}` : 'No hay ingredientes todavía'}
+        </p>
+        <p className="text-sm mt-1 text-center max-w-sm px-4">
+          Importa el catálogo con columna ingredientes en Excel o usa «Añadir lista» arriba.
         </p>
       </div>
     );
@@ -390,17 +419,17 @@ function IngredientTileGrid({
 
   if (filtered.length === 0) {
     return (
-      <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-6 py-12 text-center space-y-3">
+      <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-6 py-12 text-center space-y-3">
         <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
           Ningún resultado
-          {search.trim() ? ` para «${search.trim()}»` : listFilter !== 'all' ? ' con este filtro' : ''}
+          {q ? ` para «${q}»` : listFilter !== 'all' ? ' con este filtro' : ''}
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           {q && (
             <button
               type="button"
               onClick={onClearSearch}
-              className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+              className="px-4 py-2 rounded-xl text-sm font-semibold border-2 border-gray-200 dark:border-gray-700"
             >
               Limpiar búsqueda
             </button>
@@ -409,7 +438,7 @@ function IngredientTileGrid({
             <button
               type="button"
               onClick={onClearFilter}
-              className="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
             >
               Ver todos ({items.length})
             </button>
@@ -419,45 +448,85 @@ function IngredientTileGrid({
     );
   }
 
+  const visibleSections = sections.filter(
+    (s) => listFilter === 'all' || (listFilter === 'extra' && s.key === 'extra') || (listFilter === 'base' && s.key === 'base'),
+  );
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5 max-h-[min(62vh,640px)] overflow-y-auto pr-1">
-      {filtered.map((ing, index) => {
-        const isExtra = ingredientChargesExtra(ing);
-        const label = String(ing.name || '').trim() || '(sin nombre)';
+    <div className="space-y-3">
+      {visibleSections.map((section) => {
+        if (section.rows.length === 0) return null;
+        const isCollapsed = !sectionsOpen.has(section.key);
+        return (
+          <div
+            key={section.key}
+            className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden"
+          >
+            <button
+              type="button"
+              onClick={() => onToggleSection(section.key)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-left"
+              aria-expanded={!isCollapsed}
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {isCollapsed ? (
+                  <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                )}
+                <span className="font-semibold text-gray-900 dark:text-gray-100">{section.title}</span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
+                  {section.rows.length} ingrediente{section.rows.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+            </button>
+            {!isCollapsed && <IngredientCatalogTable rows={section.rows} onToggleExtra={onToggleExtra} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BrandTabs({
+  brands,
+  selectedBrandId,
+  onSelect,
+  items,
+  allBrandIds,
+}: {
+  brands: Brand[];
+  selectedBrandId: string;
+  onSelect: (id: string) => void;
+  items: StoreIngredient[];
+  allBrandIds: string[];
+}) {
+  if (brands.length <= 1) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {brands.map((brand) => {
+        const active = brand._id === selectedBrandId;
+        const count = countStoreIngredientsByBrand(items, brand._id, allBrandIds);
+        const tint = brandTint(brand.primaryColor || '#6366f1', active ? '22' : '12');
         return (
           <button
-            key={`${ing.id}-${index}`}
+            key={brand._id}
             type="button"
-            onClick={() => onToggleExtra(ing.id, !isExtra)}
-            className={`group relative flex flex-col items-start justify-between min-h-[88px] p-3 rounded-xl border-2 text-left transition-all active:scale-[0.98] touch-manipulation ${
-              isExtra
-                ? 'border-amber-400 bg-gradient-to-br from-amber-50 to-amber-100/80 dark:from-amber-950/50 dark:to-amber-900/30 shadow-sm hover:border-amber-500'
-                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-300 dark:hover:border-gray-600 hover:shadow-sm'
+            onClick={() => onSelect(brand._id)}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold border-2 transition-all touch-manipulation ${
+              active
+                ? 'border-gray-900 dark:border-gray-100 shadow-sm'
+                : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'
             }`}
+            style={{ backgroundColor: tint }}
           >
             <span
-              className={`absolute top-2.5 right-2.5 flex h-6 w-6 items-center justify-center rounded-lg ${
-                isExtra
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-400 group-hover:text-gray-600'
-              }`}
-            >
-              {isExtra ? <Sparkles className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
-            </span>
-            <span
-              className={`text-sm font-bold leading-snug pr-8 line-clamp-3 ${
-                isExtra ? 'text-amber-950 dark:text-amber-50' : 'text-gray-900 dark:text-gray-100'
-              }`}
-            >
-              {label}
-            </span>
-            <span
-              className={`text-[10px] font-bold uppercase tracking-wide mt-2 ${
-                isExtra ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'
-              }`}
-            >
-              {isExtra ? 'Extra de pago' : 'Solo quitar'}
-            </span>
+              className="w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ backgroundColor: brand.primaryColor || '#6366f1' }}
+            />
+            <span className="text-gray-900 dark:text-gray-100">{brand.name}</span>
+            <span className="text-xs font-semibold tabular-nums opacity-70">{count}</span>
           </button>
         );
       })}
@@ -489,11 +558,34 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [dirty, setDirty] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [selectedBrandId, setSelectedBrandId] = useState('');
+  const [sectionsOpen, setSectionsOpen] = useState<Set<string>>(() => new Set(['extra', 'base']));
+  const [showBulkPanel, setShowBulkPanel] = useState(false);
+
+  const toggleSection = (key: string) => {
+    setSectionsOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const allBrandIds = useMemo(() => brands.map((b) => b._id), [brands]);
+  const multiBrand = brands.length > 1;
+  const activeBrandId = multiBrand
+    ? selectedBrandId && allBrandIds.includes(selectedBrandId)
+      ? selectedBrandId
+      : allBrandIds[0] || ''
+    : allBrandIds[0] || '';
+  const activeBrand = brands.find((b) => b._id === activeBrandId);
+  const brandScopedItems = useMemo(
+    () => (multiBrand ? filterStoreIngredientsByBrand(items, activeBrandId, allBrandIds) : items),
+    [items, multiBrand, activeBrandId, allBrandIds],
+  );
   const hasExtras = useMemo(() => items.some((i) => ingredientChargesExtra(i)), [items]);
-  const extraItems = useMemo(() => items.filter((i) => ingredientChargesExtra(i)), [items]);
-  const baseItems = useMemo(() => items.filter((i) => !ingredientChargesExtra(i)), [items]);
+  const extraItems = useMemo(() => brandScopedItems.filter((i) => ingredientChargesExtra(i)), [brandScopedItems]);
+  const baseItems = useMemo(() => brandScopedItems.filter((i) => !ingredientChargesExtra(i)), [brandScopedItems]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -509,14 +601,40 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
         businessId ? commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])) : [],
       );
       const brandIds = lineBrands.map((b) => b._id);
-      const unified = toTpvPanelItems(unifyStoreIngredientsFromConfig(cfg, brandIds));
+      const merged = unifyStoreIngredientsFromConfig(cfg, brandIds);
+      const split = explodeStoreIngredientsPerBrand(merged, lineBrands);
+      const unified = toTpvPanelItems(split);
+      const needsPersistSplit =
+        lineBrands.length > 1 && storeIngredientsNeedPerBrandSplit(merged, brandIds);
+
       setConfigDocId(cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`);
       setConfigRev(cfg._rev);
       setBrands(lineBrands);
       setItems(unified);
+
+      if (needsPersistSplit && unified.length > 0) {
+        try {
+          const saved = await updateDeliveryConfigRequest(userId, {
+            _id: cfg._id || `dlvconf-${normalizeTenantUserId(userId)}`,
+            _rev: cfg._rev,
+            storeIngredients: normalizeStoreIngredients(unified),
+          } as Parameters<typeof updateDeliveryConfigRequest>[1]);
+          setConfigDocId(saved._id || cfg._id);
+          setConfigRev(saved._rev);
+          notifyDeliveryConfigChanged();
+          toast.success('Ingredientes separados por marca (modomio / blackburger…)', { duration: 5000 });
+        } catch {
+          setDirty(true);
+          toast.message('Revisa y guarda: hay ingredientes compartidos entre marcas', { duration: 6000 });
+        }
+      } else {
+        setDirty(false);
+      }
+      setSelectedBrandId((prev) =>
+        prev && brandIds.includes(prev) ? prev : brandIds[0] || '',
+      );
       setDefaultExtraPrice(String(inferTpvDefaultExtraPrice(unified, cfg.tpvDefaultExtraPrice) || ''));
       setNewDraft(emptyDraft(brandIds, false));
-      setDirty(false);
     } catch {
       setLoadError('Error al cargar');
       toast.error('No se pudieron cargar los ingredientes');
@@ -531,7 +649,8 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
 
   const validateDraft = (draft: IngredientDraft): string | null => {
     if (!draft.name.trim()) return 'Escribe el nombre';
-    if (allBrandIds.length > 0 && draft.brandIds.length === 0) return 'Elige al menos una marca';
+    if (multiBrand && draft.brandIds.length === 0) return 'Elige al menos una marca';
+    if (!multiBrand && allBrandIds.length > 0 && draft.brandIds.length === 0) return 'Elige al menos una marca';
     if (draft.productParts.length === 0) return 'Elige pizzas o hamburguesas';
     return null;
   };
@@ -559,12 +678,25 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   };
 
   const importBulk = () => {
-    const names = bulkText.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
+    const names = parseIngredientsBulkText(bulkText);
     if (names.length === 0) return;
+
+    if (multiBrand && !activeBrandId) {
+      toast.error('Elige una marca antes de añadir la lista');
+      return;
+    }
+
+    const targetBrandIds =
+      multiBrand && activeBrandId ? [activeBrandId] : allBrandIds.length > 0 ? [...allBrandIds] : [];
+    const targetParts =
+      activeBrand && resolveBrandTpvCategoryKeys(activeBrand).length > 0
+        ? resolveBrandTpvCategoryKeys(activeBrand)
+        : (['pizzas', 'hamburguesas'] as TpvCategoryTemplateKey[]);
 
     let added = 0;
     let promoted = 0;
     let skipped = 0;
+    let brandTotal = 0;
 
     setItems((prev) => {
       const next = [...prev];
@@ -573,7 +705,12 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
         const name = rawName.trim();
         if (!name) continue;
         const key = ingredientNameFold(name);
-        const idx = next.findIndex((i) => ingredientNameFold(i.name) === key);
+        const idx = next.findIndex(
+          (i) =>
+            ingredientNameFold(i.name) === key &&
+            (!multiBrand ||
+              filterStoreIngredientsByBrand([i], activeBrandId, allBrandIds).length > 0),
+        );
         if (idx >= 0) {
           if (!ingredientChargesExtra(next[idx])) {
             promoted += 1;
@@ -590,11 +727,17 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
           name,
           role: 'extra',
           escandalloOnly: false,
-          ...(allBrandIds.length > 0 ? { brandIds: [...allBrandIds] } : {}),
-          productParts: ['pizzas', 'hamburguesas'],
+          ...(targetBrandIds.length > 0 ? { brandIds: [...targetBrandIds] } : {}),
+          productParts: [...targetParts],
         });
       }
-      return toTpvPanelItems(next);
+      const normalized = toTpvPanelItems(next);
+      brandTotal = multiBrand
+        ? normalized.filter(
+            (i) => filterStoreIngredientsByBrand([i], activeBrandId, allBrandIds).length > 0,
+          ).length
+        : normalized.length;
+      return normalized;
     });
 
     setBulkText('');
@@ -602,16 +745,19 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     setListFilter('all');
     setDirty(true);
 
+    const brandLabel = activeBrand?.name || 'esta marca';
+    const parts: string[] = [`${names.length} en la lista`];
+    if (added > 0) parts.push(`${added} nuevo(s)`);
+    if (promoted > 0) parts.push(`${promoted} marcado(s) como extra`);
+    if (skipped > 0) parts.push(`${skipped} ya eran extra`);
+    parts.push(`${brandTotal} en ${brandLabel}`);
+
     if (added > 0 || promoted > 0) {
-      toast.success(
-        added > 0 && promoted > 0
-          ? `${added} añadido(s) · ${promoted} marcado(s) como extra`
-          : added > 0
-            ? `${added} ingrediente(s) añadido(s)`
-            : `${promoted} marcado(s) como extra`,
-      );
+      toast.success(`${parts.join(' · ')}. Pulsa «Guardar en el TPV».`, { duration: 9000 });
     } else if (skipped > 0) {
-      toast.info('Esos ingredientes ya estaban en la lista');
+      toast.info(`${parts.join(' · ')} — no había nada nuevo que añadir.`, { duration: 8000 });
+    } else {
+      toast.warning('No se reconoció ningún nombre. Usa comas o una línea por ingrediente.');
     }
   };
 
@@ -686,7 +832,9 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
       } as Parameters<typeof updateDeliveryConfigRequest>[1]);
       setConfigDocId(saved._id || configDocId);
       setConfigRev(saved._rev);
-      const unified = toTpvPanelItems(unifyStoreIngredientsFromConfig(saved, allBrandIds));
+      const merged = unifyStoreIngredientsFromConfig(saved, allBrandIds);
+      const split = explodeStoreIngredientsPerBrand(merged, brands);
+      const unified = toTpvPanelItems(split);
       setItems(unified);
       setDefaultExtraPrice(String(inferTpvDefaultExtraPrice(unified, saved.tpvDefaultExtraPrice) || ''));
       setDirty(false);
@@ -694,7 +842,7 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
       const savedExtras = unified.filter((i) => ingredientChargesExtra(i)).length;
       const savedBase = unified.length - savedExtras;
       if (savedExtras === 0) {
-        toast.warning('Guardado, pero ningún extra de pago marcado. Toca las tarjetas ámbar.', {
+        toast.warning('Guardado, pero ningún extra de pago marcado. Usa «Marcar extra» en la tabla.', {
           duration: 8000,
         });
       } else {
@@ -733,226 +881,310 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
   }
 
   const priceOk = !hasExtras || normalizeTpvDefaultExtraPrice(defaultExtraPrice) != null;
-  const filteredVisible = filterVisibleItems(items, search, listFilter).length;
+  const filteredVisible = filterVisibleItems(brandScopedItems, search, listFilter).length;
+  const canSave = !saving && priceOk;
+  const priceDisplay = defaultExtraPrice.trim() || '—';
+
+  const markAllBrandAsExtra = () => {
+    toggleManyExtra(brandScopedItems.map((i) => i.id), true);
+  };
 
   const markVisibleAsExtra = () => {
-    toggleManyExtra(filterVisibleItems(items, search, listFilter).map((i) => i.id), true);
+    toggleManyExtra(filterVisibleItems(brandScopedItems, search, listFilter).map((i) => i.id), true);
   };
 
   const markVisibleAsBase = () => {
-    toggleManyExtra(filterVisibleItems(items, search, listFilter).map((i) => i.id), false);
+    toggleManyExtra(filterVisibleItems(brandScopedItems, search, listFilter).map((i) => i.id), false);
   };
 
   return (
-    <div className="max-w-6xl mx-auto pb-24 lg:pb-8 space-y-6">
+    <div className="max-w-6xl mx-auto pb-24 lg:pb-8 space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ingredientes TPV</h1>
         <p className="text-sm text-gray-500 mt-1 max-w-2xl leading-relaxed">
-          Lista maestra del negocio. Si importas el catálogo con la columna <strong>ingredientes</strong> en Excel,
-          los nombres se rellenan solos aquí. En cada producto van los que lleva esa receta; aquí marcas cuáles son{' '}
-          <strong>extras de pago</strong> (naranja) y el precio del suplemento.
+          {multiBrand
+            ? 'Cada línea comercial tiene su lista. Al importar Excel con columna ingredientes entran ya como extras de pago por marca.'
+            : 'Al importar Excel con columna ingredientes entran ya como extras de pago. Ajusta el precio del extra y guarda si cambias algo.'}
         </p>
       </div>
 
-      {/* Stats — solo móvil/tablet arriba; en desktop van en sidebar */}
-      <div className="grid grid-cols-2 lg:hidden gap-3">
-        <StatCard label="Total" value={items.length} />
-        <StatCard label="Extras" value={extraItems.length} tone="amber" />
-      </div>
+      {multiBrand ? (
+        <BrandTabs
+          brands={brands}
+          selectedBrandId={activeBrandId}
+          onSelect={(id) => {
+            setSelectedBrandId(id);
+            setSearch('');
+            setListFilter('all');
+            setNewDraft(emptyDraft([id], false));
+          }}
+          items={items}
+          allBrandIds={allBrandIds}
+        />
+      ) : null}
 
-      {/* Layout principal */}
-      <div className="grid lg:grid-cols-[300px_minmax(0,1fr)] gap-5 items-start">
-        {/* Panel izquierdo — fijo al hacer scroll */}
-        <aside className="lg:sticky lg:top-4 lg:z-20 lg:self-start space-y-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
-          <SavePanel
-            dirty={dirty}
-            saving={saving}
-            hasExtras={hasExtras}
-            priceOk={priceOk}
-            extraCount={extraItems.length}
-            onSave={() => void save()}
-          />
-
-          <div className="hidden lg:grid grid-cols-2 gap-2">
-            <StatCard label="Total" value={items.length} />
-            <StatCard label="Extras" value={extraItems.length} tone="amber" />
-          </div>
-
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm space-y-5">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-500">Precio del extra</label>
-              <div className="relative mt-2">
-                <Euro className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0,90"
-                  value={defaultExtraPrice}
-                  onChange={(e) => {
-                    setDefaultExtraPrice(e.target.value);
-                    setDirty(true);
-                  }}
-                  className="w-full pl-9 pr-3 py-3 border border-gray-200 dark:border-gray-700 rounded-xl text-lg font-bold bg-gray-50 dark:bg-gray-800 focus:border-amber-400 outline-none"
-                />
-              </div>
-              {hasExtras && !priceOk && (
-                <p className="text-xs text-amber-600 mt-2 font-medium">Necesitas poner precio si hay extras</p>
-              )}
-            </div>
-
-            <div className="border-t border-gray-100 dark:border-gray-800 pt-5">
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-500">Añadir lista</label>
-              <textarea
-                value={bulkText}
-                onChange={(e) => setBulkText(e.target.value)}
-                rows={5}
-                placeholder={'Mozzarella\nTomate\nBacon\nExtra queso\nPiña'}
-                className="mt-2 w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-gray-50 dark:bg-gray-800 resize-none focus:border-emerald-400 outline-none leading-relaxed"
-              />
-              <button
-                type="button"
-                onClick={importBulk}
-                disabled={!bulkText.trim()}
-                className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl disabled:opacity-40 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold touch-manipulation"
-              >
-                <Plus className="w-4 h-4" />
-                Añadir a la lista
-              </button>
-              <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
-                Uno por línea o separados por coma.
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 text-xs text-gray-500 leading-relaxed">
-            <p className="font-semibold text-gray-700 dark:text-gray-300 mb-1">Cómo funciona</p>
-            <p>
-              <span className="text-amber-600 font-semibold">Extra de pago</span> → pestaña Extras en el TPV.
-              {' '}
-              <span className="text-gray-600 font-semibold">Solo quitar</span> → ingrediente incluido en el plato.
-            </p>
-          </div>
-        </aside>
-
-        {/* Panel derecho — grid principal */}
-        <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden min-w-0">
-          <div className="sticky top-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border-b border-gray-100 dark:border-gray-800 px-5 py-4 flex flex-col gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      {/* Barra de estado + guardar */}
+      <div
+        className={`rounded-xl border-2 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
+          dirty
+            ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700'
+            : 'border-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/20 dark:border-emerald-800'
+        }`}
+      >
+        <div className="flex items-start gap-2.5 min-w-0">
+          {dirty ? (
+            <>
+              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Ingredientes</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {filteredVisible} visibles · toca una tarjeta para cambiar el tipo
+                <p className="text-sm font-bold text-amber-950 dark:text-amber-100">Cambios sin guardar</p>
+                <p className="text-xs text-amber-900/80 dark:text-amber-200/80 mt-0.5">
+                  Los cambios <strong>no llegan al TPV</strong> hasta pulsar «Guardar en el TPV».
+                  {hasExtras && !priceOk ? ' Indica el precio del extra abajo.' : ''}
                 </p>
               </div>
-              <div className="flex p-1 rounded-xl bg-gray-100 dark:bg-gray-800 shrink-0">
-                {([
-                  { id: 'all' as const, label: 'Todos', count: items.length },
-                  { id: 'extra' as const, label: 'Extras', count: extraItems.length },
-                  { id: 'base' as const, label: 'Quitar', count: baseItems.length },
-                ]).map(({ id, label, count }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setListFilter(id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                      listFilter === id
-                        ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                    }`}
-                  >
-                    {label} <span className="opacity-60">{count}</span>
-                  </button>
-                ))}
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">Sincronizado con el TPV</p>
+                <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80 mt-0.5">
+                  {extraItems.length > 0
+                    ? `${extraItems.length} extra(s) de pago · ${baseItems.length} incluidos`
+                    : `${brandScopedItems.length} ingrediente(s) listos para quitar en venta`}
+                </p>
               </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar…"
-                  className="w-full pl-9 pr-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-gray-50 dark:bg-gray-800 focus:border-gray-400 outline-none"
-                />
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={markVisibleAsExtra}
-                  disabled={filteredVisible === 0}
-                  className="px-3 py-2.5 rounded-xl text-xs font-bold border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800"
-                >
-                  + Extra
-                </button>
-                <button
-                  type="button"
-                  onClick={markVisibleAsBase}
-                  disabled={filteredVisible === 0}
-                  className="px-3 py-2.5 rounded-xl text-xs font-bold border border-gray-300 text-gray-600 bg-white hover:bg-gray-50 disabled:opacity-40 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-600"
-                >
-                  Solo quitar
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5">
-            <IngredientTileGrid
-              items={items}
-              search={search}
-              listFilter={listFilter}
-              onToggleExtra={toggleItemExtra}
-              onClearSearch={() => setSearch('')}
-              onClearFilter={() => setListFilter('all')}
-            />
-          </div>
-
-          <div className="border-t border-gray-100 dark:border-gray-800">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced((v) => !v)}
-              className="w-full flex items-center justify-between px-5 py-3.5 text-sm font-semibold text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800/40"
-            >
-              <span className="inline-flex items-center gap-2">
-                <Settings2 className="w-4 h-4" />
-                Edición avanzada
-              </span>
-              <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-            </button>
-            {showAdvanced && (
-              <div className="px-5 pb-5 space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
-                <IngredientRow
-                  brands={brands}
-                  draft={newDraft}
-                  onChange={setNewDraft}
-                  isNew
-                  onAdd={() => addItem(newDraft)}
-                />
-                {items.map((ing) => (
-                  <IngredientRow
-                    key={ing.id}
-                    brands={brands}
-                    draft={itemToDraft(ing, allBrandIds)}
-                    onChange={(draft) => updateItem(ing.id, draft)}
-                    onRemove={() => removeItem(ing.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          disabled={!canSave}
+          onClick={() => void save()}
+          className={`shrink-0 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 ${
+            dirty
+              ? 'bg-gray-900 hover:bg-gray-800 text-white dark:bg-amber-500 dark:hover:bg-amber-600'
+              : 'border-2 border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 text-emerald-800 dark:text-emerald-200'
+          }`}
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          {saving ? 'Guardando…' : dirty ? 'Guardar en el TPV' : 'Todo guardado'}
+        </button>
       </div>
 
-      {/* Guardar fijo en móvil cuando hay cambios */}
-      {dirty && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-gray-900 px-4 py-3 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]">
-          <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 mb-2 text-center">
-            Cambios sin guardar — no llegan al TPV hasta que guardes
-          </p>
+      {/* KPIs estilo catálogo */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <CatalogKpi
+          icon={<Package className="w-5 h-5" />}
+          value={brandScopedItems.length}
+          label={multiBrand && activeBrand ? `Total · ${activeBrand.name}` : 'Total ingredientes'}
+          tone="blue"
+        />
+        <CatalogKpi
+          icon={<Sparkles className="w-5 h-5" />}
+          value={extraItems.length}
+          label="Extras de pago"
+          tone="amber"
+        />
+        <CatalogKpi
+          icon={<Minus className="w-5 h-5" />}
+          value={baseItems.length}
+          label="Solo quitar"
+          tone="slate"
+        />
+        <CatalogKpi
+          icon={<Euro className="w-5 h-5" />}
+          value={hasExtras ? `${priceDisplay} €` : '—'}
+          label="Precio del extra"
+          tone="green"
+        />
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex flex-col lg:flex-row gap-3 items-start lg:items-center justify-between">
+        <div className="relative w-full lg:w-auto lg:min-w-[280px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar ingrediente…"
+            className="pl-9 pr-4 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:border-gray-900 outline-none bg-white dark:bg-gray-800 w-full"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2 items-center w-full lg:w-auto">
+          <div className="flex p-1 rounded-xl bg-gray-100 dark:bg-gray-800">
+            {([
+              { id: 'all' as const, label: 'Todos', count: brandScopedItems.length },
+              { id: 'extra' as const, label: 'Extras', count: extraItems.length },
+              { id: 'base' as const, label: 'Quitar', count: baseItems.length },
+            ]).map(({ id, label, count }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setListFilter(id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  listFilter === id
+                    ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                }`}
+              >
+                {label} <span className="opacity-60">{count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="relative">
+            <Euro className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Precio extra"
+              value={defaultExtraPrice}
+              onChange={(e) => {
+                setDefaultExtraPrice(e.target.value);
+                setDirty(true);
+              }}
+              className="w-28 pl-8 pr-2 py-2 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm font-semibold bg-white dark:bg-gray-800 focus:border-amber-400 outline-none"
+              title="Precio por defecto de los extras en el TPV"
+            />
+          </div>
           <button
             type="button"
-            disabled={saving || (hasExtras && !priceOk)}
+            onClick={markAllBrandAsExtra}
+            disabled={brandScopedItems.length === 0}
+            className="px-3 py-2 rounded-xl text-xs font-bold border-2 border-amber-300 text-amber-900 bg-amber-100 hover:bg-amber-200 disabled:opacity-40 dark:bg-amber-950/40 dark:text-amber-100 dark:border-amber-700"
+          >
+            Todos extras de pago
+          </button>
+          <button
+            type="button"
+            onClick={markVisibleAsExtra}
+            disabled={filteredVisible === 0}
+            className="px-3 py-2 rounded-xl text-xs font-bold border-2 border-amber-200 text-amber-800 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800"
+          >
+            Marcar visibles
+          </button>
+          <button
+            type="button"
+            onClick={markVisibleAsBase}
+            disabled={filteredVisible === 0}
+            className="px-3 py-2 rounded-xl text-xs font-bold border-2 border-gray-200 text-gray-600 bg-white hover:bg-gray-50 disabled:opacity-40 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-600"
+          >
+            Solo quitar
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowBulkPanel((v) => !v)}
+            className="px-3 py-2 rounded-xl text-xs font-bold border-2 border-emerald-200 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1.5"
+          >
+            <ListPlus className="w-4 h-4" />
+            Añadir lista
+          </button>
+        </div>
+      </div>
+
+      {showBulkPanel && (
+        <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-white dark:bg-gray-800 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Añadir ingredientes{multiBrand && activeBrand ? ` · ${activeBrand.name}` : ''}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowBulkPanel(false)}
+              className="text-xs font-semibold text-gray-500 hover:text-gray-700"
+            >
+              Cerrar
+            </button>
+          </div>
+          <textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            rows={4}
+            placeholder={'Mozzarella\nTomate\nBacon\nExtra queso'}
+            className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-gray-50 dark:bg-gray-900 resize-none focus:border-emerald-400 outline-none"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                importBulk();
+                setShowBulkPanel(false);
+              }}
+              disabled={!bulkText.trim()}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl disabled:opacity-40 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold"
+            >
+              <Plus className="w-4 h-4" />
+              Añadir a la lista
+            </button>
+            <p className="text-xs text-gray-500">Uno por línea o separados por coma.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Tabla por secciones — como el catálogo */}
+      <IngredientCatalogSections
+        items={brandScopedItems}
+        search={search}
+        listFilter={listFilter}
+        sectionsOpen={sectionsOpen}
+        onToggleSection={toggleSection}
+        onToggleExtra={toggleItemExtra}
+        onClearSearch={() => setSearch('')}
+        onClearFilter={() => setListFilter('all')}
+        brandLabel={multiBrand ? activeBrand?.name : undefined}
+      />
+
+      {/* Edición avanzada */}
+      <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Settings2 className="w-4 h-4" />
+            Edición avanzada{multiBrand && activeBrand ? ` · ${activeBrand.name}` : ''}
+          </span>
+          <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+        </button>
+        {showAdvanced && (
+          <div className="px-4 pb-4 space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+            <IngredientRow
+              brands={multiBrand && activeBrand ? [activeBrand] : brands}
+              draft={
+                multiBrand && activeBrandId
+                  ? { ...newDraft, brandIds: [activeBrandId] }
+                  : newDraft
+              }
+              onChange={setNewDraft}
+              isNew
+              onAdd={() =>
+                addItem(
+                  multiBrand && activeBrandId
+                    ? { ...newDraft, brandIds: [activeBrandId] }
+                    : newDraft,
+                )
+              }
+            />
+            {brandScopedItems.map((ing) => (
+              <IngredientRow
+                key={ing.id}
+                brands={multiBrand && activeBrand ? [activeBrand] : brands}
+                draft={itemToDraft(ing, allBrandIds)}
+                onChange={(draft) => updateItem(ing.id, draft)}
+                onRemove={() => removeItem(ing.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Guardar fijo en móvil */}
+      {dirty && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t-2 border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-gray-900 px-4 py-3 shadow-[0_-8px_30px_rgba(0,0,0,0.12)]">
+          <button
+            type="button"
+            disabled={!canSave}
             onClick={() => void save()}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl bg-gray-900 text-white text-sm font-bold disabled:opacity-50"
           >

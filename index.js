@@ -80,6 +80,7 @@ import { constructionRouter } from './routers/constructionRouter.js';
 import { webPublicRouter, webProtectedRouter } from './routers/webRouter.js';
 import { gdprRouter } from './routers/gdprRouter.js';
 import { settingsRouter } from './routers/settingsRouter.js';
+import { supportRouter } from './routers/supportRouter.js';
 import { subscriptionRouter } from './routers/subscriptionRouter.js';
 import { chatRouter } from './routers/chatRouter.js';
 import { orgchartRouter } from './routers/orgchartRouter.js';
@@ -988,6 +989,9 @@ for (const [path, ...middlewares] of internalRouters) {
 // ADM: Settings — branding, pipeline, email templates, horarios, export/import, impersonation, changelog
 app.use('/api/settings', settingsRouter);
 app.use('/api/v2/settings', settingsRouter);
+
+app.use('/api/support', requireAuthAndEmailVerified, burstLimiter, supportRouter);
+app.use('/api/v2/support', requireAuthAndEmailVerified, burstLimiter, supportRouter);
 
 // MONEI Subscriptions — rutas protegidas + webhooks públicos internos
 app.use('/api/subscriptions', subscriptionRouter);

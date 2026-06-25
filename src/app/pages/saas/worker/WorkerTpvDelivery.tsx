@@ -5,6 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { useLiveClock } from '../../../hooks/useLiveClock';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   filterDeliveryOrdersRequest,
@@ -1016,12 +1017,7 @@ export function WorkerTpvDelivery({
     return () => clearInterval(interval);
   }, [userId, loadOrders]);
 
-  // Refresca colores de tiempo en pantalla sin recargar pedidos.
-  const [, setTimeTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTimeTick((n) => n + 1), 30000);
-    return () => clearInterval(t);
-  }, []);
+  const nowMs = useLiveClock(30_000);
 
   const advanceOrder = useCallback(async (order: DeliveryOrder, paymentMethod?: DeliveryPaymentMethod) => {
     const next = TABLET_NEXT_STATUS[order.status];
@@ -1221,7 +1217,7 @@ export function WorkerTpvDelivery({
       delivered: completados.length,
       avgWait,
     };
-  }, [orders, openSession]);
+  }, [orders, openSession, nowMs]);
 
   const scopedActive = useMemo(
     () => orders.filter(

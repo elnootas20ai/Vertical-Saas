@@ -2006,8 +2006,13 @@ export function CatalogPage() {
       const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
       if (withIngredients > 0 && businessId) {
         const ingSync = await syncStoreIngredientsFromCatalogImport(user.id, businessId, items);
-        if (ingSync.added > 0) {
-          toast.message(`${ingSync.added} ingrediente(s) añadidos a Ingredientes TPV`, { duration: 6000 });
+        if (ingSync.added > 0 || ingSync.promoted > 0) {
+          const parts = [];
+          if (ingSync.added > 0) parts.push(`${ingSync.added} nuevo(s)`);
+          if (ingSync.promoted > 0) parts.push(`${ingSync.promoted} como extra de pago`);
+          toast.message(`Ingredientes TPV: ${parts.join(' · ')}. Revisa el precio del extra si hace falta.`, {
+            duration: 8000,
+          });
         }
       }
       await loadCatalog();
@@ -3520,6 +3525,11 @@ export function CatalogPage() {
       : false;
   }, [isDelivery, brands, catalogItems.length, retailStoreCount]);
 
+  /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
+  const brandCheckReady =
+    pageReady && Boolean(businessId) && !brandsLoading && !activeStore.loading;
+  const showBrandIncompleteBanner = isDelivery && brandCheckReady && !brandReady;
+
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
@@ -3531,7 +3541,7 @@ export function CatalogPage() {
 
         {pageReady && (
           <>
-        {isDelivery && !brandReady && (
+        {showBrandIncompleteBanner && (
           <div className="flex flex-col gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/90 dark:bg-amber-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 text-left">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />

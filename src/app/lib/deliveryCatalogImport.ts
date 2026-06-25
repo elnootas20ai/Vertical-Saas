@@ -1,10 +1,11 @@
 import { listBrandsRequest, updateBrandRequest, type Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import {
-  mergeStoreIngredientNames,
   normalizeStoreIngredients,
+  normalizeTpvDefaultExtraPrice,
   parseIngredientsBulkText,
   resolveBrandTpvCategoryKeys,
+  resolveIngredientRole,
   type TpvCategoryTemplateKey,
   unifyStoreIngredientsFromConfig,
 } from './catalogCustomization';
@@ -13,6 +14,8 @@ import { notifyDeliveryConfigChanged } from './deliverySetup';
 import { normalizeTenantUserId } from './tenantUserId';
 import {
   buildBrandCategoryMapFromItems,
+  applyCatalogImportIngredientEntries,
+  collectIngredientEntriesFromCatalogImport,
   commercialLineBrands,
   formatUnmatchedCommercialBrandWarning,
   isCommercialLineBrand,
@@ -28,7 +31,9 @@ import { parseImportPrice } from './deliveryCatalogExcelTemplate';
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
   allCommercialLineBrands,
+  applyCatalogImportIngredientEntries,
   buildBrandCategoryMapFromItems,
+  collectIngredientEntriesFromCatalogImport,
   commercialLineBrands,
   defaultBrandIdForCatalogImport,
   formatUnmatchedCommercialBrandWarning,
@@ -117,24 +122,16 @@ export async function syncTpvOrganizersAfterCatalogImport(
 
 /**
  * Tras importar productos con columna ingredientes, añade nombres únicos a la lista
- * maestra (Catálogo → Ingredientes) para extras y configuración TPV.
+ * maestra (Catálogo → Ingredientes) como extras de pago listos para el TPV.
  */
 export async function syncStoreIngredientsFromCatalogImport(
   userId: string,
   businessId: string,
-  items: Array<Pick<CatalogItem, 'customFields'>>,
-): Promise<{ added: number }> {
+  items: Array<Pick<CatalogItem, 'customFields' | 'brandIds'>>,
+): Promise<{ added: number; promoted: number }> {
   const uid = String(userId || '').trim();
   const bid = String(businessId || '').trim();
-  if (!uid || !bid || items.length === 0) return { added: 0 };
-
-  const names: string[] = [];
-  for (const item of items) {
-    const text = String(item.customFields?.ingredients || '').trim();
-    if (text) names.push(...parseIngredientsBulkText(text));
-  }
-  const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-  if (uniqueNames.length === 0) return { added: 0 };
+  if (!uid || !bid || items.length === 0) return { added: 0, promoted: 0 };
 
   const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
   const brandIds = brands.map((b) => b._id);
@@ -144,24 +141,26 @@ export async function syncStoreIngredientsFromCatalogImport(
   const partsDefault: TpvCategoryTemplateKey[] =
     productParts.length > 0 ? productParts : ['pizzas', 'hamburguesas'];
 
+  const entries = collectIngredientEntriesFromCatalogImport(items, brands, partsDefault);
+  if (entries.length === 0) return { added: 0, promoted: 0 };
+
   const cfg = await getDeliveryConfigRequest(uid);
   const existing = unifyStoreIngredientsFromConfig(cfg, brandIds);
-  const before = existing.length;
-  const merged = mergeStoreIngredientNames(existing, uniqueNames, {
-    role: 'base',
-    brandIds,
-    productParts: partsDefault,
-  });
-  const added = merged.length - before;
-  if (added <= 0) return { added: 0 };
+  const { merged, added, promoted } = applyCatalogImportIngredientEntries(existing, entries);
+  if (added <= 0 && promoted <= 0) return { added: 0, promoted: 0 };
+
+  const needsDefaultPrice =
+    normalizeTpvDefaultExtraPrice(cfg.tpvDefaultExtraPrice) == null &&
+    merged.some((i) => resolveIngredientRole(i) === 'extra');
 
   await updateDeliveryConfigRequest(uid, {
     _id: cfg._id || `dlvconf-${normalizeTenantUserId(uid)}`,
     _rev: cfg._rev,
     storeIngredients: normalizeStoreIngredients(merged),
+    ...(needsDefaultPrice ? { tpvDefaultExtraPrice: 0 } : {}),
   });
   notifyDeliveryConfigChanged();
-  return { added };
+  return { added, promoted };
 }
 
 /** Activa líneas comerciales que recibieron productos en el import (p. ej. blackburger inactiva). */

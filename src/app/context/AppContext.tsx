@@ -866,11 +866,14 @@ export function readDevExtraBusinesses(): number {
 }
 
 export function readDevUnlimitedPdv(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return true;
   try {
-    return window.localStorage.getItem(DEV_UNLIMITED_PDV_KEY) === '1';
+    if (window.localStorage.getItem(DEV_UNLIMITED_PDV_KEY) === '1') return true;
+    // Sin modo ilimitado explícito: limitado solo si simulas Básico/Normal/Pro.
+    if (readDevPlanOverride()) return false;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -1202,13 +1205,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const isWorker = isWorkerAccount(authUser);
     const baseSubscription = deserializeSubscription(authUser.subscription, { isWorker });
     const canUseDevPlanOverride = userCanUseDevPlanOverride(authUser);
-    setSubscription(canUseDevPlanOverride ? applyDevPlanOverride(baseSubscription) : baseSubscription);
     if (canUseDevPlanOverride) {
       setDevExtraPdv(readDevExtraPdv());
       setDevExtraBrands(readDevExtraBrands());
       setDevExtraBusiness(readDevExtraBusinesses());
-      setDevUnlimitedPdv(readDevUnlimitedPdv());
+      try {
+        window.localStorage.setItem(DEV_UNLIMITED_PDV_KEY, '1');
+        window.localStorage.removeItem(DEV_PLAN_OVERRIDE_KEY);
+      } catch {
+        // ignore
+      }
+      setDevUnlimitedPdv(true);
+      setSubscription(baseSubscription);
     } else {
+      setSubscription(baseSubscription);
       setDevExtraPdv(0);
       setDevExtraBrands(0);
       setDevExtraBusiness(0);

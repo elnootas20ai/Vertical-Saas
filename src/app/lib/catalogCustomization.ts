@@ -293,15 +293,110 @@ export function resolveStoreIngredientBrandIds(
   return [...allBrandIds];
 }
 
+/** Ingredientes visibles en la pestaña de una línea comercial del panel TPV. */
+export function filterStoreIngredientsByBrand(
+  items: StoreIngredient[],
+  brandId: string,
+  allBrandIds: string[],
+): StoreIngredient[] {
+  if (!brandId || allBrandIds.length <= 1) return items;
+  return items.filter((ing) => normalizeBrandIds(ing.brandIds).includes(brandId));
+}
+
+export function countStoreIngredientsByBrand(
+  items: StoreIngredient[],
+  brandId: string,
+  allBrandIds: string[],
+): number {
+  return filterStoreIngredientsByBrand(items, brandId, allBrandIds).length;
+}
+
 export function ensureStoreIngredientBrandIds(
   list: StoreIngredient[],
   allBrandIds: string[],
 ): StoreIngredient[] {
   if (allBrandIds.length === 0) return list;
+  if (allBrandIds.length === 1) {
+    return list.map((ing) => ({
+      ...ing,
+      brandIds:
+        normalizeBrandIds(ing.brandIds).length > 0 ? normalizeBrandIds(ing.brandIds) : [allBrandIds[0]],
+    }));
+  }
   return list.map((ing) => ({
     ...ing,
-    brandIds: normalizeBrandIds(ing.brandIds).length > 0 ? normalizeBrandIds(ing.brandIds) : [...allBrandIds],
+    brandIds: normalizeBrandIds(ing.brandIds),
   }));
+}
+
+/**
+ * Una fila por línea comercial: evita que el mismo extra (pizza/burger) se comparta entre marcas.
+ */
+export function explodeStoreIngredientsPerBrand(
+  list: StoreIngredient[],
+  brands: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>,
+): StoreIngredient[] {
+  if (brands.length <= 1) return list;
+
+  const allIds = brands.map((b) => b._id);
+  const brandById = new Map(brands.map((b) => [b._id, b]));
+  const out: StoreIngredient[] = [];
+
+  for (const ing of list) {
+    let assigned = normalizeBrandIds(ing.brandIds);
+    if (assigned.length === 0) {
+      const parts = normalizeProductParts(ing.productParts);
+      if (parts.length > 0) {
+        for (const brand of brands) {
+          const keys = resolveBrandTpvCategoryKeys(brand);
+          if (keys.some((k) => parts.includes(k))) assigned.push(brand._id);
+        }
+      }
+      if (assigned.length === 0) assigned = [...allIds];
+    }
+    const uniqueAssigned = [...new Set(assigned.filter((id) => allIds.includes(id)))];
+
+    if (uniqueAssigned.length <= 1) {
+      const brandId = uniqueAssigned[0];
+      const brand = brandId ? brandById.get(brandId) : undefined;
+      let parts = normalizeProductParts(ing.productParts);
+      if (parts.length === 0 && brand) parts = resolveBrandTpvCategoryKeys(brand);
+      out.push({
+        ...ing,
+        ...(brandId ? { brandIds: [brandId] } : {}),
+        ...(parts.length > 0 ? { productParts: parts } : {}),
+      });
+      continue;
+    }
+
+    for (const brandId of uniqueAssigned) {
+      const brand = brandById.get(brandId);
+      const brandKeys = brand ? resolveBrandTpvCategoryKeys(brand) : [];
+      let parts = normalizeProductParts(ing.productParts);
+      if (parts.length > 0 && brandKeys.length > 0) {
+        parts = parts.filter((p) => brandKeys.includes(p));
+      }
+      if (parts.length === 0) parts = brandKeys;
+      const price = ing.extraPrices?.[brandId];
+      out.push({
+        ...ing,
+        id: `${String(ing.id || ingredientNameKey(ing.name)).trim()}::${brandId}`,
+        brandIds: [brandId],
+        productParts: parts.length > 0 ? parts : (['pizzas', 'hamburguesas'] as TpvCategoryTemplateKey[]),
+        ...(price != null && Number.isFinite(price) ? { extraPrices: { [brandId]: price } } : {}),
+      });
+    }
+  }
+
+  return normalizeStoreIngredients(out);
+}
+
+export function storeIngredientsNeedPerBrandSplit(
+  list: StoreIngredient[],
+  allBrandIds: string[],
+): boolean {
+  if (allBrandIds.length <= 1) return false;
+  return list.some((ing) => normalizeBrandIds(ing.brandIds).length !== 1);
 }
 
 function normalizeExtraPrices(raw: unknown): Record<string, number> {
@@ -591,10 +686,16 @@ export function parseStoreIngredientExtras(
     return out;
   };
 
-  // TPV: todos los extras del tipo (pizza/hamburguesa), sin filtrar por marca.
-  const forProductType = collect(true, false);
-  if (forProductType.length > 0) return forProductType;
-  return collect(true, true);
+  const strict = collect(false, false);
+  if (strict.length > 0) return strict;
+  const strictNoPart = collect(false, true);
+  if (strictNoPart.length > 0) return strictNoPart;
+  if (brandIds.length === 0) {
+    const loose = collect(true, false);
+    if (loose.length > 0) return loose;
+    return collect(true, true);
+  }
+  return [];
 }
 
 export function storeIngredientsById(list: StoreIngredient[] | undefined): Map<string, StoreIngredient> {

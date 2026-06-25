@@ -8,10 +8,7 @@ import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
 } from '../../lib/dayBannerDismiss';
-import {
-  getTrialActiveBannerContent,
-  getTrialExpiringBannerContent,
-} from '../../lib/trialBannerMessages';
+import { getTrialExpiringBannerContent } from '../../lib/trialBannerMessages';
 
 export function SubscriptionBanner() {
   const { subscription } = useApp();
@@ -65,75 +62,23 @@ export function SubscriptionBanner() {
   }, [subscription.status, subscription.gracePeriodEndsAt]);
 
   const hasSavedCard = Boolean(String(user?.paymentSummary?.lastFourDigits || '').trim());
-  const cardLastFour = String(user?.paymentSummary?.lastFourDigits || '').trim();
   const hasMoneiSubscription = Boolean(String(subscription.moneiSubscriptionId || '').trim());
 
-  // Trial active banner (countdown of 14 days)
-  if (!dismissedTrial && subscription.status === 'trial_active' && subscription.trialEndsAt) {
-    const daysLeft = Math.ceil(
-      (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-    );
-    if (daysLeft > 0 && daysLeft <= 14) {
-      const trialCopy = getTrialActiveBannerContent({
-        daysLeft,
-        trialEndsAt: subscription.trialEndsAt,
-        hasSavedCard,
-        cardLastFour,
-        hasMoneiSubscription,
-      });
-
-      return (
-        <div className="bg-blue-50 dark:bg-blue-950/80 border-b-2 border-blue-200 dark:border-blue-800">
-          <div className="px-4 md:px-6 py-2 md:py-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-start gap-2 min-w-0">
-                <Clock className="w-4 h-4 text-blue-700 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <p className="text-xs md:text-sm font-semibold text-blue-900 dark:text-blue-200">
-                    {trialCopy.title}
-                  </p>
-                  <p className="text-[11px] md:text-xs text-blue-800/90 dark:text-blue-300/90 leading-snug mt-0.5">
-                    {trialCopy.detail}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={() => navigate('/saas/billing')}
-                  className="px-3 py-1.5 bg-blue-700 dark:bg-blue-600 hover:bg-blue-800 dark:hover:bg-blue-500 text-white font-medium rounded-lg transition-colors text-xs whitespace-nowrap"
-                >
-                  {trialCopy.ctaLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (trialDismissKey) dismissBannerForRestOfLocalDay(trialDismissKey);
-                    rerender();
-                  }}
-                  className="p-1 hover:bg-blue-100 dark:hover:bg-blue-900 rounded transition-colors"
-                  aria-label="Cerrar hasta mañana"
-                  title="No mostrar hoy (se restablece a las 00:00)"
-                >
-                  <X className="w-4 h-4 text-blue-700 dark:text-blue-400" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-  }
-
-  // Trial expiring banner (<=3 days)
-  if (!dismissedTrial && subscription.status === 'trial_expiring' && subscription.trialEndsAt) {
+  // Trial expiring: solo si falta método de pago (la info de tarjeta/prueba ya se da en el registro)
+  if (
+    !dismissedTrial &&
+    !hasSavedCard &&
+    !hasMoneiSubscription &&
+    subscription.status === 'trial_expiring' &&
+    subscription.trialEndsAt
+  ) {
     const daysLeft = Math.ceil(
       (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
     const trialCopy = getTrialExpiringBannerContent({
       daysLeft,
-      hasSavedCard,
-      cardLastFour,
-      hasMoneiSubscription,
+      hasSavedCard: false,
+      hasMoneiSubscription: false,
     });
 
     return (

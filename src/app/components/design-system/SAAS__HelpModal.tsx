@@ -1,9 +1,11 @@
-import { X, HelpCircle, MessageCircle, Mail, FileText, ExternalLink, Sparkles } from 'lucide-react';
+import { X, HelpCircle, MessageCircle, Mail, FileText, ExternalLink, Sparkles, Bug } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { useRestartTour } from '../saas/OnboardingTour';
 import { useActivationChecklist } from '../../context/ActivationChecklistContext';
 import { useModalClose } from '../../hooks/useModalClose';
+import { BugReportModal } from '../saas/BugReportModal';
 
 interface Props {
   isOpen: boolean;
@@ -14,6 +16,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const restartTour = useRestartTour();
   const { restore: restoreActivationGuide } = useActivationChecklist();
+  const [showBugReport, setShowBugReport] = useState(false);
 
   useModalClose(isOpen, onClose);
 
@@ -44,6 +47,15 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
       color: 'text-purple-600',
       bgColor: 'bg-purple-100',
     },
+    {
+      icon: Bug,
+      label: 'Reportar a Vertial',
+      description: 'Bug o error con captura — aviso instantáneo al equipo',
+      link: '/saas/help#reporte',
+      action: 'bug-report' as const,
+      color: 'text-amber-700',
+      bgColor: 'bg-amber-100',
+    },
   ];
 
   const quickLinks = [
@@ -60,7 +72,16 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
     navigate(link);
   };
 
+  const handleHelpOption = (option: (typeof helpOptions)[number]) => {
+    if ('action' in option && option.action === 'bug-report') {
+      setShowBugReport(true);
+      return;
+    }
+    handleNavigate(option.link);
+  };
+
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
@@ -96,7 +117,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                   <button
                     key={option.label}
                     type="button"
-                    onClick={() => handleNavigate(option.link)}
+                    onClick={() => handleHelpOption(option)}
                     className="flex items-start gap-4 p-4 border-2 border-gray-200 dark:border-gray-700 hover:border-blue-500 hover:bg-blue-50 rounded-xl transition-all group"
                   >
                     <div className={`w-12 h-12 ${option.bgColor} rounded-xl flex items-center justify-center flex-shrink-0`}>
@@ -195,5 +216,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
         </div>
       </div>
     </div>
+    <BugReportModal isOpen={showBugReport} onClose={() => setShowBugReport(false)} />
+    </>
   );
 }

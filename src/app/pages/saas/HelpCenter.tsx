@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   Bot,
+  Bug,
   Building2,
   Car,
   CheckCircle2,
@@ -21,6 +22,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { BugReportForm } from '../../components/saas/BugReportModal';
 
 type Accent = {
   badge: string;
@@ -129,6 +131,15 @@ const supportCards: SupportCard[] = [
     href: '/saas/help#contacto',
     icon: Mail,
     accent: ACCENTS.violet,
+  },
+  {
+    id: 'reporte',
+    title: 'Reportar a Vertial',
+    description: 'Envia bugs, errores o pantallas rotas con captura. El equipo recibe un aviso instantaneo por correo.',
+    actionLabel: 'Enviar reporte',
+    href: '/saas/help#reporte',
+    icon: Bug,
+    accent: ACCENTS.amber,
   },
 ];
 
@@ -551,6 +562,22 @@ export function HelpCenter() {
                 <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-400">{faq.answer}</p>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section id="reporte" className="scroll-mt-28 rounded-3xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-800 p-6">
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Reporte a Vertial</p>
+            <h3 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-100">
+              Detecta bugs y errores con captura incluida
+            </h3>
+            <p className="mt-3 text-sm leading-7 text-gray-600 dark:text-gray-400">
+              Usa este formulario cuando veas un fallo, un mensaje de error o un comportamiento raro.
+              El reporte llega al equipo de Vertial al instante por correo, con la pagina, la empresa y la captura que adjuntes.
+            </p>
+          </div>
+          <div className="mt-6 max-w-3xl">
+            <BugReportForm />
           </div>
         </section>
 
