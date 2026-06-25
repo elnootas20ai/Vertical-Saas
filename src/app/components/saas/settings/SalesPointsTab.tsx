@@ -9,6 +9,7 @@ import {
   bootstrapRetailStoreAfterCreate,
   loadDeliveryStores,
   clearDeliveryStoresSessionCache,
+  markDeliveryPdvSessionConfirmed,
   notifyDeliveryWorkCentersChanged,
   selectDeliveryPointOfSale,
   DELIVERY_WORK_CENTERS_CHANGED,
@@ -727,7 +728,6 @@ function WorkCenterModal({
       maxHeight={simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
       size={simplifyPdvCreate ? 'medium' : 'default'}
       preview={step === 'horarios' ? undefined : storePreview}
-      bodyOverflow={step === 'horarios' && includeOpeningHours ? 'hidden' : 'auto'}
       footer={
         <SettingsWizardFooter
           onCancel={onClose}
@@ -1475,7 +1475,7 @@ function WorkCenterModal({
           )}
 
           {step === 'horarios' && includeOpeningHours && (
-            <div className="space-y-3">
+            <div className="space-y-3 pb-2">
               {fieldErrors.horarios ? (
                 <p className="text-xs text-red-600 dark:text-red-400 font-medium">{fieldErrors.horarios}</p>
               ) : null}
@@ -1675,8 +1675,14 @@ export function SalesPointsTab() {
     }
     setRegeneratingTerminal(wc._id);
     try {
+      const suggestedCode = suggestNextPdvCode(
+        sanitizeStoreDisplayName(String(wc.name || '')),
+        [...deliveryPdvCodes],
+      );
       const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
         business: currentBusiness ?? null,
+        pdvCode: suggestedCode || undefined,
+        pdvName: sanitizeStoreDisplayName(String(wc.name || '')),
       });
       if (!pdv?._id) {
         toast.error(
@@ -1685,10 +1691,19 @@ export function SalesPointsTab() {
         return;
       }
       applyLinkedPdvToState(wc, pdv);
-      toast.success('Caja del TPV activada — ya puedes usar TPV rápido desde el menú');
-      void loadData();
+      markDeliveryPdvSessionConfirmed(dataUserId);
+      toast.success(`Caja del TPV activada — ${pointOfSaleDisplayLabel(pdv)}`);
+      await loadData();
+      if (activationFocus === 'pdv-link' || activationFocus === 'pdv-list') {
+        clearActivationFocus();
+      }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo activar la caja del TPV');
+      const msg = err instanceof Error ? err.message : 'No se pudo activar la caja del TPV';
+      toast.error(
+        msg.includes('límite') || msg.includes('limite') || msg.includes('PLAN_LIMIT')
+          ? `${msg} La tienda ya cuenta como PDV; activar la caja no debería consumir otro cupo. Recarga e inténtalo de nuevo.`
+          : msg,
+      );
     } finally {
       setRegeneratingTerminal(null);
     }

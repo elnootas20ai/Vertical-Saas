@@ -11,9 +11,14 @@ import {
 } from './couchdb.js';
 import { isDefaultCommercialBrandName } from '../shared/brand/constants.js';
 import {
+  getEffectivePointOfSaleLimit,
   PLAN_TIER_LABELS,
   resolveTenantEntitlements,
 } from '../shared/billing/entitlements.js';
+import {
+  canCreateDeliveryPointOfSale,
+  countEffectiveRetailPointOfSaleSlots,
+} from '../shared/billing/pointOfSaleSlotCount.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
 function normalizeBusinessScopeId(value) {
@@ -95,6 +100,60 @@ async function countActiveDeliveryPdvsForAccount(req, account, excludeDocId = ''
   return pdvs.filter((p) => !p.deletedAt && String(p._id || '') !== exclude).length;
 }
 
+async function listActiveDeliveryPdvsForAccount(req, account, excludeDocId = '') {
+  const pdvs = await listPointsOfSaleByUser(req, account.user_id);
+  const exclude = String(excludeDocId || '').trim();
+  return pdvs.filter((p) => !p.deletedAt && String(p._id || '') !== exclude);
+}
+
+async function listPdvWorkCentersForAccount(req, account, excludeDocId = '') {
+  const userId = account.user_id;
+  const businesses = await listBusinessesByUser(req, userId);
+  const businessIds = new Set(
+    businesses.map((b) => normalizeBusinessScopeId(b._id || b.business_id)),
+  );
+  const db = getWorkCentersDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  const exclude = String(excludeDocId || '').trim();
+  return docs.filter((d) => {
+    if (d?.type !== 'sales_point' || d?.deletedAt) return false;
+    if (String(d._id || '') === exclude) return false;
+    if (d?.centerType !== 'punto_de_venta') return false;
+    const wb = normalizeBusinessScopeId(d.businessId || d.business_id);
+    if (wb && businessIds.has(wb)) return true;
+    return workCenterDocMatchesUser(d, userId);
+  });
+}
+
+/** Tienda + caja enlazada = 1 cupo (no max(wc, pdv) que bloqueaba «Activar caja»). */
+async function countEffectiveRetailPointOfSaleSlotsForAccount(req, account, excludeDocId = '') {
+  const pdvs = await listActiveDeliveryPdvsForAccount(req, account, excludeDocId);
+  const linkedWorkCenterIds = pdvs
+    .map((p) => String(p.workCenterId || '').trim())
+    .filter(Boolean);
+  const linkedSet = new Set(linkedWorkCenterIds);
+  const orphanPdvCount = pdvs.filter((p) => !String(p.workCenterId || '').trim()).length;
+  const workCenters = await listPdvWorkCentersForAccount(req, account, excludeDocId);
+  const unlinkedWorkCenterCount = workCenters.filter(
+    (wc) => !linkedSet.has(String(wc._id || '').trim()),
+  ).length;
+  return countEffectiveRetailPointOfSaleSlots({
+    linkedWorkCenterIds,
+    orphanPdvCount,
+    unlinkedWorkCenterCount,
+  });
+}
+
+async function isLinkingDeliveryPdvToExistingStore(req, account, workCenterId, excludeDocId = '') {
+  const wcId = String(workCenterId || '').trim();
+  if (!wcId) return false;
+  const pdvs = await listActiveDeliveryPdvsForAccount(req, account, excludeDocId);
+  if (pdvs.some((p) => String(p.workCenterId || '').trim() === wcId)) return false;
+  const workCenters = await listPdvWorkCentersForAccount(req, account, excludeDocId);
+  return workCenters.some((wc) => String(wc._id || '').trim() === wcId);
+}
+
 function formatLimitMessage(kind, entitlements) {
   const label = entitlements.planLabel || 'tu plan';
   if (kind === 'business') {
@@ -144,14 +203,30 @@ export async function assertCanCreatePointOfSale(req, userId, actorEmail, exclud
   const account = await resolveBillingAccount(req, userId);
   if (!account) return { ok: true };
   const subscription = account.subscription || {};
-  const wcCount = await countPdvWorkCentersForAccount(req, account, excludeDocId);
-  const pdvCount = await countActiveDeliveryPdvsForAccount(req, account, excludeDocId);
+  const workCenterId = String(req?.body?.pointOfSale?.workCenterId || '').trim();
+  const effectiveCount = await countEffectiveRetailPointOfSaleSlotsForAccount(
+    req,
+    account,
+    excludeDocId,
+  );
+  const pdvLimit = getEffectivePointOfSaleLimit(subscription);
+  const isLinkingExistingStore = workCenterId
+    ? await isLinkingDeliveryPdvToExistingStore(req, account, workCenterId, excludeDocId)
+    : false;
   const entitlements = resolveTenantEntitlements(subscription, {
     businesses: 0,
-    pointOfSales: Math.max(wcCount, pdvCount),
+    pointOfSales: pdvLimit,
     commercialBrands: 0,
   });
-  if (entitlements.canCreatePointOfSale) return { ok: true };
+  if (
+    canCreateDeliveryPointOfSale({
+      effectiveCount,
+      limit: pdvLimit,
+      isLinkingExistingStore,
+    })
+  ) {
+    return { ok: true };
+  }
   return forbidden(formatLimitMessage('pdv', entitlements));
 }
 
@@ -191,13 +266,26 @@ export async function validateWorkCenterEntitlementWrite(req, dbName, docBody, d
   if (!account) return { ok: true };
 
   const subscription = account.subscription || {};
-  const wcCount = await countPdvWorkCentersForAccount(req, account, String(docId || body._id || ''));
+  const effectiveCount = await countEffectiveRetailPointOfSaleSlotsForAccount(
+    req,
+    account,
+    String(docId || body._id || ''),
+  );
+  const pdvLimit = getEffectivePointOfSaleLimit(subscription);
   const entitlements = resolveTenantEntitlements(subscription, {
     businesses: 0,
-    pointOfSales: wcCount,
+    pointOfSales: pdvLimit,
     commercialBrands: 0,
   });
-  if (entitlements.canCreatePointOfSale) return { ok: true };
+  if (
+    canCreateDeliveryPointOfSale({
+      effectiveCount,
+      limit: pdvLimit,
+      isLinkingExistingStore: false,
+    })
+  ) {
+    return { ok: true };
+  }
   return forbidden(formatLimitMessage('pdv', entitlements));
 }
 
