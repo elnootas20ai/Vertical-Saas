@@ -148,7 +148,7 @@ export function getBrandSetupPending(
 }
 
 export function isBrandSetupComplete(
-  brand: Pick<Brand, 'deliveryLineKind' | 'catalogCategories' | 'salesPointIds'>,
+  brand: Pick<Brand, 'name' | 'isDefault' | 'deliveryLineKind' | 'catalogCategories' | 'salesPointIds'>,
   ctx: BrandSetupContext,
 ): boolean {
   return getBrandSetupPending(brand, ctx).length === 0;

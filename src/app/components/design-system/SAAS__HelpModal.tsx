@@ -13,7 +13,7 @@ interface Props {
 export function SAAS__HelpModal({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const restartTour = useRestartTour();
-  const { restore: restoreActivationGuide, completionPct, totalSteps } = useActivationChecklist();
+  const { restore: restoreActivationGuide } = useActivationChecklist();
 
   useModalClose(isOpen, onClose);
 
@@ -142,8 +142,9 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                 type="button"
                 onClick={() => {
                   onClose();
-                  if (restartTour()) {
-                    toast.success('Tour abierto — paso 1 de 7');
+                  restoreActivationGuide();
+                  if (restartTour({ fromBeginning: false })) {
+                    toast.success('Tour reanudado donde lo dejaste');
                   } else {
                     toast.error(
                       'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
@@ -156,33 +157,31 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 text-left">
-                  <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">Tour interactivo</p>
+                  <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">Continuar tour</p>
                   <p className="text-xs text-violet-600 dark:text-violet-400">
-                    Ventanas paso a paso (tienda, marca, catálogo…). Distinto del «Alta delivery» del menú.
+                    Reanuda las ventanas paso a paso (no cuenta como terminado si cerraste con X).
                   </p>
                 </div>
               </button>
-              {totalSteps > 0 && completionPct >= 100 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    restoreActivationGuide();
-                    toast.message('Checklist «Alta delivery» visible en el menú lateral');
-                  }}
-                  className="flex items-center gap-3 w-full px-4 py-3 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 rounded-xl transition-all"
-                >
-                  <div className="w-9 h-9 bg-amber-500 rounded-xl flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Ver checklist del alta</p>
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Ya tienes {totalSteps}/{totalSteps} pasos hechos — repaso en el menú lateral.
-                    </p>
-                  </div>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  restoreActivationGuide();
+                  if (restartTour({ fromBeginning: true })) {
+                    toast.success('Tour desde el paso 1');
+                  } else {
+                    toast.error(
+                      'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
+                    );
+                  }
+                }}
+                className="flex items-center gap-3 w-full px-4 py-3 bg-violet-50/60 dark:bg-violet-950/20 hover:bg-violet-100/80 dark:hover:bg-violet-900/20 border border-violet-200/80 dark:border-violet-800/40 rounded-xl transition-all"
+              >
+                <div className="flex-1 text-left pl-12">
+                  <p className="text-sm font-medium text-violet-800 dark:text-violet-300">Empezar tour desde el paso 1</p>
+                </div>
+              </button>
             </div>
           </div>
 

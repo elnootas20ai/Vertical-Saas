@@ -58,7 +58,7 @@ export function ActivationChecklist({ collapsed }: Props) {
   const allStepsDone = totalSteps > 0 && completedSteps >= totalSteps;
   const [expanded, setExpanded] = useState(readExpandedPreference);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const canDismissChecklist = !isDelivery;
+  const canDismissChecklist = true;
   const checklistTitle = isDelivery ? 'Alta delivery' : 'Arranque rápido';
 
   useEffect(() => {
@@ -139,7 +139,9 @@ export function ActivationChecklist({ collapsed }: Props) {
         <p className="text-[9px] leading-snug text-gray-400 dark:text-gray-500 mb-1.5 pr-6">
           {allStepsDone ? (
             <>
-              Alta completada. Para repasar pantallas paso a paso: <strong className="font-semibold text-gray-500">Ayuda → Tour interactivo</strong>.
+              Datos del alta completos ({completedSteps}/{totalSteps}). Pulsa cualquier paso para{' '}
+              <strong className="font-semibold text-gray-500">repasar</strong> o usa{' '}
+              <strong className="font-semibold text-gray-500">Ayuda → Continuar tour</strong>.
             </>
           ) : (
             <>
@@ -169,7 +171,7 @@ export function ActivationChecklist({ collapsed }: Props) {
               onClick={dismiss}
               className="w-full mt-1 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors text-center"
             >
-              Saltar por ahora
+              {isDelivery ? 'Ocultar guía del menú' : 'Saltar por ahora'}
             </button>
           )}
         </div>
@@ -191,9 +193,11 @@ function StepRow({
   const route = step.locked && step.unlockRoute ? step.unlockRoute : step.route;
 
   const handleStepClick = () => {
-    if (isCompleted) return;
-    if (!isLocked) onNavigate(route);
-    else if (step.unlockRoute) onNavigate(step.unlockRoute);
+    if (isLocked && step.unlockRoute) {
+      onNavigate(step.unlockRoute);
+      return;
+    }
+    onNavigate(route);
   };
 
   return (
@@ -207,11 +211,10 @@ function StepRow({
       <button
         type="button"
         onClick={handleStepClick}
-        disabled={isCompleted}
-        title={isLocked ? step.lockedReason : undefined}
+        title={isLocked ? step.lockedReason : isCompleted ? 'Repasar este paso' : undefined}
         className={`w-full flex items-start gap-2.5 px-2 py-2 text-left transition-all ${
           isCompleted
-            ? 'opacity-50 cursor-default'
+            ? 'opacity-80 hover:opacity-100 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer'
             : isLocked
               ? 'opacity-70 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50'
               : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer'
@@ -229,13 +232,18 @@ function StepRow({
             <p
               className={`text-xs font-medium leading-tight ${
                 isCompleted
-                  ? 'line-through text-gray-400 dark:text-gray-500'
+                  ? 'text-gray-500 dark:text-gray-400'
                   : isLocked
                     ? 'text-gray-500 dark:text-gray-400'
                     : 'text-gray-700 dark:text-gray-300'
               }`}
             >
               {step.label}
+              {isCompleted ? (
+                <span className="ml-1 text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  · repasar
+                </span>
+              ) : null}
             </p>
             {!isCompleted && !isLocked && step.totalSubSteps > 0 && (
               <span
@@ -254,7 +262,7 @@ function StepRow({
         </div>
       </button>
 
-      {!isCompleted && !isLocked && step.subSteps.length > 0 && (
+      {(isActive || isCompleted) && !isLocked && step.subSteps.length > 0 && (
         <ul className="px-2 pb-2 pl-8 space-y-1" aria-label={`Detalle: ${step.label}`}>
           {step.subSteps.map((sub) => {
             const guide = getSubStepGuide(sub.id);

@@ -352,18 +352,35 @@ export function clearOnboardingTourForBusiness(userId: string, businessId: strin
 }
 
 /** Tras crear una empresa en sesión: tour desde paso 0 en esa empresa (sin recargar). */
-export function armOnboardingTourForBusiness(userId: string, businessId: string): void {
+export function armOnboardingTourForBusiness(
+  userId: string,
+  businessId: string,
+  options?: { fromBeginning?: boolean },
+): void {
   if (!userId || !businessId) return;
   try {
+    const fromBeginning = options?.fromBeginning !== false;
+    let stepIndex = 0;
+    if (!fromBeginning) {
+      const raw = sessionStorage.getItem(onboardingTourStepKey(userId, businessId));
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as Partial<OnboardingTourStepSnapshot>;
+          if (typeof parsed?.i === 'number' && parsed.i > 0) stepIndex = parsed.i;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
     clearOnboardingTourForBusiness(userId, businessId);
     sessionStorage.setItem(
       onboardingTourStepKey(userId, businessId),
-      JSON.stringify({ i: 0, id: 'welcome' } satisfies OnboardingTourStepSnapshot),
+      JSON.stringify({ i: stepIndex, id: stepIndex === 0 ? 'welcome' : '' } satisfies OnboardingTourStepSnapshot),
     );
     sessionStorage.setItem(onboardingTourActiveKey(userId, businessId), '1');
     window.dispatchEvent(
       new CustomEvent(ONBOARDING_TOUR_ARM_EVENT, {
-        detail: { userId: trimId(userId), businessId: trimId(businessId) },
+        detail: { userId: trimId(userId), businessId: trimId(businessId), stepIndex },
       }),
     );
   } catch {

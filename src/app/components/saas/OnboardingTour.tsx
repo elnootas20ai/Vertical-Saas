@@ -68,19 +68,25 @@ export function OnboardingTour({ onComplete }: Props) {
     if (!accountUserId || !businessId) return;
 
     const onArmed = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
+      const detail = (event as CustomEvent<{ userId?: string; businessId?: string; stepIndex?: number }>).detail;
       if (detail?.userId !== accountUserId || detail?.businessId !== businessId) return;
-      setStepIndex(0);
-      setOnboardingTourStep(accountUserId, businessId, 0, 'welcome');
+      const start =
+        typeof detail?.stepIndex === 'number' && detail.stepIndex >= 0
+          ? Math.min(detail.stepIndex, steps.length - 1)
+          : 0;
+      const startStep = steps[start];
+      setStepIndex(start);
+      setOnboardingTourStep(accountUserId, businessId, start, startStep?.id || 'welcome');
       showLockRef.current = true;
       setPausedThisSession(false);
       setOnboardingTourActive(accountUserId, businessId, true);
       setTourGate('show');
+      if (startStep?.route) tourRouteNavigate(navigate, startStep.route);
     };
 
     window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
     return () => window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-  }, [accountUserId, businessId, user]);
+  }, [accountUserId, businessId, user, navigate, steps]);
 
   useEffect(() => {
     if (isWorkerAccount(user)) {
@@ -259,9 +265,9 @@ export function OnboardingTour({ onComplete }: Props) {
         </div>
 
         <button
-          onClick={finishTour}
+          onClick={pauseTour}
           className="absolute top-3 right-3 p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors z-10"
-          title="Cerrar tour"
+          title="Cerrar y continuar más tarde"
         >
           <X className="w-4 h-4 text-gray-400 dark:text-gray-500" />
         </button>
@@ -372,13 +378,16 @@ export function OnboardingTour({ onComplete }: Props) {
 export function useRestartTour() {
   const { user } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
-  const restart = useCallback(() => {
-    const accountUserId = resolveAccountUserId(user);
-    const businessId = String(currentBusiness?.business_id || '').trim();
-    if (!accountUserId) return false;
-    if (!businessId) return false;
-    armOnboardingTourForBusiness(accountUserId, businessId);
-    return true;
-  }, [user, currentBusiness?.business_id]);
+  const restart = useCallback(
+    (options?: { fromBeginning?: boolean }) => {
+      const accountUserId = resolveAccountUserId(user);
+      const businessId = String(currentBusiness?.business_id || '').trim();
+      if (!accountUserId) return false;
+      if (!businessId) return false;
+      armOnboardingTourForBusiness(accountUserId, businessId, options);
+      return true;
+    },
+    [user, currentBusiness?.business_id],
+  );
   return restart;
 }

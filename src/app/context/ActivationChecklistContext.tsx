@@ -351,26 +351,33 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     if (completionPct !== 100 || !accountUserId || !businessId) return;
+    if (isDelivery) return;
     if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
     setIsDismissed(true);
     setActivationChecklistDismissed(accountUserId, businessId, true);
-  }, [completionPct, accountUserId, businessId]);
+  }, [completionPct, accountUserId, businessId, isDelivery]);
 
   const dismiss = useCallback(() => {
-    if (isDelivery) return;
     setIsDismissed(true);
     if (accountUserId && businessId) {
       setActivationChecklistDismissed(accountUserId, businessId, true);
+      if (isDelivery) setActivationChecklistForceVisible(accountUserId, businessId, false);
     }
   }, [accountUserId, businessId, isDelivery]);
 
-  /** Delivery: ignorar un «saltar» antiguo solo si el alta sigue incompleto. */
+  /** Delivery al 100 %: quitar ocultado automático antiguo (una vez) para poder repasar pasos. */
   useEffect(() => {
-    if (!isDelivery || !accountUserId || !businessId) return;
-    if (completionPct >= 100) return;
-    if (isActivationChecklistDismissed(accountUserId, businessId)) {
+    if (!isDelivery || !accountUserId || !businessId || completionPct < 100) return;
+    if (!isActivationChecklistDismissed(accountUserId, businessId)) return;
+    try {
+      const migKey = `vertial_activation_redisplay:${accountUserId}:${businessId}`;
+      if (localStorage.getItem(migKey) === '1') return;
       setActivationChecklistDismissed(accountUserId, businessId, false);
       setIsDismissed(false);
+      localStorage.setItem(migKey, '1');
+    } catch {
+      setIsDismissed(false);
+      setActivationChecklistDismissed(accountUserId, businessId, false);
     }
   }, [isDelivery, accountUserId, businessId, completionPct]);
 
@@ -388,8 +395,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     setTimeout(() => setIsLoadingSample(false), 1500);
   }, []);
 
-  const isVisible =
-    totalSteps > 0 && !isDismissed && (completionPct < 100 || forceVisible);
+  const isVisible = totalSteps > 0 && !isDismissed && (isDelivery || completionPct < 100 || forceVisible);
 
   return (
     <ActivationChecklistContext.Provider
