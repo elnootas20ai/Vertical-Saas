@@ -6265,6 +6265,10 @@ export function pdvDocMatchesUser(doc, userId) {
   return workCenterDocMatchesUser(doc, userId);
 }
 
+export function catalogDocMatchesUser(doc, userId) {
+  return workCenterDocMatchesUser(doc, userId);
+}
+
 function isRetailWorkCenterDoc(doc) {
   const t = String(doc?.centerType || '').trim();
   return t === 'punto_de_venta' || t === 'almacen';
@@ -9650,7 +9654,7 @@ export async function listCatalogItemsByUser(req, userId, { module: filterModule
   return docs
     .filter((doc) => {
       if (!doc || doc.type !== 'catalog_item' || doc.deletedAt) return false;
-      if (userId && doc.user_id !== userId) return false;
+      if (userId && !catalogDocMatchesUser(doc, userId)) return false;
       if (filterModule && (doc.module || 'catalog') !== filterModule) return false;
       return true;
     })

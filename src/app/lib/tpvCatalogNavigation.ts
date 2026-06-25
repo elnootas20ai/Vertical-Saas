@@ -5,6 +5,7 @@ import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory } from './deliveryCatalogImport';
 
 export type TpvCatalogScope =
+  | { kind: 'all' }
   | { kind: 'brand'; brandId: string }
   | { kind: 'shared'; groupKey: string };
 
@@ -26,11 +27,13 @@ function foldKey(s: string): string {
 }
 
 export function formatTpvSectionId(scope: TpvCatalogScope): string {
+  if (scope.kind === 'all') return 'all';
   if (scope.kind === 'brand') return `brand:${scope.brandId}`;
   return `shared:${scope.groupKey}`;
 }
 
 export function parseTpvSectionId(id: string): TpvCatalogScope | null {
+  if (id === 'all') return { kind: 'all' };
   if (id.startsWith('brand:')) {
     const brandId = id.slice(6);
     return brandId ? { kind: 'brand', brandId } : null;
@@ -85,9 +88,18 @@ export function sharedGroupLabel(groupKey: string): string {
   return SHARED_GROUP_LABELS[groupKey] || groupKey.charAt(0).toUpperCase() + groupKey.slice(1);
 }
 
-/** Pestañas superiores: líneas comerciales (marcas) + bloques compartidos del Excel. */
+/** Pestañas superiores: todo el catálogo + líneas comerciales + bloques compartidos. */
 export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[]): TpvCatalogSection[] {
   const sections: TpvCatalogSection[] = [];
+  if (catalog.some(isSellable)) {
+    sections.push({
+      id: formatTpvSectionId({ kind: 'all' }),
+      scope: { kind: 'all' },
+      label: 'Todos',
+      color: '#059669',
+      shortCode: 'ALL',
+    });
+  }
   const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
 
   for (const brand of sorted) {
@@ -130,6 +142,7 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
 
 function itemsInScope(catalog: CatalogItem[], scope: TpvCatalogScope): CatalogItem[] {
   const sellable = catalog.filter(isSellable);
+  if (scope.kind === 'all') return sellable;
   if (scope.kind === 'brand') {
     return sellable.filter((i) => (i.brandIds || []).includes(scope.brandId));
   }
@@ -172,6 +185,8 @@ export function categoriesForTpvScope(
 }
 
 export function defaultTpvSectionId(sections: TpvCatalogSection[]): string {
+  const allSection = sections.find((s) => s.scope.kind === 'all');
+  if (allSection) return allSection.id;
   const brandSection = sections.find((s) => s.scope.kind === 'brand');
   return brandSection?.id ?? sections[0]?.id ?? '';
 }

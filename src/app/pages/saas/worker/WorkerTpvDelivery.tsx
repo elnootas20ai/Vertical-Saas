@@ -983,8 +983,9 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!userId) return;
-    prefetchTpvCatalog(userId, businessId || '');
-  }, [userId, businessId]);
+    const bizId = businessId || String(tabletBinding?.businessId || '').trim();
+    prefetchTpvCatalog(userId, bizId);
+  }, [userId, businessId, tabletBinding?.businessId]);
 
   useEffect(() => {
     if (!userId) {

@@ -5,7 +5,7 @@ import { listBrandsRequest } from './brandsApi';
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v2:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v3:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
@@ -161,7 +161,8 @@ export async function fetchTpvCatalog(
 
   const promise = (async () => {
     const [items, brands] = await Promise.all([
-      listCatalogItemsRequest(userId, 'catalog', { view: 'tpv' }),
+      // Misma amplitud que Catálogo (sin filtrar solo module=catalog).
+      listCatalogItemsRequest(userId, undefined, { view: 'tpv' }),
       businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
     ]);
     const snapshot: TpvCatalogSnapshot = {

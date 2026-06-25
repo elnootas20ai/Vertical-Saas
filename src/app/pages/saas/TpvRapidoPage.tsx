@@ -386,7 +386,11 @@ export function TpvRapidoOrderFlow({
     if (resolved) return resolved;
     return String(tabletBinding?.dataUserId || '').trim();
   }, [user, currentBusiness, tabletBinding?.dataUserId]);
-  const businessId = resolveBusinessScopeId(currentBusiness);
+  const businessId = useMemo(() => {
+    const fromBusiness = resolveBusinessScopeId(currentBusiness);
+    if (fromBusiness) return fromBusiness;
+    return String(tabletBinding?.businessId || '').trim();
+  }, [currentBusiness, tabletBinding?.businessId]);
   const clientSearchBusinessId = isDeliveryBusiness ? (businessId || undefined) : undefined;
 
   const [currentStep, setCurrentStep] = useState<Step>('client');
