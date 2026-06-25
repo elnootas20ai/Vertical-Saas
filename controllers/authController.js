@@ -32,6 +32,7 @@ import {
   isValidPosPin,
   findPointOfSaleByTerminalCode,
   findWorkCenterById,
+  resolveBusinessDocumentForPointOfSale,
   workerCanAccessPdvForTablet,
   sanitizePointOfSale,
   incrementFailedLoginAttempts,
@@ -3369,14 +3370,7 @@ export async function posSwitchUser(req, res) {
 // ─── TPV Tablet: código de tienda (fichaje + sesión TPV) ─────────────────────
 
 async function resolveBusinessForPointOfSale(req, pdv) {
-  const wc = pdv.workCenterId ? await findWorkCenterById(req, pdv.workCenterId) : null;
-  const businessId = String(wc?.businessId || wc?.business_id || '').trim();
-  if (businessId) {
-    const business = await findBusinessById(req, businessId);
-    if (business) return business;
-  }
-  const all = await listAllBusinesses(req);
-  return all.find((b) => b.owner_user_id === pdv.user_id && !b.deletedAt) || null;
+  return resolveBusinessDocumentForPointOfSale(req, pdv);
 }
 
 async function resolveTabletSessionAccount(req, business, pdv) {

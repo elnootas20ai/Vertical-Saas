@@ -6270,32 +6270,62 @@ function isRetailWorkCenterDoc(doc) {
   return t === 'punto_de_venta' || t === 'almacen';
 }
 
-async function listOwnerBusinessesForUser(req, userId) {
+/** Misma lógica que el login tablet: empresa del WC o, si falta, la del titular del PDV. */
+export async function resolveBusinessDocumentForPointOfSale(req, pdv) {
+  const pdvOwner = normalizeAccountUserId(pdv?.user_id);
+  if (!pdvOwner) return null;
+
+  const owned = (await listAllBusinesses(req)).filter(
+    (b) => !b?.deletedAt && normalizeAccountUserId(b.owner_user_id) === pdvOwner,
+  );
+  if (owned.length === 0) return null;
+
+  const wcId = String(pdv?.workCenterId || '').trim();
+  const wc = wcId ? await findWorkCenterById(req, wcId) : null;
+  const fromWc = normalizeBusinessScopeId(wc?.businessId || wc?.business_id);
+  if (fromWc) {
+    const business = owned.find((b) => normalizeBusinessScopeId(b.business_id) === fromWc);
+    if (business) return business;
+    const byId = await findBusinessById(req, fromWc);
+    if (byId && !byId.deletedAt) return byId;
+  }
+
+  if (owned.length === 1) return owned[0];
+
+  const label = String(wc?.name || pdv?.name || '').trim().toLowerCase();
+  if (label) {
+    const exact = owned.find((b) => String(b.name || '').trim().toLowerCase() === label);
+    if (exact) return exact;
+    const partial = owned.find((b) => {
+      const bn = String(b.name || '').trim().toLowerCase();
+      return bn && (label.includes(bn) || bn.includes(label));
+    });
+    if (partial) return partial;
+  }
+
+  if (wcId) {
+    for (const business of owned) {
+      const bid = normalizeBusinessScopeId(business.business_id);
+      const wcIds = await listWorkCenterIdsForBusiness(req, pdv.user_id, bid);
+      if (wcIds.has(wcId)) return business;
+    }
+  }
+
+  return owned[0] || null;
+}
+
+export async function resolveBusinessIdForPointOfSale(req, pdv) {
+  const business = await resolveBusinessDocumentForPointOfSale(req, pdv);
+  return normalizeBusinessScopeId(business?.business_id);
+}
+
+export async function listOwnerBusinessesForUser(req, userId) {
   const uid = normalizeAccountUserId(userId);
   if (!uid) return [];
   const all = await listAllBusinesses(req);
   return all.filter(
     (b) => !b?.deletedAt && normalizeAccountUserId(b.owner_user_id) === uid,
   );
-}
-
-/** Misma lógica que el login tablet: empresa del WC o, si falta, la del titular del PDV. */
-export async function resolveBusinessIdForPointOfSale(req, pdv) {
-  const wcId = String(pdv?.workCenterId || '').trim();
-  if (wcId) {
-    const wc = await findWorkCenterById(req, wcId);
-    const fromWc = normalizeBusinessScopeId(wc?.businessId || wc?.business_id);
-    if (fromWc) return fromWc;
-  }
-  const ownerBusinesses = await listOwnerBusinessesForUser(req, pdv?.user_id);
-  if (ownerBusinesses.length === 1) {
-    return normalizeBusinessScopeId(ownerBusinesses[0].business_id);
-  }
-  const pdvOwner = normalizeAccountUserId(pdv?.user_id);
-  const match = ownerBusinesses.find(
-    (b) => normalizeAccountUserId(b.owner_user_id) === pdvOwner,
-  );
-  return normalizeBusinessScopeId(match?.business_id);
 }
 
 /**
@@ -6315,8 +6345,8 @@ export async function repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, t
 
   const owned = await listOwnerBusinessesForUser(req, userId);
   const canRepair =
-    !current ||
-    (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid);
+    owned.some((b) => normalizeBusinessScopeId(b.business_id) === bid) &&
+    (!current || (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid));
   if (!canRepair) return false;
 
   const db = getWorkCentersDbName();
@@ -6351,8 +6381,14 @@ export async function acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, busi
     if (wcId) {
       const wc = await findWorkCenterById(req, wcId);
       if (!wc || !workCenterDocMatchesUser(wc, userId)) return null;
-    } else if (owned.length !== 1) {
-      return null;
+    } else {
+      const pdvName = String(pdvDoc.name || '').trim().toLowerCase();
+      const bizName = String(business.name || '').trim().toLowerCase();
+      const nameMatches =
+        pdvName &&
+        bizName &&
+        (pdvName === bizName || pdvName.includes(bizName) || bizName.includes(pdvName));
+      if (!nameMatches && owned.length !== 1) return null;
     }
     scopedPdvIds.add(pdvId);
   }
@@ -6368,7 +6404,11 @@ export async function listWorkCenterIdsForBusiness(req, userId, businessId) {
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
   const ids = new Set();
-  const legacyRetailIds = [];
+  const legacyRetail = [];
+  const owned = await listOwnerBusinessesForUser(req, userId);
+  const business = owned.find((b) => normalizeBusinessScopeId(b.business_id) === bid);
+  const bizName = String(business?.name || '').trim().toLowerCase();
+
   for (const d of docs) {
     if (d?.type !== 'sales_point' || d?.deletedAt) continue;
     if (!workCenterDocMatchesUser(d, userId)) continue;
@@ -6379,13 +6419,23 @@ export async function listWorkCenterIdsForBusiness(req, userId, businessId) {
       ids.add(id);
       continue;
     }
-    if (!wb && isRetailWorkCenterDoc(d)) legacyRetailIds.push(id);
+    if (!wb && isRetailWorkCenterDoc(d)) {
+      legacyRetail.push({ id, name: String(d.name || '') });
+    }
   }
 
-  if (ids.size === 0 && legacyRetailIds.length > 0) {
-    const owned = await listOwnerBusinessesForUser(req, userId);
+  if (legacyRetail.length > 0 && bizName) {
+    for (const legacy of legacyRetail) {
+      const wcName = legacy.name.trim().toLowerCase();
+      if (wcName === bizName || wcName.includes(bizName) || bizName.includes(wcName)) {
+        ids.add(legacy.id);
+      }
+    }
+  }
+
+  if (ids.size === 0 && legacyRetail.length > 0) {
     if (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid) {
-      for (const legacyId of legacyRetailIds) ids.add(legacyId);
+      for (const legacy of legacyRetail) ids.add(legacy.id);
     }
   }
 
