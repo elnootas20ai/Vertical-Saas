@@ -273,6 +273,14 @@ export function Gate() {
   // Tras el onboarding, crear la empresa automáticamente con los datos ya recogidos.
   useEffect(() => {
     if (!showTrulyEmptyBusinesses || !hasOnboardingCompany || autoProvisionAttempted.current) return;
+
+    // El backend ya la crea al completar el onboarding; evitar un segundo alta desde aquí.
+    if (user?.onboardingCompleted) {
+      autoProvisionAttempted.current = true;
+      void reloadBusinesses();
+      return;
+    }
+
     autoProvisionAttempted.current = true;
     setIsAutoProvisioning(true);
 
@@ -297,6 +305,7 @@ export function Gate() {
   }, [
     showTrulyEmptyBusinesses,
     hasOnboardingCompany,
+    user?.onboardingCompleted,
     createBusiness,
     reloadBusinesses,
     switchBusiness,

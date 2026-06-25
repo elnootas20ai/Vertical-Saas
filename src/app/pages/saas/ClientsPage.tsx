@@ -19,10 +19,10 @@ import { SAAS__ConvertToClientModal } from '../../components/design-system/SAAS_
 import { SAAS__CreateContractModal } from '../../components/design-system/SAAS__CreateContractModal';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import { CrmDownloadDropdown } from '../../components/saas/CrmDownloadDropdown';
+import { ClientsActionsMenu } from '../../components/saas/ClientsActionsMenu';
 import { CrmNav } from '../../components/saas/CrmNav';
 import { NuevoClienteModal } from '../../components/saas/NuevoClienteModal';
 import { CrmAlertsPanel } from '../../components/saas/CrmAlertsPanel';
-import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../../components/saas/ActivationGuideUi';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -1986,6 +1986,22 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     ? serverClientsPagination.total
     : filteredClients.length;
 
+  const clientExportRows = useMemo(
+    () =>
+      filteredClients.map((c) => ({
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+        dni: c.dni,
+        address: c.address,
+        city: c.city,
+        postalCode: c.postalCode,
+        status: c.status,
+        tags: c.tags,
+      })),
+    [filteredClients],
+  );
+
   const { paginated: paginatedClientsLocal, pagination: clientsPaginationLocal } = usePagination(
     useServerClients && !useSegmentMode ? [] : filteredClients,
     20,
@@ -2868,6 +2884,32 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   // ─── Tab: Clients ─────────────────────────────────────────────────────────
 
+  const renderClientsToolbar = () => (
+    <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:px-4">
+      <ViewToggle view={clientsView} setView={setClientsView} />
+      <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
+        <ClientsActionsMenu
+          isDeliveryBusiness={isDeliveryBusiness}
+          canUseSegments={listPlan.canUseSegments}
+          canExport={listPlan.canExport}
+          canImportFromBusiness={listPlan.canImportFromBusiness}
+          hasOtherBusinesses={otherBusinesses.length > 0}
+          segmentConditionsCount={segmentConditions.length}
+          exportClients={clientExportRows}
+          requiredPlanLabel={listPlan.requiredPlanLabel}
+          onQuickAddClient={() => setShowAddClientModal(true)}
+          onAIAddClient={() => setShowAIClientModal(true)}
+          onImportClients={() => setCrmImportMode('clients')}
+          onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
+          onImportFromBusiness={() => {
+            setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
+            setShowImportFromBusiness(true);
+          }}
+        />
+      </ActivationFieldWrap>
+    </div>
+  );
+
   const renderClientsTab = () => (
     <div className="space-y-3">
       {isDeliveryBusiness && (
@@ -2877,126 +2919,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           lockedCount={listPlan.lockedCount}
         />
       )}
-
-      {/* Toolbar */}
-      <div className={`flex items-center gap-2 ${isDeliveryBusiness ? 'justify-between flex-wrap' : ''}`}>
-        <div className="flex items-center gap-2 min-w-0">
-          {branches.length > 0 && (
-            <div className="relative flex-shrink-0">
-              <Store className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500 pointer-events-none" />
-              <select
-                value={filterBranch}
-                onChange={e => setFilterBranch(e.target.value)}
-                className={`pl-7 pr-7 py-2.5 border-2 rounded-xl text-xs font-semibold focus:outline-none transition-all appearance-none bg-white dark:bg-gray-800 ${
-                  filterBranch !== 'all'
-                    ? 'border-violet-400 text-violet-700 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20'
-                    : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'
-                }`}
-              >
-                <option value="all">Todos los PDV</option>
-                {branches.map(b => (
-                  <option key={b.branch_id} value={b.branch_id}>{b.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
-            </div>
-          )}
-          <ViewToggle view={clientsView} setView={setClientsView} />
-        </div>
-
-        <div className={`flex items-center gap-2 flex-shrink-0 ${isDeliveryBusiness ? 'ml-auto' : ''}`}>
-          {isDeliveryBusiness && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!listPlan.canUseSegments) {
-                    toast.info(`Segmentación disponible desde plan ${listPlan.requiredPlanLabel('lista_segmentos')}`);
-                    return;
-                  }
-                  setShowSegmentBuilder((prev) => !prev);
-                }}
-                title={listPlan.canUseSegments ? 'Segmentación avanzada' : `Plan ${listPlan.requiredPlanLabel('lista_segmentos')}`}
-                className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2.5 border-2 rounded-xl transition-colors text-xs font-semibold ${
-                  segmentConditions.length > 0
-                    ? 'border-indigo-400 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
-                    : listPlan.canUseSegments
-                      ? 'border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-600 dark:text-gray-400'
-                      : 'border-gray-200 text-gray-400 opacity-70'
-                }`}
-              >
-                <TrendingUp className="w-4 h-4" />
-                Segmentos
-                {!listPlan.canUseSegments && <Lock className="w-3 h-3" />}
-                {segmentConditions.length > 0 && (
-                  <span className="text-xs bg-indigo-600 text-white rounded-full w-4 h-4 flex items-center justify-center">
-                    {segmentConditions.length}
-                  </span>
-                )}
-              </button>
-              {listPlan.canExport ? (
-                <CrmDownloadDropdown
-                  mode="clients"
-                  isDelivery
-                  clients={filteredClients.map((c) => ({
-                    name: c.name,
-                    phone: c.phone,
-                    email: c.email,
-                    dni: c.dni,
-                    address: c.address,
-                    city: c.city,
-                    postalCode: c.postalCode,
-                    status: c.status,
-                    tags: c.tags,
-                  }))}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => toast.info(`Exportación disponible desde plan ${listPlan.requiredPlanLabel('lista_export')}`)}
-                  className="flex-shrink-0 p-2.5 border-2 border-gray-200 dark:border-gray-700 text-gray-400 rounded-xl opacity-70"
-                  title={`Plan ${listPlan.requiredPlanLabel('lista_export')}`}
-                >
-                  <Download className="w-4 h-4" />
-                </button>
-              )}
-            </>
-          )}
-          {isDeliveryBusiness && otherBusinesses.length > 0 && (
-            listPlan.canImportFromBusiness ? (
-            <button
-              type="button"
-              onClick={() => {
-                setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
-                setShowImportFromBusiness(true);
-              }}
-              className="px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:border-violet-400 hover:text-violet-700 dark:hover:text-violet-300 transition-all"
-            >
-              Importar de otra empresa
-            </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => toast.info(`Importación entre empresas disponible en plan ${listPlan.requiredPlanLabel('lista_import_empresa')}`)}
-                className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-400 opacity-70"
-              >
-                <Lock className="w-3 h-3" />
-                Importar empresa
-              </button>
-            )
-          )}
-          <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
-            <AddButtonDropdown
-              label="Cliente"
-              onQuickAdd={() => setShowAddClientModal(true)}
-              onAIAdd={() => setShowAIClientModal(true)}
-              onImport={() => setCrmImportMode('clients')}
-              quickAddLabel="Alta rápida"
-              quickAddDesc="Formulario de nuevo cliente"
-            />
-          </ActivationFieldWrap>
-        </div>
-      </div>
 
       {isDeliveryBusiness && showSegmentBuilder && listPlan.canUseSegments && (
         <div className="mt-1">
@@ -3990,6 +3912,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     <>
       <div className="space-y-4">
         {!embedDeliveryOps && <CrmNav active={activeTab} />}
+
+        {activeTab === 'clients' ? renderClientsToolbar() : null}
 
         {/* Misma barra de búsqueda en todas las pestañas: debajo del nav, altura fija, sin saltos al cambiar */}
         <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm px-3 py-3 md:px-4 md:py-3">

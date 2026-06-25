@@ -5,6 +5,7 @@ import type { Client } from '../context/AppContext';
 export interface ClientPhoneSearchResult {
   results: Client[];
   isSearching: boolean;
+  searchError: string | null;
   selectedClient: Client | null;
   selectClient: (client: Client) => void;
   clearSelection: () => void;
@@ -17,6 +18,7 @@ export function useClientPhoneSearch(params: {
   businessId?: string;
   enabled?: boolean;
   debounceMs?: number;
+  resultLimit?: number;
   /** Solo dígitos; usado cuando matchByName es false (comportamiento clásico). */
   minDigits?: number;
   /**
@@ -31,13 +33,15 @@ export function useClientPhoneSearch(params: {
     phone,
     businessId,
     enabled = true,
-    debounceMs = 300,
+    debounceMs = 400,
+    resultLimit = 15,
     minDigits = 3,
     matchByName = false,
     minQueryLength = 2,
   } = params;
   const [results, setResults] = useState<Client[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,9 +59,11 @@ export function useClientPhoneSearch(params: {
     if (!shouldSearch) {
       setResults([]);
       setIsSearching(false);
+      setSearchError(null);
       return;
     }
     setIsSearching(true);
+    setSearchError(null);
     timerRef.current = setTimeout(async () => {
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
@@ -66,18 +72,24 @@ export function useClientPhoneSearch(params: {
         const clients = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
-          8,
+          resultLimit,
           controller.signal,
           businessId,
         );
         if (!controller.signal.aborted) {
           setResults(clients);
+          setSearchError(null);
           setIsSearching(false);
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (!controller.signal.aborted) {
           setResults([]);
+          setSearchError(
+            err instanceof Error && err.message
+              ? err.message
+              : 'No se pudo buscar clientes. Inténtalo de nuevo.',
+          );
           setIsSearching(false);
         }
       }
@@ -86,7 +98,7 @@ export function useClientPhoneSearch(params: {
       if (timerRef.current) clearTimeout(timerRef.current);
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [shouldSearch, queryForApi, userId, businessId, debounceMs, selectedClient]);
+  }, [shouldSearch, queryForApi, userId, businessId, debounceMs, resultLimit, selectedClient]);
 
   const selectClient = useCallback((client: Client) => {
     setSelectedClient(client);
@@ -101,7 +113,16 @@ export function useClientPhoneSearch(params: {
   const clearResults = useCallback(() => {
     setResults([]);
     setIsSearching(false);
+    setSearchError(null);
   }, []);
 
-  return { results, isSearching, selectedClient, selectClient, clearSelection, clearResults };
+  return {
+    results,
+    isSearching,
+    searchError,
+    selectedClient,
+    selectClient,
+    clearSelection,
+    clearResults,
+  };
 }

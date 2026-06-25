@@ -97,6 +97,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useTenantEntitlements } from '../../hooks/useTenantEntitlements';
 import { PortfolioPlanBanner } from '../../components/saas/PortfolioPlanBanner';
+import { VertialSubscriptionSummary } from '../../components/saas/VertialSubscriptionSummary';
 import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -350,6 +351,7 @@ function TabBilling() {
   const [isInvoicePreviewOpen, setIsInvoicePreviewOpen] = useState(false);
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
   const [billingFeedback, setBillingFeedback] = useState<string | null>(null);
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
   const [invoiceForm, setInvoiceForm] = useState({
     number: buildInvoiceNumber(),
@@ -387,6 +389,7 @@ function TabBilling() {
 
   const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) || plans[0];
   const activeSubscriptionPlanId = subscription.selectedPlanId || 'basic';
+  const activePlan = plans.find((plan) => plan.id === activeSubscriptionPlanId) || plans[0];
   const accountBlocked = isBlockingSubscriptionStatus(subscription.status);
   const isSuspended = subscription.status === 'suspended';
   /** Permite ir a pasarela aunque ya haya suscripción, si el usuario eligió otro plan (pruebas / futuro upgrade). */
@@ -409,6 +412,23 @@ function TabBilling() {
 
     setSelectedPlanId(subscription.selectedPlanId);
   }, [subscription.selectedPlanId]);
+
+  useEffect(() => {
+    if (subscription.billingMode === 'monthly' || subscription.billingMode === 'annual') {
+      setBillingMode(subscription.billingMode);
+      return;
+    }
+    const payMode = user?.paymentSummary?.billingMode;
+    if (payMode === 'monthly' || payMode === 'annual') {
+      setBillingMode(payMode);
+    }
+  }, [subscription.billingMode, user?.paymentSummary?.billingMode]);
+
+  useEffect(() => {
+    if (accountBlocked) {
+      setShowPlanPicker(true);
+    }
+  }, [accountBlocked]);
 
   useEffect(() => {
     if (!billingSelectionStorageKey) {
@@ -817,69 +837,41 @@ function TabBilling() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="p-6 border-b border-gray-100 dark:border-gray-800">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">Suscripción activa</p>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{subscription.planName}</span>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${sc.badgeBg} ${sc.badgeText}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
-                  {sc.label}
-                </span>
-              </div>
-            </div>
-            <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center flex-shrink-0">
-              <TrendingUp className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
+      <VertialSubscriptionSummary
+        subscription={subscription}
+        user={user}
+        activePlan={activePlan}
+        billingMode={billingMode}
+        annualDiscount={ANNUAL_DISCOUNT}
+        statusStyle={sc}
+        onChangePlan={() => setShowPlanPicker(true)}
+      />
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-6">
-          {subscription.currentPeriodEnd && (
-            <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-2xl">
-              <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center">
-                <Calendar className="w-4 h-4 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-xs text-blue-600 font-medium">Próximo pago</p>
-                <p className="text-sm font-bold text-blue-900">
-                  {new Date(subscription.currentPeriodEnd).toLocaleDateString('es-ES')}
-                </p>
-              </div>
-            </div>
-          )}
-          {subscription.lastPaymentAt && (
-            <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-2xl">
-              <div className="w-9 h-9 bg-emerald-100 rounded-xl flex items-center justify-center">
-                <Check className="w-4 h-4 text-emerald-600" />
-              </div>
-              <div>
-                <p className="text-xs text-emerald-600 font-medium">Último pago</p>
-                <p className="text-sm font-bold text-emerald-900">
-                  {new Date(subscription.lastPaymentAt).toLocaleDateString('es-ES')}
-                </p>
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-            <div className="w-9 h-9 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center">
-              <CreditCard className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Cobro</p>
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{billingMode === 'monthly' ? 'Mensual' : 'Anual'}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      {(showPlanPicker || accountBlocked) && (
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Planes disponibles</p>
-          {/* S-09: Toggle visual mensual / anual con descuento */}
-          <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-xl p-1 self-start sm:self-auto">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+              {wantsDifferentPlanThanSubscription ? 'Confirmar cambio de plan' : 'Elige tu plan'}
+            </p>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Selecciona el plan y el ciclo de cobro. Al confirmar irás a la pasarela segura de Vertial.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 self-start">
+            {!accountBlocked ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPlanPicker(false);
+                  setSelectedPlanId(activeSubscriptionPlanId);
+                }}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancelar
+              </button>
+            ) : null}
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-700 rounded-xl p-1">
             <button
               type="button"
               onClick={() => setBillingMode('monthly')}
@@ -905,6 +897,7 @@ function TabBilling() {
                 −20%
               </span>
             </button>
+            </div>
           </div>
         </div>
         {billingMode === 'annual' && (
@@ -994,6 +987,7 @@ function TabBilling() {
           })}
         </div>
       </div>
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="mb-5">

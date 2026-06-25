@@ -13,6 +13,7 @@ import {
 } from '../services/couchdb.js';
 import { seedAlertsConfigIfMissing } from './settingsController.js';
 import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
+import { findLikelyDuplicateBusiness } from '../shared/billing/onboardingBusiness.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -30,6 +31,17 @@ export async function createBusiness(req, res) {
     const limitCheck = await assertCanCreateBusiness(req, userId, actorEmail);
     if (!limitCheck.ok) {
       return res.status(limitCheck.status).json({ ok: false, error: limitCheck.error, code: limitCheck.code });
+    }
+
+    const existingBusinesses = await listBusinessesByUser(req, userId);
+    const duplicate = findLikelyDuplicateBusiness(existingBusinesses, {
+      ownerUserId: userId,
+      name,
+      city,
+      taxId,
+    });
+    if (duplicate) {
+      return res.json({ ok: true, business: sanitizeBusiness(duplicate), deduplicated: true });
     }
 
     const business = buildBusinessDocument({

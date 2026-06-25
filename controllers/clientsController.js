@@ -23,6 +23,7 @@ import {
   sanitizeClientPromotion,
   listClientPromotionsByClient,
   searchClientsByPhone,
+  getClientDocumentsForUser,
   listDeliveryOrdersByUser,
 } from '../services/couchdb.js';
 import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
@@ -942,6 +943,10 @@ export async function bulkCreateClients(req, res) {
       entityLabel: 'Importación masiva',
       metadata: { created: created.length, errors: errors.length, requested: clients.length },
     });
+
+    if (created.length > 0) {
+      await getClientDocumentsForUser(req, userId).catch(() => []);
+    }
 
     return res.status(201).json({ ok: true, clients: created, errors, total: created.length });
   } catch (error) {

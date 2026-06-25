@@ -15,6 +15,40 @@ export function resolveBusinessNameFromOnboarding(account) {
   return String(profile.tradeName || account?.companyName || '').trim();
 }
 
+function normalizeBusinessMatchText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+/**
+ * Evita altas duplicadas cuando el mismo titular repite nombre (y ciudad o CIF).
+ * @param {object[]} existing
+ * @param {{ name?: string, city?: string, taxId?: string, ownerUserId?: string }} fields
+ * @returns {object|null}
+ */
+export function findLikelyDuplicateBusiness(existing, fields) {
+  const ownerUserId = String(fields?.ownerUserId || '').trim();
+  const normName = normalizeBusinessMatchText(fields?.name);
+  if (!ownerUserId || !normName || !Array.isArray(existing)) return null;
+
+  const normCity = normalizeBusinessMatchText(fields?.city);
+  const normTax = normalizeBusinessMatchText(fields?.taxId);
+
+  return (
+    existing.find((business) => {
+      if (String(business?.owner_user_id || '').trim() !== ownerUserId) return false;
+      if (normalizeBusinessMatchText(business?.name) !== normName) return false;
+      if (normTax) {
+        const businessTax = normalizeBusinessMatchText(business?.taxId || business?.tax_id);
+        if (businessTax && businessTax === normTax) return true;
+      }
+      if (normCity) {
+        return normalizeBusinessMatchText(business?.city) === normCity;
+      }
+      return true;
+    }) || null
+  );
+}
+
 /**
  * @returns {Promise<{ ok: boolean, created?: boolean, business?: object, businessId?: string, reason?: string }>}
  */
@@ -24,17 +58,27 @@ export async function provisionBusinessFromOnboarding(req, account) {
   if (account.accountType === 'user') return { ok: false, reason: 'worker_account' };
 
   const existing = await listBusinessesByUser(req, userId);
+  const name = resolveBusinessNameFromOnboarding(account);
+  if (!name) return { ok: false, reason: 'missing_name' };
+
+  const onboarding = account.onboardingData || {};
+  const profile = onboarding.companyProfile || {};
+  const duplicate = findLikelyDuplicateBusiness(existing, {
+    ownerUserId: userId,
+    name,
+    city: profile.city || profile.province || '',
+    taxId: profile.taxId || '',
+  });
+  if (duplicate) {
+    const businessId = duplicate.business_id || String(duplicate._id || '').replace(/^business:/, '');
+    return { ok: true, created: false, business: duplicate, businessId };
+  }
   if (existing.length > 0) {
     const first = existing[0];
     const businessId = first.business_id || String(first._id || '').replace(/^business:/, '');
     return { ok: true, created: false, business: first, businessId };
   }
 
-  const name = resolveBusinessNameFromOnboarding(account);
-  if (!name) return { ok: false, reason: 'missing_name' };
-
-  const onboarding = account.onboardingData || {};
-  const profile = onboarding.companyProfile || {};
   const business = buildBusinessDocument({
     ownerUserId: userId,
     name,

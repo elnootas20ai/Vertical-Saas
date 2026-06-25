@@ -270,6 +270,13 @@ export function PaymentInfo() {
           </div>
         ) : null}
 
+        <div className="shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-[11px] leading-snug text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100">
+          <p className="font-semibold">14 días de prueba gratuita</p>
+          <p className="mt-0.5 text-blue-800/90 dark:text-blue-200/90">
+            Guardamos tu tarjeta para el cobro automático al terminar la prueba. Hoy no se realiza ningún cargo.
+          </p>
+        </div>
+
         <OnboardingContentCard className="!p-3 sm:!p-4 space-y-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -399,7 +406,8 @@ export function PaymentInfo() {
                 className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-gray-300"
               />
               <span className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
-                Confirmo los datos y autorizo guardar este método de pago según los términos aplicables.
+                Confirmo los datos y autorizo guardar este método de pago. Entiendo que empiezo con 14 días de prueba
+                gratuita y que el cobro del plan se hará al finalizar la prueba.
               </span>
             </label>
             {errors.acceptTerms ? (

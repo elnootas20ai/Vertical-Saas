@@ -363,7 +363,7 @@ export function TpvRapidoOrderFlow({
   const registerFromGate = useTpvRegisterIfOpen();
   const register = registerOverride ?? registerFromGate;
 
-  const { addClient, clients } = useApp();
+  const { addClient, clients, clientsTotalCount } = useApp();
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
   const goBack = onBack ?? (() => navigate('/saas/delivery-ops'));
@@ -404,7 +404,7 @@ export function TpvRapidoOrderFlow({
   const [creatingClient, setCreatingClient] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
-  const { results, isSearching, selectedClient, selectClient, clearSelection, clearResults } =
+  const { results, isSearching, searchError, selectedClient, selectClient, clearSelection, clearResults } =
     useClientPhoneSearch({
       userId,
       phone: phoneInput,
@@ -1707,9 +1707,17 @@ export function TpvRapidoOrderFlow({
                 </div>
               </form>
               <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).
+                {clientsTotalCount >= 500
+                  ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono (3+ dígitos) o nombre (2+ letras). No se listan todos a la vez.`
+                  : 'Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).'}
               </p>
             </div>
+
+            {searchError && (
+              <div className="mt-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-300 text-sm">
+                {searchError}
+              </div>
+            )}
 
             {isSearching && (
               <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
@@ -1732,9 +1740,13 @@ export function TpvRapidoOrderFlow({
             {!showCreateForm && (
               <div className="mt-3 flex items-center justify-between gap-2">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {(!isSearching && results.length === 0 && clientSearchReady)
-                    ? 'No se encontró ningún cliente'
-                    : 'Si no aparece, puedes crear cliente manualmente'}
+                  {searchError
+                    ? 'Revisa la conexión e inténtalo otra vez.'
+                    : (!isSearching && results.length === 0 && clientSearchReady)
+                      ? (isDeliveryBusiness && clientsTotalCount > 0
+                        ? 'No se encontró ningún cliente en esta empresa. Si los importaste en otra, cámbiala arriba.'
+                        : 'No se encontró ningún cliente')
+                      : 'Si no aparece, puedes crear cliente manualmente'}
                 </p>
                 <button
                   onClick={() => {

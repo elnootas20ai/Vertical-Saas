@@ -8,6 +8,10 @@ import {
   dismissBannerForRestOfLocalDay,
   isBannerDismissedForLocalToday,
 } from '../../lib/dayBannerDismiss';
+import {
+  getTrialActiveBannerContent,
+  getTrialExpiringBannerContent,
+} from '../../lib/trialBannerMessages';
 
 export function SubscriptionBanner() {
   const { subscription } = useApp();
@@ -60,28 +64,45 @@ export function SubscriptionBanner() {
     }
   }, [subscription.status, subscription.gracePeriodEndsAt]);
 
+  const hasSavedCard = Boolean(String(user?.paymentSummary?.lastFourDigits || '').trim());
+  const cardLastFour = String(user?.paymentSummary?.lastFourDigits || '').trim();
+  const hasMoneiSubscription = Boolean(String(subscription.moneiSubscriptionId || '').trim());
+
   // Trial active banner (countdown of 14 days)
   if (!dismissedTrial && subscription.status === 'trial_active' && subscription.trialEndsAt) {
     const daysLeft = Math.ceil(
       (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
     if (daysLeft > 0 && daysLeft <= 14) {
+      const trialCopy = getTrialActiveBannerContent({
+        daysLeft,
+        trialEndsAt: subscription.trialEndsAt,
+        hasSavedCard,
+        cardLastFour,
+        hasMoneiSubscription,
+      });
+
       return (
         <div className="bg-blue-50 dark:bg-blue-950/80 border-b-2 border-blue-200 dark:border-blue-800">
           <div className="px-4 md:px-6 py-2 md:py-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <Clock className="w-4 h-4 text-blue-700 dark:text-blue-400 flex-shrink-0" />
-                <span className="text-xs md:text-sm font-semibold text-blue-900 dark:text-blue-200 truncate">
-                  Periodo de prueba: {daysLeft} {daysLeft === 1 ? 'día' : 'días'} restantes
-                </span>
+              <div className="flex items-start gap-2 min-w-0">
+                <Clock className="w-4 h-4 text-blue-700 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-xs md:text-sm font-semibold text-blue-900 dark:text-blue-200">
+                    {trialCopy.title}
+                  </p>
+                  <p className="text-[11px] md:text-xs text-blue-800/90 dark:text-blue-300/90 leading-snug mt-0.5">
+                    {trialCopy.detail}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={() => navigate('/saas/billing')}
                   className="px-3 py-1.5 bg-blue-700 dark:bg-blue-600 hover:bg-blue-800 dark:hover:bg-blue-500 text-white font-medium rounded-lg transition-colors text-xs whitespace-nowrap"
                 >
-                  Activar suscripción
+                  {trialCopy.ctaLabel}
                 </button>
                 <button
                   type="button"
@@ -108,23 +129,34 @@ export function SubscriptionBanner() {
     const daysLeft = Math.ceil(
       (new Date(subscription.trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
     );
+    const trialCopy = getTrialExpiringBannerContent({
+      daysLeft,
+      hasSavedCard,
+      cardLastFour,
+      hasMoneiSubscription,
+    });
 
     return (
       <div className="bg-amber-100 dark:bg-amber-950/80 border-b-2 border-amber-300 dark:border-amber-800">
         <div className="px-4 md:px-6 py-2 md:py-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <Clock className="w-4 h-4 text-amber-700 dark:text-amber-400 flex-shrink-0" />
-              <span className="text-xs md:text-sm font-semibold text-amber-900 dark:text-amber-200 truncate">
-                Prueba termina en {daysLeft} {daysLeft === 1 ? 'día' : 'días'}
-              </span>
+            <div className="flex items-start gap-2 min-w-0">
+              <Clock className="w-4 h-4 text-amber-700 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="text-xs md:text-sm font-semibold text-amber-900 dark:text-amber-200">
+                  {trialCopy.title}
+                </p>
+                <p className="text-[11px] md:text-xs text-amber-900/85 dark:text-amber-200/85 leading-snug mt-0.5">
+                  {trialCopy.detail}
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 onClick={() => navigate('/saas/billing')}
                 className="px-3 py-1.5 bg-amber-700 dark:bg-amber-600 hover:bg-amber-800 dark:hover:bg-amber-500 text-white font-medium rounded-lg transition-colors text-xs whitespace-nowrap"
               >
-                Ver planes
+                {trialCopy.ctaLabel}
               </button>
               <button
                 type="button"

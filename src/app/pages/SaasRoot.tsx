@@ -93,6 +93,7 @@ function SaasContent() {
   const [isAutoCreating, setIsAutoCreating] = useState(false);
 
   const autoCreateAttempted = useRef(false);
+  const onboardingReloadAttempted = useRef(false);
 
 
 
@@ -194,7 +195,6 @@ function SaasContent() {
     if (
       isInitializing ||
       !isAuthenticated ||
-      !createBusiness ||
       !businessesFetchSettled ||
       isLoadingBusinesses ||
       businesses.length > 0 ||
@@ -205,7 +205,23 @@ function SaasContent() {
       return;
     }
 
+    // El backend ya provisiona la empresa al completar el onboarding; solo recargar.
+    if (user?.onboardingCompleted) {
+      if (!onboardingReloadAttempted.current) {
+        onboardingReloadAttempted.current = true;
+        void (async () => {
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            await reloadBusinesses?.();
+            if (attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, 350));
+            }
+          }
+        })();
+      }
+      return;
+    }
 
+    if (!createBusiness) return;
 
     const onboarding = user?.onboardingData as OnboardingDataShape | undefined;
 

@@ -244,6 +244,9 @@ export async function putDocument(req, dbName, docId, document) {
   cacheService.invalidateDb(dbName);
   cacheService.invalidateByPrefix('kpi:');
   cacheService.invalidateByPrefix('view:');
+  if (document?.type === 'client' && document?.user_id) {
+    cacheService.invalidateByPrefix(`clients_user:${String(document.user_id)}:`);
+  }
 
   return payload;
 }
@@ -263,6 +266,11 @@ export async function bulkPutDocuments(req, dbName, docs) {
   cacheService.invalidateDb(dbName);
   cacheService.invalidateByPrefix('kpi:');
   cacheService.invalidateByPrefix('view:');
+  for (const doc of docs || []) {
+    if (doc?.type === 'client' && doc?.user_id) {
+      cacheService.invalidateByPrefix(`clients_user:${String(doc.user_id)}:`);
+    }
+  }
 
   return Array.isArray(payload) ? payload : [];
 }
@@ -3469,12 +3477,40 @@ export function sanitizeClientSummary(client) {
   };
 }
 
+/** Índice en memoria por titular: evita releer notas/promos en cada búsqueda TPV con miles de clientes. */
+const clientDocumentsInflight = new Map();
+
+export async function getClientDocumentsForUser(req, userId) {
+  const uid = String(userId || '').trim();
+  if (!uid) return [];
+
+  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
+  const cached = cacheService.get(cacheKey);
+  if (cached) return cached;
+
+  if (clientDocumentsInflight.has(uid)) {
+    return clientDocumentsInflight.get(uid);
+  }
+
+  const promise = (async () => {
+    const db = getClientsDbName();
+    await ensureDatabase(req, db);
+    const docs = await getAllDocuments(req, db);
+    const clients = docs.filter(
+      (doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === uid,
+    );
+    cacheService.set(cacheKey, clients, cacheService.TTL_PRESETS.DOCS_LIST);
+    return clients;
+  })().finally(() => {
+    clientDocumentsInflight.delete(uid);
+  });
+
+  clientDocumentsInflight.set(uid, promise);
+  return promise;
+}
+
 export async function listClientsByUser(req, userId, options = {}) {
-  const db = getClientsDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  const base = docs
-    .filter((doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === userId);
+  const base = await getClientDocumentsForUser(req, userId);
   const bid = normalizeClientBusinessScopeId(options.businessId);
   const scoped = bid
     ? base.filter((doc) => clientMatchesBusinessScope(doc, bid, options))
@@ -3588,15 +3624,15 @@ function clientPhoneDigitHaystacks(doc) {
 
 /** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
 export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
-  const db = getClientsDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
   const raw = String(phoneQuery || '').trim();
   if (raw.length < 2) return [];
+
+  const docs = await getClientDocumentsForUser(req, userId);
   const qFold = foldSearchText(raw);
   const qDigits = raw.replace(/\D/g, '');
   const preferPhone = clientSearchPrefersPhone(raw, qDigits);
   const bid = normalizeClientBusinessScopeId(options.businessId);
+  const max = Math.min(50, Math.max(1, Number(limit) || 20));
 
   return docs
     .map((d) => {
@@ -3610,7 +3646,7 @@ export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, 
       if (b.score !== a.score) return b.score - a.score;
       return String(b.doc.updatedAt || '').localeCompare(String(a.doc.updatedAt || ''));
     })
-    .slice(0, Number(limit) || 20)
+    .slice(0, max)
     .map((row) => row.doc);
 }
 
