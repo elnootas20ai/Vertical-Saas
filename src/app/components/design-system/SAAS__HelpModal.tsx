@@ -13,7 +13,7 @@ interface Props {
 export function SAAS__HelpModal({ isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const restartTour = useRestartTour();
-  const { restore: restoreActivationGuide } = useActivationChecklist();
+  const { restore: restoreActivationGuide, completionPct, totalSteps } = useActivationChecklist();
 
   useModalClose(isOpen, onClose);
 
@@ -142,9 +142,8 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                 type="button"
                 onClick={() => {
                   onClose();
-                  restoreActivationGuide();
                   if (restartTour()) {
-                    toast.success('Tour iniciado desde el paso 1');
+                    toast.success('Tour abierto — paso 1 de 7');
                   } else {
                     toast.error(
                       'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
@@ -158,9 +157,32 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                 </div>
                 <div className="flex-1 text-left">
                   <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">Tour interactivo</p>
-                  <p className="text-xs text-violet-600 dark:text-violet-400">Reiniciar la guía de bienvenida</p>
+                  <p className="text-xs text-violet-600 dark:text-violet-400">
+                    Ventanas paso a paso (tienda, marca, catálogo…). Distinto del «Alta delivery» del menú.
+                  </p>
                 </div>
               </button>
+              {totalSteps > 0 && completionPct >= 100 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    restoreActivationGuide();
+                    toast.message('Checklist «Alta delivery» visible en el menú lateral');
+                  }}
+                  className="flex items-center gap-3 w-full px-4 py-3 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/30 border border-amber-200 dark:border-amber-800/50 rounded-xl transition-all"
+                >
+                  <div className="w-9 h-9 bg-amber-500 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Ver checklist del alta</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Ya tienes {totalSteps}/{totalSteps} pasos hechos — repaso en el menú lateral.
+                    </p>
+                  </div>
+                </button>
+              )}
             </div>
           </div>
 

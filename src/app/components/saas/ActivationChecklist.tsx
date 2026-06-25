@@ -53,7 +53,9 @@ interface Props {
 export function ActivationChecklist({ collapsed }: Props) {
   const navigate = useNavigate();
   const { currentBusiness } = useBusiness();
-  const { steps, completionPct, completedSteps, totalSteps, isVisible, dismiss } = useActivationChecklist();
+  const { steps, completionPct, completedSteps, totalSteps, isVisible, dismiss } =
+    useActivationChecklist();
+  const allStepsDone = totalSteps > 0 && completedSteps >= totalSteps;
   const [expanded, setExpanded] = useState(readExpandedPreference);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const canDismissChecklist = !isDelivery;
@@ -135,7 +137,15 @@ export function ActivationChecklist({ collapsed }: Props) {
           )}
         </div>
         <p className="text-[9px] leading-snug text-gray-400 dark:text-gray-500 mb-1.5 pr-6">
-          Arriba: pasos del alta. En cada fila, <strong className="font-semibold text-gray-500">datos</strong> = campos de ese paso (ej. 3/4 datos en Empresa).
+          {allStepsDone ? (
+            <>
+              Alta completada. Para repasar pantallas paso a paso: <strong className="font-semibold text-gray-500">Ayuda → Tour interactivo</strong>.
+            </>
+          ) : (
+            <>
+              Progreso real del alta. En cada fila, <strong className="font-semibold text-gray-500">datos</strong> = campos de ese paso (ej. 3/4 en Empresa).
+            </>
+          )}
         </p>
         <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
           <div

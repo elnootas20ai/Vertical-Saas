@@ -3503,7 +3503,7 @@ export function CatalogPage() {
     { id: 'suppliers', label: 'Proveedores', count: supplierKpis.active || undefined },
     { id: 'purchase-orders', label: 'Órdenes de compra' },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
-    { id: 'ingredientes', label: 'Ingredientes' },
+    { id: 'ingredientes', label: 'Ingredientes TPV' },
     { id: 'escandallo', label: 'Escandallo' },
   ], [stockTabCount, catalogItems, supplierKpis.active, invoiceKpis.pending]);
 

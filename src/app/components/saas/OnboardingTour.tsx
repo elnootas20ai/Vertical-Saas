@@ -62,6 +62,26 @@ export function OnboardingTour({ onComplete }: Props) {
   /** Evita que re-renders del contexto empresa oculten el tour a mitad de recorrido. */
   const showLockRef = useRef(false);
 
+  /** Reinicio manual (Ayuda → Tour): siempre escuchar aunque el tour ya estuviera marcado como visto. */
+  useEffect(() => {
+    if (isWorkerAccount(user)) return;
+    if (!accountUserId || !businessId) return;
+
+    const onArmed = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
+      if (detail?.userId !== accountUserId || detail?.businessId !== businessId) return;
+      setStepIndex(0);
+      setOnboardingTourStep(accountUserId, businessId, 0, 'welcome');
+      showLockRef.current = true;
+      setPausedThisSession(false);
+      setOnboardingTourActive(accountUserId, businessId, true);
+      setTourGate('show');
+    };
+
+    window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
+    return () => window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
+  }, [accountUserId, businessId, user]);
+
   useEffect(() => {
     if (isWorkerAccount(user)) {
       if (accountUserId && businessId) {
@@ -89,9 +109,10 @@ export function OnboardingTour({ onComplete }: Props) {
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
     if (alreadySeen) {
-      showLockRef.current = false;
-      setOnboardingTourActive(accountUserId, businessId, false);
-      setTourGate('hide');
+      if (!showLockRef.current) {
+        setOnboardingTourActive(accountUserId, businessId, false);
+        setTourGate('hide');
+      }
       return;
     }
 
@@ -99,9 +120,10 @@ export function OnboardingTour({ onComplete }: Props) {
 
     const openTour = () => {
       if (isOnboardingTourCompleted(accountUserId, businessId)) {
-        showLockRef.current = false;
-        setOnboardingTourActive(accountUserId, businessId, false);
-        setTourGate('hide');
+        if (!showLockRef.current) {
+          setOnboardingTourActive(accountUserId, businessId, false);
+          setTourGate('hide');
+        }
         return;
       }
       showLockRef.current = true;
@@ -110,23 +132,10 @@ export function OnboardingTour({ onComplete }: Props) {
       setTourGate('show');
     };
 
-    const onArmed = (event: Event) => {
-      const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
-      if (detail?.userId === accountUserId && detail?.businessId === businessId) {
-        setStepIndex(0);
-        setOnboardingTourStep(accountUserId, businessId, 0, 'welcome');
-        openTour();
-      }
-    };
-
-    window.addEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-
     if (showLockRef.current) {
       setOnboardingTourActive(accountUserId, businessId, true);
       setTourGate('show');
-      return () => {
-        window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
-      };
+      return;
     }
 
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -143,7 +152,6 @@ export function OnboardingTour({ onComplete }: Props) {
 
     return () => {
       if (timer) clearTimeout(timer);
-      window.removeEventListener(ONBOARDING_TOUR_ARM_EVENT, onArmed);
     };
   }, [
     accountUserId,

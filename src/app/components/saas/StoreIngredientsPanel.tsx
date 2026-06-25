@@ -747,8 +747,10 @@ export function StoreIngredientsPanel({ userId, businessId }: { userId: string; 
     <div className="max-w-6xl mx-auto pb-24 lg:pb-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ingredientes TPV</h1>
-        <p className="text-sm text-gray-500 mt-1 max-w-lg">
-          Configura qué puede quitar el cliente y qué extras cobran en el TPV tablet.
+        <p className="text-sm text-gray-500 mt-1 max-w-2xl leading-relaxed">
+          Lista maestra del negocio. Si importas el catálogo con la columna <strong>ingredientes</strong> en Excel,
+          los nombres se rellenan solos aquí. En cada producto van los que lleva esa receta; aquí marcas cuáles son{' '}
+          <strong>extras de pago</strong> (naranja) y el precio del suplemento.
         </p>
       </div>
 
