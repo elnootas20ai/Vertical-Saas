@@ -64,11 +64,11 @@ import {
   Wallet,
   Trash2,
   Smartphone,
-  ChevronDown,
-  ChevronUp,
   Globe,
   UtensilsCrossed,
   LogOut,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
@@ -315,12 +315,14 @@ function OrderCard({
   onSelect,
   onDelete,
   advancing,
+  readOnly = false,
 }: {
   order: DeliveryOrder;
   onAdvance: (o: DeliveryOrder) => void;
   onSelect: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
   advancing: boolean;
+  readOnly?: boolean;
 }) {
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
@@ -342,14 +344,16 @@ function OrderCard({
         waitMinutes >= LATE_MINUTES ? 'border-red-300 dark:border-red-800' : 'border-gray-200/80 dark:border-gray-600/50'
       }`}
     >
-      <button
-        type="button"
-        onClick={() => onDelete(order)}
-        title="Eliminar pedido"
-        className="absolute top-1 right-1 z-10 p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
-      >
-        <Trash2 className="w-3 h-3" />
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={() => onDelete(order)}
+          title="Eliminar pedido"
+          className="absolute top-1 right-1 z-10 p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      )}
       <div className="flex items-stretch gap-2 pr-5">
         {/* Tiempo de espera — badge fijo a la izquierda */}
         <div
@@ -431,7 +435,7 @@ function OrderCard({
         </button>
 
         {/* Acción principal */}
-        {nextLabel && (
+        {!readOnly && nextLabel && (
           <button
             type="button"
             onClick={() => onAdvance(order)}
@@ -467,6 +471,8 @@ function OrderLane({
   onSelect,
   onDelete,
   advancingId,
+  readOnly = false,
+  compact = false,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -480,9 +486,11 @@ function OrderLane({
   onSelect: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
   advancingId: string | null;
+  readOnly?: boolean;
+  compact?: boolean;
 }) {
   return (
-    <section className={`flex flex-col min-h-[220px] md:min-h-0 flex-1 rounded-2xl border-2 ${borderClass} bg-white dark:bg-gray-900 overflow-hidden shadow-sm`}>
+    <section className={`flex flex-col min-h-0 flex-1 rounded-2xl border-2 ${borderClass} bg-white dark:bg-gray-900 overflow-hidden shadow-sm ${compact ? 'min-h-[140px]' : 'min-h-[220px] md:min-h-0'}`}>
       <header className={`shrink-0 px-3 py-2.5 border-b flex items-center justify-between gap-2 ${headerClass}`}>
         <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-gray-100 min-w-0">
           <span className="shrink-0">{icon}</span>
@@ -507,6 +515,7 @@ function OrderLane({
               onSelect={onSelect}
               onDelete={onDelete}
               advancing={advancingId === order._id}
+              readOnly={readOnly}
             />
           ))
         )}
@@ -653,6 +662,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
 }) {
   useModalClose(true, onClose);
   const { currentBusiness } = useBusiness();
+  const compact = Boolean(readTpvTabletBinding());
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
   const displayLabel = LANE_STATUS_LABEL[order.status] || cfg.label;
@@ -662,15 +672,17 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+    <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-2' : 'p-4 sm:p-6'}`}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
-      <div className="relative flex flex-col w-full max-w-3xl max-h-[88dvh] bg-gray-50 dark:bg-gray-950 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden">
-        <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-4 py-3">
+      <div className={`relative flex flex-col w-full bg-gray-50 dark:bg-gray-950 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden ${
+        compact ? 'max-w-lg max-h-[92dvh] rounded-b-none sm:rounded-2xl' : 'max-w-3xl max-h-[88dvh]'
+      }`}>
+        <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Detalle del pedido</p>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
+                <h2 className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-lg' : 'text-xl'}`}>
                   #{order.orderNumber}
                 </h2>
                 <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${cfg.bg} ${cfg.color}`}>
@@ -697,8 +709,8 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 flex flex-col gap-3 px-4 py-3 overflow-hidden">
-          <div className="shrink-0 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className={`flex-1 min-h-0 flex flex-col gap-3 overflow-hidden ${compact ? 'px-3 py-2' : 'px-4 py-3'}`}>
+          <div className={`shrink-0 grid gap-3 ${compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
             {order.customerName && (
               <div className="flex items-start gap-2.5 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 min-w-0">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-50 dark:bg-cyan-950/40 shrink-0">
@@ -733,8 +745,8 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
               Artículos · {order.items.length}
             </h3>
             <div
-              className={`max-h-[min(280px,32dvh)] overflow-y-auto grid gap-3 content-start ${
-                order.items.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'
+              className={`max-h-[min(280px,32dvh)] overflow-y-auto grid gap-3 content-start grid-cols-1 ${
+                !compact && order.items.length > 1 ? 'sm:grid-cols-2' : ''
               }`}
             >
               {order.items.map((item) => (
@@ -763,7 +775,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
                   </p>
                 )}
               </div>
-              <p className="text-3xl font-black text-emerald-700 dark:text-emerald-400 tabular-nums leading-none shrink-0">
+              <p className={`font-black text-emerald-700 dark:text-emerald-400 tabular-nums leading-none shrink-0 ${compact ? 'text-2xl' : 'text-3xl'}`}>
                 {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
               </p>
             </div>
@@ -908,8 +920,8 @@ export function WorkerTpvDelivery({
     return String(pdv?.workCenterId || '').trim() || null;
   }, [scopedPdvId, activeStoreScope.pointsOfSale]);
 
-  const [showDelivered, setShowDelivered] = useState(true);
   const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
+  const [showDelivered, setShowDelivered] = useState(false);
   const sessionOpenedAt = register?.session?.openedAt ?? null;
 
   const loadOrders = useCallback(async (options?: { silent?: boolean }) => {
@@ -1257,7 +1269,7 @@ export function WorkerTpvDelivery({
       })
       .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
       .filter((o) => matchesSearch(o, search))
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .sort((a, b) => new Date(b.deliveredAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.createdAt).getTime())
       .slice(0, 50),
     [orders, openSession, fulfillmentFilter, search],
   );
@@ -1440,54 +1452,6 @@ export function WorkerTpvDelivery({
         </div>
       </div>
 
-      {/* Completados hoy — cobrados en TPV + entregados */}
-      {!isTabletUi && (
-      <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setShowDelivered((v) => !v)}
-          className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-            <span className="text-sm font-bold text-green-800 dark:text-green-300">
-              Completados en turno ({completedTodayOrders.length})
-            </span>
-          </div>
-          {showDelivered ? <ChevronUp className="w-4 h-4 text-green-700" /> : <ChevronDown className="w-4 h-4 text-green-700" />}
-        </button>
-        {showDelivered && completedTodayOrders.length > 0 && (
-          <div className="mt-2 max-h-44 overflow-y-auto space-y-1">
-            {completedTodayOrders.map((order) => {
-                const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
-                return (
-                  <button
-                    key={order._id}
-                    type="button"
-                    onClick={() => setSelectedOrder(order)}
-                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
-                      <p className="text-[11px] text-gray-500 truncate">
-                        {order.customerName || 'Cliente'}
-                        {' · '}
-                        {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                        {order.channel ? ` · ${String(order.channel).toUpperCase()}` : ''}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs font-bold tabular-nums">{formatCurrency(resolveDeliveryOrderChargeTotal(order))}</p>
-                      <p className={`text-[10px] font-semibold ${statusCfg.color}`}>{statusCfg.label}</p>
-                    </div>
-                  </button>
-                );
-              })}
-          </div>
-        )}
-      </div>
-      )}
-
       {/* Columnas Montaje | Reparto */}
       <div className={`flex-1 min-h-0 overflow-hidden ${isTabletUi ? 'p-2' : 'p-3 sm:p-4'}`}>
         {initialLoading ? (
@@ -1495,7 +1459,7 @@ export function WorkerTpvDelivery({
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className={`flex gap-2 h-full min-h-0 ${isTabletUi ? 'flex-row' : 'flex-col md:flex-row gap-3'}`}>
+          <div className={`flex h-full min-h-0 gap-2 ${isTabletUi ? 'flex-col' : 'flex-col md:flex-row gap-3'}`}>
             <OrderLane
               title="Montaje"
               icon={<Package className="w-4 h-4 text-indigo-600" />}
@@ -1509,6 +1473,7 @@ export function WorkerTpvDelivery({
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
               advancingId={advancingId}
+              compact={isTabletUi}
             />
             <OrderLane
               title="Reparto"
@@ -1523,6 +1488,7 @@ export function WorkerTpvDelivery({
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
               advancingId={advancingId}
+              compact={isTabletUi}
             />
           </div>
         )}
@@ -1552,6 +1518,57 @@ export function WorkerTpvDelivery({
             </div>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowDelivered((v) => !v)}
+          className="mt-2.5 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left touch-manipulation"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+            <span className="text-xs sm:text-sm font-bold text-green-800 dark:text-green-300 truncate">
+              Completados en turno ({completedTodayOrders.length})
+            </span>
+          </div>
+          {showDelivered ? (
+            <ChevronUp className="w-4 h-4 text-green-700 shrink-0" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-green-700 shrink-0" />
+          )}
+        </button>
+        {showDelivered && (
+          <div className={`mt-2 overflow-y-auto space-y-1 ${isTabletUi ? 'max-h-36' : 'max-h-44'}`}>
+            {completedTodayOrders.length === 0 ? (
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">Sin entregas en turno</p>
+            ) : (
+              completedTodayOrders.map((order) => {
+                const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
+                return (
+                  <button
+                    key={order._id}
+                    type="button"
+                    onClick={() => setSelectedOrder(order)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left touch-manipulation"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-900 dark:text-gray-100 font-mono">#{order.orderNumber}</p>
+                      <p className="text-[11px] text-gray-500 truncate">
+                        {order.customerName || 'Cliente'}
+                        {' · '}
+                        {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                        {order.channel ? ` · ${String(order.channel).toUpperCase()}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-xs font-bold tabular-nums">{formatCurrency(resolveDeliveryOrderChargeTotal(order))}</p>
+                      <p className={`text-[10px] font-semibold ${statusCfg.color}`}>{statusCfg.label}</p>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* Order detail modal */}
