@@ -2008,23 +2008,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteClient = async (id: string) => {
     const currentClient = clients.find(c => c.id === id);
-    if (!currentClient) {
-      return;
-    }
 
     if (!authUser?.user_id) {
       setClients(prev => prev.filter(c => c.id !== id));
       return;
     }
 
-    await deleteClientRequest(authUser.user_id, currentClient);
+    await deleteClientRequest(authUser.user_id, currentClient || ({ id } as Client));
     setClients(prev => prev.filter(c => c.id !== id));
     setClientsTotalCount((n) => Math.max(0, n - 1));
     trackActivity({
       type: 'client',
-      action: `Eliminó cliente ${currentClient.name}`,
-      entityId: currentClient.id,
-      entityLabel: currentClient.name,
+      action: `Eliminó cliente ${currentClient?.name || id}`,
+      entityId: id,
+      entityLabel: currentClient?.name || id,
     });
   };
 

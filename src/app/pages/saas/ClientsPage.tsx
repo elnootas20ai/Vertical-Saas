@@ -54,6 +54,7 @@ import {
   saveSlaConfigRequest,
   fetchAllClientsForExport,
   listClientsPageRequest,
+  deleteClientRequest,
   importClientsFromBusinessRequest,
   type AssignmentRule,
   type SlaConfig,
@@ -1593,6 +1594,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
   const [leadsView,               setLeadsView]               = useState<'cards' | 'table'>('table');
   const [clientsView,             setClientsView]             = useState<'cards' | 'table'>('table');
+  const [deletingClientId,        setDeletingClientId]        = useState<string | null>(null);
+  const [bulkDeletingClients,   setBulkDeletingClients]     = useState(false);
   const [billingView,             setBillingView]             = useState<'cards' | 'table'>('cards');
   const [selectedInvoice,         setSelectedInvoice]         = useState<Invoice | null>(null);
   const [selectedLead,            setSelectedLead]            = useState<Lead | null>(null);
@@ -2011,6 +2014,78 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const isClientsTabLoading = useServerClients
     ? (useSegmentMode ? loadingSegmentClients : isLoadingServerClients)
     : isLoadingClients;
+
+  const handleDeleteDeliveryClient = useCallback(async (client: { id: string; name: string }) => {
+    if (!clientsDataUserId) return;
+    if (!window.confirm(`¿Eliminar a "${client.name}"?\n\nSe borrarán sus datos del CRM.`)) return;
+    setDeletingClientId(client.id);
+    try {
+      await deleteClientRequest(clientsDataUserId, { id: client.id, name: client.name } as AppContextClient);
+      await deleteClient(client.id);
+      if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
+      toast.success('Cliente eliminado');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar el cliente');
+    } finally {
+      setDeletingClientId(null);
+    }
+  }, [clientsDataUserId, deleteClient, refreshPaginatedClients, useSegmentMode, useServerClients]);
+
+  const handleDeleteAllDeliveryClients = useCallback(async () => {
+    if (!clientsDataUserId || !isDeliveryBusiness) return;
+    const total = clientsListTotal;
+    if (total <= 0) {
+      toast.info('No hay clientes que eliminar');
+      return;
+    }
+    if (!window.confirm(`¿Eliminar los ${total} clientes del negocio?`)) return;
+    if (!window.confirm('Última confirmación: esta acción no se puede deshacer.')) return;
+    setBulkDeletingClients(true);
+    try {
+      const ids: string[] = [];
+      const limit = 200;
+      let skip = 0;
+      while (true) {
+        const { clients, meta } = await listClientsPageRequest(clientsDataUserId, {
+          limit,
+          skip,
+          lite: true,
+          businessId: businessScopeId || undefined,
+        });
+        for (const c of clients) {
+          const id = String(c.id || '').trim();
+          if (id) ids.push(id);
+        }
+        if (clients.length === 0 || skip + clients.length >= meta.total) break;
+        skip += clients.length;
+      }
+      let removed = 0;
+      for (const id of ids) {
+        try {
+          await deleteClientRequest(clientsDataUserId, { id } as AppContextClient);
+          await deleteClient(id);
+          removed += 1;
+        } catch {
+          // seguir con el resto
+        }
+      }
+      if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
+      toast.success(`Eliminados ${removed} cliente${removed === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al eliminar clientes');
+    } finally {
+      setBulkDeletingClients(false);
+    }
+  }, [
+    businessScopeId,
+    clientsDataUserId,
+    clientsListTotal,
+    deleteClient,
+    isDeliveryBusiness,
+    refreshPaginatedClients,
+    useSegmentMode,
+    useServerClients,
+  ]);
 
   const filteredInvoices = useMemo(() => {
     if (!searchQuery) return allInvoices;
@@ -2905,6 +2980,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
             setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
             setShowImportFromBusiness(true);
           }}
+          onDeleteAllClients={isDeliveryBusiness ? () => void handleDeleteAllDeliveryClients() : undefined}
+          deleteAllCount={isDeliveryBusiness ? clientsListTotal : 0}
+          deletingAll={bulkDeletingClients}
         />
       </ActivationFieldWrap>
     </div>
@@ -3048,6 +3126,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                       <DeliveryClientRowActions
                         onView={() => viewClientDetail(client.id)}
                         onNewOrder={() => goToDeliveryTpvForClient(client.id)}
+                        onDelete={() => void handleDeleteDeliveryClient(client)}
+                        deleting={deletingClientId === client.id}
                         alwaysVisible
                       />
                     ) : (
@@ -3271,6 +3351,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                           <DeliveryClientRowActions
                             onView={() => viewClientDetail(client.id)}
                             onNewOrder={() => goToDeliveryTpvForClient(client.id)}
+                            onDelete={() => void handleDeleteDeliveryClient(client)}
+                            deleting={deletingClientId === client.id}
                           />
                         ) : (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

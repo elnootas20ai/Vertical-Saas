@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Sparkles,
   TrendingUp,
+  Trash2,
   Upload,
   UserPlus,
   Users,
@@ -50,6 +51,9 @@ export interface ClientsActionsMenuProps {
   onImportClients: () => void;
   onToggleSegmentBuilder: () => void;
   onImportFromBusiness?: () => void;
+  onDeleteAllClients?: () => void;
+  deleteAllCount?: number;
+  deletingAll?: boolean;
 }
 
 export function ClientsActionsMenu({
@@ -66,6 +70,9 @@ export function ClientsActionsMenu({
   onImportClients,
   onToggleSegmentBuilder,
   onImportFromBusiness,
+  onDeleteAllClients,
+  deleteAllCount = 0,
+  deletingAll = false,
 }: ClientsActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -126,6 +133,21 @@ export function ClientsActionsMenu({
             close();
           },
         },
+        ...(onDeleteAllClients
+          ? [{
+              id: 'delete-all',
+              label: deletingAll ? 'Eliminando…' : 'Eliminar todos',
+              description: deleteAllCount > 0
+                ? `Borrar ${deleteAllCount} cliente${deleteAllCount === 1 ? '' : 's'} del negocio`
+                : 'No hay clientes que eliminar',
+              icon: <Trash2 className="w-4 h-4 text-red-500" />,
+              disabled: deletingAll || deleteAllCount === 0,
+              action: () => {
+                onDeleteAllClients();
+                close();
+              },
+            }]
+          : []),
       ],
     },
   ];

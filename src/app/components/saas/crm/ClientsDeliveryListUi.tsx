@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Hash, Euro, Calendar, Tag, Gift, Star, Repeat, ShoppingBag, Clock,
-  Phone, Mail, MapPin, Eye, Lock,
+  Phone, Mail, MapPin, Eye, Lock, Trash2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -223,11 +223,15 @@ export function DeliveryClientLoyaltyCell({ loyalty }: { loyalty: DeliveryListCl
 export function DeliveryClientRowActions({
   onView,
   onNewOrder,
+  onDelete,
   alwaysVisible = false,
+  deleting = false,
 }: {
   onView: () => void;
   onNewOrder: () => void;
+  onDelete?: () => void;
   alwaysVisible?: boolean;
+  deleting?: boolean;
 }) {
   return (
     <div className={`flex items-center gap-1 ${alwaysVisible ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
@@ -247,6 +251,17 @@ export function DeliveryClientRowActions({
       >
         <Eye className="h-4 w-4 text-gray-500 dark:text-gray-400" />
       </button>
+      {onDelete ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          disabled={deleting}
+          className="rounded-lg p-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40"
+          title="Eliminar cliente"
+        >
+          <Trash2 className={`h-4 w-4 text-red-500 ${deleting ? 'animate-spin' : ''}`} />
+        </button>
+      ) : null}
     </div>
   );
 }
