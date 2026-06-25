@@ -2462,66 +2462,28 @@ async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusin
     return { ok: false, error: 'Punto de venta no encontrado' };
   }
 
-  const tryScope = async (bid) => {
-    const normalized = normalizeBusinessScopeId(bid);
-    if (!normalized) return null;
-    const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, normalized);
+  let businessId = normalizeBusinessScopeId(requestedBusinessId);
+  if (!businessId) {
+    businessId = normalizeBusinessScopeId(await resolveBusinessIdForPointOfSale(req, pdvDoc));
+  }
+  if (!businessId) {
+    const resolved = await resolveBusinessDocumentForPointOfSale(req, pdvDoc);
+    businessId = normalizeBusinessScopeId(resolved?.business_id);
+  }
+
+  if (businessId) {
+    await repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, businessId).catch(() => false);
+    const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessId);
     const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-    return scopedPdvIds.has(pdvId) ? { businessId: normalized, scopedPdvIds } : null;
-  };
-
-  let targetBusinessId = normalizeBusinessScopeId(requestedBusinessId);
-  if (!targetBusinessId) {
-    targetBusinessId = normalizeBusinessScopeId(await resolveBusinessIdForPointOfSale(req, pdvDoc));
-  }
-
-  const tryCandidates = [
-    normalizeBusinessScopeId(requestedBusinessId),
-    targetBusinessId,
-    normalizeBusinessScopeId(await resolveBusinessIdForPointOfSale(req, pdvDoc)),
-  ].filter(Boolean);
-
-  for (const bid of [...new Set(tryCandidates)]) {
-    const scoped = await tryScope(bid);
-    if (scoped) return { ok: true, ...scoped };
-  }
-
-  const wc = pdvDoc.workCenterId ? await findWorkCenterById(req, pdvDoc.workCenterId) : null;
-  const fromWorkCenter = await tryScope(wc?.businessId || wc?.business_id || '');
-  if (fromWorkCenter) return { ok: true, ...fromWorkCenter };
-
-  const resolvedBusiness = await resolveBusinessDocumentForPointOfSale(req, pdvDoc);
-  const repairTargets = [
-    ...tryCandidates,
-    normalizeBusinessScopeId(resolvedBusiness?.business_id),
-  ].filter(Boolean);
-
-  for (const repairBid of [...new Set(repairTargets)]) {
-    const repaired = await repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, repairBid);
-    if (!repaired) continue;
-    const afterRepair = await tryScope(repairBid);
-    if (afterRepair) return { ok: true, ...afterRepair };
-  }
-
-  for (const fallbackBid of [...new Set(repairTargets)]) {
-    const direct = await acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, fallbackBid);
-    if (direct) return { ok: true, ...direct };
-  }
-
-  const owned = await listOwnerBusinessesForUser(req, userId);
-  for (const business of owned) {
-    const bid = normalizeBusinessScopeId(business.business_id);
-    const direct = await acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, bid);
-    if (direct) return { ok: true, ...direct };
+    scopedPdvIds.add(pdvId);
+    return { ok: true, businessId, scopedPdvIds };
   }
 
   const wcId = String(pdvDoc.workCenterId || '').trim();
+  const wc = wcId ? await findWorkCenterById(req, pdvDoc.workCenterId) : null;
   let hint = 'Ve a Ajustes → Tienda y pulsa «Activar caja del TPV» en esa tienda.';
-  if (!wcId) hint = 'Falta enlazar la tienda al PDV de caja. ' + hint;
+  if (!wcId) hint = 'La caja no tiene tienda enlazada. ' + hint;
   else if (!wc) hint = 'La tienda enlazada ya no existe. Créala de nuevo en Ajustes → Tienda.';
-  else if (owned.length > 1 && !normalizeBusinessScopeId(wc.businessId || wc.business_id)) {
-    hint = 'Tienes varias empresas y esta tienda no indica cuál es. Abre Ajustes → Tienda en la empresa correcta y pulsa «Activar caja del TPV».';
-  }
 
   return {
     ok: false,

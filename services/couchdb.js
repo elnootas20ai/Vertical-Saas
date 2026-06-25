@@ -6345,9 +6345,14 @@ export async function repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, t
 
   const owned = await listOwnerBusinessesForUser(req, userId);
   const canRepair =
-    owned.some((b) => normalizeBusinessScopeId(b.business_id) === bid) &&
-    (!current || (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid));
-  if (!canRepair) return false;
+    !current &&
+    (owned.some((b) => normalizeBusinessScopeId(b.business_id) === bid) ||
+      pdvDocMatchesUser(pdvDoc, userId));
+  const canRetag =
+    current &&
+    owned.length === 1 &&
+    normalizeBusinessScopeId(owned[0].business_id) === bid;
+  if (!canRepair && !canRetag) return false;
 
   const db = getWorkCentersDbName();
   await ensureDatabase(req, db);
@@ -6367,10 +6372,15 @@ export async function acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, busi
   if (!bid || !pdvId || !pdvDocMatchesUser(pdvDoc, userId)) return null;
 
   const owned = await listOwnerBusinessesForUser(req, userId);
-  const business = owned.find((b) => normalizeBusinessScopeId(b.business_id) === bid);
-  if (!business) return null;
-
-  if (normalizeAccountUserId(pdvDoc.user_id) !== normalizeAccountUserId(business.owner_user_id)) {
+  let business = owned.find((b) => normalizeBusinessScopeId(b.business_id) === bid);
+  if (!business) {
+    const all = await listAllBusinesses(req);
+    business = all.find((b) => !b?.deletedAt && normalizeBusinessScopeId(b.business_id) === bid) || null;
+    if (!business || !pdvDocMatchesUser(pdvDoc, userId)) return null;
+  } else if (
+    normalizeAccountUserId(pdvDoc.user_id) !== normalizeAccountUserId(business.owner_user_id) &&
+    !pdvDocMatchesUser(pdvDoc, userId)
+  ) {
     return null;
   }
 
