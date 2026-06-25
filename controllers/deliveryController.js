@@ -47,6 +47,11 @@ import {
   tpvRegisterSessionBelongsToBusiness,
   generateTerminalCode,
   findPointOfSaleByTerminalCode,
+  findWorkCenterById,
+  pdvDocMatchesUser,
+  resolveBusinessIdForPointOfSale,
+  repairWorkCenterBusinessScopeForPdv,
+  acceptPointOfSaleInBusinessScope,
   buildScaleDeviceDocument,
   sanitizeScaleDevice,
   listScaleDevicesByUser,
@@ -2249,20 +2254,19 @@ export async function createTpvRegisterSession(req, res) {
     if (!session || typeof session !== 'object') return badRequest(res, 'Falta el objeto session');
     const pdvId = String(session.pointOfSaleId || '').trim();
     if (!pdvId) return badRequest(res, 'Falta el punto de venta (tienda) de la caja');
-    const businessId = String(session.business_id || session.businessId || '').trim();
+    const requestedBusinessId = String(session.business_id || session.businessId || '').trim();
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
     await ensureDatabase(req, db);
 
-    let scopedPdvIds = null;
-    if (businessId) {
-      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessId);
-      scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-      if (!scopedPdvIds.has(pdvId)) {
-        return badRequest(res, 'El punto de venta no pertenece a la empresa seleccionada');
-      }
+    const scope = await resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusinessId);
+    if (!scope.ok) {
+      return badRequest(res, scope.error || 'El punto de venta no pertenece a la empresa seleccionada');
     }
+
+    const businessId = scope.businessId;
+    const scopedPdvIds = scope.scopedPdvIds;
 
     const allSessions = await listTpvRegisterSessionsByUser(req, userId);
     const scopedSessions = businessId
@@ -2441,8 +2445,66 @@ async function ensurePointOfSaleOwner(req, userId, pdvId) {
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   const doc = await getDocument(req, db, pdvId);
-  if (!doc || doc.type !== 'point_of_sale' || doc.user_id !== userId) return null;
+  if (!doc || doc.type !== 'point_of_sale' || !pdvDocMatchesUser(doc, userId)) return null;
   return doc;
+}
+
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+/** Resuelve la empresa real del PDV (legacy sin businessId en tienda, tablet, etc.). */
+async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusinessId) {
+  const pdvDoc = await ensurePointOfSaleOwner(req, userId, pdvId);
+  if (!pdvDoc) {
+    return { ok: false, error: 'Punto de venta no encontrado' };
+  }
+
+  const tryScope = async (bid) => {
+    const normalized = normalizeBusinessScopeId(bid);
+    if (!normalized) return null;
+    const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, normalized);
+    const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+    return scopedPdvIds.has(pdvId) ? { businessId: normalized, scopedPdvIds } : null;
+  };
+
+  const requested = await tryScope(requestedBusinessId);
+  if (requested) return { ok: true, ...requested };
+
+  const wc = pdvDoc.workCenterId ? await findWorkCenterById(req, pdvDoc.workCenterId) : null;
+  const fromWorkCenter = await tryScope(wc?.businessId || wc?.business_id || '');
+  if (fromWorkCenter) return { ok: true, ...fromWorkCenter };
+
+  const resolvedBusinessId = await resolveBusinessIdForPointOfSale(req, pdvDoc);
+  const repairTargets = [
+    normalizeBusinessScopeId(requestedBusinessId),
+    normalizeBusinessScopeId(resolvedBusinessId),
+  ].filter(Boolean);
+
+  for (const repairBid of [...new Set(repairTargets)]) {
+    const repaired = await repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, repairBid);
+    if (!repaired) continue;
+    const afterRepair = await tryScope(repairBid);
+    if (afterRepair) return { ok: true, ...afterRepair };
+  }
+
+  const fromResolved = await tryScope(resolvedBusinessId);
+  if (fromResolved) return { ok: true, ...fromResolved };
+
+  for (const fallbackBid of [
+    normalizeBusinessScopeId(requestedBusinessId),
+    normalizeBusinessScopeId(resolvedBusinessId),
+  ]) {
+    if (!fallbackBid) continue;
+    const direct = await acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, fallbackBid);
+    if (direct) return { ok: true, ...direct };
+  }
+
+  return {
+    ok: false,
+    error:
+      'La tienda del código tablet no está bien enlazada a la empresa. Ve a Ajustes → Tienda, pulsa «Activar caja del TPV» en esa tienda y vuelve a entrar con el código.',
+  };
 }
 
 async function ensureTerminalCodeOnPdv(req, pdv) {

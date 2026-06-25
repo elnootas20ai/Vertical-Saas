@@ -2580,7 +2580,7 @@ export function TpvRegisterGate({
     const total = calcDenominationTotal(data.counts);
     try {
       const created = await createTpvRegisterSessionRequest(dataUserId, {
-        business_id: resolveBusinessScopeId(currentBusiness) || scopeBusinessId || '',
+        business_id: scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
         workerId: data.workerId || '',
         workerName: data.workerName,
         pointOfSaleId: data.pointOfSaleId,

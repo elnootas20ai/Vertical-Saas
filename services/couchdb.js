@@ -6222,7 +6222,12 @@ export async function listPointsOfSaleByUser(req, userId) {
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
   return docs
-    .filter((doc) => doc?.type === 'point_of_sale' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter(
+      (doc) =>
+        doc?.type === 'point_of_sale' &&
+        !doc?.deletedAt &&
+        (!userId || workCenterDocMatchesUser(doc, userId)),
+    )
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 }
 
@@ -6243,13 +6248,116 @@ function normalizeBusinessScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
+function normalizeAccountUserId(value) {
+  const v = String(value || '').trim();
+  return v.startsWith('account:') ? v.slice('account:'.length) : v;
+}
+
 function workCenterDocMatchesUser(doc, userId) {
   const uid = String(userId || '').trim();
   if (!uid) return true;
   const docUser = String(doc?.user_id || '').trim();
   if (!docUser) return true;
-  const norm = (v) => (v.startsWith('account:') ? v.slice('account:'.length) : v);
-  return docUser === uid || norm(docUser) === norm(uid);
+  return docUser === uid || normalizeAccountUserId(docUser) === normalizeAccountUserId(uid);
+}
+
+export function pdvDocMatchesUser(doc, userId) {
+  return workCenterDocMatchesUser(doc, userId);
+}
+
+function isRetailWorkCenterDoc(doc) {
+  const t = String(doc?.centerType || '').trim();
+  return t === 'punto_de_venta' || t === 'almacen';
+}
+
+async function listOwnerBusinessesForUser(req, userId) {
+  const uid = normalizeAccountUserId(userId);
+  if (!uid) return [];
+  const all = await listAllBusinesses(req);
+  return all.filter(
+    (b) => !b?.deletedAt && normalizeAccountUserId(b.owner_user_id) === uid,
+  );
+}
+
+/** Misma lógica que el login tablet: empresa del WC o, si falta, la del titular del PDV. */
+export async function resolveBusinessIdForPointOfSale(req, pdv) {
+  const wcId = String(pdv?.workCenterId || '').trim();
+  if (wcId) {
+    const wc = await findWorkCenterById(req, wcId);
+    const fromWc = normalizeBusinessScopeId(wc?.businessId || wc?.business_id);
+    if (fromWc) return fromWc;
+  }
+  const ownerBusinesses = await listOwnerBusinessesForUser(req, pdv?.user_id);
+  if (ownerBusinesses.length === 1) {
+    return normalizeBusinessScopeId(ownerBusinesses[0].business_id);
+  }
+  const pdvOwner = normalizeAccountUserId(pdv?.user_id);
+  const match = ownerBusinesses.find(
+    (b) => normalizeAccountUserId(b.owner_user_id) === pdvOwner,
+  );
+  return normalizeBusinessScopeId(match?.business_id);
+}
+
+/**
+ * Tiendas retail antiguas sin `businessId` en CouchDB: Ajustes las muestra en cuentas
+ * de una sola empresa, pero el scope estricto del TPV las excluía.
+ */
+export async function repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, targetBusinessId) {
+  const bid = normalizeBusinessScopeId(targetBusinessId);
+  const wcId = String(pdvDoc?.workCenterId || '').trim();
+  if (!bid || !wcId) return false;
+
+  const wc = await findWorkCenterById(req, wcId);
+  if (!wc || !workCenterDocMatchesUser(wc, userId)) return false;
+
+  const current = normalizeBusinessScopeId(wc.businessId || wc.business_id);
+  if (current === bid) return true;
+
+  const owned = await listOwnerBusinessesForUser(req, userId);
+  const canRepair =
+    !current ||
+    (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid);
+  if (!canRepair) return false;
+
+  const db = getWorkCentersDbName();
+  await ensureDatabase(req, db);
+  await putDocument(req, db, wc._id, {
+    ...wc,
+    businessId: bid,
+    business_id: bid,
+    updatedAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+/** Acepta el PDV de la tablet si pertenece al titular de la empresa (aunque el scope estricto falle). */
+export async function acceptPointOfSaleInBusinessScope(req, userId, pdvDoc, businessId) {
+  const bid = normalizeBusinessScopeId(businessId);
+  const pdvId = String(pdvDoc?._id || '').trim();
+  if (!bid || !pdvId || !pdvDocMatchesUser(pdvDoc, userId)) return null;
+
+  const owned = await listOwnerBusinessesForUser(req, userId);
+  const business = owned.find((b) => normalizeBusinessScopeId(b.business_id) === bid);
+  if (!business) return null;
+
+  if (normalizeAccountUserId(pdvDoc.user_id) !== normalizeAccountUserId(business.owner_user_id)) {
+    return null;
+  }
+
+  const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, bid);
+  const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+  if (!scopedPdvIds.has(pdvId)) {
+    const wcId = String(pdvDoc.workCenterId || '').trim();
+    if (wcId) {
+      const wc = await findWorkCenterById(req, wcId);
+      if (!wc || !workCenterDocMatchesUser(wc, userId)) return null;
+    } else if (owned.length !== 1) {
+      return null;
+    }
+    scopedPdvIds.add(pdvId);
+  }
+
+  return { businessId: bid, scopedPdvIds };
 }
 
 /** Centros de trabajo de una empresa (Ajustes → Tiendas). */
@@ -6260,14 +6368,27 @@ export async function listWorkCenterIdsForBusiness(req, userId, businessId) {
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
   const ids = new Set();
+  const legacyRetailIds = [];
   for (const d of docs) {
     if (d?.type !== 'sales_point' || d?.deletedAt) continue;
     if (!workCenterDocMatchesUser(d, userId)) continue;
     const wb = normalizeBusinessScopeId(d.businessId || d.business_id);
-    if (wb !== bid) continue;
     const id = String(d._id || '').trim();
-    if (id) ids.add(id);
+    if (!id) continue;
+    if (wb === bid) {
+      ids.add(id);
+      continue;
+    }
+    if (!wb && isRetailWorkCenterDoc(d)) legacyRetailIds.push(id);
   }
+
+  if (ids.size === 0 && legacyRetailIds.length > 0) {
+    const owned = await listOwnerBusinessesForUser(req, userId);
+    if (owned.length === 1 && normalizeBusinessScopeId(owned[0].business_id) === bid) {
+      for (const legacyId of legacyRetailIds) ids.add(legacyId);
+    }
+  }
+
   return ids;
 }
 
