@@ -137,17 +137,26 @@ function resolveTpvCategoryFromItemCatalogCategory(
   return null;
 }
 
+function hasProductTpvIngredients(item: Pick<CatalogItem, 'customFields'>): boolean {
+  return (
+    parseIngredientsText(
+      typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '',
+    ).length > 0
+  );
+}
+
 /** Producto/combo configurable en TPV (quitar ingredientes, extras globales). */
 export function isCustomizableCatalogItem(
-  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds'>,
+  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'customFields'>,
   brands?: TpvBrandHint[],
 ): boolean {
+  if (hasProductTpvIngredients(item)) return true;
   return resolveTpvCategoryTemplateKey(item, brands) !== null;
 }
 
 /** Catálogo: sección TPV editable (pizzas, burgers, combos…). */
 export function isCatalogTpvConfigurable(
-  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'itemType'>,
+  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds' | 'itemType' | 'customFields'>,
   brands?: TpvBrandHint[],
 ): boolean {
   if (item.itemType === 'combo') return true;

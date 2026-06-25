@@ -29,6 +29,7 @@ import {
   resolveCatalogImportBrandIds,
   shouldClearBrandForCategory,
   activateCommercialLinesAfterCatalogImport,
+  syncStoreIngredientsFromCatalogImport,
   syncTpvOrganizersAfterCatalogImport,
 } from '../../lib/deliveryCatalogImport';
 import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
@@ -349,7 +350,15 @@ function CreateCatalogItemModal({
           ? []
           : [...form.selectedBrandIds];
       const customizable = isCatalogTpvConfigurable(
-        { category, name: form.name, brandIds, itemType: form.itemType },
+        {
+          category,
+          name: form.name,
+          brandIds,
+          itemType: form.itemType,
+          customFields: form.ingredients.trim()
+            ? { ingredients: form.ingredients.trim() }
+            : editItem?.customFields,
+        },
         brands,
       );
       const customFields = {
@@ -557,6 +566,9 @@ function CreateCatalogItemModal({
       name: form.name,
       brandIds: form.selectedBrandIds,
       itemType: form.itemType,
+      customFields: form.ingredients.trim()
+        ? { ingredients: form.ingredients.trim() }
+        : editItem?.customFields,
     },
     brands,
   );
@@ -1991,10 +2003,16 @@ export function CatalogPage() {
         const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
         if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
       }
+      const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
+      if (withIngredients > 0 && businessId) {
+        const ingSync = await syncStoreIngredientsFromCatalogImport(user.id, businessId, items);
+        if (ingSync.added > 0) {
+          toast.message(`${ingSync.added} ingrediente(s) añadidos a Ingredientes TPV`, { duration: 6000 });
+        }
+      }
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
-      const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
       const parts = [];
       if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
       if ((result.updated ?? 0) > 0) parts.push(`${result.updated} actualizado(s) con ingredientes`);
@@ -2307,6 +2325,19 @@ export function CatalogPage() {
     }
     setCatalogDeleteGuard({ mode: 'bulk', items });
     setBulkDeleteConfirmStep(false);
+  };
+
+  const handleDeleteAllFilteredCatalog = () => {
+    if (!user?.id || bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0) return;
+    setCatalogSelectMode(true);
+    setSelectedCatalogIds(new Set(filteredCatalog.map((item) => item._id)));
+    setBulkDeleteConfirmStep(true);
+    toast.warning(
+      searchCatalog.trim()
+        ? `${filteredCatalog.length} producto(s) visibles seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`
+        : `${filteredCatalog.length} producto(s) seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`,
+      { duration: 8000 },
+    );
   };
 
   const executeCatalogDeleteAfterGuard = useCallback(async () => {
@@ -2772,19 +2803,32 @@ export function CatalogPage() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setCatalogSelectMode(true);
-                setBulkDeleteConfirmStep(false);
-                setSelectedCatalogIds(new Set());
-              }}
-              disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-              className="px-4 py-2.5 border border-indigo-300 text-indigo-700 dark:text-indigo-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <ArrowRightLeft className="w-5 h-5" />
-              Gestionar
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setCatalogSelectMode(true);
+                  setBulkDeleteConfirmStep(false);
+                  setSelectedCatalogIds(new Set());
+                }}
+                disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                className="px-4 py-2.5 border border-indigo-300 text-indigo-700 dark:text-indigo-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-indigo-50 dark:hover:bg-indigo-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ArrowRightLeft className="w-5 h-5" />
+                Seleccionar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteAllFilteredCatalog}
+                disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                className="px-4 py-2.5 border border-red-300 text-red-700 dark:text-red-300 rounded-xl flex items-center gap-2 font-medium transition-colors hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="w-5 h-5" />
+                {searchCatalog.trim()
+                  ? `Eliminar visibles (${filteredCatalog.length})`
+                  : `Eliminar todo (${filteredCatalog.length})`}
+              </button>
+            </>
           )}
           <ActivationFieldWrap
             fieldKey="catalog-import"

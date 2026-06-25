@@ -117,6 +117,21 @@ describe('catalogCustomization TPV', () => {
     ]);
   });
 
+  it('producto con ingredientes en ficha es configurable aunque no sea pizza/burger', () => {
+    const crepe = {
+      category: 'Entrantes',
+      name: 'Crepe jamón y queso',
+      brandIds: ['crep'],
+      customFields: { ingredients: 'Jamón, Queso, Mantequilla' },
+    };
+    expect(isCustomizableCatalogItem(crepe)).toBe(true);
+    expect(
+      parseCatalogIngredients(crepe, undefined, undefined, undefined, undefined, undefined, {
+        productIngredientsOnly: true,
+      }),
+    ).toEqual(['Jamón', 'Queso', 'Mantequilla']);
+  });
+
   it('usa suplementos por marca si aún no hay extras en la lista maestra', () => {
     const pizza = { category: 'Pizzas', brandIds: ['mod'], customFields: {} };
     const brandSupplements = {
