@@ -402,6 +402,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
         ...account.subscription,
         planName,
         selectedPlanId,
+        adminPlanLocked: true,
         status: subscriptionStatus as AuthUser['subscription'] extends { status: infer S } ? S : never,
         cancelAtPeriodEnd: activating ? false : (account.subscription?.cancelAtPeriodEnd ?? false),
         extraPointOfSaleSlots: Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0))),
@@ -480,6 +481,15 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
         ...account.subscription,
         planName,
         selectedPlanId,
+        adminPlanLocked: true,
+        status:
+          subscriptionStatus === 'suspended'
+          || subscriptionStatus === 'trial_expired'
+          || subscriptionStatus === 'payment_failed'
+          || subscriptionStatus === 'grace_period'
+            ? 'subscription_active'
+            : subscriptionStatus,
+        billingExempt: billingExempt || account.subscription?.billingExempt,
       },
     });
     setSavingPlan(false);

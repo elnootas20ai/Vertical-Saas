@@ -102,6 +102,11 @@ import {
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import { applySuperAdminSubscriptionActivation } from '../services/subscriptionAdminActivation.js';
+import {
+  applyAdminPlanLock,
+  isAdminPlanLocked,
+  preserveAdminLockedPlan,
+} from '../shared/billing/adminPlanLock.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
@@ -978,6 +983,18 @@ export async function updateProfile(req, res) {
         if (Object.prototype.hasOwnProperty.call(subscription, 'billingExempt')) {
           merged.billingExempt = Boolean(subscription.billingExempt);
         }
+        if (
+          Object.prototype.hasOwnProperty.call(subscription, 'selectedPlanId')
+          || Object.prototype.hasOwnProperty.call(subscription, 'planName')
+        ) {
+          merged = applyAdminPlanLock(
+            merged,
+            subscription.selectedPlanId ?? merged.selectedPlanId,
+            subscription.planName ?? merged.planName,
+          );
+        } else if (isAdminPlanLocked(account.subscription)) {
+          merged = preserveAdminLockedPlan(merged, account.subscription);
+        }
         merged = applySuperAdminSubscriptionActivation(merged, account.subscription);
       } else {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
@@ -996,9 +1013,12 @@ export async function updateProfile(req, res) {
     const onbForProvision =
       onboardingData !== undefined ? onboardingData : account.onboardingData;
     if (completingOnboarding && onbForProvision) {
-      nextSubscription = buildSubscriptionFromOnboarding(
-        onbForProvision,
-        nextSubscription || account.subscription || {},
+      nextSubscription = preserveAdminLockedPlan(
+        buildSubscriptionFromOnboarding(
+          onbForProvision,
+          nextSubscription || account.subscription || {},
+        ),
+        account.subscription || {},
       );
     }
 
@@ -1022,6 +1042,22 @@ export async function updateProfile(req, res) {
     const workerProfileCompletion = computeWorkerProfileCompletion(profileDraft);
     const workerIdentityCompleted = hasMinimumWorkerIdentity(profileDraft);
 
+    let nextOnboardingData = onboardingData !== undefined ? onboardingData : account.onboardingData;
+    if (
+      isVertialSuperAdminEmail(actorEmail)
+      && subscription !== undefined
+      && nextSubscription?.adminPlanLocked
+      && nextSubscription?.selectedPlanId
+    ) {
+      nextOnboardingData = {
+        ...(nextOnboardingData || {}),
+        subscriptionSelection: {
+          ...(nextOnboardingData?.subscriptionSelection || {}),
+          recommendedPlanId: nextSubscription.selectedPlanId,
+        },
+      };
+    }
+
     const updatedAccount = {
       ...account,
       firstName: nextFirstName,
@@ -1042,7 +1078,7 @@ export async function updateProfile(req, res) {
       companyName: companyName !== undefined ? String(companyName).trim() : account.companyName,
       onboardingCompleted:
         onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted,
-      onboardingData: onboardingData !== undefined ? onboardingData : account.onboardingData,
+      onboardingData: nextOnboardingData,
       paymentSummary: paymentSummary !== undefined ? paymentSummary : account.paymentSummary,
       subscription: nextSubscription,
       updatedAt: new Date().toISOString(),
@@ -1229,10 +1265,13 @@ export async function saveBillingCard(req, res) {
         billingMode: billingMode || onboardingData.subscriptionSelection?.billingMode || 'monthly',
       },
     };
-    const nextSubscription = buildSubscriptionFromOnboarding(
-      dataForProvision,
+    const nextSubscription = preserveAdminLockedPlan(
+      buildSubscriptionFromOnboarding(
+        dataForProvision,
+        account.subscription || {},
+        { selectedPlanId, billingMode },
+      ),
       account.subscription || {},
-      { selectedPlanId, billingMode },
     );
 
     const savedAccount = await saveAccount(req, {
@@ -2613,7 +2652,10 @@ export async function saveOnboarding(req, res) {
       onboardingCompleted !== undefined ? Boolean(onboardingCompleted) : account.onboardingCompleted;
     let nextSubscription = account.subscription;
     if (wasIncomplete && willComplete && nextOnboardingData) {
-      nextSubscription = buildSubscriptionFromOnboarding(nextOnboardingData, account.subscription || {});
+      nextSubscription = preserveAdminLockedPlan(
+        buildSubscriptionFromOnboarding(nextOnboardingData, account.subscription || {}),
+        account.subscription || {},
+      );
     }
     let savedAccount = await saveAccount(req, {
       ...account,

@@ -66,4 +66,25 @@ describe('onboarding subscription provisioning', () => {
     expect(sub.selectedPlanId).toBe('pro');
     expect(sub.billingMode).toBe('annual');
   });
+
+  it('no cambia el plan si el admin lo bloqueó manualmente', () => {
+    const sub = buildSubscriptionFromOnboarding(
+      {
+        businessMetrics: { userCount: 2, locationCount: 1, businessCount: 1, commercialBrandCount: 0 },
+        subscriptionSelection: { recommendedPlanId: 'basic', billingMode: 'monthly' },
+      },
+      {
+        selectedPlanId: 'pro',
+        planName: 'Pro',
+        adminPlanLocked: true,
+        adminPlanLockedAt: '2026-01-01T00:00:00.000Z',
+        status: 'subscription_active',
+      },
+      { selectedPlanId: 'basic' },
+    );
+    expect(sub.selectedPlanId).toBe('pro');
+    expect(sub.planName).toBe('Pro');
+    expect(sub.adminPlanLocked).toBe(true);
+    expect(sub.status).toBe('subscription_active');
+  });
 });

@@ -14,6 +14,10 @@ import {
   resolvePlanTier,
 } from './entitlements.js';
 import { clampOnboardingPlanId } from './onboardingPlanRecommendation.js';
+import {
+  adminPlanFieldsFromId,
+  isAdminPlanLocked,
+} from './adminPlanLock.js';
 
 export function normalizeInfrastructureMetrics(metrics = {}) {
   return {
@@ -75,6 +79,17 @@ function resolveTrialEndsAt(onboardingData, existingSubscription = {}) {
  */
 export function buildSubscriptionFromOnboarding(onboardingData, existingSubscription = {}, overrides = {}) {
   const prev = existingSubscription && typeof existingSubscription === 'object' ? existingSubscription : {};
+
+  if (isAdminPlanLocked(prev)) {
+    const locked = adminPlanFieldsFromId(prev.selectedPlanId, prev.planName);
+    return {
+      ...prev,
+      ...locked,
+      adminPlanLocked: true,
+      adminPlanLockedAt: prev.adminPlanLockedAt || new Date().toISOString(),
+    };
+  }
+
   const planId = resolvePlanIdFromOnboarding(onboardingData, overrides);
   const tier = resolvePlanTier(planId, '');
   const metrics = normalizeInfrastructureMetrics(onboardingData?.businessMetrics || {});

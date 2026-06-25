@@ -37,6 +37,7 @@ import {
   mapMoneiStatusToAppStatus,
   shouldApplyMoneiWebhookUpdate,
 } from '../services/moneiSubscriptionSync.js';
+import { isAdminPlanLocked } from '../shared/billing/adminPlanLock.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -424,7 +425,9 @@ export async function confirmSubscription(req, res) {
     appStatus = applyBillingExemptOverride(appStatus, account.subscription);
 
     const now = new Date();
-    const fromMoneiMeta = subscriptionPlanFieldsFromMoneiMetadata(moneiSub.metadata);
+    const fromMoneiMeta = isAdminPlanLocked(account.subscription)
+      ? {}
+      : subscriptionPlanFieldsFromMoneiMetadata(moneiSub.metadata);
     const updatedAccount = await saveAccount(req, {
       ...account,
       subscription: {
@@ -508,7 +511,9 @@ export async function webhookSubscriptionStatus(req, res) {
     }
     appStatus = applyBillingExemptOverride(appStatus, account.subscription);
 
-    const fromWebhookMeta = subscriptionPlanFieldsFromMoneiMetadata(metadata);
+    const fromWebhookMeta = isAdminPlanLocked(account.subscription)
+      ? {}
+      : subscriptionPlanFieldsFromMoneiMetadata(metadata);
 
     const updatedAccount = await saveAccount(req, {
       ...account,
