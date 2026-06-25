@@ -40,6 +40,20 @@ describe('onboarding subscription provisioning', () => {
     expect(extras.extraCommercialBrandSlots).toBe(2);
   });
 
+  it('sube a PRO si piden basic con marcas extra en onboarding', () => {
+    const sub = buildSubscriptionFromOnboarding(
+      {
+        businessType: 'delivery',
+        businessMetrics: { userCount: 2, locationCount: 1, businessCount: 1, commercialBrandCount: 1 },
+        requestedModules: { inventory: true, sales: true, crm: false, documentation: false, analytics: false, workshop: false },
+        subscriptionSelection: { recommendedPlanId: 'basic', billingMode: 'monthly' },
+      },
+      {},
+      { selectedPlanId: 'basic' },
+    );
+    expect(sub.selectedPlanId).toBe('pro');
+  });
+
   it('respeta override de plan al guardar tarjeta', () => {
     const sub = buildSubscriptionFromOnboarding(
       {

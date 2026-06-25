@@ -42,7 +42,7 @@ export function resolvePlanTier(planId, planName) {
   const id = String(planId || '').toLowerCase();
   const name = String(planName || '').toLowerCase();
   if (id === 'pro' || name.includes('pro')) return 'pro';
-  if (id === 'normal' || name.includes('normal')) return 'normal';
+  if (id === 'normal' || name.includes('normal') || name.includes('mediano')) return 'normal';
   return 'basic';
 }
 

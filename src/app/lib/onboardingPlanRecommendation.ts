@@ -240,6 +240,70 @@ export function countEnabledModules(modules: Partial<RequestedModules>): number 
   return Object.values(modules).filter(Boolean).length;
 }
 
+export function countSelectedDeliveryNeeds(needs: Partial<DeliveryNeedsSelection>): number {
+  return DELIVERY_NEED_OPTIONS.filter((o) => needs[o.key]).length;
+}
+
+export const ONBOARDING_PLAN_RANK: Record<OnboardingPlanId, number> = {
+  basic: 0,
+  normal: 1,
+  pro: 2,
+};
+
+const TIER_TO_PLAN: OnboardingPlanId[] = ['basic', 'normal', 'pro'];
+
+/** Plan mínimo obligatorio según infraestructura y módulos (no se puede bajar en el comparador). */
+export function minimumOnboardingPlanId(params: {
+  businessType: string;
+  userCount: number;
+  locationCount: number;
+  businessCount?: number;
+  commercialBrandCount?: number;
+  modules: Partial<RequestedModules>;
+  deliveryNeeds?: Partial<DeliveryNeedsSelection>;
+}): OnboardingPlanId {
+  const metrics = normalizeInfrastructureMetrics(params);
+  const moduleCount = countEnabledModules(params.modules);
+  const deliveryCount = isDeliveryBusinessType(params.businessType)
+    ? countSelectedDeliveryNeeds(params.deliveryNeeds ?? modulesToDeliveryNeeds(params.modules))
+    : 0;
+
+  let rank = 0;
+
+  if (metrics.userCount > 2 || moduleCount >= 3) {
+    rank = Math.max(rank, 1);
+  }
+
+  if (
+    metrics.commercialBrandCount > 0 ||
+    metrics.businessCount > 1 ||
+    metrics.locationCount > 1 ||
+    metrics.userCount > 5 ||
+    moduleCount >= 5 ||
+    deliveryCount >= 6 ||
+    (moduleCount >= 4 && metrics.userCount > 3)
+  ) {
+    rank = Math.max(rank, 2);
+  }
+
+  return TIER_TO_PLAN[rank];
+}
+
+export function isOnboardingPlanAllowed(
+  planId: OnboardingPlanId,
+  params: Parameters<typeof minimumOnboardingPlanId>[0],
+): boolean {
+  return ONBOARDING_PLAN_RANK[ planId] >= ONBOARDING_PLAN_RANK[minimumOnboardingPlanId(params)];
+}
+
+export function clampOnboardingPlanId(
+  planId: OnboardingPlanId,
+  params: Parameters<typeof minimumOnboardingPlanId>[0],
+): OnboardingPlanId {
+  const min = minimumOnboardingPlanId(params);
+  return ONBOARDING_PLAN_RANK[ planId] >= ONBOARDING_PLAN_RANK[min] ? planId : min;
+}
+
 export type OnboardingInfrastructureMetrics = {
   userCount: number;
   locationCount: number;
@@ -269,7 +333,7 @@ function planTierForInfrastructure(
   if (userCount > 2) tier = Math.max(tier, 1);
   if (modules.analytics || modules.documentation) tier = Math.max(tier, 1);
   if (modules.workshop && userCount > 3) tier = Math.max(tier, 1);
-  if (moduleCount >= 5) tier = Math.max(tier, 1);
+  if (moduleCount >= 5) tier = Math.max(tier, 2);
 
   // PRO: varias empresas, varios PDV o marcas extra (Pizzería, Burger…)
   if (commercialBrandCount > 0 || businessCount > 1 || locationCount > 1) {
@@ -294,8 +358,6 @@ function infrastructureExceedsPlan(
   );
 }
 
-const TIER_TO_PLAN: OnboardingPlanId[] = ['basic', 'normal', 'pro'];
-
 export function recommendOnboardingPlanId(params: {
   businessType: string;
   userCount: number;
@@ -303,6 +365,7 @@ export function recommendOnboardingPlanId(params: {
   businessCount?: number;
   commercialBrandCount?: number;
   modules: Partial<RequestedModules>;
+  deliveryNeeds?: Partial<DeliveryNeedsSelection>;
 }): OnboardingPlanId {
   const metrics = normalizeInfrastructureMetrics(params);
   const { modules } = params;
@@ -319,8 +382,10 @@ export function recommendOnboardingPlanId(params: {
   }
 
   const tier = planTierForInfrastructure(metrics, modules);
+  const tierPlan = TIER_TO_PLAN[Math.min(tier, 2)];
+  const floor = minimumOnboardingPlanId(params);
 
-  return TIER_TO_PLAN[Math.min(tier, 2)];
+  return ONBOARDING_PLAN_RANK[tierPlan] >= ONBOARDING_PLAN_RANK[floor] ? tierPlan : floor;
 }
 
 export function buildRecommendationReason(params: {
@@ -435,6 +500,7 @@ export function recommendOnboardingPlan(params: {
   businessCount?: number;
   commercialBrandCount?: number;
   modules: Partial<RequestedModules>;
+  deliveryNeeds?: Partial<DeliveryNeedsSelection>;
 }) {
   const metrics = normalizeInfrastructureMetrics(params);
   const plans = getPlansForBusinessType(params.businessType);

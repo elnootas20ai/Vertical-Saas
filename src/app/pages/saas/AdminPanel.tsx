@@ -69,6 +69,7 @@ import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import {
   getBasePointOfSaleLimit,
   getEffectivePointOfSaleLimit,
+  PLAN_TIER_LABELS,
   resolvePlanTier,
 } from '../../lib/pointOfSaleLimits';
 import {
@@ -142,9 +143,23 @@ type TabId = (typeof TABS)[number]['id'];
 
 const PLAN_OPTIONS = [
   { id: 'basic', name: 'Básico' },
-  { id: 'normal', name: 'Normal' },
+  { id: 'normal', name: 'Mediano' },
   { id: 'pro', name: 'Pro' },
-];
+] as const;
+
+function formatAccountPlanLabel(account: AuthUser): string {
+  const tier = resolvePlanTier(
+    account.subscription?.selectedPlanId || '',
+    account.subscription?.planName || '',
+  );
+  return PLAN_TIER_LABELS[tier];
+}
+
+function initialPlanFromSubscription(sub?: AuthUser['subscription'] | null): { id: string; name: string } {
+  const tier = resolvePlanTier(sub?.selectedPlanId || '', sub?.planName || '');
+  const match = PLAN_OPTIONS.find((p) => p.id === tier);
+  return match || PLAN_OPTIONS[0];
+}
 
 const SUBSCRIPTION_STATUS_OPTIONS = [
   { id: 'trial_active', label: 'Trial activo', color: 'text-blue-700 bg-blue-50' },
@@ -253,10 +268,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
 
   const [companyName, setCompanyName] = useState(account.companyName || '');
   const [email, setEmail] = useState(account.email || '');
-  const [planName, setPlanName] = useState(account.subscription?.planName || 'Basic');
-  const [selectedPlanId, setSelectedPlanId] = useState(
-    account.subscription?.selectedPlanId || account.subscription?.planName?.toLowerCase() || 'basic',
-  );
+  const initialPlan = initialPlanFromSubscription(account.subscription);
+  const [planName, setPlanName] = useState(initialPlan.name);
+  const [selectedPlanId, setSelectedPlanId] = useState(initialPlan.id);
   const [subscriptionStatus, setSubscriptionStatus] = useState(
     account.subscription?.status || 'trial_active',
   );
@@ -277,6 +291,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   );
   const [isBlocked, setIsBlocked] = useState(account.status === 'inactive');
   const [saving, setSaving] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateError, setImpersonateError] = useState('');
@@ -458,6 +473,27 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     if (plan) { setSelectedPlanId(plan.id); setPlanName(plan.name); }
   };
 
+  const handleSavePlan = async () => {
+    setSavingPlan(true);
+    setSaveError('');
+    setSaveSuccess(false);
+    const result = await updateUser(account.user_id, {
+      subscription: {
+        ...account.subscription,
+        planName,
+        selectedPlanId,
+      },
+    });
+    setSavingPlan(false);
+    if (!result.success) {
+      setSaveError(result.error ?? 'No se pudo guardar el plan');
+      return;
+    }
+    setSaveSuccess(true);
+    if (result.user) onSaved(result.user);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
   const planTier = resolvePlanTier(selectedPlanId, planName);
   const basePdvLimit = getBasePointOfSaleLimit(planTier);
   const extraPdv = Math.max(0, Math.min(99, Math.floor(Number(extraPointOfSaleSlots) || 0)));
@@ -484,6 +520,10 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             </div>
             <div>
               <p className="font-bold text-gray-900 dark:text-gray-100 leading-tight">{account.fullName}</p>
+              {account.companyName ? (
+                <p className="text-sm text-gray-600 dark:text-gray-300">{account.companyName}</p>
+              ) : null}
+              <p className="text-xs text-gray-400 dark:text-gray-500">{account.email}</p>
               <p className="text-xs text-gray-400 dark:text-gray-500 font-mono">{account.user_id}</p>
             </div>
           </div>
@@ -559,14 +599,43 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               ) : null}
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Plan</label>
-              <div className="relative">
-                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-                <select value={selectedPlanId} onChange={(e) => handlePlanChange(e.target.value)}
-                  className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 transition-all appearance-none bg-white dark:bg-gray-900">
-                  {PLAN_OPTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+                Plan real del cliente
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                Básico, Mediano o Pro — se guarda en la suscripción del cliente (no es simulación local).
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {PLAN_OPTIONS.map((p) => {
+                  const isCurrent = selectedPlanId === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handlePlanChange(p.id)}
+                      className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors border ${
+                        isCurrent
+                          ? p.id === 'pro'
+                            ? 'bg-violet-600 text-white border-violet-600'
+                            : p.id === 'normal'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-slate-700 text-white border-slate-700'
+                          : 'bg-white text-gray-600 hover:bg-gray-50 border-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  );
+                })}
               </div>
+              <button
+                type="button"
+                onClick={() => void handleSavePlan()}
+                disabled={savingPlan || saving}
+                className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+              >
+                {savingPlan ? 'Guardando plan...' : `Guardar plan (${planName})`}
+              </button>
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Estado suscripción</label>
@@ -975,7 +1044,7 @@ function getAccountSortValue(account: AuthUser, field: SortField): string | numb
     case 'fullName': return (account.fullName || '').toLowerCase();
     case 'companyName': return (account.companyName || '').toLowerCase();
     case 'email': return (account.email || '').toLowerCase();
-    case 'plan': return (account.subscription?.planName || 'Basic').toLowerCase();
+    case 'plan': return formatAccountPlanLabel(account).toLowerCase();
     case 'pdvMax': return getAccountPdvMaxInfo(account).total;
     case 'brandMax': return getAccountBrandMaxInfo(account).total;
     case 'status': return account.subscription?.status || '';
@@ -1097,7 +1166,7 @@ function ClientsTab({
 
   const planOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const a of ownerAccountsBase) set.add(a.subscription?.planName || 'Basic');
+    for (const a of ownerAccountsBase) set.add(formatAccountPlanLabel(a));
     return Array.from(set).sort();
   }, [ownerAccountsBase]);
 
@@ -1133,7 +1202,7 @@ function ClientsTab({
     }
 
     if (filterPlan) {
-      result = result.filter((a) => (a.subscription?.planName || 'Basic') === filterPlan);
+      result = result.filter((a) => formatAccountPlanLabel(a) === filterPlan);
     }
     if (filterStatus) {
       result = result.filter((a) => a.subscription?.status === filterStatus);
@@ -1427,7 +1496,7 @@ function ClientsTab({
                       <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Building2 className="w-4 h-4 text-gray-400 dark:text-gray-500" />{account.companyName || 'Sin empresa'}</div></td>
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{account.email}</td>
                       <td className="px-4 py-3"><code className="inline-flex rounded-lg bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs text-gray-700 dark:text-gray-300">{account.password ? '••••••••' : 'No visible'}</code></td>
-                      <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Users className="w-4 h-4 text-gray-400 dark:text-gray-500" />{account.subscription?.planName || 'Basic'}</div></td>
+                      <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Users className="w-4 h-4 text-gray-400 dark:text-gray-500" />{formatAccountPlanLabel(account)}</div></td>
                       <td className="px-4 py-3">
                         {(() => {
                           const pdv = getAccountPdvMaxInfo(account);

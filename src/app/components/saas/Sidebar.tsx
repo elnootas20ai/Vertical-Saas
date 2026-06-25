@@ -1615,7 +1615,7 @@ function SidebarInner({
             <div className="grid grid-cols-3 gap-0.5">
               {([
                 { id: 'basic' as const, label: 'Básico' },
-                { id: 'normal' as const, label: 'Normal' },
+                { id: 'normal' as const, label: 'Mediano' },
                 { id: 'pro' as const, label: 'Pro' },
               ]).map(({ id, label }) => {
                 const isCurrent = !devUnlimitedPdv && currentDevPlan === id;

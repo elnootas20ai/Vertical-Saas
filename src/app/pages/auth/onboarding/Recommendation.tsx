@@ -15,6 +15,9 @@ import {
   getSelectedDeliveryNeedLabels,
   getSelectedModuleLabels,
   isDeliveryBusinessType,
+  isOnboardingPlanAllowed,
+  minimumOnboardingPlanId,
+  clampOnboardingPlanId,
   recommendOnboardingPlan,
   type OnboardingPlanDefinition,
   type OnboardingPlanId,
@@ -60,29 +63,41 @@ export function Recommendation() {
 
   const plans = useMemo(() => getPlansForBusinessType(data.businessType), [data.businessType]);
 
-  const recommendation = useMemo(
-    () =>
-      recommendOnboardingPlan({
-        businessType: data.businessType,
-        userCount: data.businessMetrics.userCount,
-        locationCount: data.businessMetrics.locationCount,
-        businessCount: data.businessMetrics.businessCount,
-        commercialBrandCount: data.businessMetrics.commercialBrandCount,
-        modules: data.requestedModules,
-      }),
+  const planParams = useMemo(
+    () => ({
+      businessType: data.businessType,
+      userCount: data.businessMetrics.userCount,
+      locationCount: data.businessMetrics.locationCount,
+      businessCount: data.businessMetrics.businessCount,
+      commercialBrandCount: data.businessMetrics.commercialBrandCount,
+      modules: data.requestedModules,
+      deliveryNeeds: data.deliveryNeeds,
+    }),
     [
       data.businessType,
       data.businessMetrics.locationCount,
       data.businessMetrics.userCount,
       data.businessMetrics.businessCount,
       data.businessMetrics.commercialBrandCount,
+      data.deliveryNeeds,
       data.requestedModules,
     ],
   );
 
-  const initialPlanId =
-    (data.subscriptionSelection.recommendedPlanId as OnboardingPlanId) || recommendation.planId;
+  const minimumPlanId = useMemo(() => minimumOnboardingPlanId(planParams), [ planParams]);
+
+  const recommendation = useMemo(() => recommendOnboardingPlan(planParams), [ planParams]);
+
+  const initialPlanId = clampOnboardingPlanId(
+    ((data.subscriptionSelection.recommendedPlanId as OnboardingPlanId) ||
+      recommendation.planId) as OnboardingPlanId,
+    planParams,
+  );
   const [selectedPlanId, setSelectedPlanId] = useState<OnboardingPlanId>(initialPlanId);
+
+  useEffect(() => {
+    setSelectedPlanId((prev) => clampOnboardingPlanId(prev, planParams));
+  }, [minimumPlanId, recommendation.planId, planParams]);
 
   const selectedPlan = useMemo(
     () => plans.find((p) => p.id === selectedPlanId) ?? recommendation.plan,
@@ -138,13 +153,16 @@ export function Recommendation() {
   }, [billingMode, metrics, plans]);
 
   const handleSelectPlan = (planId: OnboardingPlanId) => {
+    if (!isOnboardingPlanAllowed(planId, planParams)) return;
     setSelectedPlanId(planId);
     setShowComparison(false);
   };
 
   const handleStartTrial = () => {
+    const planId = clampOnboardingPlanId(selectedPlanId, planParams);
+    const plan = plans.find((p) => p.id === planId) ?? recommendation.plan;
     const totals = estimateSubscriptionTotals({
-      plan: selectedPlan,
+      plan,
       userCount: metrics.userCount,
       locationCount: metrics.locationCount,
       businessCount: metrics.businessCount,
@@ -152,7 +170,7 @@ export function Recommendation() {
     });
 
     updateData('subscriptionSelection', {
-      recommendedPlanId: selectedPlan.id,
+      recommendedPlanId: planId,
       billingMode,
       estimatedMonthlyTotal: totals.estimatedMonthlyTotal,
       estimatedAnnualTotal: totals.estimatedAnnualTotal,
@@ -162,6 +180,7 @@ export function Recommendation() {
   };
 
   const isRecommendedSelection = selectedPlanId === recommendation.planId;
+  const proRequired = minimumPlanId === 'pro';
   const needsAddons =
     pricing.extraUsers > 0 ||
     pricing.extraPdv > 0 ||
@@ -191,6 +210,13 @@ export function Recommendation() {
         title={isRecommendedSelection ? 'Tu precio recomendado' : 'Tu plan seleccionado'}
         subtitle={recommendation.reason}
       />
+
+      {proRequired ? (
+        <p className="shrink-0 mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-100">
+          Con tu operativa (trabajadores, marcas, módulos o PDV), el plan <strong>PRO</strong> es el mínimo
+          necesario. No puedes elegir Basic ni Normal.
+        </p>
+      ) : null}
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <div
@@ -323,12 +349,15 @@ export function Recommendation() {
             const breakdown = formatPricingBreakdown(plan, planPricing, billingMode);
             const isSelected = plan.id === selectedPlanId;
             const isRecommended = plan.id === recommendation.planId;
+            const planAllowed = isOnboardingPlanAllowed(plan.id, planParams);
 
             return (
               <div
                 key={plan.id}
                 className={`flex flex-col bg-white dark:bg-gray-800 border-2 rounded-xl p-4 ${
-                  isSelected
+                  ! planAllowed
+                    ? 'opacity-60 border-gray-200 dark:border-gray-700'
+                    : isSelected
                     ? 'border-gray-900 dark:border-gray-100 ring-2 ring-gray-900/10 dark:ring-gray-100/10'
                     : isRecommended
                       ? 'border-amber-500'
@@ -379,6 +408,7 @@ export function Recommendation() {
                 <ACCESO__Button
                   variant={isSelected ? 'primary' : 'outline'}
                   fullWidth
+                  disabled={! planAllowed}
                   onClick={() => handleSelectPlan(plan.id)}
                 >
                   {isSelected ? 'Plan seleccionado' : `Elegir ${plan.name}`}

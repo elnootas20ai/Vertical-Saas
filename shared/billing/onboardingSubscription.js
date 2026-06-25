@@ -13,6 +13,7 @@ import {
   clampExtraPointOfSaleSlots,
   resolvePlanTier,
 } from './entitlements.js';
+import { clampOnboardingPlanId } from './onboardingPlanRecommendation.js';
 
 export function normalizeInfrastructureMetrics(metrics = {}) {
   return {
@@ -41,16 +42,16 @@ export function computeOnboardingExtraSlots(planTier, metrics) {
 
 function resolvePlanIdFromOnboarding(onboardingData, overrides = {}) {
   const fromOverride = String(overrides.selectedPlanId || '').trim().toLowerCase();
-  if (fromOverride === 'basic' || fromOverride === 'normal' || fromOverride === 'pro') {
-    return fromOverride;
-  }
   const fromSelection = String(onboardingData?.subscriptionSelection?.recommendedPlanId || '')
     .trim()
     .toLowerCase();
-  if (fromSelection === 'basic' || fromSelection === 'normal' || fromSelection === 'pro') {
-    return fromSelection;
-  }
-  return 'basic';
+  const raw =
+    fromOverride === 'basic' || fromOverride === 'normal' || fromOverride === 'pro'
+      ? fromOverride
+      : fromSelection === 'basic' || fromSelection === 'normal' || fromSelection === 'pro'
+        ? fromSelection
+        : 'basic';
+  return clampOnboardingPlanId(raw, onboardingData);
 }
 
 function resolveBillingMode(onboardingData, overrides = {}) {

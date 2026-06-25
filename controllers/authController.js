@@ -887,10 +887,13 @@ export async function updateProfile(req, res) {
     const targetUserId = userId;
 
     if (authUserId && targetUserId && authUserId !== targetUserId) {
-      const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
-      const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
-      if (!isManager) {
-        return res.status(403).json({ ok: false, error: 'No puedes modificar el perfil de otro usuario.' });
+      const actorEmail = req.authUser?.email || '';
+      if (!isVertialSuperAdminEmail(actorEmail)) {
+        const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
+        const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
+        if (!isManager) {
+          return res.status(403).json({ ok: false, error: 'No puedes modificar el perfil de otro usuario.' });
+        }
       }
     }
 

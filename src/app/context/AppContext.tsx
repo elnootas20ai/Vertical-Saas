@@ -826,7 +826,7 @@ export function userCanUseDevPlanOverride(
 
 const DEV_PLAN_DEFINITIONS: Record<DevPlan, { planName: string; selectedPlanId: string }> = {
   basic: { planName: 'Básico', selectedPlanId: 'basic' },
-  normal: { planName: 'Normal', selectedPlanId: 'normal' },
+  normal: { planName: 'Mediano', selectedPlanId: 'normal' },
   pro: { planName: 'Pro', selectedPlanId: 'pro' },
 };
 

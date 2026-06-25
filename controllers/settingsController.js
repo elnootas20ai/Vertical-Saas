@@ -28,6 +28,7 @@ import {
   signAccessToken,
   signRefreshToken,
 } from '../middleware/auth.js';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
 const SETTINGS_DB = 'settings';
 
@@ -473,7 +474,10 @@ export async function importTenantData(req, res) {
 export async function impersonateUser(req, res) {
   try {
     const adminUser = req.authUser;
-    if (adminUser?.role !== 'Admin') {
+    const adminEmail = adminUser?.email || '';
+    const canImpersonate =
+      isVertialSuperAdminEmail(adminEmail) || adminUser?.role === 'Admin';
+    if (!canImpersonate) {
       return res.status(403).json({ ok: false, error: 'Solo los administradores pueden impersonar usuarios' });
     }
 

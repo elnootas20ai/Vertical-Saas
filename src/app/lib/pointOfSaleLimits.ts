@@ -11,7 +11,7 @@ export const POINT_OF_SALE_LIMITS: Record<SubscriptionPlanTier, number> = {
 
 export const PLAN_TIER_LABELS: Record<SubscriptionPlanTier, string> = {
   basic: 'Básico',
-  normal: 'Normal',
+  normal: 'Mediano',
   pro: 'Pro',
 };
 
@@ -25,7 +25,7 @@ export function resolvePlanTier(planId: string, planName: string): SubscriptionP
   const id = planId.toLowerCase();
   const name = planName.toLowerCase();
   if (id === 'pro' || name.includes('pro')) return 'pro';
-  if (id === 'normal' || name.includes('normal')) return 'normal';
+  if (id === 'normal' || name.includes('normal') || name.includes('mediano')) return 'normal';
   return 'basic';
 }
 
