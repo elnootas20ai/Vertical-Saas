@@ -50,17 +50,74 @@ export function orderBelongsToPdvScope(
   order: DeliveryOrder,
   pdvIds: Set<string>,
   primaryPdvId: string | null,
+  pdvWorkCenterId?: string | null,
 ): boolean {
   if (pdvIds.size === 0) return false;
   const oid = String(order.salesPointId || '').trim();
   if (!oid) {
     return primaryPdvId ? pdvIds.has(primaryPdvId) : false;
   }
-  return pdvIds.has(oid);
+  if (pdvIds.has(oid)) return true;
+  const wcId = String(pdvWorkCenterId || '').trim();
+  if (wcId && oid === wcId) return true;
+  return false;
 }
 
 function isToday(iso: string, todayKey: string): boolean {
   return String(iso || '').slice(0, 10) === todayKey;
+}
+
+function isInMonth(iso: string, monthKey: string): boolean {
+  return String(iso || '').slice(0, 7) === monthKey;
+}
+
+/** Fecha efectiva de entrega (alineado con KPIs del backend). */
+function orderDeliveredAtIso(order: DeliveryOrder): string {
+  return String(order.deliveredAt || order.updatedAt || order.createdAt || '').trim();
+}
+
+function isDeliveredOrder(order: DeliveryOrder): boolean {
+  return String(order.status || '').toLowerCase() === 'entregado';
+}
+
+function isDeliveredOnDay(order: DeliveryOrder, dayKey: string): boolean {
+  if (!isDeliveredOrder(order)) return false;
+  const when = orderDeliveredAtIso(order);
+  return when ? isToday(when, dayKey) : false;
+}
+
+function isDeliveredInMonth(order: DeliveryOrder, monthKey: string): boolean {
+  if (!isDeliveredOrder(order)) return false;
+  const when = orderDeliveredAtIso(order);
+  return when ? isInMonth(when, monthKey) : false;
+}
+
+export type StoreDeliveryMetrics = {
+  deliveredToday: number;
+  deliveredMonth: number;
+  revenueMonth: number;
+  activeOrders: number;
+};
+
+export function computeStoreDeliveryMetrics(
+  orders: DeliveryOrder[],
+  pdvId: string,
+  todayKey: string,
+  monthKey: string,
+  pdvWorkCenterId?: string | null,
+): StoreDeliveryMetrics {
+  const pdvSet = new Set([pdvId]);
+  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, pdvId, pdvWorkCenterId));
+  const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
+  const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
+  const revenueMonth = deliveredMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+  const activeOrders = scoped.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
+  return {
+    deliveredToday: deliveredToday.length,
+    deliveredMonth: deliveredMonth.length,
+    revenueMonth: Math.round(revenueMonth * 100) / 100,
+    activeOrders,
+  };
 }
 
 function channelLabel(ch: string): string {
@@ -86,12 +143,11 @@ export function computePortfolioMetrics(
   const pdvSet = new Set(pdvIds);
   if (!pdvSet.size) return emptyPortfolioMetrics();
 
+  const monthKey = todayKey.slice(0, 7);
   const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, primaryPdvId));
-  const todayOrders = scoped.filter((o) => isToday(o.createdAt, todayKey));
-  const monthOrders = scoped;
-
-  const deliveredToday = todayOrders.filter((o) => o.status === 'entregado');
-  const deliveredMonth = monthOrders.filter((o) => o.status === 'entregado');
+  const todayCreated = scoped.filter((o) => isToday(o.createdAt, todayKey));
+  const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
+  const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
 
   const revenueToday = deliveredToday.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
   const revenueMonth = deliveredMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
@@ -112,16 +168,18 @@ export function computePortfolioMetrics(
     }
   }
 
-  const activeOrders = monthOrders.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
-  const cancelledMonth = monthOrders.filter((o) => o.status === 'cancelled').length;
+  const activeOrders = scoped.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
+  const cancelledMonth = scoped.filter(
+    (o) => o.status === 'cancelled' && isInMonth(String(o.updatedAt || o.createdAt || ''), monthKey),
+  ).length;
   const avgTicketMonth =
     deliveredMonth.length > 0 ? revenueMonth / deliveredMonth.length : 0;
 
   return {
     revenueToday,
     revenueMonth,
-    ordersToday: todayOrders.length,
-    ordersMonth: monthOrders.length,
+    ordersToday: todayCreated.length,
+    ordersMonth: scoped.filter((o) => isInMonth(String(o.createdAt || ''), monthKey)).length,
     deliveredToday: deliveredToday.length,
     deliveredMonth: deliveredMonth.length,
     activeOrders,
@@ -270,4 +328,288 @@ export function fmtEuro(n: number): string {
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} M€`;
   if (Math.abs(n) >= 10_000) return `${(n / 1_000).toFixed(1)} k€`;
   return `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+}
+
+export function fmtPercent(n: number, digits = 1): string {
+  if (!Number.isFinite(n)) return '0%';
+  return `${n.toFixed(digits)}%`;
+}
+
+// ─── Desglose facturación por marca y tienda (misma empresa) ─────────────────
+
+export type BrandStoreBillingCell = {
+  storeId: string;
+  revenueMonth: number;
+  revenueToday: number;
+  deliveredMonth: number;
+  deliveredToday: number;
+};
+
+export type BrandBillingBreakdown = {
+  brandId: string;
+  revenueMonth: number;
+  revenueToday: number;
+  deliveredMonth: number;
+  deliveredToday: number;
+  sharePercent: number;
+  stores: BrandStoreBillingCell[];
+};
+
+export type StoreBrandBillingCell = {
+  brandId: string;
+  revenueMonth: number;
+  deliveredMonth: number;
+};
+
+export type StoreBillingBreakdown = {
+  storeId: string;
+  pdvId?: string;
+  revenueMonth: number;
+  revenueToday: number;
+  deliveredMonth: number;
+  deliveredToday: number;
+  activeOrders: number;
+  sharePercent: number;
+  brands: StoreBrandBillingCell[];
+};
+
+export type CompanyBillingBreakdown = {
+  totalRevenueMonth: number;
+  totalRevenueToday: number;
+  totalDeliveredMonth: number;
+  unbrandedRevenueMonth: number;
+  brands: BrandBillingBreakdown[];
+  stores: StoreBillingBreakdown[];
+};
+
+type BillingCellAcc = {
+  revenueMonth: number;
+  revenueToday: number;
+  deliveredMonth: number;
+  deliveredToday: number;
+};
+
+function emptyBillingCell(): BillingCellAcc {
+  return { revenueMonth: 0, revenueToday: 0, deliveredMonth: 0, deliveredToday: 0 };
+}
+
+function lineItemRevenue(item: {
+  total?: number;
+  unitPrice?: number;
+  quantity?: number;
+}): number {
+  const total = Number(item?.total ?? 0);
+  if (total > 0) return total;
+  return Number(item?.unitPrice ?? 0) * Number(item?.quantity ?? 0);
+}
+
+function resolveOrderWorkCenterId(
+  order: DeliveryOrder,
+  primaryPdvId: string | null,
+  pdvToWc: Map<string, string>,
+  knownWcIds: Set<string>,
+): string | null {
+  const ref = String(order.salesPointId || '').trim();
+  if (ref) {
+    if (knownWcIds.has(ref)) return ref;
+    const wc = pdvToWc.get(ref);
+    if (wc) return wc;
+  }
+  if (primaryPdvId) {
+    const wc = pdvToWc.get(primaryPdvId);
+    if (wc) return wc;
+  }
+  return null;
+}
+
+function bumpDeliveredCount(cell: BillingCellAcc, order: DeliveryOrder, todayKey: string) {
+  cell.deliveredMonth += 1;
+  if (isDeliveredOnDay(order, todayKey)) cell.deliveredToday += 1;
+}
+
+/**
+ * Facturación delivery del mes desglosada por marca comercial y tienda (centro de trabajo).
+ * Usa líneas de pedido entregado con brandIds; bebidas/complementos sin marca → unbrandedRevenueMonth.
+ */
+export function computeCompanyBillingBreakdown(
+  orders: DeliveryOrder[],
+  brandIds: string[],
+  storeRows: Array<{ id: string; pdvId?: string }>,
+  pdvIds: string[],
+  primaryPdvId: string | null,
+  pdvToWc: Map<string, string>,
+  todayKey: string,
+  activeOrdersByStore?: Map<string, number>,
+): CompanyBillingBreakdown {
+  const monthKey = todayKey.slice(0, 7);
+  const pdvSet = new Set(pdvIds);
+  const knownWcIds = new Set(storeRows.map((s) => s.id));
+  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, primaryPdvId));
+
+  const brandMatrix = new Map<string, Map<string, BillingCellAcc>>();
+  const storeTotals = new Map<string, BillingCellAcc>();
+  const storeBrandMatrix = new Map<string, Map<string, { revenueMonth: number; deliveredMonth: number }>>();
+  let unbrandedRevenueMonth = 0;
+  let totalRevenueMonth = 0;
+  let totalRevenueToday = 0;
+  let totalDeliveredMonth = 0;
+
+  for (const brandId of brandIds) {
+    brandMatrix.set(brandId, new Map());
+  }
+  for (const store of storeRows) {
+    storeTotals.set(store.id, emptyBillingCell());
+    storeBrandMatrix.set(store.id, new Map());
+  }
+
+  for (const order of scoped) {
+    if (!isDeliveredInMonth(order, monthKey)) continue;
+
+    const storeId = resolveOrderWorkCenterId(order, primaryPdvId, pdvToWc, knownWcIds);
+    const orderTotal = Number(order.totalAmount) || 0;
+    totalRevenueMonth += orderTotal;
+    if (isDeliveredOnDay(order, todayKey)) totalRevenueToday += orderTotal;
+    totalDeliveredMonth += 1;
+
+    const items = order.items || [];
+    const brandsInOrder = new Set<string>();
+    let brandedAmount = 0;
+
+    for (const item of items) {
+      const amount = lineItemRevenue(item);
+      if (amount <= 0) continue;
+
+      const itemBrandIds = (item.brandIds ?? [])
+        .map((b) => String(b || '').trim())
+        .filter(Boolean);
+
+      if (itemBrandIds.length === 0) {
+        unbrandedRevenueMonth += amount;
+        continue;
+      }
+
+      brandedAmount += amount;
+      const share = amount / itemBrandIds.length;
+
+      for (const bid of itemBrandIds) {
+        if (!brandMatrix.has(bid)) brandMatrix.set(bid, new Map());
+        brandsInOrder.add(bid);
+
+        const byStore = brandMatrix.get(bid)!;
+        if (storeId) {
+          if (!byStore.has(storeId)) byStore.set(storeId, emptyBillingCell());
+          const cell = byStore.get(storeId)!;
+          cell.revenueMonth += share;
+          if (isDeliveredOnDay(order, todayKey)) cell.revenueToday += share;
+
+          if (!storeBrandMatrix.get(storeId)!.has(bid)) {
+            storeBrandMatrix.get(storeId)!.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
+          }
+          const sb = storeBrandMatrix.get(storeId)!.get(bid)!;
+          sb.revenueMonth += share;
+        }
+      }
+    }
+
+    if (brandedAmount <= 0 && orderTotal > 0) {
+      unbrandedRevenueMonth += orderTotal;
+    }
+
+    if (storeId && storeTotals.has(storeId)) {
+      const st = storeTotals.get(storeId)!;
+      st.revenueMonth += orderTotal;
+      if (isDeliveredOnDay(order, todayKey)) st.revenueToday += orderTotal;
+      bumpDeliveredCount(st, order, todayKey);
+    }
+
+    for (const bid of brandsInOrder) {
+      if (!storeId) continue;
+      const byStore = brandMatrix.get(bid);
+      const cell = byStore?.get(storeId);
+      if (cell) bumpDeliveredCount(cell, order, todayKey);
+      const sb = storeBrandMatrix.get(storeId)?.get(bid);
+      if (sb) sb.deliveredMonth += 1;
+    }
+  }
+
+  unbrandedRevenueMonth = Math.round(unbrandedRevenueMonth * 100) / 100;
+  totalRevenueMonth = Math.round(totalRevenueMonth * 100) / 100;
+  totalRevenueToday = Math.round(totalRevenueToday * 100) / 100;
+
+  const brands: BrandBillingBreakdown[] = brandIds
+    .map((brandId) => {
+      const byStore = brandMatrix.get(brandId) || new Map();
+      let revenueMonth = 0;
+      let revenueToday = 0;
+      let deliveredMonth = 0;
+      let deliveredToday = 0;
+      const stores: BrandStoreBillingCell[] = [];
+
+      for (const [storeId, cell] of byStore.entries()) {
+        revenueMonth += cell.revenueMonth;
+        revenueToday += cell.revenueToday;
+        deliveredMonth += cell.deliveredMonth;
+        deliveredToday += cell.deliveredToday;
+        stores.push({
+          storeId,
+          revenueMonth: Math.round(cell.revenueMonth * 100) / 100,
+          revenueToday: Math.round(cell.revenueToday * 100) / 100,
+          deliveredMonth: cell.deliveredMonth,
+          deliveredToday: cell.deliveredToday,
+        });
+      }
+
+      stores.sort((a, b) => b.revenueMonth - a.revenueMonth);
+
+      return {
+        brandId,
+        revenueMonth: Math.round(revenueMonth * 100) / 100,
+        revenueToday: Math.round(revenueToday * 100) / 100,
+        deliveredMonth,
+        deliveredToday,
+        sharePercent:
+          totalRevenueMonth > 0 ? Math.round((revenueMonth / totalRevenueMonth) * 1000) / 10 : 0,
+        stores,
+      };
+    })
+    .filter((b) => b.revenueMonth > 0 || b.deliveredMonth > 0)
+    .sort((a, b) => b.revenueMonth - a.revenueMonth);
+
+  const stores: StoreBillingBreakdown[] = storeRows
+    .map((store) => {
+      const cell = storeTotals.get(store.id) || emptyBillingCell();
+      const brandCells = storeBrandMatrix.get(store.id) || new Map();
+      const brandsForStore: StoreBrandBillingCell[] = [...brandCells.entries()]
+        .map(([brandId, sb]) => ({
+          brandId,
+          revenueMonth: Math.round(sb.revenueMonth * 100) / 100,
+          deliveredMonth: sb.deliveredMonth,
+        }))
+        .filter((b) => b.revenueMonth > 0)
+        .sort((a, b) => b.revenueMonth - a.revenueMonth);
+
+      return {
+        storeId: store.id,
+        pdvId: store.pdvId,
+        revenueMonth: Math.round(cell.revenueMonth * 100) / 100,
+        revenueToday: Math.round(cell.revenueToday * 100) / 100,
+        deliveredMonth: cell.deliveredMonth,
+        deliveredToday: cell.deliveredToday,
+        activeOrders: activeOrdersByStore?.get(store.id) ?? 0,
+        sharePercent:
+          totalRevenueMonth > 0 ? Math.round((cell.revenueMonth / totalRevenueMonth) * 1000) / 10 : 0,
+        brands: brandsForStore,
+      };
+    })
+    .filter((s) => s.revenueMonth > 0 || s.deliveredMonth > 0 || s.activeOrders > 0)
+    .sort((a, b) => b.revenueMonth - a.revenueMonth);
+
+  return {
+    totalRevenueMonth,
+    totalRevenueToday,
+    totalDeliveredMonth,
+    unbrandedRevenueMonth,
+    brands,
+    stores,
+  };
 }

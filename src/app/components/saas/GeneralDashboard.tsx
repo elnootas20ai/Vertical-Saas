@@ -12,11 +12,10 @@ import {
   RefreshCw,
   Search,
   ShoppingBag,
-  Store,
-  Tag,
   TrendingDown,
   TrendingUp,
   Users,
+  CheckCircle2,
   Clock,
   FileText,
   Wallet,
@@ -36,6 +35,7 @@ import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { TeamRrhhCompactRow } from './TeamRrhhDashboardWidget';
 import { PortfolioPlanBanner } from './PortfolioPlanBanner';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
+import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -85,6 +85,8 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       revenueToday: filteredRows.reduce((s, r) => s + r.metrics.revenueToday, 0),
       revenueMonth: filteredRows.reduce((s, r) => s + r.metrics.revenueMonth, 0),
       ordersMonth: filteredRows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
+      deliveredToday: filteredRows.reduce((s, r) => s + r.metrics.deliveredToday, 0),
+      deliveredMonth: filteredRows.reduce((s, r) => s + r.metrics.deliveredMonth, 0),
       activeOrders: filteredRows.reduce((s, r) => s + r.metrics.activeOrders, 0),
       openCashRegisters: filteredRows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
       clockedInNow: filteredRows.reduce((s, r) => s + r.team.clockedInNow, 0),
@@ -202,8 +204,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 px-0.5">
             Operativa delivery y equipo
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${fmtEuro(filteredTotals.revenueToday)}`} />
+          <StatCard label="Entregados mes" value={String(filteredTotals.deliveredMonth)} icon={<CheckCircle2 className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${filteredTotals.deliveredToday}`} />
           <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
           <StatCard label="En curso" value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Pedidos activos" />
           <StatCard label="Fichados ahora" value={String(filteredTotals.clockedInNow)} icon={<Clock className="w-4 h-4" />} tone="violet" sub="Equipo en turno" />
@@ -225,6 +228,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                   <th className="pb-2 pr-3 text-right">Ingresos fin.</th>
                   <th className="pb-2 pr-3 text-right">Gastos fin.</th>
                   <th className="pb-2 pr-3 text-right">Ingresos delivery</th>
+                  <th className="pb-2 pr-3 text-right">Entregados</th>
                   <th className="pb-2 pr-3 text-right">Pedidos</th>
                   <th className="pb-2 text-right">En curso</th>
                 </tr>
@@ -239,6 +243,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                     <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtEuro(r.finance.incomeMonth)}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-rose-600 dark:text-rose-400">{fmtEuro(r.finance.expensesMonth)}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{fmtEuro(r.metrics.revenueMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">{r.metrics.deliveredMonth}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{r.metrics.ordersMonth}</td>
                     <td className="py-2.5 text-right tabular-nums">{r.metrics.activeOrders}</td>
                   </tr>
@@ -446,6 +451,7 @@ function BusinessCard({
   const typeColor = BUSINESS_TYPE_COLORS[b.businessType] || 'bg-gray-100 text-gray-700';
   const revenue = m.revenueMonth;
   const channels = Object.entries(m.revenueByChannel).sort((a, b) => b[1] - a[1]);
+  const topBrand = row.brands.find((b) => b.revenueMonth > 0) ?? row.brands[0];
 
   return (
     <article className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
@@ -487,6 +493,15 @@ function BusinessCard({
               <span>{m.ordersMonth} pedidos · {m.deliveredMonth} entregados</span>
               <span className="text-gray-300">·</span>
               <span>{row.brandCount} marcas · {row.storeCount} tiendas</span>
+              {row.isDelivery && topBrand && topBrand.revenueMonth > 0 ? (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: topBrand.primaryColor || '#8b5cf6' }} />
+                    {topBrand.name} {fmtEuro(topBrand.revenueMonth)}
+                  </span>
+                </>
+              ) : null}
             </div>
             {row.isDelivery && channels.length > 0 ? (
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -519,13 +534,14 @@ function BusinessCard({
             </div>
 
             {row.isDelivery ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                 <MetricPill label="Ingresos delivery" value={fmtEuro(revenue)} highlight />
+                <MetricPill label="Entregados mes" value={String(m.deliveredMonth)} highlight />
+                <MetricPill label="Entregados hoy" value={String(m.deliveredToday)} />
                 <MetricPill label="Ticket medio" value={fmtEuro(m.avgTicketMonth)} />
                 <MetricPill label="Activos" value={String(m.activeOrders)} />
                 <MetricPill label="Cancelados" value={String(m.cancelledMonth)} />
                 <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} />
-                <MetricPill label="Efectivo en caja" value={fmtEuro(m.cashInRegisters)} />
               </div>
             ) : (
               <p className="text-xs text-gray-500 italic">Métricas de pedidos disponibles para negocios tipo delivery con tiendas configuradas.</p>
@@ -545,6 +561,8 @@ function BusinessCard({
               </button>
             ) : null}
 
+            <PortfolioBrandStoreBilling row={row} onOpenBrands={onOpenBrands} onOpenStores={onOpenStores} />
+
             <section>
               <div className="flex items-center justify-between mb-3">
                 <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500 flex items-center gap-1.5">
@@ -563,107 +581,7 @@ function BusinessCard({
               <TeamRrhhCompactRow snapshot={row.team} />
             </section>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500 flex items-center gap-1.5">
-                    <Tag className="w-3.5 h-3.5 text-violet-500" />
-                    Marcas ({row.brands.length})
-                  </h4>
-                  <button type="button" onClick={onOpenBrands} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
-                    Gestionar
-                  </button>
-                </div>
-                {row.brands.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">Sin marcas — créalas en Ajustes → Marca</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {row.brands.map((brand) => (
-                      <li
-                        key={brand.id}
-                        className="flex items-start gap-2 p-2.5 rounded-xl bg-violet-50/80 dark:bg-violet-950/20 border border-violet-100 dark:border-violet-900/50"
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0"
-                          style={{ backgroundColor: brand.primaryColor || '#8b5cf6' }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                            {brand.name}
-                            {brand.isDefault && (
-                              <span className="ml-1.5 text-[9px] font-bold uppercase text-violet-600">default</span>
-                            )}
-                          </p>
-                          {brand.revenueMonth > 0 ? (
-                            <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                              {fmtEuro(brand.revenueMonth)} este mes
-                            </p>
-                          ) : null}
-                          {brand.linkedStoreNames.length > 0 ? (
-                            <p className="text-[11px] text-gray-500 mt-0.5 truncate">
-                              Tiendas: {brand.linkedStoreNames.join(', ')}
-                            </p>
-                          ) : (
-                            <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">Sin tiendas enlazadas</p>
-                          )}
-                        </div>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            brand.active
-                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                              : 'bg-gray-200 text-gray-600'
-                          }`}
-                        >
-                          {brand.active ? 'Activa' : 'Off'}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-              <section>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500 flex items-center gap-1.5">
-                    <Store className="w-3.5 h-3.5 text-emerald-500" />
-                    Tiendas / PDV ({row.stores.length})
-                  </h4>
-                  <button type="button" onClick={onOpenStores} className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
-                    Gestionar
-                  </button>
-                </div>
-                {row.stores.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">Sin tiendas — créalas en Ajustes → Tienda</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {row.stores.map((store) => (
-                      <li
-                        key={store.id}
-                        className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/50"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{store.name}</p>
-                          <p className="text-[11px] text-gray-500">
-                            {store.city || 'Sin ciudad'}
-                            {store.hasPdv ? ' · PDV caja OK' : ' · Sin PDV caja'}
-                          </p>
-                        </div>
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
-                            store.active
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-gray-200 text-gray-600'
-                          }`}
-                        >
-                          {store.active ? 'Activa' : 'Off'}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
-
-            <div className="lg:col-span-2 flex flex-wrap gap-3">
+            <div className="flex flex-wrap gap-3 pt-1">
               {row.isDelivery ? (
                 <button type="button" onClick={onOpenOps} className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
                   Centro operativo →
@@ -672,7 +590,6 @@ function BusinessCard({
               <button type="button" onClick={onOpenSettings} className="text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 underline underline-offset-2">
                 Ajustes de empresa
               </button>
-            </div>
             </div>
           </div>
         )}

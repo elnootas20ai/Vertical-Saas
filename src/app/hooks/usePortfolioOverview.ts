@@ -19,14 +19,19 @@ import {
 } from '../lib/deliverySetup';
 import {
   applyTpvCashMetrics,
+  computeCompanyBillingBreakdown,
   computePortfolioMetrics,
+  computeStoreDeliveryMetrics,
   consolidatePortfolioFinance,
   emptyPortfolioMetrics,
   pickPrimaryPdvIdFromList,
   sumFinanceMonthForBusiness,
+  type CompanyBillingBreakdown,
   type PortfolioFinanceTotals,
   type PortfolioMetrics,
+  type StoreDeliveryMetrics,
 } from '../lib/portfolioMetrics';
+import { localCalendarDayKey } from '../lib/tpvCajaScope';
 import { computeEbitdaForMonth } from '../lib/ebitdaMetrics';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import type { WorkCenter } from '../lib/workCentersApi';
@@ -43,6 +48,17 @@ export type PortfolioStore = {
   active: boolean;
   city?: string;
   hasPdv: boolean;
+  pdvId?: string;
+  delivery: StoreDeliveryMetrics;
+};
+
+export type PortfolioBrandStoreBreakdown = {
+  storeId: string;
+  storeName: string;
+  revenueMonth: number;
+  revenueToday: number;
+  deliveredMonth: number;
+  deliveredToday: number;
 };
 
 export type PortfolioBrand = {
@@ -53,8 +69,14 @@ export type PortfolioBrand = {
   primaryColor?: string;
   linkedStoreIds: string[];
   linkedStoreNames: string[];
+  operatesAllStores: boolean;
   revenueMonth: number;
+  revenueToday: number;
   ordersMonth: number;
+  deliveredMonth: number;
+  deliveredToday: number;
+  sharePercent: number;
+  storeBreakdown: PortfolioBrandStoreBreakdown[];
 };
 
 export type PortfolioBusiness = {
@@ -69,6 +91,7 @@ export type PortfolioBusiness = {
   pdvIds: string[];
   metrics: PortfolioMetrics;
   finance: PortfolioFinanceTotals;
+  billing: CompanyBillingBreakdown | null;
   isDelivery: boolean;
   team: TeamDashboardSnapshot;
 };
@@ -82,6 +105,8 @@ export type PortfolioTotals = {
   revenueToday: number;
   revenueMonth: number;
   ordersMonth: number;
+  deliveredToday: number;
+  deliveredMonth: number;
   activeOrders: number;
   openCashRegisters: number;
   clockedInNow: number;
@@ -99,9 +124,20 @@ const EMPTY_FINANCE: PortfolioFinanceTotals = {
   cashBalance: 0,
 };
 
+const EMPTY_STORE_DELIVERY: StoreDeliveryMetrics = {
+  deliveredToday: 0,
+  deliveredMonth: 0,
+  revenueMonth: 0,
+  activeOrders: 0,
+};
+
 function mapStores(
   workCenters: WorkCenter[],
   pdvWorkCenterIds: Set<string>,
+  pdvByWorkCenterId: Map<string, string>,
+  orders: Awaited<ReturnType<typeof filterDeliveryOrdersRequest>>['orders'],
+  todayKey: string,
+  monthKey: string,
 ): PortfolioStore[] {
   return workCenters
     .filter(
@@ -109,48 +145,83 @@ function mapStores(
         !wc.deletedAt &&
         (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
     )
-    .map((wc) => ({
-      id: wc._id,
-      name: wc.name,
-      centerType: wc.centerType,
-      active: wc.active !== false,
-      city: wc.city,
-      hasPdv: pdvWorkCenterIds.has(wc._id),
-    }))
+    .map((wc) => {
+      const pdvId = pdvByWorkCenterId.get(wc._id);
+      const delivery = pdvId
+        ? computeStoreDeliveryMetrics(orders, pdvId, todayKey, monthKey, wc._id)
+        : EMPTY_STORE_DELIVERY;
+      return {
+        id: wc._id,
+        name: wc.name,
+        centerType: wc.centerType,
+        active: wc.active !== false,
+        city: wc.city,
+        hasPdv: pdvWorkCenterIds.has(wc._id),
+        pdvId,
+        delivery,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
-function enrichBrandsWithRevenue(
+function enrichBrandsWithBilling(
   brands: PortfolioBrand[],
-  metrics: PortfolioMetrics,
+  billing: CompanyBillingBreakdown | null,
+  storeNameById: Map<string, string>,
 ): PortfolioBrand[] {
-  return brands.map((b) => {
-    const rev = metrics.revenueByBrand[b.id] ?? 0;
-    const orders = metrics.deliveredMonth > 0 && rev > 0 ? Math.max(1, Math.round(rev / (metrics.avgTicketMonth || 1))) : 0;
-    return { ...b, revenueMonth: Math.round(rev * 100) / 100, ordersMonth: orders };
-  });
+  const billingByBrand = new Map((billing?.brands ?? []).map((b) => [b.brandId, b]));
+  return brands.map((brand) => {
+    const row = billingByBrand.get(brand.id);
+    const storeBreakdown: PortfolioBrandStoreBreakdown[] = (row?.stores ?? []).map((cell) => ({
+      storeId: cell.storeId,
+      storeName: storeNameById.get(cell.storeId) || 'Tienda',
+      revenueMonth: cell.revenueMonth,
+      revenueToday: cell.revenueToday,
+      deliveredMonth: cell.deliveredMonth,
+      deliveredToday: cell.deliveredToday,
+    }));
+    return {
+      ...brand,
+      revenueMonth: row?.revenueMonth ?? 0,
+      revenueToday: row?.revenueToday ?? 0,
+      deliveredMonth: row?.deliveredMonth ?? 0,
+      deliveredToday: row?.deliveredToday ?? 0,
+      ordersMonth: row?.deliveredMonth ?? 0,
+      sharePercent: row?.sharePercent ?? 0,
+      storeBreakdown,
+    };
+  }).sort((a, b) => b.revenueMonth - a.revenueMonth);
 }
 
-function buildBrandRows(brands: Brand[], stores: PortfolioStore[]): PortfolioBrand[] {
+function buildBrandRows(brands: Brand[], stores: PortfolioStore[], totalStores: number): PortfolioBrand[] {
   const storeById = new Map(stores.map((s) => [s.id, s.name]));
   return brands
     .filter((b) => !b.deletedAt)
     .map((b) => {
-      const linkedStoreIds = (b.salesPointIds ?? [])
+      const rawIds = (b.salesPointIds ?? [])
         .map((id) => String(id || '').trim())
         .filter(Boolean);
+      const linkedStoreIds = rawIds.filter((id) => storeById.has(id));
+      const operatesAllStores = totalStores > 0 && (rawIds.length === 0 || linkedStoreIds.length >= totalStores);
+      const effectiveIds = operatesAllStores ? stores.map((s) => s.id) : linkedStoreIds;
       return {
         id: b._id,
         name: b.name,
         active: b.active !== false,
         isDefault: Boolean(b.isDefault),
         primaryColor: b.primaryColor,
-        linkedStoreIds,
-        linkedStoreNames: linkedStoreIds
+        linkedStoreIds: effectiveIds,
+        linkedStoreNames: effectiveIds
           .map((id) => storeById.get(id))
           .filter((n): n is string => Boolean(n)),
+        operatesAllStores,
         revenueMonth: 0,
+        revenueToday: 0,
         ordersMonth: 0,
+        deliveredMonth: 0,
+        deliveredToday: 0,
+        sharePercent: 0,
+        storeBreakdown: [],
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -185,10 +256,12 @@ export function usePortfolioOverview(
     setLoading(true);
     setError(null);
 
-    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
     const monthStart = `${monthKey}-01T00:00:00.000Z`;
     const monthEnd = `${todayKey}T23:59:59.999Z`;
+    const lookbackMs = 45 * 24 * 60 * 60 * 1000;
+    const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
 
     try {
       const structures = await Promise.all(
@@ -215,16 +288,21 @@ export function usePortfolioOverview(
               .map((p) => String(p.workCenterId || '').trim())
               .filter(Boolean),
           );
-          const stores = mapStores(deliveryState.workCenters, pdvWcIds);
+          const pdvByWorkCenterId = new Map<string, string>();
+          for (const p of deliveryState.pointsOfSale) {
+            const wcId = String(p.workCenterId || '').trim();
+            if (wcId) pdvByWorkCenterId.set(wcId, p._id);
+          }
           const pdvIds = deliveryState.pointsOfSale
             .filter((p) => p.active !== false)
             .map((p) => p._id);
-
           return {
             business,
             dataUserId,
             isDelivery,
-            stores,
+            workCenters: deliveryState.workCenters,
+            pdvWcIds,
+            pdvByWorkCenterId,
             brandsRaw,
             pdvIds,
             pointsOfSale: deliveryState.pointsOfSale,
@@ -275,7 +353,7 @@ export function usePortfolioOverview(
         uniqueDataUsers.map(async (dataUserId) => {
           const [orderResult, sessions] = await Promise.all([
             filterDeliveryOrdersRequest(dataUserId, {
-              dateFrom: monthStart,
+              dateFrom: orderFetchFrom,
               dateTo: monthEnd,
               limit: 3000,
             }).catch(() => ({ orders: [], total: 0 })),
@@ -288,19 +366,46 @@ export function usePortfolioOverview(
 
       const loaded: PortfolioBusiness[] = await Promise.all(
         structures.map(async (s) => {
-          const brandsBase = buildBrandRows(s.brandsRaw, s.stores);
+          const orders = s.isDelivery && s.dataUserId ? ordersByUser.get(s.dataUserId) || [] : [];
+          const stores = mapStores(
+            s.workCenters,
+            s.pdvWcIds,
+            s.pdvByWorkCenterId,
+            orders,
+            todayKey,
+            monthKey,
+          );
+          const brandsBase = buildBrandRows(s.brandsRaw, stores, stores.length);
           let metrics = emptyPortfolioMetrics();
+          let billing: CompanyBillingBreakdown | null = null;
 
           if (s.isDelivery && s.dataUserId && s.pdvIds.length > 0) {
-            const orders = ordersByUser.get(s.dataUserId) || [];
             const sessions = sessionsByUser.get(s.dataUserId) || [];
             const createdMap = pdvCreatedAtMap(s.pointsOfSale);
             const primaryPdv = pickPrimaryPdvIdFromList(s.pdvIds, createdMap);
             metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey);
             metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
+
+            const pdvToWc = new Map<string, string>();
+            for (const p of s.pointsOfSale) {
+              const wcId = String(p.workCenterId || '').trim();
+              if (wcId) pdvToWc.set(p._id, wcId);
+            }
+            const activeByStore = new Map(stores.map((st) => [st.id, st.delivery.activeOrders]));
+            billing = computeCompanyBillingBreakdown(
+              orders,
+              brandsBase.map((b) => b.id),
+              stores.map((st) => ({ id: st.id, pdvId: st.pdvId })),
+              s.pdvIds,
+              primaryPdv,
+              pdvToWc,
+              todayKey,
+              activeByStore,
+            );
           }
 
-          const brands = enrichBrandsWithRevenue(brandsBase, metrics);
+          const storeNameById = new Map(stores.map((st) => [st.id, st.name]));
+          const brands = enrichBrandsWithBilling(brandsBase, billing, storeNameById);
           const members = (s.business.members || []).map((m) => ({
             user_id: m.user_id,
             fullName: m.fullName,
@@ -319,14 +424,15 @@ export function usePortfolioOverview(
             businessId: s.business.business_id,
             business: s.business,
             brands,
-            stores: s.stores,
+            stores,
             memberCount: s.business.members?.length ?? 0,
             brandCount: brands.length,
-            storeCount: s.stores.length,
+            storeCount: stores.length,
             pdvCount: s.pdvIds.length,
             pdvIds: s.pdvIds,
             metrics,
             finance: rowFinance,
+            billing,
             isDelivery: s.isDelivery,
             team,
           };
@@ -367,6 +473,8 @@ export function usePortfolioOverview(
     revenueToday: rows.reduce((s, r) => s + r.metrics.revenueToday, 0),
     revenueMonth: rows.reduce((s, r) => s + r.metrics.revenueMonth, 0),
     ordersMonth: rows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
+    deliveredToday: rows.reduce((s, r) => s + r.metrics.deliveredToday, 0),
+    deliveredMonth: rows.reduce((s, r) => s + r.metrics.deliveredMonth, 0),
     activeOrders: rows.reduce((s, r) => s + r.metrics.activeOrders, 0),
     openCashRegisters: rows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
     clockedInNow: rows.reduce((s, r) => s + r.team.clockedInNow, 0),

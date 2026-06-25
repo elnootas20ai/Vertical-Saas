@@ -166,7 +166,7 @@ export function pickPrimaryPdvId(pdvs) {
   return sorted[0]._id || null;
 }
 
-export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName) {
+export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName, pdvWorkCenterId) {
   const filterId = String(pdvId || '').trim();
   if (!filterId) return true;
   const oid = String(order.salesPointId || '').trim();
@@ -178,7 +178,10 @@ export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName) {
     if (orderStore && pdvLabel && orderStore === pdvLabel) return true;
     return false;
   }
-  return oid === filterId;
+  if (oid === filterId) return true;
+  const wcId = String(pdvWorkCenterId || '').trim();
+  if (wcId && oid === wcId) return true;
+  return false;
 }
 
 /** Resuelve referencia de tienda (PDV `_id` o centro de trabajo) al `_id` del PDV. */
@@ -1166,7 +1169,10 @@ export async function filterDeliveryOrders(req, res) {
       const pdv = String(salesPointId).trim();
       const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
       const pdvName = String(pdvDoc?.name || '').trim();
-      orders = orders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName));
+      const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
+      orders = orders.filter((o) =>
+        orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName, pdvWorkCenterId),
+      );
     }
     if (status) orders = orders.filter((o) => o.status === status);
     if (deliveryType) orders = orders.filter((o) => o.deliveryType === deliveryType);
@@ -3086,7 +3092,7 @@ export function orderMatchesBusinessPdvs(order, pdvs) {
   if (!Array.isArray(pdvs) || pdvs.length === 0) return false;
   const primaryPdvId = pickPrimaryPdvId(pdvs);
   for (const p of pdvs) {
-    if (orderMatchesPdvScope(order, p._id, primaryPdvId, p.name)) return true;
+    if (orderMatchesPdvScope(order, p._id, primaryPdvId, p.name, p.workCenterId)) return true;
   }
   return false;
 }
@@ -3310,7 +3316,10 @@ export async function getOpsCenter(req, res) {
       const pdv = String(salesPointId).trim();
       const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
       const pdvName = String(pdvDoc?.name || '').trim();
-      dayOrders = dayOrders.filter((o) => orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName));
+      const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
+      dayOrders = dayOrders.filter((o) =>
+        orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName, pdvWorkCenterId),
+      );
     } else if (businessPdvs && businessPdvs.length > 0) {
       dayOrders = dayOrders.filter((o) => orderMatchesBusinessPdvs(o, businessPdvs));
     }

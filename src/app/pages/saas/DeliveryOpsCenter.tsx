@@ -1175,6 +1175,7 @@ export function DeliveryOpsCenter() {
   const [sseOk, setSseOk] = useState(false);
   const [lastUp, setLastUp] = useState<Date | null>(null);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadSeqRef = useRef(0);
 
   /** PDV visibles en Ops: primero los de la empresa activa (scope global), luego respuesta API. */
   const opsPdvs = useMemo(() => {
@@ -1187,6 +1188,36 @@ export function DeliveryOpsCenter() {
   const singleActivePdvId = useMemo(() => {
     return opsPdvs.length === 1 ? opsPdvs[0]._id : null;
   }, [opsPdvs]);
+
+  /** Con varias tiendas no pedimos datos hasta tener PDV elegido (evita mezclar KPIs al entrar). */
+  const opsPdvFilterReady = useMemo(() => {
+    if (opsPdvs.length <= 1) return true;
+    const id = filters.salesPointId?.trim();
+    if (id && opsPdvs.some((p) => p._id === id)) return true;
+    // Bootstrap: aún no hay tiendas en scope ni en la última respuesta → un fetch trae la lista.
+    if (opsPdvs.length === 0 && !data?.pointsOfSale?.length) return true;
+    return false;
+  }, [opsPdvs, filters.salesPointId, data?.pointsOfSale?.length]);
+
+  /** Restaurar tienda desde scope/localStorage antes del fetch (no esperar a data.pointsOfSale). */
+  useEffect(() => {
+    if (opsPdvs.length <= 1) return;
+    const current = filters.salesPointId?.trim();
+    if (current && opsPdvs.some((p) => p._id === current)) return;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (!bid || !dataUserId) return;
+    const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
+    const pdvId = coerceSelectedPdvId(opsPdvs, saved || activeStoreScope.activeSalesPointId);
+    if (!pdvId) return;
+    setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
+  }, [
+    opsPdvs,
+    filters.salesPointId,
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    dataUserId,
+    activeStoreScope.activeSalesPointId,
+  ]);
 
   useEffect(() => {
     if (!singleActivePdvId) return;
@@ -1309,7 +1340,8 @@ export function DeliveryOpsCenter() {
   ], []);
 
   const load = useCallback(async () => {
-    if (!authUserId) return;
+    if (!authUserId || !opsPdvFilterReady) return;
+    const seq = ++loadSeqRef.current;
     try {
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
       const effectiveFilters = {
@@ -1318,9 +1350,14 @@ export function DeliveryOpsCenter() {
         ...(businessId ? { businessId } : {}),
       };
       const r = await getOpsCenterRequest(authUserId, effectiveFilters);
+      if (seq !== loadSeqRef.current) return;
       setData(r); setLastUp(new Date());
-    } catch (e) { console.error('ops-center error', e); } finally { setLoading(false); }
-  }, [authUserId, filters, currentBusiness?.business_id, currentBusiness?.id]);
+    } catch (e) {
+      if (seq === loadSeqRef.current) console.error('ops-center error', e);
+    } finally {
+      if (seq === loadSeqRef.current) setLoading(false);
+    }
+  }, [authUserId, filters, currentBusiness?.business_id, currentBusiness?.id, opsPdvFilterReady]);
 
   useEffect(() => { load(); }, [load]);
 
