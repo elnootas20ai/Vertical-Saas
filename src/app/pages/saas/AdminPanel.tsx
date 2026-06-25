@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -254,16 +254,21 @@ function getAccountVerification(account: AuthUser) {
   return getCompanyVerificationSnapshot(account.onboardingData);
 }
 
+function canDeleteSaasClient(account: AuthUser): boolean {
+  return !isVertialSuperAdminEmail(account.email);
+}
+
 // ─── Modal de edición de cliente ─────────────────────────────────────────────
 
 interface EditModalProps {
   account: AuthUser;
   onClose: () => void;
   onSaved: (updated: AuthUser) => void;
+  onDeleted: (userId: string) => void;
 }
 
-function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
-  const { updateUser, resetUserPassword, user: adminUser } = useAuth();
+function EditClientModal({ account, onClose, onSaved, onDeleted }: EditModalProps) {
+  const { updateUser, resetUserPassword, deleteUser, user: adminUser } = useAuth();
   const adminLabel = adminUser?.email || adminUser?.fullName || 'admin';
 
   const [companyName, setCompanyName] = useState(account.companyName || '');
@@ -292,6 +297,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [isBlocked, setIsBlocked] = useState(account.status === 'inactive');
   const [saving, setSaving] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
   const [impersonateError, setImpersonateError] = useState('');
@@ -492,6 +498,26 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     setSaveSuccess(true);
     if (result.user) onSaved(result.user);
     setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!canDeleteSaasClient(account)) {
+      setSaveError('No se puede eliminar la cuenta de super-admin.');
+      return;
+    }
+    const label = account.companyName || account.fullName || account.email;
+    if (!window.confirm(`¿Eliminar permanentemente "${label}" (${account.email})?\n\nSe borrarán también sus empresas vinculadas.`)) {
+      return;
+    }
+    setDeleting(true);
+    setSaveError('');
+    const result = await deleteUser(account.user_id);
+    setDeleting(false);
+    if (!result.success) {
+      setSaveError(result.error ?? 'No se pudo eliminar la cuenta');
+      return;
+    }
+    onDeleted(account.user_id);
   };
 
   const planTier = resolvePlanTier(selectedPlanId, planName);
@@ -954,6 +980,17 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               <p className="text-sm text-green-700">Cambios guardados correctamente</p>
             </div>
           )}
+          {canDeleteSaasClient(account) && (
+            <button
+              type="button"
+              onClick={() => void handleDeleteAccount()}
+              disabled={deleting || saving}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/30 text-sm font-semibold text-red-700 dark:text-red-300 transition-colors disabled:opacity-50"
+            >
+              <Trash2 className={`w-4 h-4 ${deleting ? 'animate-spin' : ''}`} />
+              {deleting ? 'Eliminando cuenta...' : 'Eliminar cuenta y empresas'}
+            </button>
+          )}
           <button onClick={() => void handleSave()} disabled={saving}
             className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-900 hover:bg-gray-700 text-white text-sm font-bold transition-colors disabled:opacity-50">
             <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
@@ -1116,16 +1153,20 @@ function getTrialInfo(account: AuthUser): {
 function ClientsTab({
   selectedAccount,
   onSelectAccount,
+  onAccountDeleted,
   accountSaveCallbackRef,
 }: {
   selectedAccount: AuthUser | null;
   onSelectAccount: (a: AuthUser | null) => void;
+  onAccountDeleted: (userId: string) => void;
   accountSaveCallbackRef: React.MutableRefObject<((u: AuthUser) => void) | null>;
 }) {
-  const { listUsers } = useAuth();
+  const { listUsers, deleteUser } = useAuth();
   const [accounts, setAccounts] = useState<AuthUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('createdAt');
@@ -1162,6 +1203,72 @@ function ClientsTab({
     () => accounts.filter((a) => !a.invitedBy),
     [accounts],
   );
+  const deletableOwnerAccounts = useMemo(
+    () => ownerAccountsBase.filter(canDeleteSaasClient),
+    [ownerAccountsBase],
+  );
+
+  const removeAccountFromList = (userId: string) => {
+    setAccounts((prev) => prev.filter((a) => a.user_id !== userId));
+    if (selectedAccount?.user_id === userId) onSelectAccount(null);
+    onAccountDeleted(userId);
+  };
+
+  const handleDeleteAccount = async (account: AuthUser, e?: MouseEvent) => {
+    e?.stopPropagation();
+    if (!canDeleteSaasClient(account)) {
+      window.alert('No se puede eliminar la cuenta de super-admin.');
+      return;
+    }
+    const label = account.companyName || account.fullName || account.email;
+    if (!window.confirm(`¿Eliminar permanentemente "${label}" (${account.email})?\n\nSe borrarán también sus empresas vinculadas.`)) {
+      return;
+    }
+    setDeletingId(account.user_id);
+    setError('');
+    try {
+      const result = await deleteUser(account.user_id);
+      if (!result.success) throw new Error(result.error || 'No se pudo eliminar');
+      removeAccountFromList(account.user_id);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'No se pudo eliminar la cuenta');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleDeleteAllAccounts = async () => {
+    if (deletableOwnerAccounts.length === 0) {
+      window.alert('No hay cuentas propietarias que se puedan eliminar.');
+      return;
+    }
+    if (!window.confirm(`¿Eliminar ${deletableOwnerAccounts.length} cuenta(s) propietaria(s)?\n\nSe borrarán también sus empresas. La cuenta super-admin se mantiene.`)) {
+      return;
+    }
+    if (!window.confirm('Última confirmación: esta acción no se puede deshacer.')) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError('');
+    let removed = 0;
+    let failed = 0;
+    for (const account of deletableOwnerAccounts) {
+      try {
+        const result = await deleteUser(account.user_id);
+        if (result.success) {
+          removed += 1;
+          removeAccountFromList(account.user_id);
+        } else {
+          failed += 1;
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+    setBulkDeleting(false);
+    window.alert(`Eliminadas: ${removed}. Errores: ${failed}.`);
+  };
+
   const invitedAccounts = useMemo(() => accounts.filter((a) => Boolean(a.invitedBy)), [accounts]);
 
   const planOptions = useMemo(() => {
@@ -1312,6 +1419,15 @@ function ClientsTab({
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                 {loading ? 'Actualizando...' : 'Actualizar'}
               </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteAllAccounts()}
+                disabled={bulkDeleting || loading || deletableOwnerAccounts.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 border border-red-200 dark:border-red-800/50 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-xl text-sm font-semibold text-red-700 dark:text-red-300 transition-colors disabled:opacity-40"
+              >
+                <Trash2 className={`w-4 h-4 ${bulkDeleting ? 'animate-spin' : ''}`} />
+                {bulkDeleting ? 'Eliminando...' : `Vaciar clientes (${deletableOwnerAccounts.length})`}
+              </button>
             </div>
 
             {/* Search bar */}
@@ -1457,12 +1573,13 @@ function ClientsTab({
                   <SortableHeader label="Importar" field="import" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Ancover" field="ancover" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Verificación" field="verification" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAndSorted.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={16} className="px-4 py-12 text-center">
+                    <td colSpan={17} className="px-4 py-12 text-center">
                       <Search className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                       <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -1650,6 +1767,27 @@ function ClientsTab({
                             </span>
                           );
                         })()}
+                      </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => onSelectAccount(account)}
+                            title="Editar cliente"
+                            className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                          >
+                            <PenLine className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => void handleDeleteAccount(account, e)}
+                            disabled={!canDeleteSaasClient(account) || deletingId === account.user_id || bulkDeleting}
+                            title={canDeleteSaasClient(account) ? 'Eliminar cliente' : 'Cuenta protegida'}
+                            className="p-2 rounded-lg border border-red-200 dark:border-red-800/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-40"
+                          >
+                            <Trash2 className={`w-4 h-4 ${deletingId === account.user_id ? 'animate-spin' : ''}`} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -3270,6 +3408,11 @@ export function AdminPanel() {
     accountSaveCallbackRef.current?.(updated);
   }, []);
 
+  const handleAccountDeleted = useCallback((userId: string) => {
+    setSelectedAccount(null);
+    setAuditUsers((prev) => prev.filter((u) => u.user_id !== userId));
+  }, []);
+
   if (!isVertialSuperAdminEmail(user?.email)) {
     return (
       <Layout title="Panel admin" subtitle="Acceso restringido">
@@ -3313,6 +3456,7 @@ export function AdminPanel() {
           <ClientsTab
             selectedAccount={selectedAccount}
             onSelectAccount={setSelectedAccount}
+            onAccountDeleted={handleAccountDeleted}
             accountSaveCallbackRef={accountSaveCallbackRef}
           />
         )}
@@ -3332,6 +3476,7 @@ export function AdminPanel() {
           account={selectedAccount}
           onClose={() => setSelectedAccount(null)}
           onSaved={handleAccountSaved}
+          onDeleted={handleAccountDeleted}
         />
       )}
     </Layout>

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
 import {
   ACCOUNTS_DB,
+  BUSINESSES_DB,
   CARDS_DB,
   ROLE_DEFINITIONS,
   buildAccountDocument,
@@ -1977,18 +1978,40 @@ export async function resetUserPassword(req, res) {
 
 export async function deleteUser(req, res) {
   try {
-    const userId = req.params.userId;
+    const userId = String(req.params.userId || '').trim();
+    const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+    const actorEmail = req.authUser?.email || '';
+    const isSuperAdmin = isVertialSuperAdminEmail(actorEmail);
+
+    if (authUserId && userId && authUserId !== userId) {
+      if (!isSuperAdmin) {
+        const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
+        const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
+        if (!isManager) {
+          return res.status(403).json({ ok: false, error: 'No puedes eliminar otro usuario.' });
+        }
+      }
+    }
+
     const account = await findAccountByUserId(req, userId);
     if (!account) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
-    // Limpiar el usuario de business.members[] del negocio al que esté vinculado,
-    // y también de cualquier otro negocio donde aparezca por seguridad.
+    if (isVertialSuperAdminEmail(account.email)) {
+      return res.status(403).json({ ok: false, error: 'No se puede eliminar la cuenta de super-admin.' });
+    }
+
+    // Limpiar negocios del owner y membership en otros negocios.
     try {
       const allBusinesses = await listAllBusinesses(req);
       for (const business of allBusinesses) {
-        if (business.owner_user_id === account.user_id) continue; // No tocamos owners
+        if (String(business.owner_user_id || '').trim() === account.user_id) {
+          if (isSuperAdmin) {
+            await softDeleteDocument(req, BUSINESSES_DB, business._id);
+          }
+          continue;
+        }
         const members = Array.isArray(business.members) ? business.members : [];
         const filtered = members.filter((m) => m && m.user_id !== account.user_id);
         if (filtered.length !== members.length) {
@@ -2000,7 +2023,18 @@ export async function deleteUser(req, res) {
         }
       }
     } catch (cleanupErr) {
-      console.error('[AUTH] Error limpiando business.members al borrar usuario:', cleanupErr?.message);
+      console.error('[AUTH] Error limpiando business al borrar usuario:', cleanupErr?.message);
+    }
+
+    if (isSuperAdmin) {
+      try {
+        const card = await findCardByUserId(req, account.user_id);
+        if (card?._id) {
+          await softDeleteDocument(req, CARDS_DB, card._id);
+        }
+      } catch (cardErr) {
+        console.error('[AUTH] Error eliminando tarjeta al borrar usuario:', cardErr?.message);
+      }
     }
 
     await softDeleteDocument(req, ACCOUNTS_DB, account._id);
@@ -2009,10 +2043,10 @@ export async function deleteUser(req, res) {
       entityId: account._id,
       entityLabel: account.fullName,
       action: 'delete',
-      actorUserId: req.body?.actorUserId || userId,
+      actorUserId: req.body?.actorUserId || authUserId || userId,
       actorName: req.body?.actorName || account.fullName,
       changes: { before: { email: account.email, role: account.role, status: account.status } },
-      metadata: { email: account.email, ip: getClientIp(req) },
+      metadata: { email: account.email, ip: getClientIp(req), deletedBySuperAdmin: isSuperAdmin },
     });
     return res.json({ ok: true, id: account.user_id });
   } catch (error) {
