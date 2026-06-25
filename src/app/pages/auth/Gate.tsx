@@ -274,6 +274,11 @@ export function Gate() {
   useEffect(() => {
     if (!showTrulyEmptyBusinesses || !hasOnboardingCompany || autoProvisionAttempted.current) return;
 
+    if (user?.onboardingData?.suppressAutoProvision) {
+      autoProvisionAttempted.current = true;
+      return;
+    }
+
     // El backend ya la crea al completar el onboarding; evitar un segundo alta desde aquí.
     if (user?.onboardingCompleted) {
       autoProvisionAttempted.current = true;

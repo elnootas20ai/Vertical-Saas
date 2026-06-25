@@ -432,6 +432,8 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        await refreshCurrentUser?.();
+
         return { success: true };
       } catch (error) {
         return {
@@ -440,7 +442,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         };
       }
     },
-    [businesses, currentBusiness, user?.user_id],
+    [businesses, currentBusiness, user?.user_id, refreshCurrentUser],
   );
 
   const addMember = useCallback(

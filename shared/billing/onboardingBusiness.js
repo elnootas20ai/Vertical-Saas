@@ -4,6 +4,7 @@
 
 import {
   buildBusinessDocument,
+  findBusinessById,
   listBusinessesByUser,
   saveBusiness,
 } from '../../services/couchdb.js';
@@ -52,10 +53,30 @@ export function findLikelyDuplicateBusiness(existing, fields) {
 /**
  * @returns {Promise<{ ok: boolean, created?: boolean, business?: object, businessId?: string, reason?: string }>}
  */
+function normalizeLinkedBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+export { normalizeLinkedBusinessId };
+
 export async function provisionBusinessFromOnboarding(req, account) {
   const userId = String(account?.user_id || '').trim();
   if (!userId) return { ok: false, reason: 'no_user' };
   if (account.accountType === 'user') return { ok: false, reason: 'worker_account' };
+
+  if (account.onboardingData?.suppressAutoProvision) {
+    return { ok: false, reason: 'suppress_auto_provision' };
+  }
+
+  const linkedId = normalizeLinkedBusinessId(account.onboardingData?.businessId);
+  if (linkedId) {
+    const linked = await findBusinessById(req, linkedId);
+    if (linked && !linked.deletedAt) {
+      return { ok: true, created: false, business: linked, businessId: linkedId };
+    }
+    // Empresa enlazada eliminada o inexistente: no recrear sola (el titular debe dar de alta manual).
+    return { ok: false, reason: 'linked_business_unavailable' };
+  }
 
   const existing = await listBusinessesByUser(req, userId);
   const name = resolveBusinessNameFromOnboarding(account);

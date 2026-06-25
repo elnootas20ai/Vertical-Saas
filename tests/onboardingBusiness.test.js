@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findLikelyDuplicateBusiness,
+  normalizeLinkedBusinessId,
   resolveBusinessNameFromOnboarding,
 } from '../shared/billing/onboardingBusiness.js';
 
@@ -56,5 +57,10 @@ describe('onboarding business provisioning helpers', () => {
         city: 'Madrid',
       }),
     ).toBeNull();
+  });
+
+  it('normaliza businessId enlazado', () => {
+    expect(normalizeLinkedBusinessId('business:abc-123')).toBe('abc-123');
+    expect(normalizeLinkedBusinessId('abc-123')).toBe('abc-123');
   });
 });

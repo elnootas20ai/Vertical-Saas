@@ -207,6 +207,9 @@ function SaasContent() {
 
     // El backend ya provisiona la empresa al completar el onboarding; solo recargar.
     if (user?.onboardingCompleted) {
+      if (user?.onboardingData?.suppressAutoProvision) {
+        return;
+      }
       if (!onboardingReloadAttempted.current) {
         onboardingReloadAttempted.current = true;
         void (async () => {
@@ -218,6 +221,10 @@ function SaasContent() {
           }
         })();
       }
+      return;
+    }
+
+    if (user?.onboardingData?.suppressAutoProvision) {
       return;
     }
 

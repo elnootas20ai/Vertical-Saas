@@ -1246,22 +1246,25 @@ export async function saveBillingCard(req, res) {
     });
 
     let accountAfterProvision = savedAccount;
-    try {
-      const provision = await provisionBusinessFromOnboarding(req, savedAccount);
-      if (provision.ok && provision.businessId) {
-        const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
-        accountAfterProvision = await saveAccount(req, {
-          ...savedAccount,
-          companyName: resolvedName || savedAccount.companyName,
-          onboardingData: {
-            ...(savedAccount.onboardingData || {}),
-            businessId: provision.businessId,
-          },
-          updatedAt: new Date().toISOString(),
-        });
+    if (!account.onboardingCompleted) {
+      try {
+        const provision = await provisionBusinessFromOnboarding(req, savedAccount);
+        if (provision.ok && provision.businessId) {
+          const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
+          accountAfterProvision = await saveAccount(req, {
+            ...savedAccount,
+            companyName: resolvedName || savedAccount.companyName,
+            onboardingData: {
+              ...(savedAccount.onboardingData || {}),
+              businessId: provision.businessId,
+              suppressAutoProvision: false,
+            },
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (provisionErr) {
+        console.error('[AUTH] Error provisionando empresa desde onboarding (tarjeta):', provisionErr?.message);
       }
-    } catch (provisionErr) {
-      console.error('[AUTH] Error provisionando empresa desde onboarding (tarjeta):', provisionErr?.message);
     }
 
     return res.json({
@@ -2588,7 +2591,7 @@ export async function saveOnboarding(req, res) {
       updatedAt: new Date().toISOString(),
     });
 
-    if (willComplete) {
+    if (wasIncomplete && willComplete) {
       try {
         const provision = await provisionBusinessFromOnboarding(req, savedAccount);
         if (provision.ok && provision.businessId) {
@@ -2597,6 +2600,7 @@ export async function saveOnboarding(req, res) {
             onboardingData: {
               ...(savedAccount.onboardingData || {}),
               businessId: provision.businessId,
+              suppressAutoProvision: false,
             },
             updatedAt: new Date().toISOString(),
           });

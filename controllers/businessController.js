@@ -6,6 +6,7 @@ import {
   listBusinessesByUser,
   normalizePermissionMatrix,
   sanitizeBusiness,
+  saveAccount,
   saveBusiness,
   softDeleteDocument,
   verifyPassword,
@@ -13,7 +14,7 @@ import {
 } from '../services/couchdb.js';
 import { seedAlertsConfigIfMissing } from './settingsController.js';
 import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
-import { findLikelyDuplicateBusiness } from '../shared/billing/onboardingBusiness.js';
+import { findLikelyDuplicateBusiness, normalizeLinkedBusinessId } from '../shared/billing/onboardingBusiness.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -60,6 +61,20 @@ export async function createBusiness(req, res) {
     const saved = await saveBusiness(req, business);
     const businessId = saved._id?.replace(/^business:/, '') || saved._id;
     await seedAlertsConfigIfMissing(req, businessId, saved.businessType || businessType);
+
+    const ownerAccount = await findAccountByUserId(req, userId);
+    if (ownerAccount) {
+      await saveAccount(req, {
+        ...ownerAccount,
+        onboardingData: {
+          ...(ownerAccount.onboardingData || {}),
+          businessId: saved.business_id || businessId,
+          suppressAutoProvision: false,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     return res.status(201).json({ ok: true, business: sanitizeBusiness(saved) });
   } catch (error) {
     return res.status(500).json({
@@ -157,6 +172,27 @@ export async function deleteBusiness(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     await softDeleteDocument(req, BUSINESSES_DB, business._id);
+
+    if (String(business.owner_user_id || '').trim() === userId) {
+      const ownerAccount = await findAccountByUserId(req, userId);
+      if (ownerAccount) {
+        const prevOnboarding = ownerAccount.onboardingData || {};
+        const deletedBusinessId = business.business_id || String(business._id || '').replace(/^business:/, '');
+        await saveAccount(req, {
+          ...ownerAccount,
+          onboardingData: {
+            ...prevOnboarding,
+            businessId:
+              normalizeLinkedBusinessId(prevOnboarding.businessId) === deletedBusinessId
+                ? null
+                : prevOnboarding.businessId,
+            suppressAutoProvision: true,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({
