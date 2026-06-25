@@ -192,9 +192,10 @@ function shouldKeepTpvSessionInList(
 
 // ─── Cash Count Grid ────────────────────────────────────────────────────────
 
-function CashCountGrid({ counts, onChange }: {
+function CashCountGrid({ counts, onChange, compact = false }: {
   counts: CashDenominationCount;
   onChange: (counts: CashDenominationCount) => void;
+  compact?: boolean;
 }) {
   const total = calcDenominationTotal(counts);
   const bills = DENOMINATIONS.filter(d => d.type === 'bill');
@@ -208,35 +209,35 @@ function CashCountGrid({ counts, onChange }: {
     const qty = counts[d.key] || 0;
     const subtotal = qty * d.value;
     return (
-      <div key={d.key} className="flex items-center gap-2">
-        <span className={`w-14 text-right text-sm font-semibold ${d.type === 'bill' ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'}`}>{d.label}</span>
+      <div key={d.key} className={`flex items-center ${compact ? 'gap-1.5' : 'gap-2'}`}>
+        <span className={`text-right font-semibold ${compact ? 'w-11 text-xs' : 'w-14 text-sm'} ${d.type === 'bill' ? 'text-green-700 dark:text-green-400' : 'text-amber-700 dark:text-amber-400'}`}>{d.label}</span>
         <span className="text-gray-400 text-xs">×</span>
         <div className="flex items-center gap-1">
-          <button onClick={() => updateCount(d.key, qty - 1)} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">-</button>
+          <button onClick={() => updateCount(d.key, qty - 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>-</button>
           <input type="number" min="0" value={qty || ''} onChange={e => updateCount(d.key, parseInt(e.target.value) || 0)}
-            className="w-14 h-7 text-center border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none" />
-          <button onClick={() => updateCount(d.key, qty + 1)} className="w-7 h-7 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">+</button>
+            className={`text-center border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none ${compact ? 'w-11 h-6 text-xs' : 'w-14 h-7 text-sm'}`} />
+          <button onClick={() => updateCount(d.key, qty + 1)} className={`rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-center text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ${compact ? 'w-6 h-6 text-xs' : 'w-7 h-7 text-sm'}`}>+</button>
         </div>
-        <span className="text-sm font-medium text-gray-600 dark:text-gray-400 w-16 text-right">{subtotal > 0 ? `${subtotal.toFixed(2)}€` : '—'}</span>
+        <span className={`font-medium text-gray-600 dark:text-gray-400 text-right ${compact ? 'text-xs w-12' : 'text-sm w-16'}`}>{subtotal > 0 ? `${subtotal.toFixed(2)}€` : '—'}</span>
       </div>
     );
   };
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className={compact ? 'space-y-2' : 'space-y-4'}>
+      <div className={`grid grid-cols-1 ${compact ? 'gap-2' : 'sm:grid-cols-2 gap-4'}`}>
         <div>
-          <h5 className="text-xs font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-2 flex items-center gap-1"><Banknote className="w-3.5 h-3.5" /> Billetes</h5>
-          <div className="space-y-1.5">{bills.map(renderRow)}</div>
+          <h5 className={`font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><Banknote className="w-3 h-3" /> Billetes</h5>
+          <div className={compact ? 'space-y-1' : 'space-y-1.5'}>{bills.map(renderRow)}</div>
         </div>
         <div>
-          <h5 className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-2 flex items-center gap-1"><DollarSign className="w-3.5 h-3.5" /> Monedas</h5>
-          <div className="space-y-1.5">{coins.map(renderRow)}</div>
+          <h5 className={`font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><DollarSign className="w-3 h-3" /> Monedas</h5>
+          <div className={compact ? 'space-y-1' : 'space-y-1.5'}>{coins.map(renderRow)}</div>
         </div>
       </div>
-      <div className="flex items-center justify-between p-3 bg-gray-900 dark:bg-gray-100 rounded-xl">
-        <span className="font-bold text-white dark:text-gray-900 flex items-center gap-2"><Calculator className="w-4 h-4" /> Total contado</span>
-        <span className="text-2xl font-bold text-white dark:text-gray-900">{total.toFixed(2)}€</span>
+      <div className={`flex items-center justify-between bg-gray-900 dark:bg-gray-100 rounded-xl ${compact ? 'p-2' : 'p-3'}`}>
+        <span className={`font-bold text-white dark:text-gray-900 flex items-center gap-2 ${compact ? 'text-xs' : 'text-sm'}`}><Calculator className="w-3.5 h-3.5" /> Total contado</span>
+        <span className={`font-bold text-white dark:text-gray-900 ${compact ? 'text-lg' : 'text-2xl'}`}>{total.toFixed(2)}€</span>
       </div>
     </div>
   );
@@ -636,17 +637,17 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     : tabletStoreLabel || '';
 
   return (
-    <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-3 sm:p-4 overflow-hidden">
+    <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-2 sm:p-3 overflow-hidden">
       <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${isTabletMode ? 'max-w-2xl' : 'max-w-6xl'} mx-auto flex-1 min-h-0 flex flex-col overflow-hidden`}>
         {/* Header */}
-        <div className="px-5 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 relative">
-          <div className="w-11 h-11 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0">
-            <Unlock className="w-5 h-5 text-emerald-600" />
+        <div className={`border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 relative ${isTabletMode ? 'px-4 py-2.5' : 'px-5 sm:px-6 py-3 sm:py-4'}`}>
+          <div className={`bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 ${isTabletMode ? 'w-9 h-9' : 'w-11 h-11'}`}>
+            <Unlock className={`text-emerald-600 ${isTabletMode ? 'w-4 h-4' : 'w-5 h-5'}`} />
           </div>
           <div className="flex-1 min-w-0">
             {isTabletMode || selectedPdv ? (
               <>
-                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate">
+                <h1 className={`font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate ${isTabletMode ? 'text-base' : 'text-lg sm:text-xl'}`}>
                   <Store className="w-5 h-5 text-emerald-600 shrink-0" />
                   <span className="truncate">{displayStoreName || 'Tu tienda'}</span>
                 </h1>
@@ -723,20 +724,20 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
           className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden'} relative`}
         >
           {isTabletMode && tabletStep === 1 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
                   <User className="w-3 h-3 inline mr-1" />
                   ¿Quién abre la caja? *
                 </label>
                 {hasWorkers ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {workerOptions.map((w) => (
                       <button
                         key={w.id}
                         type="button"
                         onClick={() => setSelectedWorkerId(w.id)}
-                        className={`p-4 min-h-[72px] rounded-2xl border-2 text-left transition-all touch-manipulation ${
+                        className={`p-3 min-h-[56px] rounded-xl border-2 text-left transition-all touch-manipulation ${
                           selectedWorkerId === w.id
                             ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm'
                             : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
@@ -780,8 +781,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
           )}
 
           {isTabletMode && tabletStep === 2 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 flex flex-col">
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col">
+              <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Abre la caja</p>
                   <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{effectiveWorkerName()}</p>
@@ -818,7 +819,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                 </div>
               )}
               <div className="flex-1 min-h-0">
-                <CashCountGrid counts={counts} onChange={setCounts} />
+                <CashCountGrid counts={counts} onChange={setCounts} compact />
               </div>
             </div>
           )}
@@ -1056,7 +1057,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 px-5 sm:px-6 py-3 sm:py-4 border-t border-gray-200 dark:border-gray-700 flex gap-3 bg-white dark:bg-gray-800">
+        <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 ${isTabletMode ? 'px-4 py-2' : 'px-5 sm:px-6 py-3 sm:py-4 gap-3'}`}>
           {isTabletMode ? (
             <>
               <button
@@ -1065,7 +1066,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                   if (tabletStep === 2) setTabletStep(1);
                   else goBack();
                 }}
-                className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="px-4 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 {tabletStep === 2 ? 'Anterior' : 'Salir'}
               </button>
@@ -1077,7 +1078,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                     setTabletStep(2);
                   }}
                   disabled={!effectiveWorkerName() || parentLoading}
-                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
                     effectiveWorkerName()
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
@@ -1091,7 +1092,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canOpen || parentLoading || !cashCountReady}
-                  className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
                     canOpen && cashCountReady
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
@@ -1764,11 +1765,11 @@ function RegisterStatusBar({
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
   const actionBtn = isTabletMode
-    ? 'shrink-0 px-3 py-2.5 min-h-[44px] rounded-xl font-semibold transition-colors flex items-center gap-1.5 touch-manipulation whitespace-nowrap'
+    ? 'shrink-0 px-2.5 py-1.5 min-h-[36px] rounded-lg font-semibold text-[11px] transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap'
     : 'px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1';
 
   return (
-    <div className={`relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-3 sm:px-4 py-2 flex flex-col gap-2 ${isTabletMode ? '' : 'sm:flex-row sm:items-center sm:justify-between'} text-xs`}>
+    <div className={`relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 flex flex-col gap-1.5 text-xs ${isTabletMode ? 'px-2 py-1.5' : 'px-3 sm:px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2'}`}>
       <div className={`flex items-center gap-3 sm:gap-4 flex-wrap min-w-0 ${isTabletMode ? 'text-[11px] sm:text-xs' : ''}`}>
         <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta</span>
         {session.pointOfSaleName && <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1 min-w-0"><MapPin className="w-3 h-3 shrink-0" /> <span className="truncate">{session.pointOfSaleName}</span></span>}

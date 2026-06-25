@@ -880,6 +880,7 @@ export function WorkerTpvDelivery({
   const register = registerLive ?? stickyRegisterRef.current;
   const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
+  const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
     [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
@@ -1309,17 +1310,17 @@ export function WorkerTpvDelivery({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header compacto */}
-      <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center shrink-0">
-              <Package className="w-5 h-5 text-indigo-600" />
+      <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-3 py-2' : 'px-4 py-3'}`}>
+        <div className={`flex items-center justify-between gap-3 ${isTabletUi ? 'mb-2' : 'mb-3'}`}>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center shrink-0 ${isTabletUi ? 'w-8 h-8' : 'w-10 h-10'}`}>
+              <Package className={`text-indigo-600 ${isTabletUi ? 'w-4 h-4' : 'w-5 h-5'}`} />
             </div>
             <div className="min-w-0">
-              <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+              <h1 className={`font-bold text-gray-900 dark:text-gray-100 truncate ${isTabletUi ? 'text-base' : 'text-lg'}`}>
                 {ceoMode ? (scopedPdvName || 'Pedidos activos') : 'Pedidos activos'}
               </h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
+              <p className={`text-gray-500 dark:text-gray-400 ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
                 {ceoMode ? 'TPV operativo · ' : ''}Montaje y reparto · {visibleCount} visibles
               </p>
             </div>
@@ -1358,15 +1359,17 @@ export function WorkerTpvDelivery({
           </div>
         </div>
 
-        <div className={`grid gap-2.5 mb-3 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-2 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'} ${isTabletUi ? 'mb-2' : 'mb-3'}`}>
           <button
             type="button"
             onClick={() => setView('new-order')}
             disabled={!registerOpen}
             title={registerOpen ? undefined : 'Abre la caja de la tienda antes de crear pedidos'}
-            className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-emerald-600/45 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25 transition-colors touch-manipulation"
+            className={`w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-emerald-600/45 disabled:cursor-not-allowed text-white font-bold shadow-lg shadow-emerald-900/25 transition-colors touch-manipulation ${
+              isTabletUi ? 'min-h-[40px] py-2 text-sm' : 'min-h-[48px] py-3.5 text-sm sm:text-base gap-2.5 rounded-2xl'
+            }`}
           >
-            <Plus className="w-5 h-5" strokeWidth={2.5} />
+            <Plus className={isTabletUi ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
             Nuevo pedido
           </button>
           {staffConsumptionEnabled && (
@@ -1375,22 +1378,26 @@ export function WorkerTpvDelivery({
               onClick={() => setView('staff-consumption')}
               disabled={!registerOpen}
               title={registerOpen ? undefined : 'Abre la caja de la tienda antes de registrar consumo'}
-              className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 disabled:bg-violet-600/45 disabled:cursor-not-allowed text-white font-bold text-sm sm:text-base shadow-lg shadow-violet-900/25 transition-colors touch-manipulation"
+              className={`w-full flex items-center justify-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 active:bg-violet-800 disabled:bg-violet-600/45 disabled:cursor-not-allowed text-white font-bold shadow-lg shadow-violet-900/25 transition-colors touch-manipulation ${
+                isTabletUi ? 'min-h-[40px] py-2 text-sm' : 'min-h-[48px] py-3.5 text-sm sm:text-base gap-2.5 rounded-2xl'
+              }`}
             >
-              <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
+              <UtensilsCrossed className={isTabletUi ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
               Consumo equipo
             </button>
           )}
         </div>
 
         {/* Filtro recogida / envío */}
-        <div className="flex gap-1.5 p-1 rounded-xl bg-gray-100 dark:bg-gray-800">
+        <div className={`flex p-0.5 rounded-lg bg-gray-100 dark:bg-gray-800 ${isTabletUi ? 'gap-1' : 'gap-1.5 p-1 rounded-xl'}`}>
           {FULFILLMENT_FILTERS.map((f) => (
             <button
               key={f.id}
               type="button"
               onClick={() => setFulfillmentFilter(f.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold transition-all touch-manipulation ${
+              className={`flex-1 flex items-center justify-center gap-1 px-2 rounded-lg font-semibold transition-all touch-manipulation ${
+                isTabletUi ? 'min-h-[34px] py-1.5 text-[11px]' : 'min-h-[44px] py-2 text-xs gap-1.5'
+              } ${
                 fulfillmentFilter === f.id
                   ? f.id === 'recogida'
                     ? 'bg-violet-600 text-white shadow-sm'
@@ -1413,15 +1420,17 @@ export function WorkerTpvDelivery({
       </div>
 
       {/* Búsqueda */}
-      <div className="shrink-0 px-4 py-2 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700">
+      <div className={`shrink-0 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-3 py-1.5' : 'px-4 py-2'}`}>
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 ${isTabletUi ? 'w-3.5 h-3.5' : 'w-4 h-4'}`} />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar nº pedido, cliente..."
-            className="w-full pl-9 pr-8 py-2.5 min-h-[44px] rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+            className={`w-full pr-8 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none ${
+              isTabletUi ? 'pl-8 py-1.5 min-h-[36px] text-xs' : 'pl-9 py-2.5 min-h-[44px] text-sm rounded-xl'
+            }`}
           />
           {search && (
             <button type="button" onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -1432,6 +1441,7 @@ export function WorkerTpvDelivery({
       </div>
 
       {/* Completados hoy — cobrados en TPV + entregados */}
+      {!isTabletUi && (
       <div className="shrink-0 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2">
         <button
           type="button"
@@ -1476,15 +1486,16 @@ export function WorkerTpvDelivery({
           </div>
         )}
       </div>
+      )}
 
       {/* Columnas Montaje | Reparto */}
-      <div className="flex-1 min-h-0 overflow-hidden p-3 sm:p-4">
+      <div className={`flex-1 min-h-0 overflow-hidden ${isTabletUi ? 'p-2' : 'p-3 sm:p-4'}`}>
         {initialLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className="flex flex-col md:flex-row gap-3 h-full min-h-0">
+          <div className={`flex gap-2 h-full min-h-0 ${isTabletUi ? 'flex-row' : 'flex-col md:flex-row gap-3'}`}>
             <OrderLane
               title="Montaje"
               icon={<Package className="w-4 h-4 text-indigo-600" />}

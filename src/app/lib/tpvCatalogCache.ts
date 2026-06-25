@@ -5,7 +5,7 @@ import { listBrandsRequest } from './brandsApi';
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v3:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v4:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
@@ -89,14 +89,30 @@ function writeSession(key: string, snapshot: TpvCatalogSnapshot): void {
   }
 }
 
+function catalogHasBrandIds(items: CatalogItem[]): boolean {
+  return items.some((item) => Array.isArray(item.brandIds) && item.brandIds.length > 0);
+}
+
+export function tpvCatalogSnapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
+  if (!snapshot.items.length) return false;
+  if (snapshot.brands.length > 0) return false;
+  return catalogHasBrandIds(snapshot.items);
+}
+
+function snapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
+  return tpvCatalogSnapshotNeedsBrandRefetch(snapshot);
+}
+
 export function readTpvCatalogCache(userId: string, businessId: string): TpvCatalogSnapshot | null {
   const key = cacheKey(userId, businessId);
   const fromMemory = memory.get(key);
   if (fromMemory && Date.now() - fromMemory.fetchedAt < MEMORY_TTL_MS) {
+    if (snapshotNeedsBrandRefetch(fromMemory)) return null;
     return fromMemory;
   }
   const fromSession = readSession(key);
   if (fromSession) {
+    if (snapshotNeedsBrandRefetch(fromSession)) return null;
     memory.set(key, fromSession);
     return fromSession;
   }

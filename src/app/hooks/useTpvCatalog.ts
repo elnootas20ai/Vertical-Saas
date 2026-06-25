@@ -6,6 +6,7 @@ import { DELIVERY_CATALOG_CHANGED } from '../lib/deliverySetup';
 import {
   fetchTpvCatalog,
   readTpvCatalogCache,
+  tpvCatalogSnapshotNeedsBrandRefetch,
 } from '../lib/tpvCatalogCache';
 
 const REVALIDATE_MS = 60_000;
@@ -58,7 +59,10 @@ export function useTpvCatalog(userId: string | undefined, businessId: string) {
       setLoadingCatalog(true);
     }
 
-    const needsNetwork = !cached || Date.now() - cached.fetchedAt > REVALIDATE_MS;
+    const needsNetwork =
+      !cached
+      || Date.now() - (cached?.fetchedAt ?? 0) > REVALIDATE_MS
+      || (cached != null && tpvCatalogSnapshotNeedsBrandRefetch(cached));
 
     if (!needsNetwork) {
       return () => {

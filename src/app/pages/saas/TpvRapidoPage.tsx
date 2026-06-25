@@ -1665,9 +1665,9 @@ export function TpvRapidoOrderFlow({
   };
 
   const stickyFooter = (
-    <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-4 py-3`}>
-        <div className="flex items-center justify-end gap-3 mb-2 text-xs text-gray-500 dark:text-gray-400">
+    <div className="shrink-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-lg pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto px-3 py-2`}>
+        <div className="flex items-center justify-end gap-2 mb-1.5 text-xs text-gray-500 dark:text-gray-400">
           {cartCount > 0 && (
             <span className="flex items-center gap-1">
               <ShoppingCart className="w-3 h-3" />
@@ -1680,11 +1680,11 @@ export function TpvRapidoOrderFlow({
             </span>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           <button
             type="button"
             onClick={handleReset}
-            className={`px-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[48px] py-3' : 'py-2.5'}`}
+            className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[40px] py-2' : 'py-2.5'}`}
           >
             Cancelar
           </button>
@@ -1692,7 +1692,7 @@ export function TpvRapidoOrderFlow({
             type="button"
             onClick={goToPreviousStep}
             disabled={currentStep === 'client'}
-            className={`px-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[48px] py-3' : 'py-2.5'}`}
+            className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[40px] py-2' : 'py-2.5'}`}
           >
             Atrás
           </button>
@@ -1700,7 +1700,7 @@ export function TpvRapidoOrderFlow({
             type="button"
             onClick={handleFooterPrimary}
             disabled={footerPrimaryDisabled}
-            className={`flex-1 px-4 rounded-xl bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[48px] py-3 text-base' : 'py-2.5 text-sm'}`}
+            className={`flex-1 px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[40px] py-2 text-sm' : 'py-2.5 text-sm'}`}
           >
             {footerPrimaryLabel}
           </button>
@@ -1717,7 +1717,7 @@ export function TpvRapidoOrderFlow({
       topSlot={tpvTopActions}
       footerSlot={stickyFooter}
     >
-      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto pb-4 px-2 md:px-4`}>
+      <div className={`${isProductsFocus ? 'max-w-[1320px]' : 'max-w-[920px]'} mx-auto ${tabletMode && isProductsFocus ? 'flex-1 min-h-0 flex flex-col pb-1 px-1.5' : 'pb-4 px-2 md:px-4'}`}>
         {!tabletMode && register && register.clockedInWorkers.length > 0 && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
@@ -1767,7 +1767,7 @@ export function TpvRapidoOrderFlow({
                       }
                     }}
                     placeholder="Ej. 612… o María García"
-                    className={`${INPUT_CLASS} pl-10 text-lg ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
+                    className={`${INPUT_CLASS} pl-10 ${tabletMode ? 'text-base py-2' : 'text-lg'} ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck={false}
@@ -2135,7 +2135,9 @@ export function TpvRapidoOrderFlow({
         {/* ═══════════════ STEP 3: PRODUCTS ═══════════════ */}
         {currentStep === 'products' && isStepReachable('products') ? (
           <StepContainer step={3} title="Productos" visible wide>
+            <div className={tabletMode ? 'flex-1 min-h-0 flex flex-col' : undefined}>
             <TpvProductPicker
+              compact={tabletMode}
               sections={catalogSections}
               selectedSectionId={selectedSectionId}
               onSelectedSectionChange={setSelectedSectionId}
@@ -2155,8 +2157,8 @@ export function TpvRapidoOrderFlow({
               hasPricedProducts={hasPricedProducts}
               onImportCatalog={() => navigate('/saas/catalog')}
               cartPanel={(
-                <div className={`flex flex-col h-full min-h-[14rem] md:min-h-0 p-3 ${cartShake ? 'animate-shake' : ''}`}>
-                  <div className="flex items-center justify-between mb-2 shrink-0">
+                <div className={`flex flex-col h-full min-h-0 ${tabletMode ? 'p-2' : 'p-3'} ${cartShake ? 'animate-shake' : ''}`}>
+                  <div className="flex items-center justify-between mb-1.5 shrink-0">
                     <h4 className="text-xs font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider">
                       Pedido
                     </h4>
@@ -2347,6 +2349,7 @@ export function TpvRapidoOrderFlow({
                           <span className="font-bold text-sm">Total</span>
                           <span className="font-bold text-base tabular-nums">{formatPrice(finalTotal)}</span>
                         </div>
+                        {!tabletMode && (
                         <button
                           type="button"
                           onClick={() => completeStep('products')}
@@ -2354,12 +2357,14 @@ export function TpvRapidoOrderFlow({
                         >
                           Continuar al pago
                         </button>
+                        )}
                       </div>
                     </>
                   )}
                 </div>
               )}
             />
+            </div>
           </StepContainer>
         ) : null}
 
@@ -2387,14 +2392,16 @@ export function TpvRapidoOrderFlow({
                   key={key}
                   type="button"
                   onClick={() => setPaymentMethod(key)}
-                  className={`flex flex-col items-center gap-2 p-4 min-h-[80px] rounded-xl border-2 transition-all touch-manipulation ${
+                  className={`flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
+                    tabletMode ? 'p-2.5 min-h-[56px]' : 'p-4 min-h-[80px] gap-2'
+                  } ${
                     paymentMethod === key
                       ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
                       : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
                   }`}
                 >
-                  <Icon className="w-6 h-6 text-gray-700 dark:text-gray-300" />
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{label}</span>
+                  <Icon className={`text-gray-700 dark:text-gray-300 ${tabletMode ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                  <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>{label}</span>
                 </button>
               ))}
             </div>
@@ -2424,10 +2431,10 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
-            <div className="mt-4">
+            <div className="mt-3">
               <label className={LABEL_CLASS}>Notas / Observaciones</label>
               <textarea
-                rows={3}
+                rows={tabletMode ? 2 : 3}
                 value={orderNotes}
                 onChange={(e) => setOrderNotes(e.target.value)}
                 className={`${INPUT_CLASS} resize-none`}
@@ -2549,11 +2556,11 @@ function TpvFullscreenShell({
 }) {
   const header = (
     <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 pt-[max(0px,env(safe-area-inset-top))]">
-      <div className="max-w-[1320px] mx-auto px-3 py-2.5 flex items-center gap-2">
+      <div className={`max-w-[1320px] mx-auto px-3 flex items-center gap-2 ${tabletMode ? 'py-1.5' : 'py-2.5'}`}>
         <button
           type="button"
           onClick={onBack}
-          className={`inline-flex items-center gap-1.5 px-3 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2' : 'py-1.5'}`}
+          className={`inline-flex items-center gap-1.5 px-2.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[36px] py-1.5 text-xs' : 'py-1.5'}`}
         >
           <ArrowLeft className="w-4 h-4" />
           Volver
@@ -2568,8 +2575,8 @@ function TpvFullscreenShell({
     return (
       <div className="h-full min-h-0 flex flex-col bg-gray-50 dark:bg-gray-950 overflow-hidden">
         {header}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="max-w-[1320px] mx-auto px-2 md:px-3 pt-2">{children}</div>
+        <div className={`flex-1 min-h-0 ${tabletMode ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
+          <div className={`max-w-[1320px] mx-auto px-2 md:px-3 pt-2 ${tabletMode ? 'flex-1 min-h-0 flex flex-col' : ''}`}>{children}</div>
         </div>
         {footerSlot}
       </div>

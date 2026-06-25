@@ -2,6 +2,66 @@ import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Loader2, Minus, Package, Plus, Search, Sparkles } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import type { TpvCatalogSection } from '../../../lib/tpvCatalogNavigation';
+
+function isBrandScopeSection(section: TpvCatalogSection): boolean {
+  return section.scope.kind === 'all' || section.scope.kind === 'brand';
+}
+
+function BrandSectionChip({
+  section,
+  active,
+  compact,
+  onSelect,
+}: {
+  section: TpvCatalogSection;
+  active: boolean;
+  compact: boolean;
+  onSelect: () => void;
+}) {
+  const color =
+    section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color) ? section.color : '#374151';
+  const tileSize = compact ? 'w-10 h-10' : 'w-11 h-11';
+  const chipWidth = compact ? 'w-[3.25rem]' : 'w-14';
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={section.label}
+      className={`shrink-0 flex flex-col items-center gap-0.5 focus:outline-none touch-manipulation ${chipWidth}`}
+    >
+      {section.logo ? (
+        <span
+          className={`${tileSize} rounded-xl overflow-hidden border-2 transition-all ${
+            active ? 'border-gray-900 dark:border-gray-100 shadow-md scale-105' : 'border-gray-200 dark:border-gray-700'
+          }`}
+        >
+          <img src={section.logo} alt="" className="w-full h-full object-cover" />
+        </span>
+      ) : (
+        <span
+          className={`${tileSize} rounded-xl flex items-center justify-center text-[10px] font-bold border-2 transition-all ${
+            active ? 'text-white shadow-md scale-105 border-transparent' : 'border-gray-200 dark:border-gray-700'
+          }`}
+          style={
+            active
+              ? { backgroundColor: color }
+              : { color, backgroundColor: brandTint(color, '14') }
+          }
+        >
+          {section.shortCode || section.label.slice(0, 2).toUpperCase()}
+        </span>
+      )}
+      <span
+        className={`text-center leading-tight line-clamp-2 w-full px-0.5 font-medium ${
+          compact ? 'text-[8px]' : 'text-[9px]'
+        } ${active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}
+      >
+        {section.label}
+      </span>
+    </button>
+  );
+}
 import {
   buildTpvProductSearchIndex,
   parseTpvSectionId,
@@ -32,6 +92,8 @@ type TpvProductPickerProps = {
   cartPanel: ReactNode;
   hasPricedProducts: boolean;
   onImportCatalog?: () => void;
+  /** TPV tablet: layout denso, catálogo + carrito en fila y más espacio útil. */
+  compact?: boolean;
 };
 
 function categoryShortLabel(label: string): string {
@@ -49,6 +111,7 @@ const ProductTile = memo(function ProductTile({
   formatPrice,
   onAdd,
   onRemove,
+  compact = false,
 }: {
   item: CatalogItem;
   qty: number;
@@ -57,6 +120,7 @@ const ProductTile = memo(function ProductTile({
   formatPrice: (n: number) => string;
   onAdd: () => void;
   onRemove: () => void;
+  compact?: boolean;
 }) {
   const price = Number(item.unitPrice || 0);
   const hasImage = Boolean(item.image?.trim());
@@ -110,11 +174,11 @@ const ProductTile = memo(function ProductTile({
             </span>
           )}
         </div>
-        <div className="px-1.5 py-1.5 min-h-[2.75rem] flex flex-col justify-between gap-0.5">
-          <p className="text-[11px] md:text-xs leading-tight font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
+        <div className={`px-1.5 flex flex-col justify-between gap-0.5 ${compact ? 'py-1 min-h-[2.1rem]' : 'py-1.5 min-h-[2.75rem]'}`}>
+          <p className={`leading-tight font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 ${compact ? 'text-[10px]' : 'text-[11px] md:text-xs'}`}>
             {item.name}
           </p>
-          <p className="text-[11px] font-bold text-gray-600 dark:text-gray-400 tabular-nums">
+          <p className={`font-bold text-gray-600 dark:text-gray-400 tabular-nums ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
             {price > 0 ? formatPrice(price) : '—'}
           </p>
         </div>
@@ -125,7 +189,7 @@ const ProductTile = memo(function ProductTile({
           <button
             type="button"
             onClick={onRemove}
-            className="flex-1 min-h-[36px] h-9 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation"
+            className={`flex-1 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation ${compact ? 'min-h-[28px] h-7' : 'min-h-[36px] h-9'}`}
             aria-label="Quitar"
           >
             <Minus className="w-3.5 h-3.5" />
@@ -135,7 +199,7 @@ const ProductTile = memo(function ProductTile({
             type="button"
             onClick={onAdd}
             disabled={disabled}
-            className="flex-1 min-h-[36px] h-9 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 touch-manipulation"
+            className={`flex-1 flex items-center justify-center text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 touch-manipulation ${compact ? 'min-h-[28px] h-7' : 'min-h-[36px] h-9'}`}
             aria-label="Añadir"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -152,12 +216,14 @@ function SearchResultRow({
   formatPrice,
   onAdd,
   disabled,
+  compact = false,
 }: {
   item: CatalogItem;
   qty: number;
   formatPrice: (n: number) => string;
   onAdd: () => void;
   disabled: boolean;
+  compact?: boolean;
 }) {
   const price = Number(item.unitPrice || 0);
   return (
@@ -165,7 +231,9 @@ function SearchResultRow({
       type="button"
       disabled={disabled}
       onClick={onAdd}
-      className={`w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] rounded-lg border text-left transition-colors touch-manipulation ${
+      className={`w-full flex items-center gap-2 rounded-lg border text-left transition-colors touch-manipulation ${
+        compact ? 'px-2 py-1.5 min-h-[36px]' : 'px-3 py-2.5 min-h-[44px]'
+      } ${
         qty > 0
           ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
           : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-300 dark:hover:border-indigo-600'
@@ -211,6 +279,7 @@ export function TpvProductPicker({
   cartPanel,
   hasPricedProducts,
   onImportCatalog,
+  compact = false,
 }: TpvProductPickerProps) {
   const [productSearch, setProductSearch] = useState('');
 
@@ -250,13 +319,27 @@ export function TpvProductPicker({
   const isSearchMode = productSearch.trim().length > 0;
   const searchTruncated =
     isSearchMode && filteredProducts.length >= TPV_PRODUCT_SEARCH_LIMIT;
+  const brandSections = useMemo(
+    () => sections.filter(isBrandScopeSection),
+    [sections],
+  );
+  const sharedSections = useMemo(
+    () => sections.filter((s) => s.scope.kind === 'shared'),
+    [sections],
+  );
 
   return (
-    <div className="flex flex-col md:flex-row gap-3 min-h-[min(68vh,640px)] md:min-h-0 md:h-full">
+    <div
+      className={
+        compact
+          ? 'flex flex-row gap-2 h-full min-h-0 max-h-full'
+          : 'flex flex-col md:flex-row gap-3 min-h-[min(68vh,640px)] md:min-h-0 md:h-full'
+      }
+    >
       <div className="flex-1 flex flex-col min-h-0 min-w-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
-        <div className="shrink-0 px-2.5 pt-2.5 pb-2 border-b border-gray-100 dark:border-gray-800">
+        <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 ${compact ? 'px-2 pt-1.5 pb-1.5' : 'px-2.5 pt-2.5 pb-2'}`}>
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 ${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'}`} />
             <input
               id="tpv-product-search"
               name="vertial-product-search"
@@ -273,59 +356,85 @@ export function TpvProductPicker({
               spellCheck={false}
               data-1p-ignore
               data-lpignore="true"
-              className="w-full h-10 pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+              className={`w-full pl-8 pr-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${
+                compact ? 'h-8 text-xs' : 'h-10 text-sm'
+              }`}
             />
           </div>
         </div>
 
-        {!isSearchMode && (
+        {!isSearchMode && brandSections.length > 0 && (
           <>
-            <div className="shrink-0 px-2 py-2 bg-gray-100/80 dark:bg-gray-950/50 border-b border-gray-200 dark:border-gray-800">
-              <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-                {sections.map((section) => {
-                  const active = selectedSectionId === section.id;
-                  const color =
-                    section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color)
-                      ? section.color
-                      : '#374151';
-                  return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      onClick={() => {
-                        onSelectedSectionChange(section.id);
-                        onSelectedCategoryChange(null);
-                      }}
-                      className={`shrink-0 min-w-[5.5rem] max-w-[9rem] px-2.5 py-2.5 min-h-[44px] rounded-lg text-[10px] font-bold uppercase tracking-wide transition-all truncate touch-manipulation ${
-                        active
-                          ? 'text-white shadow-sm'
-                          : 'bg-white/70 dark:bg-gray-800/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800'
-                      }`}
-                      style={active ? { backgroundColor: color } : undefined}
-                      title={section.label}
-                    >
-                      {section.logo ? (
-                        <img src={section.logo} alt="" className="w-4 h-4 mx-auto mb-0.5 rounded object-cover" />
-                      ) : section.shortCode ? (
-                        <span className="block text-[9px] opacity-80 mb-0.5">{section.shortCode}</span>
-                      ) : null}
-                      <span className="block truncate">{section.label}</span>
-                    </button>
-                  );
-                })}
+            <div className={`shrink-0 border-b border-gray-200 dark:border-gray-800 bg-gray-100/80 dark:bg-gray-950/50 ${compact ? 'px-1.5 py-1' : 'px-2 py-2'}`}>
+              <div className={`flex overflow-x-auto scrollbar-hide items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
+                {brandSections.map((section) => (
+                  <BrandSectionChip
+                    key={section.id}
+                    section={section}
+                    active={selectedSectionId === section.id}
+                    compact={compact}
+                    onSelect={() => {
+                      onSelectedSectionChange(section.id);
+                      onSelectedCategoryChange(null);
+                    }}
+                  />
+                ))}
               </div>
             </div>
 
+            {sharedSections.length > 0 && (
+              <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 bg-white/70 dark:bg-gray-900/40 ${compact ? 'px-1.5 py-1' : 'px-2 py-1.5'}`}>
+                <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                  {sharedSections.map((section) => {
+                    const active = selectedSectionId === section.id;
+                    const color =
+                      section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color)
+                        ? section.color
+                        : '#374151';
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectedSectionChange(section.id);
+                          onSelectedCategoryChange(null);
+                        }}
+                        className={`shrink-0 rounded-md font-semibold uppercase tracking-wide transition-all truncate touch-manipulation ${
+                          compact
+                            ? 'px-2 py-1 min-h-[28px] text-[8px] max-w-[6rem]'
+                            : 'px-2.5 py-1.5 min-h-[32px] text-[9px] max-w-[7rem]'
+                        } ${
+                          active
+                            ? 'text-white shadow-sm'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'
+                        }`}
+                        style={active ? { backgroundColor: color } : undefined}
+                        title={section.label}
+                      >
+                        {section.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {!isSearchMode && (
+          <>
             {categories.length > 0 && (
-              <div className="shrink-0 px-2 py-2 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40">
-                <div className="flex gap-2 overflow-x-auto scrollbar-hide items-start">
+              <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 ${compact ? 'px-1.5 py-1' : 'px-2 py-2'}`}>
+                <div className={`flex overflow-x-auto scrollbar-hide items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
                   <button
                     type="button"
                     onClick={() => onSelectedCategoryChange(null)}
-                    className="shrink-0 flex flex-col items-center gap-1 w-14 focus:outline-none"
+                    className={`shrink-0 flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-11' : 'gap-1 w-14'}`}
                   >
                     <span
-                      className={`w-11 h-11 rounded-xl flex items-center justify-center text-[10px] font-bold transition-all ${
+                      className={`rounded-xl flex items-center justify-center font-bold transition-all ${
+                        compact ? 'w-9 h-9 text-[9px]' : 'w-11 h-11 text-[10px]'
+                      } ${
                         !selectedCategory
                           ? 'text-white shadow-md scale-105'
                           : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
@@ -345,10 +454,12 @@ export function TpvProductPicker({
                         key={cat}
                         type="button"
                         onClick={() => onSelectedCategoryChange(active ? null : cat)}
-                        className="shrink-0 flex flex-col items-center gap-1 w-14 focus:outline-none"
+                        className={`shrink-0 flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-11' : 'gap-1 w-14'}`}
                       >
                         <span
-                          className={`w-11 h-11 rounded-xl flex items-center justify-center text-[10px] font-bold transition-all ${
+                          className={`rounded-xl flex items-center justify-center font-bold transition-all ${
+                            compact ? 'w-9 h-9 text-[9px]' : 'w-11 h-11 text-[10px]'
+                          } ${
                             active
                               ? 'text-white shadow-md scale-105'
                               : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
@@ -388,7 +499,7 @@ export function TpvProductPicker({
           </div>
         )}
 
-        {!isSearchMode && habitualProducts.length > 0 && (
+        {!isSearchMode && !compact && habitualProducts.length > 0 && (
           <div className="shrink-0 mx-2 mt-2 px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/25 border border-emerald-200/60 dark:border-emerald-800/40">
             <p className="text-[10px] font-semibold text-emerald-800 dark:text-emerald-300 mb-1">Este cliente suele pedir</p>
             <div className="flex flex-wrap gap-1">
@@ -407,7 +518,7 @@ export function TpvProductPicker({
           </div>
         )}
 
-        {!isSearchMode && crossSellProducts.length > 0 && (
+        {!isSearchMode && !compact && crossSellProducts.length > 0 && (
           <div className="shrink-0 mx-2 mt-2 px-2 py-1.5 rounded-lg bg-violet-50/80 dark:bg-violet-950/20 border border-violet-200/50 dark:border-violet-800/40">
             <p className="text-[10px] font-semibold text-violet-800 dark:text-violet-300 mb-1 flex items-center gap-1">
               <Sparkles className="w-3 h-3" />
@@ -429,7 +540,7 @@ export function TpvProductPicker({
           </div>
         )}
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-2">
+        <div className={`flex-1 min-h-0 overflow-y-auto ${compact ? 'p-1.5' : 'p-2'}`}>
           {loading ? (
             <div className="flex items-center justify-center py-16 text-gray-400">
               <Loader2 className="w-6 h-6 animate-spin" />
@@ -463,14 +574,19 @@ export function TpvProductPicker({
                     formatPrice={formatPrice}
                     onAdd={() => addToCart(item)}
                     disabled={disabled}
+                    compact={compact}
                   />
                 );
               })}
             </div>
           ) : (
             <div
-              className="grid gap-2"
-              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(5.25rem, 1fr))' }}
+              className={compact ? 'grid gap-1.5' : 'grid gap-2'}
+              style={{
+                gridTemplateColumns: compact
+                  ? 'repeat(auto-fill, minmax(3.75rem, 1fr))'
+                  : 'repeat(auto-fill, minmax(5.25rem, 1fr))',
+              }}
             >
               {filteredProducts.map((item) => {
                 const qty = getCartQty(item._id);
@@ -485,6 +601,7 @@ export function TpvProductPicker({
                     formatPrice={formatPrice}
                     onAdd={() => addToCart(item)}
                     onRemove={() => removeFromCart(item._id)}
+                    compact={compact}
                   />
                 );
               })}
@@ -493,7 +610,13 @@ export function TpvProductPicker({
         </div>
       </div>
 
-      <aside className="md:w-[17rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[14rem] md:min-h-0 md:sticky md:top-14 md:self-start md:max-h-[calc(100dvh-8rem)]">
+      <aside
+        className={
+          compact
+            ? 'w-[11.5rem] sm:w-[12.5rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-0 max-h-full overflow-hidden'
+            : 'md:w-[17rem] xl:w-[18rem] shrink-0 rounded-xl border border-gray-200/80 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/50 flex flex-col min-h-[14rem] md:min-h-0 md:sticky md:top-14 md:self-start md:max-h-[calc(100dvh-8rem)]'
+        }
+      >
         {cartPanel}
       </aside>
     </div>
