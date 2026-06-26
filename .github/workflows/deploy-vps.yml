@@ -1,15 +1,10 @@
-# Despliega API + Couch (Docker) en tu VPS Scaleway en cada push a main.
-# bump: commits trivial OK para disparar deploy sin tocar app
-# Una vez en el VPS: repo clonado, .env en la raiz, clave publica en authorized_keys.
-# GitHub: Settings - Secrets and variables - Actions:
-#   VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_DEPLOY_PATH
-# (Clave SSH dedicada solo para Actions; no uses tu clave personal.)
+# Despliegue automático al VPS — DESACTIVADO en push (deploy real: npm run deploy:all desde tu PC).
+# Si quieres usarlo: Actions → Deploy API (VPS) → Run workflow (manual).
+# Requiere secretos: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_DEPLOY_PATH
 
 name: Deploy API (VPS)
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

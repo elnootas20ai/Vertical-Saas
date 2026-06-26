@@ -1,21 +1,15 @@
-# Smoke test SaaS en push/PR a main (si hay credenciales en Secrets).
-# Secrets opcionales: SAAS_LOGIN_EMAIL, SAAS_LOGIN_PASSWORD, SMOKE_API_BASE
-# Si no están configurados, el job se omite.
+# Smoke test SaaS — solo manual (push desactivado; evita correos de error en cada commit).
+# Secrets: SAAS_LOGIN_EMAIL, SAAS_LOGIN_PASSWORD, SMOKE_API_BASE (opcional)
 
 name: Smoke SaaS
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: ${{ secrets.SAAS_LOGIN_EMAIL != '' && secrets.SAAS_LOGIN_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +25,16 @@ jobs:
         run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Comprobar credenciales smoke
+        env:
+          SAAS_LOGIN_EMAIL: ${{ secrets.SAAS_LOGIN_EMAIL }}
+          SAAS_LOGIN_PASSWORD: ${{ secrets.SAAS_LOGIN_PASSWORD }}
+        run: |
+          if [ -z "$SAAS_LOGIN_EMAIL" ] || [ -z "$SAAS_LOGIN_PASSWORD" ]; then
+            echo "::error::Configura SAAS_LOGIN_EMAIL y SAAS_LOGIN_PASSWORD en Secrets de Actions"
+            exit 1
+          fi
 
       - name: Smoke test (API remota)
         run: node scripts/smoke-saas.mjs

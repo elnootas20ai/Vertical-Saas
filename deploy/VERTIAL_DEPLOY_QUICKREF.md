@@ -12,9 +12,11 @@ Este archivo solo lista **nombres** de variables, rutas y comandos. Los valores 
   El servicio `app` usa `env_file: ../.env` y fuerza `COUCHDB_URL` al hostname `couchdb` salvo que definas `COUCHDB_URL_APP`.
 - **CouchDB**: idealmente no expuesto a Internet; si abres el puerto para Fauxton, cierra firewall cuando puedas
 
-## GitHub Actions — push a `main` despliega el VPS (API + Docker)
+## GitHub Actions (opcional — no despliega solo con push)
 
-En el repo hay un workflow: **`.github/workflows/deploy-vps.yml`**. En cada **push a `main`** (o manualmente en *Actions → Deploy API (VPS) → Run workflow*), GitHub se conecta por **SSH** al servidor, hace `git pull` (reset duro a `origin/main`) y `docker compose … build` + `up -d`.
+El repo incluye workflows en `.github/workflows/` (**desactivados en push** para no duplicar ni mandar correos de error). El despliegue habitual es desde tu PC: **`npm run deploy:all`** (o `deploy:frontend` / `deploy:backend`).
+
+Si quieres desplegar desde GitHub: *Actions → Deploy API (VPS) → Run workflow* (requiere secretos SSH en el repo).
 
 ### Secretos (GitHub → *Settings* → *Secrets and variables* → *Actions*)
 
