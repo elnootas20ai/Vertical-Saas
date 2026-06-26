@@ -20,7 +20,7 @@ import {
   FileText,
   Wallet,
 } from 'lucide-react';
-import { fmtEuro, fmtPercent, type PortfolioFinanceTotals } from '../../lib/portfolioMetrics';
+import { fmtEuro, fmtPercent, monthOverMonthPct, type PortfolioFinanceTotals } from '../../lib/portfolioMetrics';
 import { Layout } from './Layout';
 import { BUSINESS_TYPE_COLORS, BUSINESS_TYPE_LABELS } from './BusinessCarousel';
 import { useAuth } from '../../context/AuthContext';
@@ -36,6 +36,8 @@ import { TeamRrhhCompactRow } from './TeamRrhhDashboardWidget';
 import { PortfolioPlanBanner } from './PortfolioPlanBanner';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
+import { PortfolioCompanyLeague } from './PortfolioCompanyLeague';
+import { PortfolioAlertsPanel } from './PortfolioAlertsPanel';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -81,6 +83,8 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       return {
         incomeMonth: 0,
         expensesMonth: 0,
+        incomePrevMonth: 0,
+        expensesPrevMonth: 0,
         profitMonth: 0,
         ebitdaMonth: 0,
         ebitdaMarginMonth: 0,
@@ -92,10 +96,14 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       filteredRows.reduce((s, r) => s + pick(r.finance), 0);
     const incomeMonth = sum((f) => f.incomeMonth);
     const expensesMonth = sum((f) => f.expensesMonth);
+    const incomePrevMonth = sum((f) => f.incomePrevMonth);
+    const expensesPrevMonth = sum((f) => f.expensesPrevMonth);
     const ebitdaMonth = sum((f) => f.ebitdaMonth);
     return {
       incomeMonth,
       expensesMonth,
+      incomePrevMonth,
+      expensesPrevMonth,
       profitMonth: incomeMonth - expensesMonth,
       ebitdaMonth,
       ebitdaMarginMonth: incomeMonth > 0 ? Math.round((ebitdaMonth / incomeMonth) * 1000) / 10 : 0,
@@ -103,15 +111,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       cashBalance: finance.cashBalance,
     };
   }, [filteredRows, finance.cashBalance]);
-
-  const displayFinance = businessFilter === 'all' ? finance : filteredFinance;
-  const liveStatusText = liveSseOk
-    ? 'En vivo'
-    : isRefreshing
-      ? 'Actualizando…'
-      : lastUpdatedAt
-        ? `Actualizado ${lastUpdatedAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} · cada 90s`
-        : null;
 
   const filteredTotals = useMemo((): PortfolioTotals => {
     return {
@@ -122,16 +121,37 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       members: filteredRows.reduce((s, r) => s + r.memberCount, 0),
       revenueToday: filteredRows.reduce((s, r) => s + r.metrics.revenueToday, 0),
       revenueMonth: filteredRows.reduce((s, r) => s + r.metrics.revenueMonth, 0),
+      revenuePrevMonth: filteredRows.reduce((s, r) => s + r.metrics.revenuePrevMonth, 0),
       ordersMonth: filteredRows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
+      ordersPrevMonth: filteredRows.reduce((s, r) => s + r.metrics.ordersPrevMonth, 0),
       deliveredToday: filteredRows.reduce((s, r) => s + r.metrics.deliveredToday, 0),
       deliveredMonth: filteredRows.reduce((s, r) => s + r.metrics.deliveredMonth, 0),
+      deliveredPrevMonth: filteredRows.reduce((s, r) => s + r.metrics.deliveredPrevMonth, 0),
       activeOrders: filteredRows.reduce((s, r) => s + r.metrics.activeOrders, 0),
       openCashRegisters: filteredRows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
       clockedInNow: filteredRows.reduce((s, r) => s + r.team.clockedInNow, 0),
       pendingVacations: filteredRows.reduce((s, r) => s + r.team.pendingVacationRequests, 0),
       payslipsThisMonth: filteredRows.reduce((s, r) => s + r.team.payslipsThisMonth, 0),
+      totalClients: filteredRows.reduce((s, r) => s + r.clients.totalClients, 0),
+      newClientsMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsMonth, 0),
+      newClientsPrevMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsPrevMonth, 0),
     };
   }, [filteredRows]);
+
+  const revenueMomPct = monthOverMonthPct(filteredTotals.revenueMonth, filteredTotals.revenuePrevMonth);
+
+  const displayFinance = businessFilter === 'all' ? finance : filteredFinance;
+
+  const incomeMomPct = monthOverMonthPct(displayFinance.incomeMonth, displayFinance.incomePrevMonth);
+  const newClientsMomPct = monthOverMonthPct(filteredTotals.newClientsMonth, filteredTotals.newClientsPrevMonth);
+
+  const liveStatusText = liveSseOk
+    ? 'En vivo'
+    : isRefreshing
+      ? 'Actualizando…'
+      : lastUpdatedAt
+        ? `Actualizado ${lastUpdatedAt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} · cada 90s`
+        : null;
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -187,7 +207,46 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           portfolioLocked={portfolioPlan.portfolioLocked}
         />
 
-        {/* Finanzas globales (cuenta titular) — lo primero visible */}
+        {/* Resumen portfolio: empresas, clientes y variación mes a mes */}
+        <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-indigo-500" />
+              Resumen del portfolio
+            </h3>
+            <button
+              type="button"
+              onClick={() => void reload()}
+              disabled={loading && !isRefreshing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading || isRefreshing ? 'animate-spin' : ''}`} />
+              Actualizar
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <StatCard label="Empresas" value={String(filteredTotals.businesses)} icon={<Building2 className="w-4 h-4" />} tone="blue" sub={`${filteredTotals.brands} marcas · ${filteredTotals.stores} tiendas`} />
+            <StatCard label="Clientes totales" value={String(filteredTotals.totalClients)} icon={<Users className="w-4 h-4" />} tone="violet" sub="Base CRM activa" />
+            <StatCard label="Clientes nuevos" value={String(filteredTotals.newClientsMonth)} icon={<Users className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={newClientsMomPct} prev={filteredTotals.newClientsPrevMonth} suffix=" vs mes ant." />} />
+            <StatCard label="Ventas delivery" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={revenueMomPct} prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} />} />
+            <StatCard label="Ingresos finanzas" value={fmtEuro(displayFinance.incomeMonth)} icon={<Wallet className="w-4 h-4" />} tone="blue" sub={<MomBadge pct={incomeMomPct} prevLabel={fmtEuro(displayFinance.incomePrevMonth)} />} />
+            <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="amber" sub={`Mes ant.: ${filteredTotals.ordersPrevMonth}`} />
+          </div>
+        </section>
+
+        {/* Clasificación del grupo — comparativa tipo ranking */}
+        {filteredRows.length > 0 && (
+          <PortfolioCompanyLeague
+            rows={filteredRows}
+            onEnter={enterBusiness}
+          />
+        )}
+
+        {filteredRows.length > 0 && (
+          <PortfolioAlertsPanel rows={filteredRows} />
+        )}
+
+        {/* Finanzas globales (cuenta titular) */}
         <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -243,7 +302,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             Operativa delivery y equipo
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
-          <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${fmtEuro(filteredTotals.revenueToday)}`} />
+          <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<span>Hoy: {fmtEuro(filteredTotals.revenueToday)} · <MomBadge pct={revenueMomPct} inline prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} /></span>} />
           <StatCard label="Entregados mes" value={String(filteredTotals.deliveredMonth)} icon={<CheckCircle2 className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${filteredTotals.deliveredToday}`} />
           <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
           <StatCard label="En curso" value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Pedidos activos" />
@@ -253,17 +312,20 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           </div>
         </div>
 
-        {/* Comparativa rápida por empresa */}
-        {filteredRows.length > 1 && (
+        {/* Comparativa por empresa */}
+        {filteredRows.length > 0 && (
           <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5 overflow-x-auto">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
               Comparativa por empresa
             </h3>
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100 dark:border-gray-700">
                   <th className="pb-2 pr-3">Empresa</th>
+                  <th className="pb-2 pr-3 text-right">Clientes</th>
+                  <th className="pb-2 pr-3 text-right">Nuevos</th>
                   <th className="pb-2 pr-3 text-right">Ingresos fin.</th>
+                  <th className="pb-2 pr-3 text-right">Δ fin.</th>
                   <th className="pb-2 pr-3 text-right">Gastos fin.</th>
                   {canViewEbitda ? (
                     <>
@@ -273,20 +335,26 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                   ) : (
                     <th className="pb-2 pr-3 text-right">Resultado</th>
                   )}
-                  <th className="pb-2 pr-3 text-right">Ingresos delivery</th>
+                  <th className="pb-2 pr-3 text-right">Ventas delivery</th>
+                  <th className="pb-2 pr-3 text-right">Δ delivery</th>
                   <th className="pb-2 pr-3 text-right">Entregados</th>
-                  <th className="pb-2 pr-3 text-right">Pedidos</th>
                   <th className="pb-2 text-right">En curso</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((r) => (
+                {filteredRows.map((r) => {
+                  const deliveryMom = monthOverMonthPct(r.metrics.revenueMonth, r.metrics.revenuePrevMonth);
+                  const financeMom = monthOverMonthPct(r.finance.incomeMonth, r.finance.incomePrevMonth);
+                  return (
                   <tr
                     key={r.businessId}
                     className="border-b border-gray-50 dark:border-gray-700/80 last:border-0 hover:bg-gray-50/80 dark:hover:bg-gray-900/40"
                   >
                     <td className="py-2.5 pr-3 font-semibold text-gray-900 dark:text-gray-100">{r.business.name}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">{r.clients.totalClients}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-violet-600 dark:text-violet-400">{r.clients.newClientsMonth}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmtEuro(r.finance.incomeMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums"><MomBadge pct={financeMom} compact /></td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-rose-600 dark:text-rose-400">{fmtEuro(r.finance.expensesMonth)}</td>
                     {canViewEbitda ? (
                       <>
@@ -301,11 +369,11 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                       </td>
                     )}
                     <td className="py-2.5 pr-3 text-right tabular-nums">{fmtEuro(r.metrics.revenueMonth)}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums"><MomBadge pct={deliveryMom} compact /></td>
                     <td className="py-2.5 pr-3 text-right tabular-nums text-green-600 dark:text-green-400">{r.metrics.deliveredMonth}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums">{r.metrics.ordersMonth}</td>
                     <td className="py-2.5 text-right tabular-nums">{r.metrics.activeOrders}</td>
                   </tr>
-                ))}
+                );})}
               </tbody>
             </table>
           </section>
@@ -402,7 +470,7 @@ function StatCard({
 }: {
   label: string;
   value: string | number;
-  sub?: string;
+  sub?: React.ReactNode;
   icon: React.ReactNode;
   tone: 'blue' | 'violet' | 'emerald' | 'amber' | 'rose' | 'slate';
   className?: string;
@@ -475,6 +543,41 @@ function FilterChip({
     >
       {children}
     </button>
+  );
+}
+
+function MomBadge({
+  pct,
+  prev,
+  prevLabel,
+  suffix,
+  inline = false,
+  compact = false,
+}: {
+  pct: number | null;
+  prev?: number;
+  prevLabel?: string;
+  suffix?: string;
+  inline?: boolean;
+  compact?: boolean;
+}) {
+  if (pct === null && prev === undefined && !prevLabel) {
+    return <span className={inline ? '' : 'text-[10px] text-gray-500 dark:text-gray-400'}>Sin histórico</span>;
+  }
+  const up = (pct ?? 0) >= 0;
+  const color = pct === null
+    ? 'text-gray-500 dark:text-gray-400'
+    : up
+      ? 'text-emerald-600 dark:text-emerald-400'
+      : 'text-rose-600 dark:text-rose-400';
+  const prevText = prevLabel ?? (prev !== undefined ? String(prev) : '');
+  const pctText = pct === null ? '—' : `${up ? '+' : ''}${pct}%`;
+  return (
+    <span className={`${color} ${compact ? 'text-[11px] font-semibold tabular-nums' : 'text-[10px] font-semibold'}`}>
+      {pctText}
+      {prevText ? ` · ant. ${prevText}` : ''}
+      {suffix ? ` ${suffix}` : ''}
+    </span>
   );
 }
 
@@ -561,6 +664,8 @@ function BusinessCard({
               <span className="text-gray-300">·</span>
               <span>{m.ordersMonth} pedidos · {m.deliveredMonth} entregados</span>
               <span className="text-gray-300">·</span>
+              <span>{row.clients.totalClients} clientes · {row.clients.newClientsMonth} nuevos</span>
+              <span className="text-gray-300">·</span>
               <span>{row.brandCount} marcas · {row.storeCount} tiendas</span>
               {row.isDelivery && topBrand && topBrand.revenueMonth > 0 ? (
                 <>
@@ -596,6 +701,8 @@ function BusinessCard({
         {expanded && (
           <div className="mt-5 pt-5 border-t border-gray-100 dark:border-gray-700 space-y-5">
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+              <MetricPill label="Clientes" value={String(row.clients.totalClients)} />
+              <MetricPill label="Nuevos mes" value={String(row.clients.newClientsMonth)} highlight={row.clients.newClientsMonth > 0} />
               <MetricPill label="Ingresos fin." value={fmtEuro(f.incomeMonth)} highlight />
               <MetricPill label="Gastos fin." value={fmtEuro(f.expensesMonth)} />
               {canViewEbitda ? (

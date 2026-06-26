@@ -40,8 +40,8 @@ import {
   loadTpvPointsOfSaleForBusiness,
   resolveBusinessScopeId,
   filterPointsOfSaleForWorkCenters,
-  workCentersStrictlyForBusiness,
-  isRetailWorkCenter,
+  filterWorkCentersForBusinessScope,
+  dedupeRetailWorkCentersForBusiness,
 } from '../lib/deliverySetup';
 
 export interface ActiveStoreScopeValue {
@@ -80,9 +80,16 @@ function pickRetailWorkCenters(workCenters: WorkCenter[]): WorkCenter[] {
   );
 }
 
-function scopeRetailForBusiness(retail: WorkCenter[], businessId: string): WorkCenter[] {
-  const scoped = businessId ? workCentersStrictlyForBusiness(retail, businessId) : retail;
-  return scoped.filter(isRetailWorkCenter);
+function scopeRetailForBusiness(
+  retail: WorkCenter[],
+  businessId: string,
+  accountBusinessCount?: number,
+): WorkCenter[] {
+  const picked = pickRetailWorkCenters(retail);
+  if (!businessId) return picked;
+  return dedupeRetailWorkCentersForBusiness(
+    filterWorkCentersForBusinessScope(picked, businessId, { accountBusinessCount }),
+  );
 }
 
 function scopeFromLoadState(
@@ -91,7 +98,8 @@ function scopeFromLoadState(
   authUser: AuthUser | null | undefined,
   businessId: string,
 ): { retail: WorkCenter[]; allPdvs: PointOfSale[] } {
-  let retail = scopeRetailForBusiness(pickRetailWorkCenters(workCenters), businessId);
+  // loadTpvPointsOfSaleForBusiness ya filtra por empresa (incl. legacy sin businessId).
+  let retail = pickRetailWorkCenters(workCenters);
   let allPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, retail));
 
   if (authUser && isInvitedWorkerUser(authUser)) {
@@ -192,7 +200,10 @@ function ActiveStoreScopeProviderImpl({
 
   const applyStores = useCallback((retail: WorkCenter[], allPdvs: PointOfSale[]) => {
     const bid = businessIdRef.current;
-    const scopedRetail = bid ? scopeRetailForBusiness(retail, bid) : retail;
+    const accountN = businessesFetchSettledRef.current
+      ? (accountBusinessCountRef.current ?? businessesRef.current.length)
+      : undefined;
+    const scopedRetail = bid ? scopeRetailForBusiness(retail, bid, accountN) : pickRetailWorkCenters(retail);
     const scopedPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail));
     const activePdvs = scopedPdvs.filter((p) => p.active !== false);
     setRetailWorkCenters(scopedRetail);

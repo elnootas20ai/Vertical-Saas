@@ -17,10 +17,10 @@ import {
   type DeliveryOperationalConfig,
 } from '../../lib/settingsApi';
 import { RuleThresholdQuickEdit } from '../../lib/alertRuleThresholdFields';
-import { useApp } from '../../context/AppContext';
 import { useAlertDepartments } from '../../hooks/useAlertDepartments';
+import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { getDepartmentLabel, isRuleVisibleForVertical } from '../../lib/alertDepartments';
-import { resolvePlanTier, PLAN_TIER_LABELS, type SubscriptionPlanTier } from '../../lib/pointOfSaleLimits';
+import { PLAN_TIER_LABELS, type SubscriptionPlanTier } from '../../lib/pointOfSaleLimits';
 import {
   ALERT_PLAN_TIER_LABELS,
   alertTierDescription,
@@ -120,9 +120,8 @@ export function AlertCenterSettingsPanel({
   onOpenAdvanced,
 }: Props) {
   const navigate = useNavigate();
-  const { subscription } = useApp();
   const { departments: alertDepartments, vertical } = useAlertDepartments();
-  const userPlanTier = resolvePlanTier(subscription.selectedPlanId || '', subscription.planName || '');
+  const userPlanTier = useEffectivePlanTier();
   const [config, setConfig] = useState<AlertsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

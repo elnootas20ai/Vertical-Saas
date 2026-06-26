@@ -59,11 +59,52 @@ export interface ClientExportRow {
   status?: string;
   responsible?: string;
   tags?: string[];
+  totalOrders?: number;
+  totalSpent?: number;
+  lastOrderDate?: string | null;
+  loyaltyPoints?: number;
+  loyaltyLevel?: string;
 }
 
-export function downloadClientsExport(clients: ClientExportRow[], options?: { includeResponsible?: boolean }) {
+export function mapClientToExportRow(c: {
+  name: string;
+  phone: string;
+  email?: string;
+  dni?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  status?: string;
+  responsible?: string;
+  tags?: string[];
+  stats?: { totalOrders?: number; totalSpent?: number; lastOrderDate?: string | null };
+  loyalty?: { points?: number; level?: string };
+}): ClientExportRow {
+  return {
+    name: c.name,
+    phone: c.phone,
+    email: c.email,
+    dni: c.dni,
+    address: c.address,
+    city: c.city,
+    postalCode: c.postalCode,
+    status: c.status,
+    responsible: c.responsible,
+    tags: c.tags,
+    totalOrders: Number(c.stats?.totalOrders || 0),
+    totalSpent: Number(c.stats?.totalSpent || 0),
+    lastOrderDate: c.stats?.lastOrderDate || null,
+    loyaltyPoints: Number(c.loyalty?.points || 0),
+    loyaltyLevel: c.loyalty?.level || '',
+  };
+}
+
+export function downloadClientsExport(
+  clients: ClientExportRow[],
+  options?: { includeResponsible?: boolean; includeDeliveryStats?: boolean },
+) {
   const rows = clients.map((c) => {
-    const row: Record<string, string> = {
+    const row: Record<string, string | number> = {
       Nombre: c.name,
       Teléfono: c.phone,
       Email: c.email || '',
@@ -77,6 +118,15 @@ export function downloadClientsExport(clients: ClientExportRow[], options?: { in
       row.Responsable = c.responsible || '';
     }
     if (c.tags?.length) row.Etiquetas = c.tags.join(', ');
+    if (options?.includeDeliveryStats) {
+      row.Pedidos = c.totalOrders ?? 0;
+      row['Total gastado (€)'] = Number((c.totalSpent ?? 0).toFixed(2));
+      row['Último pedido'] = c.lastOrderDate
+        ? String(c.lastOrderDate).slice(0, 10)
+        : '';
+      row['Puntos fidelización'] = c.loyaltyPoints ?? 0;
+      row['Nivel fidelización'] = c.loyaltyLevel || '';
+    }
     return row;
   });
   const ws = XLSX.utils.json_to_sheet(rows);

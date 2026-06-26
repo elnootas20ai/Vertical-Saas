@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { useApp } from '../context/AppContext';
 import {
   clientsListSummaryByPlan,
   isClientsListFeatureUnlocked,
@@ -8,17 +7,12 @@ import {
 } from '../lib/clientsListPlanCatalog';
 import {
   PLAN_TIER_LABELS,
-  resolvePlanTier,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export function useClientsListPlanAccess() {
-  const { subscription } = useApp();
-
-  const planTier = resolvePlanTier(
-    subscription?.selectedPlanId || '',
-    subscription?.planName || '',
-  );
+  const planTier = useEffectivePlanTier();
 
   const planLabel = PLAN_TIER_LABELS[planTier];
   const isBasicPlan = planTier === 'basic';

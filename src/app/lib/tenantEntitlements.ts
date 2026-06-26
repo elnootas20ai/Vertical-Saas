@@ -11,7 +11,12 @@
  */
 import type { BillingSubscription } from './authApi';
 import {
-  getEffectivePointOfSaleLimit,
+  clampExtraBusinessSlots,
+  clampExtraCommercialBrandSlots,
+  clampExtraPointOfSaleSlots,
+  getBasePointOfSaleLimit,
+  INCLUDED_BUSINESSES,
+  INCLUDED_COMMERCIAL_BRANDS,
   PLAN_TIER_LABELS,
   resolvePlanTier,
   subscriptionHasProAccess,
@@ -119,6 +124,8 @@ export type ResolveTenantEntitlementsOptions = {
   devUnlimitedBrands?: boolean;
   /** Modo Ilimitado (dev) o super-admin: sin tope de empresas. */
   devUnlimitedBusinesses?: boolean;
+  /** Tier efectivo (Pro real, dev ilimitado, admin…) para límites y etiquetas de plan. */
+  featurePlanTier?: SubscriptionPlanTier;
 };
 
 export function resolveTenantEntitlements(
@@ -135,14 +142,22 @@ export function resolveTenantEntitlements(
   counts: TenantEntitlementCounts,
   options?: ResolveTenantEntitlementsOptions,
 ): TenantEntitlementAccess {
-  const planTier = resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
-  const hasProAccess = subscriptionHasProAccess(subscription);
+  const planTier =
+    options?.featurePlanTier
+    ?? resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
+  const hasProAccess =
+    subscriptionHasProAccess(subscription)
+    || planTier === 'pro'
+    || Boolean(options?.devUnlimitedBrands);
   const unlimitedBusinesses = Boolean(options?.devUnlimitedBusinesses);
-  const businessLimit = unlimitedBusinesses ? 999 : getEffectiveBusinessLimit(subscription);
-  const pdvLimit = getEffectivePointOfSaleLimit(subscription);
+  const extraBiz = clampExtraBusinessSlots(subscription?.extraBusinessSlots);
+  const businessLimit = unlimitedBusinesses ? 999 : INCLUDED_BUSINESSES[planTier] + extraBiz;
+  const extraPdv = clampExtraPointOfSaleSlots(subscription?.extraPointOfSaleSlots);
+  const pdvLimit = getBasePointOfSaleLimit(planTier) + extraPdv;
+  const extraBrands = clampExtraCommercialBrandSlots(subscription?.extraCommercialBrandSlots);
   const brandLimit = options?.devUnlimitedBrands
     ? 999
-    : getEffectiveCommercialBrandLimit(subscription);
+    : INCLUDED_COMMERCIAL_BRANDS[planTier] + extraBrands;
   const atBusinessLimit = counts.businesses >= businessLimit;
 
   const canCreateBusiness = unlimitedBusinesses || counts.businesses < businessLimit;
@@ -163,13 +178,13 @@ export function resolveTenantEntitlements(
     needsProUpgrade:
       !options?.devUnlimitedBrands &&
       !hasProAccess &&
-      (counts.pointOfSales >= pdvLimit || counts.commercialBrands >= getEffectiveCommercialBrandLimit(subscription)),
+      (counts.pointOfSales >= pdvLimit || counts.commercialBrands >= brandLimit),
     needsBusinessUpgrade: !unlimitedBusinesses && !hasProAccess && atBusinessLimit,
     needsBusinessAddon: !unlimitedBusinesses && hasProAccess && atBusinessLimit,
     needsPointOfSaleAddon: hasProAccess && counts.pointOfSales >= pdvLimit,
     needsCommercialBrandAddon:
       !options?.devUnlimitedBrands &&
       hasProAccess &&
-      counts.commercialBrands >= getEffectiveCommercialBrandLimit(subscription),
+      counts.commercialBrands >= brandLimit,
   };
 }

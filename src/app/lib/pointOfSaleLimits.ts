@@ -67,3 +67,36 @@ export function subscriptionHasProAccess(
   if (subscriptionHasAdminProAccess(subscription)) return true;
   return resolvePlanTier(subscription.selectedPlanId || '', subscription.planName || '') === 'pro';
 }
+
+export type EffectivePlanTierOptions = {
+  /** Simulación dev (Básico/Mediano/Pro): no elevar por Pro real ni Ilimitado. */
+  devSimulatedTier?: SubscriptionPlanTier | null;
+  /** Dev Ilimitado: funciones Pro en toda la app. */
+  devUnlimitedFeatures?: boolean;
+};
+
+/**
+ * Plan efectivo para gates de UI (CRM, dashboard, informes, columnas…).
+ * Prioridad: simulación dev → ilimitado dev → exento/admin/pro real → tier de suscripción.
+ */
+export function resolveEffectivePlanTier(
+  subscription: Pick<
+    BillingSubscription,
+    'selectedPlanId' | 'planName' | 'adminProAccess' | 'billingExempt' | 'status'
+  > | null | undefined,
+  options?: EffectivePlanTierOptions,
+): SubscriptionPlanTier {
+  if (options?.devSimulatedTier) {
+    return options.devSimulatedTier;
+  }
+  if (options?.devUnlimitedFeatures) {
+    return 'pro';
+  }
+  if (subscription?.billingExempt) {
+    return 'pro';
+  }
+  if (subscriptionHasProAccess(subscription)) {
+    return 'pro';
+  }
+  return resolvePlanTier(subscription?.selectedPlanId || '', subscription?.planName || '');
+}

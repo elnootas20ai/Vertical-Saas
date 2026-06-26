@@ -1,0 +1,37 @@
+---
+description: Funciones Pro deben desbloquear UI y conectar datos reales
+alwaysApply: true
+---
+
+# Pro conectado — no solo candados
+
+Toda función **Pro** (o de plan superior) debe cumplir **dos** cosas:
+
+1. **Desbloqueo de UI** — quitar candados, mostrar columnas, widgets, filtros, export, etc.
+2. **Datos conectados** — lo que se muestra viene de una fuente real (API, pedidos, finanzas, alertas), no placeholders estáticos ni campos vacíos por falta de pipeline.
+
+## Regla práctica
+
+Antes de marcar una feature Pro como hecha, verificar:
+
+- ¿El gate de plan (`useEffectivePlanTier`, `*PlanAccess`, catálogo de features) está cableado?
+- ¿La pantalla **pide y muestra** los datos que esa feature promete?
+- Si los datos viven en otro sitio (p. ej. stats de cliente en pedidos delivery), ¿hay enriquecimiento o sync en el flujo de listado/detalle?
+
+**No tiene sentido** desbloquear una columna "Total gastado" si el listado no calcula o no trae `stats.totalSpent` desde pedidos.
+
+## Ejemplos en el repo
+
+| Feature Pro | UI | Datos |
+|-------------|-----|-------|
+| KPIs dashboard | `useDashboardPlanAccess` | `GET /api/dashboard/kpis/:userId` |
+| Dashboard general (portfolio) | `usePortfolioPlanAccess` | `usePortfolioOverview` + pedidos/finanzas por empresa |
+| Columnas CRM delivery (gasto, último pedido, fidelización) | `useClientsListPlanAccess` | `liveStats=1` en listado → `enrichClientRowWithLiveDeliveryStats` desde pedidos |
+| Detalle cliente delivery | tabs Pro | `getClientDetail` + `syncClientFromDeliveryOrders` |
+
+## Al añadir features Pro nuevas
+
+1. Definir feature en catálogo de plan (`*PlanCatalog.ts`).
+2. Gate en hook `use*PlanAccess`.
+3. **Pipeline de datos** explícito (endpoint, query param, hook de fetch).
+4. Probar con plan Pro efectivo (suscripción Pro, dev Ilimitado sin simular Básico): debe verse **contenido real**, no solo UI desbloqueada.

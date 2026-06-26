@@ -42,8 +42,14 @@ interface WorkerTpvStaffConsumptionProps {
   salesPointName?: string | null;
 }
 
-function formatCurrency(value: number) {
-  return value.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
+function formatTpvPrice(value: number): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0,00\u00A0€';
+  return `${n.toFixed(2).replace('.', ',')}\u00A0€`;
+}
+
+function hasStaffDiscount(staffPrice: number, publicPrice: number): boolean {
+  return publicPrice > 0 && staffPrice < publicPrice - 0.004;
 }
 
 export function WorkerTpvStaffConsumption({
@@ -194,8 +200,8 @@ export function WorkerTpvStaffConsumption({
       }
       toast.success(
         paymentMode === 'cash_now'
-          ? `${formatCurrency(cartTotal)} cobrado y apuntado`
-          : `${formatCurrency(cartTotal)} apuntado a nómina`,
+          ? `${formatTpvPrice(cartTotal)} cobrado y apuntado`
+          : `${formatTpvPrice(cartTotal)} apuntado a nómina`,
       );
       if (allStockWarnings.length > 0) {
         toast.warning(allStockWarnings[0], { description: allStockWarnings.length > 1 ? `+${allStockWarnings.length - 1} aviso(s) de stock` : undefined });
@@ -307,39 +313,40 @@ export function WorkerTpvStaffConsumption({
               No hay productos habilitados para consumo de equipo.
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 overflow-y-auto pb-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-3 overflow-y-auto pb-4">
               {filteredProducts.map((item) => {
                 const staffPrice = resolveStaffUnitPrice(item, staffConfig);
                 const publicPrice = Number(item.unitPrice || 0);
+                const discounted = hasStaffDiscount(staffPrice, publicPrice);
                 const inCart = cart.find((line) => line.item._id === item._id)?.quantity || 0;
                 return (
                   <button
                     key={item._id}
                     type="button"
                     onClick={() => addToCart(item)}
-                    className={`text-left rounded-2xl border p-3 min-h-[88px] transition-colors touch-manipulation ${
+                    className={`flex flex-col text-left rounded-2xl border p-3 min-h-[104px] transition-colors touch-manipulation ${
                       inCart
                         ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30'
                         : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-violet-300'
                     }`}
                   >
-                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 min-h-[2.5rem]">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 line-clamp-2 leading-snug flex-1">
                       {item.name}
                     </p>
-                    <p className="text-[11px] text-gray-500 mt-1">{item.category}</p>
+                    <p className="text-[11px] text-gray-500 mt-1 truncate">{item.category}</p>
                     <div className="mt-2 flex items-end justify-between gap-2">
-                      <div>
-                        <p className="text-lg font-bold text-violet-700 dark:text-violet-300">
-                          {formatCurrency(staffPrice)}
+                      <div className="min-w-0">
+                        <p className="text-base font-bold text-violet-700 dark:text-violet-300 tabular-nums whitespace-nowrap">
+                          {formatTpvPrice(staffPrice)}
                         </p>
-                        {staffPrice < publicPrice && (
-                          <p className="text-[11px] text-gray-400 line-through">
-                            {formatCurrency(publicPrice)}
+                        {discounted && (
+                          <p className="text-[10px] text-gray-400 tabular-nums whitespace-nowrap mt-0.5">
+                            PVP {formatTpvPrice(publicPrice)}
                           </p>
                         )}
                       </div>
                       {inCart > 0 && (
-                        <span className="text-xs font-bold bg-violet-600 text-white rounded-full w-6 h-6 flex items-center justify-center">
+                        <span className="text-xs font-bold bg-violet-600 text-white rounded-full w-6 h-6 flex items-center justify-center shrink-0">
                           {inCart}
                         </span>
                       )}
@@ -367,7 +374,7 @@ export function WorkerTpvStaffConsumption({
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                       {line.item.name}
                     </p>
-                    <p className="text-xs text-gray-500">{formatCurrency(line.unitPrice)}</p>
+                    <p className="text-xs text-gray-500 tabular-nums whitespace-nowrap">{formatTpvPrice(line.unitPrice)}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <button
@@ -394,8 +401,8 @@ export function WorkerTpvStaffConsumption({
           <div className="border-t border-gray-200 dark:border-gray-800 p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600 dark:text-gray-400">Total</span>
-              <span className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                {formatCurrency(cartTotal)}
+              <span className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums whitespace-nowrap">
+                {formatTpvPrice(cartTotal)}
               </span>
             </div>
 

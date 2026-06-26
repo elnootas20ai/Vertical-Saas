@@ -367,6 +367,8 @@ export async function listClientsPageRequest(
     branchId?: string;
     workCenterId?: string;
     businessId?: string;
+    /** Calcula stats/loyalty desde pedidos delivery (columnas Pro del listado). */
+    liveStats?: boolean;
     signal?: AbortSignal;
   } = {},
 ): Promise<{ clients: Client[]; meta: ClientsListMeta }> {
@@ -385,6 +387,7 @@ export async function listClientsPageRequest(
   if (options.workCenterId && options.workCenterId !== 'all') {
     params.set('filter[workCenterId]', options.workCenterId);
   }
+  if (options.liveStats) params.set('liveStats', '1');
 
   const payload = await request<{ ok: boolean; clients: unknown[]; meta?: ClientsListMeta }>(
     `/api/clients/${encodeURIComponent(userId)}?${params.toString()}`,
@@ -403,6 +406,7 @@ export async function fetchAllClientsForExport(
   userId: string,
   onProgress?: (done: number, total: number) => void,
   businessId?: string,
+  options?: { liveStats?: boolean },
 ): Promise<Client[]> {
   const pageSize = 500;
   let skip = 0;
@@ -415,6 +419,7 @@ export async function fetchAllClientsForExport(
       skip,
       lite: true,
       businessId,
+      liveStats: options?.liveStats,
     });
     if (skip === 0) total = meta.total;
     all = all.concat(clients);

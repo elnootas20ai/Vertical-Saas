@@ -72,6 +72,22 @@ function formatDate(value: string | null | undefined, withTime = false) {
     : d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function formatOrderItemsPreview(
+  items: DeliveryOrder['items'] | undefined,
+  maxLines = 4,
+): string | null {
+  if (!items?.length) return null;
+  const named = items.filter((i) => i && typeof i === 'object' && String(i.name || '').trim());
+  if (!named.length) return null;
+  const lines = named.slice(0, maxLines).map((i) => {
+    const qty = Number(i.quantity || 1);
+    const name = String(i.name || '').trim();
+    return qty > 1 ? `${qty}× ${name}` : name;
+  });
+  if (named.length > maxLines) lines.push(`+${named.length - maxLines} más`);
+  return lines.join(' · ');
+}
+
 function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
@@ -607,8 +623,11 @@ export function DeliveryClientResumen({
               </div>
             ) : (
               <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                {recentOrders.map((order) => (
-                  <div key={order._id} className="flex items-center gap-4 px-5 py-4">
+                {recentOrders.map((order) => {
+                  const itemsPreview = formatOrderItemsPreview(order.items);
+                  return (
+                  <div key={order._id} className="px-5 py-4">
+                    <div className="flex items-start gap-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-900">
                       {order.deliveryType === 'domicilio'
                         ? <Truck className="h-4 w-4 text-indigo-600" />
@@ -623,20 +642,29 @@ export function DeliveryClientResumen({
                         </span>
                         <OrderStatusBadge status={order.status} />
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                         {formatDate(order.createdAt, true)}
                         {order.salesPointName ? ` · ${order.salesPointName}` : ''}
-                        {order.items?.length ? ` · ${order.items.length} artículo${order.items.length !== 1 ? 's' : ''}` : ''}
+                        {!itemsPreview && order.items?.length
+                          ? ` · ${order.items.length} artículo${order.items.length !== 1 ? 's' : ''}`
+                          : ''}
                       </p>
+                      {itemsPreview ? (
+                        <p className="mt-1.5 text-xs leading-relaxed text-gray-700 dark:text-gray-300 line-clamp-2">
+                          {itemsPreview}
+                        </p>
+                      ) : null}
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 text-right">
                       <p className="font-bold text-gray-900 dark:text-gray-100">{formatEuro(Number(order.totalAmount || 0))}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {DELIVERY_TYPE_LABELS[order.deliveryType] || order.deliveryType}
                       </p>
                     </div>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

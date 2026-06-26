@@ -1,9 +1,7 @@
 import { useMemo } from 'react';
-import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAN_TIER_LABELS,
-  resolvePlanTier,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
 import {
@@ -15,15 +13,12 @@ import {
   type ReportCatalogEntry,
   type ReportId,
 } from '../lib/reportPlanCatalog';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export function useReportPlanAccess() {
-  const { subscription } = useApp();
   const { user } = useAuth();
 
-  const planTier = resolvePlanTier(
-    subscription?.selectedPlanId || '',
-    subscription?.planName || '',
-  );
+  const planTier = useEffectivePlanTier();
 
   const isManager = useMemo(() => {
     const role = user?.role;

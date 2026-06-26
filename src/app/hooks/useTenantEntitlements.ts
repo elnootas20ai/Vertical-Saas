@@ -8,6 +8,7 @@ import {
   resolveTenantEntitlements,
   type TenantEntitlementAccess,
 } from '../lib/tenantEntitlements';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export type { TenantEntitlementAccess };
 
@@ -27,6 +28,7 @@ export function useTenantEntitlements(options?: {
   const devUnlimited = userCanUseDevPlanOverride(user) && devUnlimitedPdv;
   const superAdmin = isVertialSuperAdminEmail(user?.email);
   const bypassLimits = devUnlimited || superAdmin;
+  const featurePlanTier = useEffectivePlanTier();
 
   return useMemo(
     () =>
@@ -40,6 +42,7 @@ export function useTenantEntitlements(options?: {
         {
           devUnlimitedBrands: bypassLimits,
           devUnlimitedBusinesses: bypassLimits,
+          featurePlanTier,
         },
       ),
     [
@@ -48,6 +51,7 @@ export function useTenantEntitlements(options?: {
       options?.pointOfSaleCount,
       options?.commercialBrandCount,
       bypassLimits,
+      featurePlanTier,
     ],
   );
 }

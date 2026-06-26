@@ -3,11 +3,12 @@ import { userCanUseDevPlanOverride } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAN_TIER_LABELS,
-  getEffectivePointOfSaleLimit,
-  resolvePlanTier,
+  clampExtraPointOfSaleSlots,
+  getBasePointOfSaleLimit,
   subscriptionHasProAccess,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export type { SubscriptionPlanTier };
 export { POINT_OF_SALE_LIMITS, PLAN_TIER_LABELS };
@@ -29,9 +30,10 @@ export interface PointOfSaleAccess {
 export function usePointOfSaleAccess(pointOfSaleCount: number): PointOfSaleAccess {
   const { subscription, devUnlimitedPdv: devUnlimitedPdvState } = useApp();
   const { user } = useAuth();
-  const planTier = resolvePlanTier(subscription.selectedPlanId || '', subscription.planName || '');
-  const includedPointOfSaleLimit = getEffectivePointOfSaleLimit(subscription);
-  const hasProAccess = subscriptionHasProAccess(subscription);
+  const planTier = useEffectivePlanTier();
+  const extraPdv = clampExtraPointOfSaleSlots(subscription.extraPointOfSaleSlots);
+  const includedPointOfSaleLimit = getBasePointOfSaleLimit(planTier) + extraPdv;
+  const hasProAccess = planTier === 'pro' || subscriptionHasProAccess(subscription);
   const devUnlimitedPdv = userCanUseDevPlanOverride(user) && devUnlimitedPdvState;
   const canCreatePointOfSale = devUnlimitedPdv || pointOfSaleCount < includedPointOfSaleLimit;
 

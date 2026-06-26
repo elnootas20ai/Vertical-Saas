@@ -18,16 +18,22 @@ import {
   isDeliveryBusinessType,
   loadDeliveryStores,
 } from '../lib/deliverySetup';
+import { listClientsPageRequest } from '../lib/crmApi';
 import {
   applyTpvCashMetrics,
   computeCompanyBillingBreakdown,
+  computePortfolioClientMetrics,
   computePortfolioMetrics,
   computeStoreDeliveryMetrics,
   consolidatePortfolioFinance,
+  emptyPortfolioClientMetrics,
   emptyPortfolioMetrics,
   pickPrimaryPdvIdFromList,
+  portfolioOrderFetchFrom,
+  prevCalendarMonthKey,
   sumFinanceMonthForBusiness,
   type CompanyBillingBreakdown,
+  type PortfolioClientMetrics,
   type PortfolioFinanceTotals,
   type PortfolioMetrics,
   type StoreDeliveryMetrics,
@@ -98,6 +104,7 @@ export type PortfolioBusiness = {
   pdvIds: string[];
   metrics: PortfolioMetrics;
   finance: PortfolioFinanceTotals;
+  clients: PortfolioClientMetrics;
   billing: CompanyBillingBreakdown | null;
   isDelivery: boolean;
   team: TeamDashboardSnapshot;
@@ -111,19 +118,27 @@ export type PortfolioTotals = {
   members: number;
   revenueToday: number;
   revenueMonth: number;
+  revenuePrevMonth: number;
   ordersMonth: number;
+  ordersPrevMonth: number;
   deliveredToday: number;
   deliveredMonth: number;
+  deliveredPrevMonth: number;
   activeOrders: number;
   openCashRegisters: number;
   clockedInNow: number;
   pendingVacations: number;
   payslipsThisMonth: number;
+  totalClients: number;
+  newClientsMonth: number;
+  newClientsPrevMonth: number;
 };
 
 const EMPTY_FINANCE: PortfolioFinanceTotals = {
   incomeMonth: 0,
   expensesMonth: 0,
+  incomePrevMonth: 0,
+  expensesPrevMonth: 0,
   profitMonth: 0,
   ebitdaMonth: 0,
   ebitdaMarginMonth: 0,
@@ -261,7 +276,9 @@ function financeForBusiness(
   businessId: string,
   accountBusinessCount: number,
 ): PortfolioFinanceTotals {
+  const prevMonthKey = prevCalendarMonthKey(monthKey);
   const base = sumFinanceMonthForBusiness(movements, monthKey, businessId);
+  const prev = sumFinanceMonthForBusiness(movements, prevMonthKey, businessId);
   let scoped = movements.filter(
     (m) => String(m.businessId || '').replace(/^business:/, '').trim() === businessId,
   );
@@ -274,8 +291,50 @@ function financeForBusiness(
   const ebitda = computeEbitdaForMonth(scoped, monthKey, { level: 'all' });
   return {
     ...base,
+    incomePrevMonth: prev.incomeMonth,
+    expensesPrevMonth: prev.expensesMonth,
     ebitdaMonth: Math.round(ebitda.ebitda * 100) / 100,
     ebitdaMarginMonth: Math.round(ebitda.ebitdaMargin * 10) / 10,
+  };
+}
+
+async function loadClientMetricsForBusiness(
+  dataUserId: string,
+  businessId: string,
+  monthKey: string,
+): Promise<PortfolioClientMetrics> {
+  const prevMonthStart = `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
+  const collected: Array<{ createdAt?: Date | string }> = [];
+  let skip = 0;
+  let totalClients = 0;
+  const pageSize = 500;
+
+  while (true) {
+    const { clients, meta } = await listClientsPageRequest(dataUserId, {
+      limit: pageSize,
+      skip,
+      lite: true,
+      businessId,
+      sort: '-createdAt',
+    }).catch(() => ({ clients: [], meta: { total: 0, skip: 0, limit: pageSize, hasMore: false } }));
+
+    if (skip === 0) totalClients = meta.total;
+    collected.push(...clients);
+
+    const oldest = clients[clients.length - 1];
+    const reachedPrevMonth =
+      oldest &&
+      new Date(oldest.createdAt instanceof Date ? oldest.createdAt : oldest.createdAt) <
+        new Date(prevMonthStart);
+
+    if (!meta.hasMore || clients.length === 0 || reachedPrevMonth) break;
+    skip += pageSize;
+  }
+
+  const metrics = computePortfolioClientMetrics(collected, monthKey);
+  return {
+    ...metrics,
+    totalClients: totalClients || collected.length,
   };
 }
 
@@ -313,10 +372,8 @@ export function usePortfolioOverview(
 
     const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
-    const monthStart = `${monthKey}-01T00:00:00.000Z`;
     const monthEnd = `${todayKey}T23:59:59.999Z`;
-    const lookbackMs = 45 * 24 * 60 * 60 * 1000;
-    const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
+    const orderFetchFrom = portfolioOrderFetchFrom(monthKey);
     let loaded: PortfolioBusiness[] = [];
 
     try {
@@ -492,6 +549,11 @@ export function usePortfolioOverview(
             s.business.business_id,
             businesses.length,
           );
+          const clients = s.dataUserId
+            ? await loadClientMetricsForBusiness(s.dataUserId, s.business.business_id, monthKey).catch(
+                () => emptyPortfolioClientMetrics(),
+              )
+            : emptyPortfolioClientMetrics();
 
           return {
             businessId: s.business.business_id,
@@ -505,6 +567,7 @@ export function usePortfolioOverview(
             pdvIds: s.pdvIds,
             metrics,
             finance: rowFinance,
+            clients,
             billing,
             isDelivery: s.isDelivery,
             team,
@@ -559,14 +622,20 @@ export function usePortfolioOverview(
     members: rows.reduce((s, r) => s + r.memberCount, 0),
     revenueToday: rows.reduce((s, r) => s + r.metrics.revenueToday, 0),
     revenueMonth: rows.reduce((s, r) => s + r.metrics.revenueMonth, 0),
+    revenuePrevMonth: rows.reduce((s, r) => s + r.metrics.revenuePrevMonth, 0),
     ordersMonth: rows.reduce((s, r) => s + r.metrics.ordersMonth, 0),
+    ordersPrevMonth: rows.reduce((s, r) => s + r.metrics.ordersPrevMonth, 0),
     deliveredToday: rows.reduce((s, r) => s + r.metrics.deliveredToday, 0),
     deliveredMonth: rows.reduce((s, r) => s + r.metrics.deliveredMonth, 0),
+    deliveredPrevMonth: rows.reduce((s, r) => s + r.metrics.deliveredPrevMonth, 0),
     activeOrders: rows.reduce((s, r) => s + r.metrics.activeOrders, 0),
     openCashRegisters: rows.reduce((s, r) => s + r.metrics.openCashRegisters, 0),
     clockedInNow: rows.reduce((s, r) => s + r.team.clockedInNow, 0),
     pendingVacations: rows.reduce((s, r) => s + r.team.pendingVacationRequests, 0),
     payslipsThisMonth: rows.reduce((s, r) => s + r.team.payslipsThisMonth, 0),
+    totalClients: rows.reduce((s, r) => s + r.clients.totalClients, 0),
+    newClientsMonth: rows.reduce((s, r) => s + r.clients.newClientsMonth, 0),
+    newClientsPrevMonth: rows.reduce((s, r) => s + r.clients.newClientsPrevMonth, 0),
   };
 
   return { rows, totals, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload };

@@ -1,8 +1,6 @@
 import { useMemo } from 'react';
-import { useApp } from '../context/AppContext';
 import {
   PLAN_TIER_LABELS,
-  resolvePlanTier,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
 import {
@@ -13,14 +11,10 @@ import {
   isDashboardWidgetUnlocked,
   type DashboardWidgetId,
 } from '../lib/dashboardPlanCatalog';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export function useDashboardPlanAccess() {
-  const { subscription } = useApp();
-
-  const planTier = resolvePlanTier(
-    subscription?.selectedPlanId || '',
-    subscription?.planName || '',
-  );
+  const planTier = useEffectivePlanTier();
 
   const planLabel = PLAN_TIER_LABELS[planTier];
   const isBasicPlan = planTier === 'basic';

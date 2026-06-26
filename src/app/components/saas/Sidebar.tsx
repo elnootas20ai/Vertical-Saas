@@ -1700,7 +1700,7 @@ function SidebarInner({
             )}
             <p className="mt-1 text-[9px] text-violet-600/80 dark:text-violet-400/80">
               {devUnlimitedPdv
-                ? 'Sin límite de cupos (plan real)'
+                ? 'Sin límite de cupos · funciones Pro'
                 : `Máx. ${getEffectiveBusinessLimit(subscription)} empresas · ${getEffectivePointOfSaleLimit(subscription)} tiendas · ${getEffectiveCommercialBrandLimit(subscription)} marcas`}
             </p>
             <button

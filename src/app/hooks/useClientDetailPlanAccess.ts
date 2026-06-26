@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { useApp } from '../context/AppContext';
 import {
   CLIENT_DETAIL_BASIC_MAX_ORDERS,
   CLIENT_DETAIL_BASIC_MAX_RECENT_ORDERS,
@@ -10,17 +9,12 @@ import {
 } from '../lib/clientDetailPlanCatalog';
 import {
   PLAN_TIER_LABELS,
-  resolvePlanTier,
   type SubscriptionPlanTier,
 } from '../lib/pointOfSaleLimits';
+import { useEffectivePlanTier } from './useEffectivePlanTier';
 
 export function useClientDetailPlanAccess() {
-  const { subscription } = useApp();
-
-  const planTier = resolvePlanTier(
-    subscription?.selectedPlanId || '',
-    subscription?.planName || '',
-  );
+  const planTier = useEffectivePlanTier();
 
   const planLabel = PLAN_TIER_LABELS[planTier];
   const isBasicPlan = planTier === 'basic';

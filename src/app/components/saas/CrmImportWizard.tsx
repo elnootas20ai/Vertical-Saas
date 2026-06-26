@@ -29,6 +29,7 @@ import {
   downloadClientsExport,
   downloadLeadImportTemplate,
   downloadLeadImportTemplateCsv,
+  mapClientToExportRow,
   type ClientExportRow,
 } from '../../lib/crmImportTemplates';
 
@@ -162,21 +163,15 @@ export function CrmImportWizard({
                   setExportingClients(true);
                   const toastId = toast.loading('Preparando exportación…');
                   try {
-                    const all = await fetchAllClientsForExport(uid, undefined, exportBusinessId);
+                    const all = await fetchAllClientsForExport(uid, undefined, exportBusinessId, {
+                      liveStats: includeResponsible === false,
+                    });
                     downloadClientsExport(
-                      all.map((c) => ({
-                        name: c.name,
-                        phone: c.phone,
-                        email: c.email,
-                        dni: c.dni,
-                        address: c.address,
-                        city: c.city,
-                        postalCode: c.postalCode,
-                        status: c.status,
-                        responsible: c.responsible,
-                        tags: c.tags,
-                      })),
-                      { includeResponsible: includeResp },
+                      all.map((c) => mapClientToExportRow(c)),
+                      {
+                        includeResponsible: includeResp,
+                        includeDeliveryStats: includeResponsible === false,
+                      },
                     );
                     toast.success(`Exportados ${all.length} clientes`, { id: toastId });
                   } catch {

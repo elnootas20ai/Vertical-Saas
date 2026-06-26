@@ -4,10 +4,13 @@ import { dedupeOpenRegisterSessions } from './tpvCajaScope';
 export type PortfolioMetrics = {
   revenueToday: number;
   revenueMonth: number;
+  revenuePrevMonth: number;
   ordersToday: number;
   ordersMonth: number;
+  ordersPrevMonth: number;
   deliveredToday: number;
   deliveredMonth: number;
+  deliveredPrevMonth: number;
   activeOrders: number;
   cancelledMonth: number;
   avgTicketMonth: number;
@@ -17,9 +20,17 @@ export type PortfolioMetrics = {
   revenueByBrand: Record<string, number>;
 };
 
+export type PortfolioClientMetrics = {
+  totalClients: number;
+  newClientsMonth: number;
+  newClientsPrevMonth: number;
+};
+
 export type PortfolioFinanceTotals = {
   incomeMonth: number;
   expensesMonth: number;
+  incomePrevMonth: number;
+  expensesPrevMonth: number;
   profitMonth: number;
   ebitdaMonth: number;
   ebitdaMarginMonth: number;
@@ -33,10 +44,13 @@ export function emptyPortfolioMetrics(): PortfolioMetrics {
   return {
     revenueToday: 0,
     revenueMonth: 0,
+    revenuePrevMonth: 0,
     ordersToday: 0,
     ordersMonth: 0,
+    ordersPrevMonth: 0,
     deliveredToday: 0,
     deliveredMonth: 0,
+    deliveredPrevMonth: 0,
     activeOrders: 0,
     cancelledMonth: 0,
     avgTicketMonth: 0,
@@ -45,6 +59,47 @@ export function emptyPortfolioMetrics(): PortfolioMetrics {
     revenueByChannel: {},
     revenueByBrand: {},
   };
+}
+
+export function prevCalendarMonthKey(monthKey: string): string {
+  const [yearRaw, monthRaw] = monthKey.split('-');
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!year || !month) return monthKey;
+  const d = new Date(year, month - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Inicio del mes anterior (UTC) para pedir pedidos con cobertura MoM completa. */
+export function portfolioOrderFetchFrom(monthKey: string): string {
+  return `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
+}
+
+export function monthOverMonthPct(current: number, previous: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+  if (previous === 0) return current > 0 ? 100 : null;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+export function emptyPortfolioClientMetrics(): PortfolioClientMetrics {
+  return { totalClients: 0, newClientsMonth: 0, newClientsPrevMonth: 0 };
+}
+
+export function computePortfolioClientMetrics(
+  clients: Array<{ createdAt?: Date | string }>,
+  monthKey: string,
+): PortfolioClientMetrics {
+  const prevKey = prevCalendarMonthKey(monthKey);
+  let newClientsMonth = 0;
+  let newClientsPrevMonth = 0;
+  for (const client of clients) {
+    const raw = client.createdAt;
+    const iso = raw instanceof Date ? raw.toISOString() : String(raw || '');
+    if (!iso) continue;
+    if (isInMonth(iso, monthKey)) newClientsMonth += 1;
+    else if (isInMonth(iso, prevKey)) newClientsPrevMonth += 1;
+  }
+  return { totalClients: clients.length, newClientsMonth, newClientsPrevMonth };
 }
 
 export function orderBelongsToPdvScope(
@@ -93,6 +148,36 @@ function isDeliveredInMonth(order: DeliveryOrder, monthKey: string): boolean {
   if (!isDeliveredOrder(order)) return false;
   const when = orderDeliveredAtIso(order);
   return when ? isInMonth(when, monthKey) : false;
+}
+
+/** Pedidos dentro del scope PDV/tienda (para gráficas y actividad del dashboard). */
+export function filterOrdersToPortfolioScope(
+  orders: DeliveryOrder[],
+  pdvIds: string[],
+  primaryPdvId: string | null,
+  wcIdsInScope?: Set<string>,
+): DeliveryOrder[] {
+  const pdvSet = new Set(pdvIds);
+  if (!pdvSet.size && (!wcIdsInScope || wcIdsInScope.size === 0)) return [];
+  return orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, primaryPdvId, null, wcIdsInScope));
+}
+
+export function sumDeliveredRevenueOnDay(orders: DeliveryOrder[], dayKey: string): number {
+  return orders
+    .filter((o) => isDeliveredOnDay(o, dayKey))
+    .reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+}
+
+export function countOrdersCreatedOnDay(orders: DeliveryOrder[], dayKey: string): number {
+  return orders.filter((o) => isToday(String(o.createdAt || ''), dayKey)).length;
+}
+
+export function getDeliveryOrderDeliveredAtIso(order: DeliveryOrder): string {
+  return orderDeliveredAtIso(order);
+}
+
+export function isDeliveryOrderDelivered(order: DeliveryOrder): boolean {
+  return isDeliveredOrder(order);
 }
 
 export type StoreDeliveryMetrics = {
@@ -148,15 +233,18 @@ export function computePortfolioMetrics(
   if (!pdvSet.size && (!wcIdsInScope || wcIdsInScope.size === 0)) return emptyPortfolioMetrics();
 
   const monthKey = todayKey.slice(0, 7);
+  const prevMonthKey = prevCalendarMonthKey(monthKey);
   const scoped = orders.filter((o) =>
     orderBelongsToPdvScope(o, pdvSet, primaryPdvId, null, wcIdsInScope),
   );
   const todayCreated = scoped.filter((o) => isToday(o.createdAt, todayKey));
   const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
   const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
+  const deliveredPrevMonth = scoped.filter((o) => isDeliveredInMonth(o, prevMonthKey));
 
   const revenueToday = deliveredToday.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
   const revenueMonth = deliveredMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+  const revenuePrevMonth = deliveredPrevMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
 
   const revenueByChannel: Record<string, number> = {};
   const revenueByBrand: Record<string, number> = {};
@@ -184,10 +272,13 @@ export function computePortfolioMetrics(
   return {
     revenueToday,
     revenueMonth,
+    revenuePrevMonth: Math.round(revenuePrevMonth * 100) / 100,
     ordersToday: todayCreated.length,
     ordersMonth: scoped.filter((o) => isInMonth(String(o.createdAt || ''), monthKey)).length,
+    ordersPrevMonth: scoped.filter((o) => isInMonth(String(o.createdAt || ''), prevMonthKey)).length,
     deliveredToday: deliveredToday.length,
     deliveredMonth: deliveredMonth.length,
+    deliveredPrevMonth: deliveredPrevMonth.length,
     activeOrders,
     cancelledMonth,
     avgTicketMonth,
@@ -270,6 +361,8 @@ export function consolidatePortfolioFinance(
   const totals: PortfolioFinanceTotals = {
     incomeMonth: 0,
     expensesMonth: 0,
+    incomePrevMonth: 0,
+    expensesPrevMonth: 0,
     profitMonth: 0,
     ebitdaMonth: 0,
     ebitdaMarginMonth: 0,
@@ -277,10 +370,15 @@ export function consolidatePortfolioFinance(
     cashBalance: 0,
   };
 
+  const prevMonthKey = prevCalendarMonthKey(monthKey);
+
   for (const bid of businessIds) {
     const row = sumFinanceMonthForBusiness(movements, monthKey, bid);
+    const rowPrev = sumFinanceMonthForBusiness(movements, prevMonthKey, bid);
     totals.incomeMonth += row.incomeMonth;
     totals.expensesMonth += row.expensesMonth;
+    totals.incomePrevMonth += rowPrev.incomeMonth;
+    totals.expensesPrevMonth += rowPrev.expensesMonth;
     totals.profitMonth += row.profitMonth;
     totals.pendingAmount += row.pendingAmount;
   }
@@ -290,14 +388,22 @@ export function consolidatePortfolioFinance(
       movements.filter((m) => !normalizeFinanceBusinessId(m.businessId)),
       monthKey,
     );
+    const legacyPrev = sumFinanceMonth(
+      movements.filter((m) => !normalizeFinanceBusinessId(m.businessId)),
+      prevMonthKey,
+    );
     totals.incomeMonth += legacy.incomeMonth;
     totals.expensesMonth += legacy.expensesMonth;
+    totals.incomePrevMonth += legacyPrev.incomeMonth;
+    totals.expensesPrevMonth += legacyPrev.expensesMonth;
     totals.profitMonth += legacy.profitMonth;
     totals.pendingAmount += legacy.pendingAmount;
   }
 
   totals.incomeMonth = Math.round(totals.incomeMonth * 100) / 100;
   totals.expensesMonth = Math.round(totals.expensesMonth * 100) / 100;
+  totals.incomePrevMonth = Math.round(totals.incomePrevMonth * 100) / 100;
+  totals.expensesPrevMonth = Math.round(totals.expensesPrevMonth * 100) / 100;
   totals.profitMonth = Math.round(totals.profitMonth * 100) / 100;
   totals.pendingAmount = Math.round(totals.pendingAmount * 100) / 100;
   return totals;
@@ -322,6 +428,8 @@ export function sumFinanceMonth(
   return {
     incomeMonth,
     expensesMonth,
+    incomePrevMonth: 0,
+    expensesPrevMonth: 0,
     profitMonth: incomeMonth - expensesMonth,
     ebitdaMonth: 0,
     ebitdaMarginMonth: 0,

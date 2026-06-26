@@ -57,7 +57,7 @@ import { DashboardViewProvider, useDashboardView } from '../../context/Dashboard
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
-import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { listFinanceMovements } from '../../lib/financeApi';
 import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
@@ -673,12 +673,19 @@ function UnifiedDashboard() {
   const [teamSnapshot, setTeamSnapshot] = useState<TeamDashboardSnapshot | null>(null);
   const [teamLoading, setTeamLoading] = useState(false);
   const [deliveryMetrics, setDeliveryMetrics] = useState<PortfolioMetrics | null>(null);
+  const [deliveryScope, setDeliveryScope] = useState<{
+    orders: DeliveryOrder[];
+    pdvIds: string[];
+    primaryPdvId: string | null;
+    wcScopeIds: string[];
+  } | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
 
   useEffect(() => {
     if (!isDeliveryVertical || !authUser || !currentBusiness) {
       setDeliveryMetrics(null);
+      setDeliveryScope(null);
       return;
     }
     let cancelled = false;
@@ -710,7 +717,10 @@ function UnifiedDashboard() {
           .map((wc) => wc._id);
         const wcScope = new Set(storeIds);
         if (pdvIds.length === 0 && wcScope.size === 0) {
-          if (!cancelled) setDeliveryMetrics(emptyPortfolioMetrics());
+          if (!cancelled) {
+            setDeliveryMetrics(emptyPortfolioMetrics());
+            setDeliveryScope({ orders: orderResult.orders, pdvIds, primaryPdvId: null, wcScopeIds: [...wcScope] });
+          }
           return;
         }
         const createdMap = new Map(pointsOfSale.map((p) => [p._id, String(p.createdAt || '')]));
@@ -722,9 +732,20 @@ function UnifiedDashboard() {
           todayKey,
           wcScope,
         );
-        if (!cancelled) setDeliveryMetrics(metrics);
+        if (!cancelled) {
+          setDeliveryMetrics(metrics);
+          setDeliveryScope({
+            orders: orderResult.orders,
+            pdvIds,
+            primaryPdvId: primaryPdv,
+            wcScopeIds: [...wcScope],
+          });
+        }
       } catch {
-        if (!cancelled) setDeliveryMetrics(null);
+        if (!cancelled) {
+          setDeliveryMetrics(null);
+          setDeliveryScope(null);
+        }
       }
     })();
     return () => {
@@ -922,7 +943,9 @@ function UnifiedDashboard() {
   const salesToday       = isDeliveryVertical && deliveryMetrics
     ? deliveryMetrics.revenueToday
     : (sk?.salesToday ?? 0);
-  const salesTodayCount  = sk?.salesTodayCount ?? 0;
+  const salesTodayCount  = isDeliveryVertical && deliveryMetrics
+    ? deliveryMetrics.deliveredToday
+    : (sk?.salesTodayCount ?? 0);
   const salesMonth       = isDeliveryVertical && deliveryMetrics
     ? deliveryMetrics.revenueMonth
     : (sk?.salesMonth ?? soldThisMonth.reduce((s, v) => s + (v.salePrice || 0), 0));
@@ -961,31 +984,80 @@ function UnifiedDashboard() {
     return eachDayOfInterval({ start, end });
   }, []);
 
-  const dailySalesData = useMemo((): DailyPoint[] =>
-    daysRange.map(d => {
+  const scopedDeliveryOrders = useMemo(() => {
+    if (!deliveryScope) return [];
+    return filterOrdersToPortfolioScope(
+      deliveryScope.orders,
+      deliveryScope.pdvIds,
+      deliveryScope.primaryPdvId,
+      new Set(deliveryScope.wcScopeIds),
+    );
+  }, [deliveryScope]);
+
+  const dailySalesData = useMemo((): DailyPoint[] => {
+    if (isDeliveryVertical && deliveryScope) {
+      return daysRange.map((d) => {
+        const dayStr = format(d, 'yyyy-MM-dd');
+        return {
+          day: dayStr,
+          label: format(d, 'd MMM', { locale: es }),
+          value: sumDeliveredRevenueOnDay(scopedDeliveryOrders, dayStr),
+        };
+      });
+    }
+    return daysRange.map(d => {
       const dayStr = format(d, 'yyyy-MM-dd');
       const daySales = soldThisMonth.filter(v => {
         const sold = v.soldAt ? new Date(v.soldAt) : null;
         return sold && format(startOfDay(sold), 'yyyy-MM-dd') === dayStr;
       });
       return { day: dayStr, label: format(d, 'd MMM', { locale: es }), value: daySales.reduce((s, v) => s + (v.salePrice || 0), 0) };
-    }),
-  [soldThisMonth, daysRange]);
+    });
+  }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, daysRange, soldThisMonth]);
 
-  const dailyLeadsData = useMemo((): DailyPoint[] =>
-    daysRange.map(d => {
+  const dailyLeadsData = useMemo((): DailyPoint[] => {
+    if (isDeliveryVertical && deliveryScope) {
+      return daysRange.map((d) => {
+        const dayStr = format(d, 'yyyy-MM-dd');
+        return {
+          day: dayStr,
+          label: format(d, 'd MMM', { locale: es }),
+          value: countOrdersCreatedOnDay(scopedDeliveryOrders, dayStr),
+        };
+      });
+    }
+    return daysRange.map(d => {
       const dayStr = format(d, 'yyyy-MM-dd');
       const count = leads.filter(l => {
         const created = l.createdAt ? new Date(l.createdAt) : null;
         return created && format(startOfDay(created), 'yyyy-MM-dd') === dayStr;
       }).length;
       return { day: dayStr, label: format(d, 'd MMM', { locale: es }), value: count };
-    }),
-  [leads, daysRange]);
+    });
+  }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, daysRange, leads]);
 
   // ── Recent activity ──
   const recentActivity = useMemo(() => {
     const items: { type: string; message: string; time: string; icon: React.ReactNode; ts: Date; dot: string }[] = [];
+    if (isDeliveryVertical && deliveryScope) {
+      scopedDeliveryOrders
+        .filter(isDeliveryOrderDelivered)
+        .sort((a, b) => getDeliveryOrderDeliveredAtIso(b).localeCompare(getDeliveryOrderDeliveredAtIso(a)))
+        .slice(0, 8)
+        .forEach((o) => {
+          const when = getDeliveryOrderDeliveredAtIso(o);
+          if (!when) return;
+          items.push({
+            type: 'delivery',
+            message: `Pedido ${String(o.orderNumber || o._id || '').slice(-8)} · ${formatEur(Number(o.totalAmount) || 0)}`,
+            time: formatTimeAgo(when, i18n.language),
+            icon: <Package className="w-3.5 h-3.5" />,
+            ts: new Date(when),
+            dot: 'bg-emerald-400',
+          });
+        });
+      return items;
+    }
     vehicles.slice(-3).reverse().forEach(v => items.push({
       type: 'vehicle', message: `Nuevo: ${v.brand} ${v.model} ${v.year}`,
       time: formatTimeAgo(v.createdAt, i18n.language), icon: <Car className="w-3.5 h-3.5" />,
@@ -1002,16 +1074,17 @@ function UnifiedDashboard() {
       ts: new Date(d.createdAt), dot: 'bg-violet-400',
     }));
     return items.sort((a, b) => b.ts.getTime() - a.ts.getTime()).slice(0, 8);
-  }, [vehicles, soldThisMonth, documents, i18n.language]);
+  }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, vehicles, soldThisMonth, documents, i18n.language]);
 
   // ── Quick access items ──
   const quickAccessItems = useMemo(() => getQuickAccessItems(vertical), [vertical]);
 
   // ── Loading state progresivo ──
   const baseDataLoading = isLoadingVehicles || isLoadingClients;
+  const deliveryDataLoading = isDeliveryVertical && deliveryMetrics === null;
   const alertsLoading = serverLoading && !serverData;
-  const chartsLoading = baseDataLoading;
-  const activityLoading = baseDataLoading;
+  const chartsLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
+  const activityLoading = isDeliveryVertical ? deliveryDataLoading : baseDataLoading;
 
   // ── Funnel totals ──
   const funnelTotal = funnelCounts['new'] || 0;
@@ -1099,7 +1172,9 @@ function UnifiedDashboard() {
                 <KPICard
                   title="Ventas hoy"
                   value={salesToday > 0 ? formatEur(salesToday) : '—'}
-                  sub={salesTodayCount > 0 ? `${salesTodayCount} operación${salesTodayCount > 1 ? 'es' : ''}` : 'Sin ventas hoy'}
+                  sub={isDeliveryVertical && deliveryMetrics
+                    ? `${deliveryMetrics.deliveredToday} entrega${deliveryMetrics.deliveredToday !== 1 ? 's' : ''} hoy`
+                    : (salesTodayCount > 0 ? `${salesTodayCount} operación${salesTodayCount > 1 ? 'es' : ''}` : 'Sin ventas hoy')}
                   icon={<DollarSign className="w-4 h-4" />}
                   iconBg="bg-emerald-100 dark:bg-emerald-900/40"
                   iconColor="text-emerald-600"
@@ -1110,7 +1185,9 @@ function UnifiedDashboard() {
                 <KPICard
                   title="Ventas mes"
                   value={salesMonth > 0 ? formatEur(salesMonth) : '—'}
-                  sub={`${sk?.soldThisMonthCount ?? soldThisMonth.length} ventas este mes`}
+                  sub={isDeliveryVertical && deliveryMetrics
+                    ? `${deliveryMetrics.deliveredMonth} entregas este mes`
+                    : `${sk?.soldThisMonthCount ?? soldThisMonth.length} ventas este mes`}
                   icon={<TrendingUp className="w-4 h-4" />}
                   iconBg="bg-blue-100 dark:bg-blue-900/40"
                   iconColor="text-blue-600"
@@ -1273,7 +1350,9 @@ function UnifiedDashboard() {
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <BarChart3 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Ventas (14 días)</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                        {isDeliveryVertical ? 'Entregas (14 días)' : 'Ventas (14 días)'}
+                      </p>
                     </div>
                     <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
                   </div>
@@ -1307,12 +1386,14 @@ function UnifiedDashboard() {
                   </div>
                 </div>
 
-                {/* Leads 14 días */}
+                {/* Pedidos / leads 14 días */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Nuevos leads (14 días)</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                        {isDeliveryVertical ? 'Pedidos nuevos (14 días)' : 'Nuevos leads (14 días)'}
+                      </p>
                     </div>
                     <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50" />
                   </div>
@@ -1335,7 +1416,7 @@ function UnifiedDashboard() {
                             return (
                               <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg">
                                 <span className="opacity-60 mr-1">{pt.label}</span>
-                                {pt.value} leads
+                                {pt.value} {isDeliveryVertical ? 'pedidos' : 'leads'}
                               </div>
                             );
                           }}

@@ -12,6 +12,8 @@ export interface UsePaginatedClientsOptions {
   branchId?: string;
   workCenterId?: string;
   enabled?: boolean;
+  /** Pedir stats reales desde pedidos (Pro: gasto, último pedido, fidelización). */
+  liveStats?: boolean;
 }
 
 function sortToQuery(sort: { key: string; dir: 'asc' | 'desc' } | null | undefined): string | undefined {
@@ -37,6 +39,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
     branchId = 'all',
     workCenterId = 'all',
     enabled = true,
+    liveStats = false,
   } = options;
 
   const [page, setPageRaw] = useState(1);
@@ -79,6 +82,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         workCenterId,
         businessId,
         lite: true,
+        liveStats,
         signal: controller.signal,
       });
 
@@ -94,7 +98,7 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
         setIsLoading(false);
       }
     }
-  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId, businessId]);
+  }, [userId, enabled, pageSize, search, sortQuery, branchId, workCenterId, businessId, liveStats]);
 
   useEffect(() => {
     setPageRaw(1);

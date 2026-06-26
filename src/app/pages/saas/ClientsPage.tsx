@@ -59,6 +59,7 @@ import {
   type AssignmentRule,
   type SlaConfig,
 } from '../../lib/crmApi';
+import { downloadClientsExport, mapClientToExportRow } from '../../lib/crmImportTemplates';
 import { InvoiceCreationModal, type InvoiceTypeSelection } from '../../components/saas/InvoiceCreationModal';
 import {
   Users, Plus, Eye, Phone, Mail, UserPlus, Search, MapPin,
@@ -1596,6 +1597,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [clientsView,             setClientsView]             = useState<'cards' | 'table'>('table');
   const [deletingClientId,        setDeletingClientId]        = useState<string | null>(null);
   const [bulkDeletingClients,   setBulkDeletingClients]     = useState(false);
+  const [exportingClients,      setExportingClients]        = useState(false);
   const [billingView,             setBillingView]             = useState<'cards' | 'table'>('cards');
   const [selectedInvoice,         setSelectedInvoice]         = useState<Invoice | null>(null);
   const [selectedLead,            setSelectedLead]            = useState<Lead | null>(null);
@@ -1655,6 +1657,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       clientsDataUserId,
       undefined,
       isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+      { liveStats: isDeliveryBusiness },
     )
       .then((all) => {
         if (!cancelled) setSegmentAllClients(all);
@@ -1694,6 +1697,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     branchId: filterBranch,
     workCenterId: filterWorkCenter,
     pageSize: 20,
+    liveStats: isDeliveryBusiness,
   });
 
   useEffect(() => {
@@ -1990,20 +1994,40 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     : filteredClients.length;
 
   const clientExportRows = useMemo(
-    () =>
-      filteredClients.map((c) => ({
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        dni: c.dni,
-        address: c.address,
-        city: c.city,
-        postalCode: c.postalCode,
-        status: c.status,
-        tags: c.tags,
-      })),
+    () => filteredClients.map((c) => mapClientToExportRow(c)),
     [filteredClients],
   );
+
+  const handleExportAllClients = useCallback(async () => {
+    if (!clientsDataUserId || exportingClients) return;
+    setExportingClients(true);
+    const toastId = toast.loading('Preparando exportación…');
+    try {
+      const all = await fetchAllClientsForExport(
+        clientsDataUserId,
+        undefined,
+        isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+        { liveStats: isDeliveryBusiness },
+      );
+      downloadClientsExport(
+        all.map((c) => mapClientToExportRow(c)),
+        {
+          includeResponsible: !isDeliveryBusiness,
+          includeDeliveryStats: isDeliveryBusiness,
+        },
+      );
+      toast.success(`Exportados ${all.length} clientes`, { id: toastId });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo exportar los clientes', { id: toastId });
+    } finally {
+      setExportingClients(false);
+    }
+  }, [
+    businessScopeId,
+    clientsDataUserId,
+    exportingClients,
+    isDeliveryBusiness,
+  ]);
 
   const { paginated: paginatedClientsLocal, pagination: clientsPaginationLocal } = usePagination(
     useServerClients && !useSegmentMode ? [] : filteredClients,
@@ -2970,7 +2994,10 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           canImportFromBusiness={listPlan.canImportFromBusiness}
           hasOtherBusinesses={otherBusinesses.length > 0}
           segmentConditionsCount={segmentConditions.length}
+          exportTotalCount={clientsListTotal}
           exportClients={clientExportRows}
+          onExportAllClients={useServerClients ? handleExportAllClients : undefined}
+          exportingClients={exportingClients}
           requiredPlanLabel={listPlan.requiredPlanLabel}
           onQuickAddClient={() => setShowAddClientModal(true)}
           onAIAddClient={() => setShowAIClientModal(true)}
@@ -2990,7 +3017,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const renderClientsTab = () => (
     <div className="space-y-3">
-      {isDeliveryBusiness && (
+      {isDeliveryBusiness && listPlan.lockedCount > 0 && (
         <ClientsListPlanBanner
           planLabel={listPlan.planLabel}
           unlockedCount={listPlan.unlockedCount}

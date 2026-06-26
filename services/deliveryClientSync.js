@@ -48,6 +48,70 @@ export async function linkOrphanOrdersToClient(req, userId, clientId, clientPhon
   return linked;
 }
 
+export function computeClientDeliveryMetrics(client, orders) {
+  const clientId = String(client._id || client.id || '').trim();
+  const phone = client.phone;
+  const matched = (orders || []).filter(
+    (o) => deliveryOrderMatchesClient(o, clientId, phone) && !isCancelledDeliveryOrder(o),
+  );
+
+  const totalSpent = matched.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
+  const dates = matched.map((o) => o.createdAt).filter(Boolean).sort();
+  const lastOrderDate = dates.length > 0 ? dates[dates.length - 1] : null;
+  const deliveredOrders = matched.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
+  const deliveredRevenue = deliveredOrders.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
+  const points = Math.floor(deliveredRevenue);
+  const storedPoints = Number(client.loyalty?.points || 0);
+  const effectivePoints = storedPoints > points ? storedPoints : points;
+
+  const stats = {
+    totalOrders: matched.length,
+    lastOrderDate,
+    orderFrequencyDays: computeOrderFrequencyDays(dates),
+    favoriteAddressId: client.stats?.favoriteAddressId || null,
+    totalSpent: Number(totalSpent.toFixed(2)),
+    createdFrom: client.stats?.createdFrom || 'crm',
+  };
+
+  const loyalty = {
+    enrolled: Boolean(client.loyalty?.enrolled || matched.length > 0),
+    enrolledAt: client.loyalty?.enrolledAt || (matched.length > 0 ? (client.createdAt || new Date().toISOString()) : null),
+    points: effectivePoints,
+    level: computeLoyaltyLevel(effectivePoints),
+    totalVisits: deliveredOrders.length,
+  };
+
+  return { stats, loyalty };
+}
+
+/** Enriquece fila de listado (sanitizeClientSummary) con stats reales desde pedidos. */
+export function enrichClientRowWithLiveDeliveryStats(clientRow, orders) {
+  const { stats, loyalty } = computeClientDeliveryMetrics(
+    {
+      _id: clientRow.id,
+      id: clientRow.id,
+      phone: clientRow.phone,
+      stats: clientRow.stats,
+      loyalty: clientRow.loyalty,
+      createdAt: clientRow.createdAt,
+    },
+    orders,
+  );
+  return {
+    ...clientRow,
+    stats: {
+      totalOrders: stats.totalOrders,
+      lastOrderDate: stats.lastOrderDate,
+      totalSpent: stats.totalSpent,
+    },
+    loyalty: {
+      enrolled: loyalty.enrolled,
+      points: loyalty.points,
+      level: loyalty.level,
+    },
+  };
+}
+
 export async function syncClientFromDeliveryOrders(req, userId, clientId) {
   const clientsDb = getClientsDbName();
   await ensureDatabase(req, clientsDb);
@@ -67,29 +131,7 @@ export async function syncClientFromDeliveryOrders(req, userId, clientId) {
   const orders = (await listDeliveryOrdersByUser(req, userId))
     .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o));
 
-  const totalSpent = orders.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
-  const dates = orders.map((o) => o.createdAt).filter(Boolean).sort();
-  const lastOrderDate = dates.length > 0 ? dates[dates.length - 1] : null;
-  const deliveredOrders = orders.filter((o) => String(o.status || '').toLowerCase() === 'entregado');
-  const deliveredRevenue = deliveredOrders.reduce((s, o) => s + deliveryOrderRevenue(o), 0);
-  const points = Math.floor(deliveredRevenue);
-
-  const stats = {
-    totalOrders: orders.length,
-    lastOrderDate,
-    orderFrequencyDays: computeOrderFrequencyDays(dates),
-    favoriteAddressId: client.stats?.favoriteAddressId || null,
-    totalSpent: Number(totalSpent.toFixed(2)),
-    createdFrom: client.stats?.createdFrom || 'crm',
-  };
-
-  const loyalty = {
-    enrolled: Boolean(client.loyalty?.enrolled || orders.length > 0),
-    enrolledAt: client.loyalty?.enrolledAt || (orders.length > 0 ? (client.createdAt || new Date().toISOString()) : null),
-    points: client.loyalty?.points && client.loyalty.points > points ? client.loyalty.points : points,
-    level: computeLoyaltyLevel(client.loyalty?.points && client.loyalty.points > points ? client.loyalty.points : points),
-    totalVisits: deliveredOrders.length,
-  };
+  const { stats, loyalty } = computeClientDeliveryMetrics(client, orders);
 
   const doc = buildClientDocument(userId, { ...client, stats, loyalty }, client);
   const saved = await putDocument(req, clientsDb, doc._id, doc);

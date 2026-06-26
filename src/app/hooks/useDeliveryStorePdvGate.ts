@@ -2,7 +2,11 @@ import { useCallback, useMemo } from 'react';
 import { useBusinessOptional } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
 import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
-import { isDeliveryBusinessType, resolveBusinessScopeId } from '../lib/deliverySetup';
+import {
+  isDeliveryBusinessType,
+  resolveBusinessScopeId,
+  snapshotDeliveryStoreActivation,
+} from '../lib/deliverySetup';
 
 /**
  * Gate delivery: tienda retail activa + PDV enlazado.
@@ -31,7 +35,18 @@ export function useDeliveryStorePdvGate() {
     if (!isDelivery) return true;
     if (!businessesFetchSettled || !businessId) return false;
 
-    const activePdvs = activeStore.pointsOfSale.filter((p) => p.active !== false);
+    const pdvPool =
+      activeStore.allPointsOfSale.length > 0
+        ? activeStore.allPointsOfSale
+        : activeStore.pointsOfSale;
+
+    const snapshot = snapshotDeliveryStoreActivation({
+      workCenters: activeStore.retailWorkCenters,
+      pointsOfSale: pdvPool,
+    });
+    if (snapshot.hasActiveRetailStore && snapshot.hasActivePdv) return true;
+
+    const activePdvs = pdvPool.filter((p) => p.active !== false);
     if (activePdvs.length > 0) return true;
 
     const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
@@ -39,7 +54,7 @@ export function useDeliveryStorePdvGate() {
 
     const rows = buildDeliverySidebarStoreRows(
       activeStore.retailWorkCenters,
-      activeStore.allPointsOfSale,
+      pdvPool,
     );
     return rows.some((row) => !row.needsPdv && !row.inactive);
   }, [
@@ -47,8 +62,8 @@ export function useDeliveryStorePdvGate() {
     businessesFetchSettled,
     businessId,
     activeStore.pointsOfSale,
-    activeStore.retailWorkCenters,
     activeStore.allPointsOfSale,
+    activeStore.retailWorkCenters,
   ]);
 
   const reload = useCallback(async () => {

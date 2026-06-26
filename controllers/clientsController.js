@@ -34,7 +34,7 @@ import {
   deliveryOrderRevenue,
   isCancelledDeliveryOrder,
 } from '../shared/clients/deliveryClientMatch.js';
-import { syncClientFromDeliveryOrders } from '../services/deliveryClientSync.js';
+import { syncClientFromDeliveryOrders, enrichClientRowWithLiveDeliveryStats } from '../services/deliveryClientSync.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -104,7 +104,13 @@ export async function listClients(req, res) {
       query.skip = '0';
     }
     const { items, meta } = applyQueryOptions(raw.map(sanitizer), query);
-    return res.json({ ok: true, clients: items, meta });
+    const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
+    let clients = items;
+    if (enrichLiveStats && items.length > 0) {
+      const deliveryOrders = await listDeliveryOrdersByUser(req, userId);
+      clients = items.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
+    }
+    return res.json({ ok: true, clients, meta });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar clientes' });
   }

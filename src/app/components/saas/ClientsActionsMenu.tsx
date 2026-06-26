@@ -44,7 +44,12 @@ export interface ClientsActionsMenuProps {
   canImportFromBusiness: boolean;
   hasOtherBusinesses: boolean;
   segmentConditionsCount: number;
+  /** Total de clientes en el servidor (no solo la página visible). */
+  exportTotalCount: number;
   exportClients: ClientExportRow[];
+  /** Exportación completa desde servidor (con stats si aplica). */
+  onExportAllClients?: () => Promise<void>;
+  exportingClients?: boolean;
   requiredPlanLabel: (id: ClientsListFeatureId) => string;
   onQuickAddClient: () => void;
   onAIAddClient: () => void;
@@ -63,7 +68,10 @@ export function ClientsActionsMenu({
   canImportFromBusiness,
   hasOtherBusinesses,
   segmentConditionsCount,
+  exportTotalCount,
   exportClients,
+  onExportAllClients,
+  exportingClients = false,
   requiredPlanLabel,
   onQuickAddClient,
   onAIAddClient,
@@ -76,7 +84,23 @@ export function ClientsActionsMenu({
 }: ClientsActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const exportCount = exportClients.length;
+  const exportCount = exportTotalCount > 0 ? exportTotalCount : exportClients.length;
+
+  const runExport = async () => {
+    if (exportCount === 0) {
+      toast.error('No hay clientes para exportar');
+      return;
+    }
+    if (onExportAllClients) {
+      await onExportAllClients();
+      return;
+    }
+    downloadClientsExport(exportClients, {
+      includeResponsible: !isDeliveryBusiness,
+      includeDeliveryStats: isDeliveryBusiness,
+    });
+    toast.success(`Exportados ${exportCount} clientes`);
+  };
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -195,15 +219,10 @@ export function ClientsActionsMenu({
               : 'No hay clientes para exportar',
           icon: <Users className="w-4 h-4 text-emerald-500" />,
           locked: !canExport,
-          disabled: exportCount === 0,
+          disabled: exportCount === 0 || exportingClients,
           action: () =>
             guardPlan(canExport, 'lista_export', () => {
-              if (exportCount === 0) {
-                toast.error('No hay clientes para exportar');
-                return;
-              }
-              downloadClientsExport(exportClients, { includeResponsible: false });
-              toast.success(`Exportados ${exportCount} clientes`);
+              void runExport();
             }),
         },
       ],
@@ -248,14 +267,9 @@ export function ClientsActionsMenu({
               ? `Exportar ${exportCount} cliente${exportCount === 1 ? '' : 's'} a Excel`
               : 'No hay clientes para exportar',
           icon: <Users className="w-4 h-4 text-emerald-500" />,
-          disabled: exportCount === 0,
+          disabled: exportCount === 0 || exportingClients,
           action: () => {
-            if (exportCount === 0) {
-              toast.error('No hay clientes para exportar');
-              return;
-            }
-            downloadClientsExport(exportClients, { includeResponsible: true });
-            toast.success(`Exportados ${exportCount} clientes`);
+            void runExport();
             close();
           },
         },
