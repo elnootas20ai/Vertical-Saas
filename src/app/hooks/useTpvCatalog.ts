@@ -105,6 +105,7 @@ export function useTpvCatalog(
 
     const needsNetwork =
       !cached
+      || cached.items.length === 0
       || Date.now() - (cached?.fetchedAt ?? 0) > REVALIDATE_MS
       || (cached != null && tpvCatalogSnapshotNeedsBrandRefetch(cached));
 

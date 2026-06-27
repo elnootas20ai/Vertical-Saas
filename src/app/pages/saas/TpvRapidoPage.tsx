@@ -519,7 +519,7 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
-  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId, {
+  const { catalog, brands, loadingCatalog, reloadCatalog } = useTpvCatalog(userId, businessId, {
     accountBusinessCount: businesses.length,
   });
 
@@ -580,6 +580,11 @@ export function TpvRapidoOrderFlow({
     if (!userId || !businessId) return;
     prefetchTpvCatalog(userId, businessId, { accountBusinessCount: businesses.length });
   }, [userId, businessId, businesses.length]);
+
+  useEffect(() => {
+    if (currentStep !== 'products' || !userId || !businessId) return;
+    void reloadCatalog({ force: true, silent: true });
+  }, [currentStep, userId, businessId, reloadCatalog]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1064,7 +1069,7 @@ export function TpvRapidoOrderFlow({
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
-      setSelectedSectionId(defaultTpvSectionId(catalogSections));
+      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
     }
     setPaymentMethod(null);
     setCashGiven('');
@@ -1075,7 +1080,7 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
-  }, [clearSelection, catalogSections]);
+  }, [clearSelection, catalogSections, catalog]);
 
   const goToPreviousStep = useCallback(() => {
     const order: Step[] = ['client', 'delivery', 'products', 'payment'];
@@ -1547,7 +1552,7 @@ export function TpvRapidoOrderFlow({
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
-      setSelectedSectionId(defaultTpvSectionId(catalogSections));
+      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
     }
     setPaymentMethod(null);
     setCashGiven('');
@@ -1560,7 +1565,7 @@ export function TpvRapidoOrderFlow({
     setSelectedClientPromoId('');
     setCreatedOrder(null);
     setTimeout(() => phoneRef.current?.focus(), 150);
-  }, [clearSelection, clearResults, catalogSections]);
+  }, [clearSelection, clearResults, catalogSections, catalog]);
 
   const handleCancelOrder = useCallback(() => {
     goBack();

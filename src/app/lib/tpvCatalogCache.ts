@@ -9,7 +9,7 @@ import {
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v6:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v7:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
@@ -101,7 +101,8 @@ function catalogHasBrandIds(items: CatalogItem[]): boolean {
 }
 
 export function tpvCatalogSnapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
-  if (!snapshot.items.length) return false;
+  // Caché vacía o sin marcas: puede ser un fallo transitorio al filtrar por empresa.
+  if (!snapshot.items.length) return true;
   if (snapshot.brands.length > 0) return false;
   return catalogHasBrandIds(snapshot.items);
 }
@@ -187,19 +188,27 @@ export async function fetchTpvCatalog(
   };
 
   const promise = (async () => {
-    const [rawItems, brands] = await Promise.all([
-      // Misma amplitud que Catálogo (sin filtrar solo module=catalog).
-      listCatalogItemsRequest(userId, undefined, { view: 'tpv' }),
-      businessId ? listBrandsRequest(businessId).catch(() => [] as Brand[]) : Promise.resolve([] as Brand[]),
-    ]);
+    const rawItems = await listCatalogItemsRequest(userId, undefined, { view: 'tpv' });
+    let brands: Brand[] = [];
+    if (businessId) {
+      brands = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
+      if (brands.length === 0 && rawItems.some((item) => (item.brandIds?.length ?? 0) > 0)) {
+        brands = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
+      }
+    }
     const items = filterCatalogItemsForBusinessScope(rawItems, businessId, brands, scopeOptions);
     const snapshot: TpvCatalogSnapshot = {
       items,
       brands,
       fetchedAt: Date.now(),
     };
-    memory.set(key, snapshot);
-    writeSession(key, snapshot);
+    const filteredAwayAll = rawItems.length > 0 && items.length === 0;
+    if (!filteredAwayAll) {
+      memory.set(key, snapshot);
+      writeSession(key, snapshot);
+    } else {
+      memory.delete(key);
+    }
     return snapshot;
   })().finally(() => {
     inflight.delete(key);
