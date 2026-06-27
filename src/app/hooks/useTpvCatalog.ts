@@ -93,26 +93,28 @@ export function useTpvCatalog(
 
     let cancelled = false;
 
-    setCatalog([]);
-    setBrands([]);
-    setLoadingCatalog(true);
-
     const cached = readTpvCatalogCache(uid, bid);
-    if (cached) {
-      applySnapshot(cached);
-      setLoadingCatalog(false);
-    }
-
     const needsNetwork =
       !cached
       || cached.items.length === 0
       || Date.now() - (cached?.fetchedAt ?? 0) > REVALIDATE_MS
       || (cached != null && tpvCatalogSnapshotNeedsBrandRefetch(cached));
 
+    if (cached) {
+      applySnapshot(cached);
+      setLoadingCatalog(false);
+    } else {
+      setLoadingCatalog(true);
+    }
+
     if (!needsNetwork) {
       return () => {
         cancelled = true;
       };
+    }
+
+    if (cached) {
+      setLoadingCatalog(true);
     }
 
     void fetchTpvCatalog(uid, bid, { accountBusinessCount })

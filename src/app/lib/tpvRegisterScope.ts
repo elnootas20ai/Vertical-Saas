@@ -25,6 +25,31 @@ export function businessScopeIdFromRawId(rawId: string | null | undefined): stri
   return resolveBusinessScopeId({ business_id: String(rawId || '').trim() });
 }
 
+type BusinessScopeRef = Pick<Business, 'business_id' | 'businessType'> & { id?: string };
+
+function isDeliveryBusinessType(businessType?: string | null): boolean {
+  return String(businessType || '').trim() === 'delivery';
+}
+
+/**
+ * Catálogo TPV delivery: si el selector global apunta a otra vertical (p. ej. limpieza),
+ * usar la empresa delivery de la cuenta (Modomio) donde viven marcas y productos.
+ */
+export function resolveTpvCatalogBusinessId(
+  scopeBusinessId: string,
+  businesses: BusinessScopeRef[],
+): string {
+  const bid = businessScopeIdFromRawId(scopeBusinessId);
+  const match = businesses.find(
+    (b) => businessScopeIdFromRawId(b.business_id || b.id) === bid,
+  );
+  if (match && isDeliveryBusinessType(match.businessType)) return bid;
+
+  const delivery = businesses.find((b) => isDeliveryBusinessType(b.businessType));
+  const deliveryId = businessScopeIdFromRawId(delivery?.business_id || delivery?.id);
+  return deliveryId || bid;
+}
+
 /** Sesión tablet TPV activa (código de tienda vinculado). */
 export function isTpvTabletSession(binding?: TpvTabletBindingRef | null): boolean {
   return Boolean(String(binding?.pdvId || '').trim() && String(binding?.businessId || '').trim());

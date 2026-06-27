@@ -4,6 +4,7 @@ import {
   businessScopeIdFromTabletBinding,
   evaluateTpvRegisterLoadGate,
   isTpvTabletSession,
+  resolveTpvCatalogBusinessId,
   resolveTpvRegisterBidAtStart,
   resolveTpvRegisterScope,
   shouldApplyTpvRegisterLoadResult,
@@ -130,5 +131,14 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
         scopeBusinessId: 'biz-cache',
       }),
     ).toBe('biz-tablet');
+  });
+
+  it('resolveTpvCatalogBusinessId usa delivery si el selector apunta a otra vertical', () => {
+    const businesses = [
+      { business_id: 'clean-1', businessType: 'cleaning' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(resolveTpvCatalogBusinessId('clean-1', businesses)).toBe('del-1');
+    expect(resolveTpvCatalogBusinessId('del-1', businesses)).toBe('del-1');
   });
 });
