@@ -65,7 +65,19 @@ if (localHead !== remoteHead) {
 
 console.log(`[deploy:all] OK — rama ${branch} @ ${localHead.slice(0, 7)} (local = origin)`);
 
-run('tests', 'npm', ['test']);
+run(
+  'tests regresión TPV catálogo',
+  'npx',
+  [
+    'vitest',
+    'run',
+    'tests/tpvCatalogScope.test.js',
+    'tests/tpvRegisterScope.test.js',
+    'tests/tpvCatalogCache.test.js',
+    'tests/catalogBusinessScope.test.js',
+    'tests/tpvCatalogNavigation.test.js',
+  ],
+);
 
 const hasSaasCreds = Boolean(process.env.SAAS_LOGIN_EMAIL && process.env.SAAS_LOGIN_PASSWORD);
 if (hasSaasCreds) {
