@@ -65,8 +65,10 @@ import {
 } from '../../../lib/deliveryBrandLineKinds';
 import {
   filterWorkCentersForBusinessScope,
+  isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
+import { resolveTpvCatalogBusinessId } from '../../../lib/tpvRegisterScope';
 import { useTenantEntitlements, countCommercialBrands } from '../../../hooks/useTenantEntitlements';
 import { writeBillingSelection } from '../../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
@@ -976,9 +978,23 @@ export function CompanyMarcaSettings() {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
-  const businessId = currentBusiness?.business_id || '';
+  const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
+  const brandBusinessId = useMemo(
+    () => resolveTpvCatalogBusinessId(scopeBusinessId, businesses),
+    [scopeBusinessId, businesses],
+  );
+  const isDelivery = useMemo(
+    () =>
+      isDeliveryBusinessType(currentBusiness?.businessType)
+      || businesses.some((b) => isDeliveryBusinessType(b.businessType)),
+    [currentBusiness?.businessType, businesses],
+  );
+  const deliveryBusinessForScope = useMemo(
+    () => businesses.find((b) => resolveBusinessScopeId(b) === brandBusinessId) ?? currentBusiness,
+    [businesses, brandBusinessId, currentBusiness],
+  );
+  const useSelectorPdvGate = isDeliveryBusinessType(currentBusiness?.businessType);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
-  const isDelivery = (currentBusiness as { businessType?: string } | null)?.businessType === 'delivery';
   const pdvGate = useDeliveryStorePdvGate();
 
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -1006,13 +1022,13 @@ export function CompanyMarcaSettings() {
   }, [stores, isDelivery]);
 
   const loadAll = useCallback(async () => {
-    if (!businessId) return;
+    if (!brandBusinessId) return;
     setLoading(true);
     try {
       setEnsuringDefault(true);
       try {
-        const tradeName = String(currentBusiness?.name || '').trim();
-        await ensureDeliveryDefaultBrand(businessId, {
+        const tradeName = String(deliveryBusinessForScope?.name || currentBusiness?.name || '').trim();
+        await ensureDeliveryDefaultBrand(brandBusinessId, {
           preferredName: tradeName || undefined,
         });
       } catch {
@@ -1020,7 +1036,7 @@ export function CompanyMarcaSettings() {
       } finally {
         setEnsuringDefault(false);
       }
-      const list = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
+      const list = await listBrandsRequest(brandBusinessId).catch(() => [] as Brand[]);
       setBrands(sortBrandsForDisplay(list));
     } catch {
       setBrands([]);
@@ -1028,7 +1044,7 @@ export function CompanyMarcaSettings() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, currentBusiness?.name]);
+  }, [brandBusinessId, deliveryBusinessForScope?.name, currentBusiness?.name]);
 
   const loadStores = useCallback(async () => {
     if (!dataUserId) {
@@ -1036,19 +1052,18 @@ export function CompanyMarcaSettings() {
       return;
     }
     try {
-      const wcs = await listWorkCentersForDelivery(dataUserId, currentBusiness ?? null);
-      const scopeId = resolveBusinessScopeId(currentBusiness);
-      const scoped = filterWorkCentersForBusinessScope(wcs, scopeId, {
+      const wcs = await listWorkCentersForDelivery(dataUserId, deliveryBusinessForScope ?? null);
+      const scoped = filterWorkCentersForBusinessScope(wcs, brandBusinessId, {
         accountBusinessCount,
       });
       setStores(scoped);
-      if (scopeId && isDelivery) {
+      if (brandBusinessId && isDelivery) {
         const firstRetail = scoped.find(
           (s) => s.active !== false && (s.centerType === 'punto_de_venta' || s.centerType === 'almacen'),
         );
         if (firstRetail?._id) {
           try {
-            await ensureDeliveryDefaultBrand(scopeId, { workCenterId: firstRetail._id });
+            await ensureDeliveryDefaultBrand(brandBusinessId, { workCenterId: firstRetail._id });
           } catch {
             /* ignore */
           }
@@ -1057,7 +1072,7 @@ export function CompanyMarcaSettings() {
     } catch {
       setStores([]);
     }
-  }, [dataUserId, currentBusiness, isDelivery, accountBusinessCount]);
+  }, [dataUserId, deliveryBusinessForScope, brandBusinessId, isDelivery, accountBusinessCount]);
 
   useEffect(() => {
     void loadAll();
@@ -1148,7 +1163,7 @@ export function CompanyMarcaSettings() {
   };
 
   const persistBrand = async (form: BrandFormState) => {
-    if (!businessId) return;
+    if (!brandBusinessId) return;
     const isDefault = editingBrand ? isDefaultCommercialBrand(editingBrand) : false;
     const payload = {
       name: form.name.trim(),
@@ -1165,11 +1180,11 @@ export function CompanyMarcaSettings() {
     };
     try {
       if (editingBrand) {
-        const updated = await updateBrandRequest(businessId, { ...editingBrand, ...payload } as Brand);
+        const updated = await updateBrandRequest(brandBusinessId, { ...editingBrand, ...payload } as Brand);
         setBrands((prev) => sortBrandsForDisplay(prev.map((b) => (b._id === updated._id ? updated : b))));
         toast.success(`«${updated.name}» actualizada`);
       } else {
-        const created = await createBrandRequest(businessId, {
+        const created = await createBrandRequest(brandBusinessId, {
           ...payload,
           active: resolveBrandActiveOnCreate(brands),
           isDefault: false,
@@ -1192,7 +1207,7 @@ export function CompanyMarcaSettings() {
     if (isDefaultCommercialBrand(brand)) return;
     if (!confirm(`¿Eliminar la marca «${brand.name}»?`)) return;
     try {
-      await deleteBrandRequest(businessId, brand._id);
+      await deleteBrandRequest(brandBusinessId, brand._id);
       setBrands((prev) => prev.filter((b) => b._id !== brand._id));
       toast.success('Marca eliminada');
       notifyDeliveryBrandsChanged();
@@ -1204,7 +1219,7 @@ export function CompanyMarcaSettings() {
   const applyBrandActive = async (brand: Brand, nextActive: boolean) => {
     setTogglingBrandId(brand._id);
     try {
-      const updated = await updateBrandRequest(businessId, { ...brand, active: nextActive });
+      const updated = await updateBrandRequest(brandBusinessId, { ...brand, active: nextActive });
       setBrands((prev) => sortBrandsForDisplay(prev.map((b) => (b._id === updated._id ? updated : b))));
       toast.success(nextActive ? `"${updated.name}" activada` : `"${updated.name}" desactivada`);
       notifyDeliveryBrandsChanged();
@@ -1239,7 +1254,7 @@ export function CompanyMarcaSettings() {
     await applyBrandActive(target, false);
   };
 
-  if (!businessId) {
+  if (!brandBusinessId) {
     return (
       <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
         Selecciona una empresa en el selector superior.
@@ -1247,7 +1262,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && pdvGate.loading) {
+  if (isDelivery && useSelectorPdvGate && pdvGate.loading) {
     return (
       <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
         Comprobando tienda y PDV…
@@ -1255,7 +1270,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && !pdvGate.ready) {
+  if (isDelivery && useSelectorPdvGate && !pdvGate.ready) {
     return (
       <div className="py-6">
         <DeliveryActivationGatePanel kind="store_pdv" />

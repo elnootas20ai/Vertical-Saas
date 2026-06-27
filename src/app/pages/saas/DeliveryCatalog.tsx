@@ -5,6 +5,7 @@ import { isBrandSetupComplete, isDefaultCommercialBrand, sortBrandsForDisplay } 
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { filterCatalogItemsForBusinessScope } from '../../lib/catalogBusinessScope';
+import { resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
 import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
@@ -1965,7 +1966,11 @@ export function CatalogPage() {
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const activeStore = useActiveStoreScope();
-  const businessId = resolveBusinessScopeId(currentBusiness);
+  const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
+  const businessId = useMemo(
+    () => resolveTpvCatalogBusinessId(scopeBusinessId, businesses),
+    [scopeBusinessId, businesses],
+  );
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pageReady = businessesFetchSettled && Boolean(dataUserId);
   const catalogDataReady = pageReady && Boolean(businessId);

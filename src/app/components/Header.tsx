@@ -5,7 +5,12 @@ import { VertialLogo } from './VertialLogo';
 import { useModalClose } from '../hooks/useModalClose';
 import { AUTH_PATHS } from '../lib/authEntryPaths';
 
-export function Header() {
+interface HeaderProps {
+  /** Header transparente sobre hero oscuro de la landing */
+  landingDark?: boolean;
+}
+
+export function Header({ landingDark = false }: HeaderProps) {
   const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
@@ -41,12 +46,25 @@ export function Header() {
     }
   };
 
+  const onDarkHero = landingDark && !isScrolled;
+  const navLink = onDarkHero
+    ? 'text-zinc-300 hover:text-white'
+    : 'text-slate-600 hover:text-emerald-600';
+  const headerShell = onDarkHero
+    ? 'bg-transparent border-b border-transparent'
+    : isScrolled
+      ? landingDark
+        ? 'bg-zinc-950/90 backdrop-blur-xl shadow-lg shadow-black/20 border-b border-zinc-800'
+        : 'bg-white/95 backdrop-blur-lg shadow-sm border-b border-blue-100'
+      : landingDark
+        ? 'bg-transparent border-b border-transparent'
+        : 'bg-white';
+
   return (
     <>
-      <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled ? 'bg-white/95 backdrop-blur-lg shadow-sm border-b border-blue-100' : 'bg-white'}`}>
+      <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${headerShell}`}>
         <div className="max-w-7xl mx-auto px-6 py-3">
           <div className="flex items-center justify-between">
-            {/* Logo */}
             <button
               onClick={() => { navigate('/'); setMobileMenuOpen(false); }}
               className="flex items-center gap-2 hover:opacity-80 transition-opacity"
@@ -54,69 +72,74 @@ export function Header() {
               <VertialLogo size="lg" />
             </button>
 
-            {/* Desktop Navigation */}
             <nav className="hidden lg:flex items-center gap-6">
               <div className="relative">
                 <button
                   onClick={() => setShowProductMenu(!showProductMenu)}
                   onMouseEnter={() => setShowProductMenu(true)}
-                  className="flex items-center gap-1 text-slate-600 hover:text-blue-700 transition-colors py-2 font-medium"
+                  className={`flex items-center gap-1 transition-colors py-2 font-medium ${navLink}`}
                 >
                   Producto
                   <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showProductMenu ? 'rotate-180' : ''}`} />
                 </button>
                 {showProductMenu && (
                   <div
-                    className="absolute top-full left-0 mt-1 w-52 bg-white border border-blue-100 rounded-xl shadow-lg shadow-blue-900/10 py-2"
+                    className={`absolute top-full left-0 mt-1 w-52 rounded-xl shadow-lg py-2 ${
+                      onDarkHero
+                        ? 'bg-zinc-900 border border-zinc-700 shadow-black/40'
+                        : 'bg-white border border-blue-100 shadow-blue-900/10'
+                    }`}
                     onMouseLeave={() => setShowProductMenu(false)}
                   >
-                    <button onClick={() => scrollToSection('verticales')} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 hover:text-blue-700 transition-colors text-slate-600 font-medium text-sm">
-                      Verticales
-                    </button>
-                    <button onClick={() => scrollToSection('modulos')} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 hover:text-blue-700 transition-colors text-slate-600 font-medium text-sm">
-                      Módulos
-                    </button>
-                    <button onClick={() => scrollToSection('integraciones')} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 hover:text-blue-700 transition-colors text-slate-600 font-medium text-sm">
-                      Integraciones
-                    </button>
+                    {['verticales', 'modulos', 'integraciones'].map((id) => (
+                      <button
+                        key={id}
+                        onClick={() => scrollToSection(id)}
+                        className={`w-full text-left px-4 py-2.5 font-medium text-sm capitalize transition-colors ${
+                          onDarkHero ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700'
+                        }`}
+                      >
+                        {id === 'modulos' ? 'Módulos' : id === 'integraciones' ? 'Integraciones' : 'Verticales'}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-              <button onClick={() => scrollToSection('como-funciona')} className="text-slate-600 hover:text-blue-700 transition-colors font-medium">
-                Cómo funciona
-              </button>
-              <button onClick={() => scrollToSection('planes')} className="text-slate-600 hover:text-blue-700 transition-colors font-medium">
-                Planes
-              </button>
-              <button onClick={() => scrollToSection('faq')} className="text-slate-600 hover:text-blue-700 transition-colors font-medium">
-                FAQ
-              </button>
-              <button onClick={() => scrollToSection('contacto')} className="text-slate-600 hover:text-blue-700 transition-colors font-medium">
-                Contacto
-              </button>
+              {[
+                ['como-funciona', 'Cómo funciona'],
+                ['planes', 'Planes'],
+                ['faq', 'FAQ'],
+                ['contacto', 'Contacto'],
+              ].map(([id, label]) => (
+                <button key={id} onClick={() => scrollToSection(id)} className={`transition-colors font-medium ${navLink}`}>
+                  {label}
+                </button>
+              ))}
             </nav>
 
-            {/* Desktop Actions */}
             <div className="hidden lg:flex items-center gap-3">
               <button
                 onClick={() => navigate(AUTH_PATHS.entry)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-medium text-sm shadow-sm shadow-blue-600/30"
+                className={`px-4 py-2 rounded-xl font-semibold text-sm transition-all ${
+                  onDarkHero
+                    ? 'vertial-glow-btn text-white shadow-lg shadow-emerald-900/30 hover:opacity-95'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm shadow-emerald-600/30'
+                }`}
               >
                 Empezar gratis
               </button>
             </div>
 
-            {/* Mobile: CTA + Hamburger */}
             <div className="flex lg:hidden items-center gap-2">
               <button
                 onClick={() => navigate(AUTH_PATHS.entry)}
-                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm"
+                className="px-3 py-2 vertial-glow-btn text-white rounded-lg font-semibold text-sm"
               >
-                Empezar gratis
+                Empezar
               </button>
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-2 text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                className={`p-2 rounded-lg transition-colors ${onDarkHero ? 'text-zinc-300 hover:text-white hover:bg-white/10' : 'text-slate-600 hover:text-blue-700 hover:bg-blue-50'}`}
                 aria-label="Menú"
               >
                 {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -126,33 +149,32 @@ export function Header() {
         </div>
       </header>
 
-      {/* Mobile Menu Overlay */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
-          <div className="absolute top-[57px] left-0 right-0 bg-white border-b border-blue-100 shadow-xl px-6 py-6 space-y-1">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Producto</p>
-            <button onClick={() => scrollToSection('verticales')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Verticales
-            </button>
-            <button onClick={() => scrollToSection('modulos')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Módulos
-            </button>
-            <button onClick={() => scrollToSection('integraciones')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Integraciones
-            </button>
-            <button onClick={() => scrollToSection('como-funciona')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Cómo funciona
-            </button>
-            <button onClick={() => scrollToSection('planes')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Planes
-            </button>
-            <button onClick={() => scrollToSection('faq')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              FAQ
-            </button>
-            <button onClick={() => scrollToSection('contacto')} className="w-full text-left px-3 py-3 text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors font-medium">
-              Contacto
-            </button>
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)} />
+          <div className={`absolute top-[57px] left-0 right-0 border-b shadow-xl px-6 py-6 space-y-1 ${
+            landingDark ? 'bg-zinc-950 border-zinc-800' : 'bg-white border-blue-100'
+          }`}>
+            <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${landingDark ? 'text-zinc-500' : 'text-slate-400'}`}>Producto</p>
+            {[
+              ['verticales', 'Verticales'],
+              ['modulos', 'Módulos'],
+              ['integraciones', 'Integraciones'],
+              ['como-funciona', 'Cómo funciona'],
+              ['planes', 'Planes'],
+              ['faq', 'FAQ'],
+              ['contacto', 'Contacto'],
+            ].map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => scrollToSection(id)}
+                className={`w-full text-left px-3 py-3 rounded-lg transition-colors font-medium ${
+                  landingDark ? 'text-zinc-300 hover:text-white hover:bg-zinc-900' : 'text-slate-700 hover:text-blue-700 hover:bg-blue-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       )}

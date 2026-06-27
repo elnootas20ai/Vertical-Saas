@@ -1,0 +1,102 @@
+/* Landing Vertial — estilos compartidos (LandingNew) */
+
+.vertial-hero-mesh {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(16, 185, 129, 0.18), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 20%, rgba(59, 130, 246, 0.08), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 0% 80%, rgba(16, 185, 129, 0.06), transparent 45%),
+    #09090b;
+}
+
+.vertial-grid-lines {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 75%);
+}
+
+.vertial-text-gradient {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 45%, #6ee7b7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.vertial-glow-btn {
+  background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+}
+
+.vertial-glow-btn:hover {
+  filter: brightness(1.05);
+}
+
+.vertial-bento-card {
+  background: rgba(24, 24, 27, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.vertial-card-lift {
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.vertial-card-lift:hover {
+  transform: translateY(-3px);
+  border-color: rgba(16, 185, 129, 0.25);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.vertial-section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.vertial-section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+
+.vertial-step-line {
+  background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.35), transparent);
+}
+
+.vertial-pricing-glow {
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2), 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.vertial-float {
+  animation: vertial-float 5s ease-in-out infinite;
+}
+
+.vertial-float-delayed {
+  animation: vertial-float 5s ease-in-out 1.2s infinite;
+}
+
+@keyframes vertial-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.vertial-marquee-track {
+  animation: vertial-marquee 28s linear infinite;
+}
+
+@keyframes vertial-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.vertial-faq-open {
+  background: rgba(16, 185, 129, 0.06);
+}
