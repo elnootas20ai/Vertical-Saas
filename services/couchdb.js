@@ -9413,6 +9413,7 @@ export function sanitizeCatalogItemForTpv(doc) {
     sku: doc.sku || '',
     barcode: doc.barcode || '',
     brandIds: Array.isArray(doc.brandIds) ? doc.brandIds : [],
+    business_id: String(doc.business_id || doc.businessId || '').trim(),
     active: doc.active !== undefined ? Boolean(doc.active) : true,
     image: '',
     images: [],

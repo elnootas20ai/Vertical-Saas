@@ -9,7 +9,7 @@ import {
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v5:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v6:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
