@@ -8,6 +8,7 @@ import {
   resolveTpvRegisterBidAtStart,
   resolveTpvRegisterScope,
   shouldApplyTpvRegisterLoadResult,
+  shouldAutoSwitchToDeliveryBusiness,
 } from '../src/app/lib/tpvRegisterScope.ts';
 
 describe('tpvRegisterScope — regresión caja tablet', () => {
@@ -140,5 +141,15 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     ];
     expect(resolveTpvCatalogBusinessId('clean-1', businesses)).toBe('del-1');
     expect(resolveTpvCatalogBusinessId('del-1', businesses)).toBe('del-1');
+  });
+
+  it('shouldAutoSwitchToDeliveryBusiness pide cambio si el selector no es delivery', () => {
+    const businesses = [
+      { business_id: 'clean-1', businessType: 'cleaning' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(shouldAutoSwitchToDeliveryBusiness({ business_id: 'clean-1', businessType: 'cleaning' }, businesses)).toBe('del-1');
+    expect(shouldAutoSwitchToDeliveryBusiness({ business_id: 'del-1', businessType: 'delivery' }, businesses)).toBe(null);
+    expect(shouldAutoSwitchToDeliveryBusiness(null, businesses)).toBe(null);
   });
 });

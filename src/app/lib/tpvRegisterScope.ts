@@ -50,6 +50,24 @@ export function resolveTpvCatalogBusinessId(
   return deliveryId || bid;
 }
 
+/** Si el selector global no es delivery, devolver el id delivery de la cuenta (TPV / catálogo). */
+export function deliveryBusinessIdForTpv(businesses: BusinessScopeRef[]): string {
+  const delivery = businesses.find((b) => isDeliveryBusinessType(b.businessType));
+  return businessScopeIdFromRawId(delivery?.business_id || delivery?.id);
+}
+
+export function shouldAutoSwitchToDeliveryBusiness(
+  currentBusiness: BusinessScopeRef | null | undefined,
+  businesses: BusinessScopeRef[],
+): string | null {
+  const deliveryId = deliveryBusinessIdForTpv(businesses);
+  if (!deliveryId) return null;
+  const currentId = businessScopeIdFromRawId(currentBusiness?.business_id || currentBusiness?.id);
+  if (!currentId || currentId === deliveryId) return null;
+  if (isDeliveryBusinessType(currentBusiness?.businessType)) return null;
+  return deliveryId;
+}
+
 /** Sesión tablet TPV activa (código de tienda vinculado). */
 export function isTpvTabletSession(binding?: TpvTabletBindingRef | null): boolean {
   return Boolean(String(binding?.pdvId || '').trim() && String(binding?.businessId || '').trim());

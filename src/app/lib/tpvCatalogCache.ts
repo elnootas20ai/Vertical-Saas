@@ -1,28 +1,33 @@
 import type { CatalogItem } from './deliveryApi';
 import { listCatalogItemsRequest } from './deliveryApi';
 import type { Brand } from './brandsApi';
-import { listBrandsRequest } from './brandsApi';
 import {
-  filterCatalogItemsForBusinessScope,
-  type CatalogBusinessScopeOptions,
-} from './catalogBusinessScope';
+  filterTpvCatalogItems,
+  loadTpvCatalogBrands,
+  resolveTpvCatalogLoadScope,
+  tpvCatalogCacheKey,
+  type TpvCatalogBusinessRef,
+} from './tpvCatalogScope';
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v8:';
+const SESSION_PREFIX = 'vertial.tpvCatalog:v9:';
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
   brands: Brand[];
   fetchedAt: number;
+  catalogBusinessId: string;
+};
+
+export type TpvCatalogFetchInput = {
+  scopeBusinessId: string;
+  businesses: TpvCatalogBusinessRef[];
+  accountBusinessCount?: number;
 };
 
 const memory = new Map<string, TpvCatalogSnapshot>();
 const inflight = new Map<string, Promise<TpvCatalogSnapshot>>();
-
-function cacheKey(userId: string, businessId: string): string {
-  return `${String(userId || '').trim()}:${String(businessId || '').trim() || 'no-biz'}`;
-}
 
 /** Sin imágenes ni campos pesados para sessionStorage (límite ~5 MB). */
 function liteCatalogItem(item: CatalogItem): CatalogItem {
@@ -77,6 +82,7 @@ function readSession(key: string): TpvCatalogSnapshot | null {
       items: parsed.items,
       brands: Array.isArray(parsed.brands) ? parsed.brands : [],
       fetchedAt: parsed.fetchedAt,
+      catalogBusinessId: String(parsed.catalogBusinessId || '').trim(),
     };
   } catch {
     return null;
@@ -101,7 +107,6 @@ function catalogHasBrandIds(items: CatalogItem[]): boolean {
 }
 
 export function tpvCatalogSnapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
-  // Caché vacía o sin marcas: puede ser un fallo transitorio al filtrar por empresa.
   if (!snapshot.items.length) return true;
   if (snapshot.brands.length > 0) return false;
   return catalogHasBrandIds(snapshot.items);
@@ -111,25 +116,32 @@ function snapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
   return tpvCatalogSnapshotNeedsBrandRefetch(snapshot);
 }
 
-export function readTpvCatalogCache(userId: string, businessId: string): TpvCatalogSnapshot | null {
-  const key = cacheKey(userId, businessId);
+export function readTpvCatalogCache(userId: string, input: TpvCatalogFetchInput): TpvCatalogSnapshot | null {
+  const scope = resolveTpvCatalogLoadScope(
+    input.scopeBusinessId,
+    input.businesses,
+    input.accountBusinessCount,
+  );
+  const key = tpvCatalogCacheKey(userId, scope);
   const fromMemory = memory.get(key);
   if (fromMemory && Date.now() - fromMemory.fetchedAt < MEMORY_TTL_MS) {
     if (snapshotNeedsBrandRefetch(fromMemory)) return null;
+    if (fromMemory.catalogBusinessId && fromMemory.catalogBusinessId !== scope.catalogBusinessId) return null;
     return fromMemory;
   }
   const fromSession = readSession(key);
   if (fromSession) {
     if (snapshotNeedsBrandRefetch(fromSession)) return null;
+    if (fromSession.catalogBusinessId && fromSession.catalogBusinessId !== scope.catalogBusinessId) return null;
     memory.set(key, fromSession);
     return fromSession;
   }
   return null;
 }
 
-export function clearTpvCatalogCache(userId?: string, businessId?: string): void {
-  if (userId && businessId) {
-    const key = cacheKey(userId, businessId);
+export function clearTpvCatalogCache(userId?: string, catalogBusinessId?: string): void {
+  if (userId && catalogBusinessId) {
+    const key = `${String(userId).trim()}:${String(catalogBusinessId).trim()}`;
     memory.delete(key);
     if (typeof sessionStorage !== 'undefined') {
       try {
@@ -171,36 +183,33 @@ export function clearTpvCatalogCache(userId?: string, businessId?: string): void
 
 export async function fetchTpvCatalog(
   userId: string,
-  businessId: string,
-  options?: { force?: boolean } & CatalogBusinessScopeOptions,
+  input: TpvCatalogFetchInput,
+  options?: { force?: boolean },
 ): Promise<TpvCatalogSnapshot> {
-  const key = cacheKey(userId, businessId);
+  const scope = resolveTpvCatalogLoadScope(
+    input.scopeBusinessId,
+    input.businesses,
+    input.accountBusinessCount,
+  );
+  const key = tpvCatalogCacheKey(userId, scope);
+
   if (!options?.force) {
-    const cached = readTpvCatalogCache(userId, businessId);
+    const cached = readTpvCatalogCache(userId, input);
     if (cached) return cached;
   }
 
   const existing = inflight.get(key);
   if (existing) return existing;
 
-  const scopeOptions: CatalogBusinessScopeOptions = {
-    accountBusinessCount: options?.accountBusinessCount,
-  };
-
   const promise = (async () => {
     const rawItems = await listCatalogItemsRequest(userId, undefined, { view: 'tpv' });
-    let brands: Brand[] = [];
-    if (businessId) {
-      brands = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
-      if (brands.length === 0 && rawItems.some((item) => (item.brandIds?.length ?? 0) > 0)) {
-        brands = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
-      }
-    }
-    const items = filterCatalogItemsForBusinessScope(rawItems, businessId, brands, scopeOptions);
+    const brands = await loadTpvCatalogBrands(scope, input.businesses);
+    const items = filterTpvCatalogItems(rawItems, scope, brands);
     const snapshot: TpvCatalogSnapshot = {
       items,
       brands,
       fetchedAt: Date.now(),
+      catalogBusinessId: scope.catalogBusinessId,
     };
     const filteredAwayAll = rawItems.length > 0 && items.length === 0;
     if (!filteredAwayAll) {
@@ -219,15 +228,11 @@ export async function fetchTpvCatalog(
 }
 
 /** Precarga en segundo plano al entrar al TPV (antes de «Nuevo pedido»). */
-export function prefetchTpvCatalog(
-  userId: string,
-  businessId: string,
-  options?: CatalogBusinessScopeOptions,
-): void {
+export function prefetchTpvCatalog(userId: string, input: TpvCatalogFetchInput): void {
   const uid = String(userId || '').trim();
-  if (!uid) return;
-  const cached = readTpvCatalogCache(uid, businessId);
+  if (!uid || !input.scopeBusinessId) return;
+  const cached = readTpvCatalogCache(uid, input);
   const stale = !cached || Date.now() - cached.fetchedAt > MEMORY_TTL_MS / 2;
   if (!stale) return;
-  void fetchTpvCatalog(uid, businessId, options).catch(() => undefined);
+  void fetchTpvCatalog(uid, input).catch(() => undefined);
 }

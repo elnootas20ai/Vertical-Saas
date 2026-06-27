@@ -11,7 +11,10 @@
  */
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
+import dotenv from 'dotenv';
 import { REPO_ROOT } from './deploy-env.mjs';
+
+dotenv.config({ path: `${REPO_ROOT}/.env` });
 
 function run(label, cmd, args) {
   console.log(`\n[deploy:all] ${label}`);
@@ -61,6 +64,17 @@ if (localHead !== remoteHead) {
 }
 
 console.log(`[deploy:all] OK — rama ${branch} @ ${localHead.slice(0, 7)} (local = origin)`);
+
+run('tests', 'npm', ['test']);
+
+const hasSaasCreds = Boolean(process.env.SAAS_LOGIN_EMAIL && process.env.SAAS_LOGIN_PASSWORD);
+if (hasSaasCreds) {
+  run('diag-tpv-catalog (producción)', 'node', ['scripts/diag-tpv-catalog.mjs']);
+} else {
+  console.log(
+    '[deploy:all] Omitiendo diag-tpv-catalog (faltan SAAS_LOGIN_EMAIL / SAAS_LOGIN_PASSWORD en .env)',
+  );
+}
 
 run('backend', 'npm', ['run', 'deploy:backend']);
 run('frontend', 'npm', ['run', 'deploy:frontend']);

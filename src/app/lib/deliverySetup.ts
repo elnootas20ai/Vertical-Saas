@@ -687,10 +687,11 @@ export function notifyDeliveryWorkCentersChanged(businessId?: string): void {
   }
 }
 
-export function notifyDeliveryCatalogChanged(userId?: string, businessId?: string): void {
+export function notifyDeliveryCatalogChanged(userId?: string, _businessId?: string): void {
   if (typeof window === 'undefined') return;
   try {
-    clearTpvCatalogCache(userId, businessId);
+    // Multi-negocio: la caché TPV usa catalogBusinessId resuelto (delivery), no el selector global.
+    clearTpvCatalogCache(userId);
     window.dispatchEvent(new CustomEvent(DELIVERY_CATALOG_CHANGED));
   } catch {
     /* ignore */

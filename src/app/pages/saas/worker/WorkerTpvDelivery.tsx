@@ -1034,11 +1034,13 @@ export function WorkerTpvDelivery({
   }, [loadOrders]);
 
   useEffect(() => {
-    if (!userId) return;
-    prefetchTpvCatalog(userId, businessId, {
-      accountBusinessCount: businesses?.length,
+    if (!userId || businesses.length === 0) return;
+    prefetchTpvCatalog(userId, {
+      scopeBusinessId: businessId,
+      businesses,
+      accountBusinessCount: businesses.length,
     });
-  }, [userId, businessId, businesses?.length]);
+  }, [userId, businessId, businesses]);
 
   useEffect(() => {
     if (!userId) {

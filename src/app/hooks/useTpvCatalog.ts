@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { CatalogItem } from '../lib/deliveryApi';
 import type { Brand } from '../lib/brandsApi';
@@ -7,28 +7,51 @@ import {
   fetchTpvCatalog,
   readTpvCatalogCache,
   tpvCatalogSnapshotNeedsBrandRefetch,
+  type TpvCatalogFetchInput,
 } from '../lib/tpvCatalogCache';
+import type { TpvCatalogBusinessRef } from '../lib/tpvCatalogScope';
+import { resolveTpvCatalogLoadScope } from '../lib/tpvCatalogScope';
 
 const REVALIDATE_MS = 60_000;
 
 export function useTpvCatalog(
   userId: string | undefined,
-  businessId: string,
-  options?: { accountBusinessCount?: number },
+  scopeBusinessId: string,
+  options?: {
+    accountBusinessCount?: number;
+    businesses?: TpvCatalogBusinessRef[];
+  },
 ) {
+  const businesses = options?.businesses ?? [];
   const accountBusinessCount = options?.accountBusinessCount;
-  const scopeRef = useRef({ userId: '', businessId: '' });
+
+  const fetchInput = useMemo((): TpvCatalogFetchInput => ({
+    scopeBusinessId: String(scopeBusinessId || '').trim(),
+    businesses,
+    accountBusinessCount,
+  }), [scopeBusinessId, businesses, accountBusinessCount]);
+
+  const catalogBusinessId = useMemo(
+    () => resolveTpvCatalogLoadScope(fetchInput.scopeBusinessId, fetchInput.businesses, fetchInput.accountBusinessCount).catalogBusinessId,
+    [fetchInput],
+  );
+
+  const scopeRef = useRef({ userId: '', fetchInput: fetchInput as TpvCatalogFetchInput });
   scopeRef.current = {
     userId: String(userId || '').trim(),
-    businessId: String(businessId || '').trim(),
+    fetchInput,
   };
 
   const initial =
-    userId && businessId ? readTpvCatalogCache(userId, businessId) : null;
+    userId && fetchInput.scopeBusinessId
+      ? readTpvCatalogCache(userId, fetchInput)
+      : null;
 
   const [catalog, setCatalog] = useState<CatalogItem[]>(() => initial?.items ?? []);
   const [brands, setBrands] = useState<Brand[]>(() => initial?.brands ?? []);
-  const [loadingCatalog, setLoadingCatalog] = useState(() => Boolean(userId && businessId && !initial));
+  const [loadingCatalog, setLoadingCatalog] = useState(
+    () => Boolean(userId && fetchInput.scopeBusinessId && !initial),
+  );
 
   const applySnapshot = useCallback((snapshot: { items: CatalogItem[]; brands: Brand[] }) => {
     setCatalog(snapshot.items);
@@ -37,54 +60,43 @@ export function useTpvCatalog(
 
   const reloadCatalog = useCallback(
     (reloadOptions?: { force?: boolean; silent?: boolean }) => {
-      const { userId: uid, businessId: bid } = scopeRef.current;
-      if (!uid || !bid) return Promise.resolve();
+      const { userId: uid, fetchInput: input } = scopeRef.current;
+      if (!uid || !input.scopeBusinessId) return Promise.resolve();
 
       const showSpinner = !reloadOptions?.silent && catalog.length === 0;
       if (showSpinner) setLoadingCatalog(true);
 
-      return fetchTpvCatalog(uid, bid, {
-        force: reloadOptions?.force,
-        accountBusinessCount,
-      })
+      return fetchTpvCatalog(uid, input, { force: reloadOptions?.force })
         .then((snapshot) => {
-          if (
-            scopeRef.current.userId !== uid
-            || scopeRef.current.businessId !== bid
-          ) {
-            return;
-          }
+          if (scopeRef.current.userId !== uid) return;
+          const currentScope = resolveTpvCatalogLoadScope(
+            scopeRef.current.fetchInput.scopeBusinessId,
+            scopeRef.current.fetchInput.businesses,
+            scopeRef.current.fetchInput.accountBusinessCount,
+          ).catalogBusinessId;
+          if (snapshot.catalogBusinessId !== currentScope) return;
           applySnapshot(snapshot);
         })
         .catch(() => {
-          if (
-            scopeRef.current.userId !== uid
-            || scopeRef.current.businessId !== bid
-          ) {
-            return;
-          }
+          if (scopeRef.current.userId !== uid) return;
           if (!reloadOptions?.silent && catalog.length === 0) {
             toast.error('Error al cargar el catálogo');
           }
         })
         .finally(() => {
-          if (
-            scopeRef.current.userId === uid
-            && scopeRef.current.businessId === bid
-            && showSpinner
-          ) {
+          if (scopeRef.current.userId === uid && showSpinner) {
             setLoadingCatalog(false);
           }
         });
     },
-    [accountBusinessCount, applySnapshot, catalog.length],
+    [applySnapshot, catalog.length],
   );
 
   useEffect(() => {
     const uid = String(userId || '').trim();
-    const bid = String(businessId || '').trim();
+    const input = fetchInput;
 
-    if (!uid || !bid) {
+    if (!uid || !input.scopeBusinessId || !catalogBusinessId) {
       setCatalog([]);
       setBrands([]);
       setLoadingCatalog(false);
@@ -93,7 +105,7 @@ export function useTpvCatalog(
 
     let cancelled = false;
 
-    const cached = readTpvCatalogCache(uid, bid);
+    const cached = readTpvCatalogCache(uid, input);
     const needsNetwork =
       !cached
       || cached.items.length === 0
@@ -117,29 +129,29 @@ export function useTpvCatalog(
       setLoadingCatalog(true);
     }
 
-    void fetchTpvCatalog(uid, bid, { accountBusinessCount })
+    void fetchTpvCatalog(uid, input)
       .then((snapshot) => {
         if (cancelled) return;
-        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        if (scopeRef.current.userId !== uid) return;
         applySnapshot(snapshot);
       })
       .catch(() => {
         if (cancelled) return;
-        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        if (scopeRef.current.userId !== uid) return;
         if (!cached) {
           toast.error('Error al cargar el catálogo');
         }
       })
       .finally(() => {
         if (cancelled) return;
-        if (scopeRef.current.userId !== uid || scopeRef.current.businessId !== bid) return;
+        if (scopeRef.current.userId !== uid) return;
         setLoadingCatalog(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [userId, businessId, accountBusinessCount, applySnapshot]);
+  }, [userId, fetchInput, catalogBusinessId, applySnapshot]);
 
   useEffect(() => {
     if (!userId || typeof window === 'undefined') return;
@@ -157,5 +169,5 @@ export function useTpvCatalog(
     };
   }, [userId, reloadCatalog]);
 
-  return { catalog, brands, loadingCatalog, reloadCatalog };
+  return { catalog, brands, loadingCatalog, reloadCatalog, catalogBusinessId };
 }

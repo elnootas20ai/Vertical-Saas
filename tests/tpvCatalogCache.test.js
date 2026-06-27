@@ -9,6 +9,7 @@ describe('tpvCatalogCache', () => {
         items: [],
         brands: [],
         fetchedAt: Date.now(),
+        catalogBusinessId: 'del-1',
       }),
     ).toBe(true);
   });
@@ -19,6 +20,7 @@ describe('tpvCatalogCache', () => {
         items: [{ _id: '1', name: 'Pizza', brandIds: ['b1'] }],
         brands: [{ _id: 'b1', name: 'Modomio' }],
         fetchedAt: Date.now(),
+        catalogBusinessId: 'del-1',
       }),
     ).toBe(false);
   });

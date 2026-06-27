@@ -56,6 +56,7 @@ import {
   resolveTpvRegisterBidAtStart,
   resolveTpvRegisterScope,
   shouldApplyTpvRegisterLoadResult,
+  shouldAutoSwitchToDeliveryBusiness,
 } from '../../lib/tpvRegisterScope';
 import { exitTpvTabletSessionPath, mergeTabletBindingPdv, readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import {
@@ -2122,6 +2123,13 @@ export function TpvRegisterGate({
   const compactRegisterChrome = isTabletSession && orderFlowActive;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
+
+  /** TPV delivery: alinear selector global con la empresa delivery (catálogo + caja). */
+  useEffect(() => {
+    if (!businessesFetchSettled || isTabletSession) return;
+    const targetId = shouldAutoSwitchToDeliveryBusiness(currentBusiness, businesses);
+    if (targetId) switchBusiness(targetId);
+  }, [businessesFetchSettled, isTabletSession, currentBusiness, businesses, switchBusiness]);
 
   const scopeBusiness = useMemo((): Business | null => {
     if (!scopeBusinessId) return currentBusiness;
