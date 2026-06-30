@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Bebida energética">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fafafa"/>
+      <stop offset="100%" stop-color="#d4d4d8"/>
+    </linearGradient>
+    <linearGradient id="can" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#52525b"/>
+      <stop offset="100%" stop-color="#18181b"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <ellipse cx="100" cy="168" rx="34" ry="8" fill="#000" opacity=".08"/>
+  <rect x="78" y="38" width="44" height="124" rx="12" fill="url(#can)"/>
+  <rect x="82" y="32" width="36" height="12" rx="6" fill="#a1a1aa"/>
+  <path d="M104 72 92 104h16l-12 32" stroke="#facc15" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

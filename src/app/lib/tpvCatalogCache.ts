@@ -1,6 +1,7 @@
 import type { CatalogItem } from './deliveryApi';
 import { listCatalogItemsRequest } from './deliveryApi';
 import type { Brand } from './brandsApi';
+import { resolveCatalogProductImage } from './catalogProductPlaceholders';
 import {
   filterTpvCatalogItems,
   loadTpvCatalogBrands,
@@ -11,7 +12,10 @@ import {
 
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
-const SESSION_PREFIX = 'vertial.tpvCatalog:v9:';
+/** Bump al cambiar forma del snapshot (p. ej. placeholders TPV). Invalida sessionStorage antiguo. */
+export const TPV_CATALOG_CACHE_SCHEMA = 'v13-lite-pizza-burger';
+const TPV_CATALOG_SCHEMA_KEY = 'vertial.tpvCatalog.schema';
+const SESSION_PREFIX = `vertial.tpvCatalog:${TPV_CATALOG_CACHE_SCHEMA}:`;
 
 export type TpvCatalogSnapshot = {
   items: CatalogItem[];
@@ -48,12 +52,24 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   if (cf.halfHalf === true) {
     customFields.halfHalf = true;
   }
+  const halfHalfAllowed = Array.isArray(cf.halfHalfAllowedProductIds)
+    ? cf.halfHalfAllowedProductIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (halfHalfAllowed.length > 0) {
+    customFields.halfHalfAllowedProductIds = halfHalfAllowed;
+  }
   if (cf.buildYourOwn === true) {
     customFields.buildYourOwn = true;
   }
+  const buildYourOwnAllowed = Array.isArray(cf.buildYourOwnAllowedIngredientIds)
+    ? cf.buildYourOwnAllowedIngredientIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (buildYourOwnAllowed.length > 0) {
+    customFields.buildYourOwnAllowedIngredientIds = buildYourOwnAllowed;
+  }
   return {
     ...item,
-    image: '',
+    image: resolveCatalogProductImage(item),
     images: [],
     description: '',
     notes: '',
@@ -70,6 +86,34 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   };
 }
 
+/** Aplica placeholders de producto a items del snapshot (cuentas TPV ya activas sin reimportar). */
+export function hydrateTpvCatalogSnapshot(snapshot: TpvCatalogSnapshot): TpvCatalogSnapshot {
+  return {
+    ...snapshot,
+    items: snapshot.items.map(liteCatalogItem),
+  };
+}
+
+/** Una vez por versión: limpia caché TPV obsoleta en cuentas que ya tenían el PDV activo. */
+export function ensureTpvCatalogCacheSchema(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (localStorage.getItem(TPV_CATALOG_SCHEMA_KEY) === TPV_CATALOG_CACHE_SCHEMA) return;
+    clearTpvCatalogCache();
+    if (typeof sessionStorage !== 'undefined') {
+      for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+        const k = sessionStorage.key(i);
+        if (k?.startsWith('vertial.tpvCatalog:v') && !k.startsWith(SESSION_PREFIX)) {
+          sessionStorage.removeItem(k);
+        }
+      }
+    }
+    localStorage.setItem(TPV_CATALOG_SCHEMA_KEY, TPV_CATALOG_CACHE_SCHEMA);
+  } catch {
+    /* ignore */
+  }
+}
+
 function readSession(key: string): TpvCatalogSnapshot | null {
   if (typeof sessionStorage === 'undefined') return null;
   try {
@@ -78,12 +122,12 @@ function readSession(key: string): TpvCatalogSnapshot | null {
     const parsed = JSON.parse(raw) as TpvCatalogSnapshot;
     if (!parsed || !Array.isArray(parsed.items) || !parsed.fetchedAt) return null;
     if (Date.now() - parsed.fetchedAt > SESSION_TTL_MS) return null;
-    return {
+    return hydrateTpvCatalogSnapshot({
       items: parsed.items,
       brands: Array.isArray(parsed.brands) ? parsed.brands : [],
       fetchedAt: parsed.fetchedAt,
       catalogBusinessId: String(parsed.catalogBusinessId || '').trim(),
-    };
+    });
   } catch {
     return null;
   }
@@ -117,6 +161,7 @@ function snapshotNeedsBrandRefetch(snapshot: TpvCatalogSnapshot): boolean {
 }
 
 export function readTpvCatalogCache(userId: string, input: TpvCatalogFetchInput): TpvCatalogSnapshot | null {
+  ensureTpvCatalogCacheSchema();
   const scope = resolveTpvCatalogLoadScope(
     input.scopeBusinessId,
     input.businesses,
@@ -127,14 +172,15 @@ export function readTpvCatalogCache(userId: string, input: TpvCatalogFetchInput)
   if (fromMemory && Date.now() - fromMemory.fetchedAt < MEMORY_TTL_MS) {
     if (snapshotNeedsBrandRefetch(fromMemory)) return null;
     if (fromMemory.catalogBusinessId && fromMemory.catalogBusinessId !== scope.catalogBusinessId) return null;
-    return fromMemory;
+    return hydrateTpvCatalogSnapshot(fromMemory);
   }
   const fromSession = readSession(key);
   if (fromSession) {
     if (snapshotNeedsBrandRefetch(fromSession)) return null;
     if (fromSession.catalogBusinessId && fromSession.catalogBusinessId !== scope.catalogBusinessId) return null;
-    memory.set(key, fromSession);
-    return fromSession;
+    const hydrated = hydrateTpvCatalogSnapshot(fromSession);
+    memory.set(key, hydrated);
+    return hydrated;
   }
   return null;
 }
@@ -186,6 +232,7 @@ export async function fetchTpvCatalog(
   input: TpvCatalogFetchInput,
   options?: { force?: boolean },
 ): Promise<TpvCatalogSnapshot> {
+  ensureTpvCatalogCacheSchema();
   const scope = resolveTpvCatalogLoadScope(
     input.scopeBusinessId,
     input.businesses,
@@ -205,12 +252,12 @@ export async function fetchTpvCatalog(
     const rawItems = await listCatalogItemsRequest(userId, undefined, { view: 'tpv' });
     const brands = await loadTpvCatalogBrands(scope, input.businesses);
     const items = filterTpvCatalogItems(rawItems, scope, brands);
-    const snapshot: TpvCatalogSnapshot = {
+    const snapshot = hydrateTpvCatalogSnapshot({
       items,
       brands,
       fetchedAt: Date.now(),
       catalogBusinessId: scope.catalogBusinessId,
-    };
+    });
     const filteredAwayAll = rawItems.length > 0 && items.length === 0;
     if (!filteredAwayAll) {
       memory.set(key, snapshot);
@@ -229,6 +276,7 @@ export async function fetchTpvCatalog(
 
 /** Precarga en segundo plano al entrar al TPV (antes de «Nuevo pedido»). */
 export function prefetchTpvCatalog(userId: string, input: TpvCatalogFetchInput): void {
+  ensureTpvCatalogCacheSchema();
   const uid = String(userId || '').trim();
   if (!uid || !input.scopeBusinessId) return;
   const cached = readTpvCatalogCache(uid, input);

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Marca">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5f3ff"/>
+      <stop offset="100%" stop-color="#ddd6fe"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <rect x="58" y="58" width="84" height="84" rx="20" fill="#8b5cf6"/>
+  <circle cx="100" cy="92" r="18" fill="#fff"/>
+  <rect x="72" y="118" width="56" height="10" rx="5" fill="#fff"/>
+</svg>

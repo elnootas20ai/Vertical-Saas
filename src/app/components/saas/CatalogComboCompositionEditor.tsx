@@ -149,7 +149,7 @@ function CatalogSectionBlock({
       if (!q) return true;
       return p.name.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q);
     });
-  }, [section.catalogCategory, catalogItems, excludeItemId, search]);
+  }, [section, catalogItems, excludeItemId, search]);
 
   const pickLabel =
     categoryNeed > 1

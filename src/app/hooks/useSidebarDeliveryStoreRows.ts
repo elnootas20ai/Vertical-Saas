@@ -13,6 +13,8 @@ import {
   filterWorkCentersForBusinessScope,
   isRetailWorkCenter,
   resolveBusinessScopeId,
+  knownBusinessIdsFromList,
+  rescueRetailForBusinessWithoutStores,
 } from '../lib/deliverySetup';
 import { listWorkCentersForDelivery } from '../lib/workCentersApi';
 import { readSidebarRetailCache, writeSidebarRetailCache } from '../lib/sidebarRetailCache';
@@ -97,7 +99,9 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
           listWorkCentersForDelivery(dataUserId, currentBusiness ?? null).catch(() => []),
         ]);
         if (cancelled) return;
-        const scopedWcs = filterWorkCentersForBusinessScope(allWcs, businessId, {
+        const knownIds = knownBusinessIdsFromList(businesses);
+        const preparedWcs = rescueRetailForBusinessWithoutStores(allWcs, businessId, knownIds);
+        const scopedWcs = filterWorkCentersForBusinessScope(preparedWcs, businessId, {
           accountBusinessCount: accountN,
         });
         const retail = dedupeRetailWorkCentersForBusiness(scopedWcs).filter(isRetailWorkCenter);

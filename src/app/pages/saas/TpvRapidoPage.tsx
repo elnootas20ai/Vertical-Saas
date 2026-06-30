@@ -644,8 +644,11 @@ export function TpvRapidoOrderFlow({
     getDeliveryConfigRequest(userId)
       .then((cfg) => {
         if (cancelled) return;
-        const unified = unifyStoreIngredientsFromConfig(cfg || {}, brands.map((b) => b._id));
+        const brandIds = brands.map((b) => b._id);
+        const unified = unifyStoreIngredientsFromConfig(cfg || {}, brandIds);
+        const { ingredientSelection } = resolveTpvBrandConfigFromDeliveryConfig(cfg || {}, brandIds);
         setStoreIngredients(unified);
+        setTpvBrandIngredientSelection(ingredientSelection);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
       })
       .catch(() => {});
@@ -2194,6 +2197,8 @@ export function TpvRapidoOrderFlow({
             <div className={tabletMode ? 'flex-1 min-h-0 flex flex-col w-full' : undefined}>
             <TpvProductPicker
               compact={tabletMode}
+              userId={userId}
+              businessId={businessId}
               sections={catalogSections}
               selectedSectionId={selectedSectionId}
               onSelectedSectionChange={setSelectedSectionId}
@@ -2543,6 +2548,7 @@ export function TpvRapidoOrderFlow({
         <TpvHalfHalfCustomizeModal
           item={halfHalfTarget.item}
           catalogItems={catalog}
+          brands={brands}
           initial={halfHalfTarget.initial?.halfHalfPizza}
           formatPrice={formatPrice}
           onClose={() => setHalfHalfTarget(null)}

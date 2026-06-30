@@ -13,6 +13,9 @@ export const ONBOARDING_TOUR_VERSION = '5';
 /** Disparado al crear empresa en sesión para abrir el tour sin recargar. */
 export const ONBOARDING_TOUR_ARM_EVENT = 'vertial:onboarding-tour-arm';
 
+/** Checklist lateral: paso «Ir» / reinicio de tour cambió el paso activo. */
+export const ACTIVATION_IN_PROGRESS_CHANGED = 'vertial:activation-in-progress-changed';
+
 const EMAIL_VERIFY_RESEND_COOLDOWN_KEY = 'emailVerifResendAt';
 
 const PENDING_VERIFY_EMAIL_KEY = 'vertial_pending_verify_email';
@@ -99,6 +102,36 @@ export function isActivationChecklistForceVisible(userId: string, businessId: st
     return localStorage.getItem(activationForceVisibleKey(userId, businessId)) === '1';
   } catch {
     return false;
+  }
+}
+
+export function setActivationInProgressStep(
+  userId: string,
+  businessId: string,
+  stepId: string | null,
+): void {
+  if (!userId || !businessId) return;
+  try {
+    const key = activationInProgressKey(userId, businessId);
+    const id = String(stepId || '').trim();
+    if (id) localStorage.setItem(key, id);
+    else localStorage.removeItem(key);
+    window.dispatchEvent(
+      new CustomEvent(ACTIVATION_IN_PROGRESS_CHANGED, {
+        detail: { userId: trimId(userId), businessId: trimId(businessId), stepId: id || null },
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getActivationInProgressStep(userId: string, businessId: string): string | null {
+  if (!userId || !businessId) return null;
+  try {
+    return localStorage.getItem(activationInProgressKey(userId, businessId));
+  } catch {
+    return null;
   }
 }
 
@@ -361,7 +394,7 @@ export function clearOnboardingTourForBusiness(userId: string, businessId: strin
 export function armOnboardingTourForBusiness(
   userId: string,
   businessId: string,
-  options?: { fromBeginning?: boolean },
+  options?: { fromBeginning?: boolean; activationStepId?: string | null },
 ): void {
   if (!userId || !businessId) return;
   try {
@@ -377,6 +410,11 @@ export function armOnboardingTourForBusiness(
           /* ignore */
         }
       }
+    }
+    if (options?.activationStepId) {
+      setActivationInProgressStep(userId, businessId, options.activationStepId);
+    } else if (fromBeginning) {
+      setActivationInProgressStep(userId, businessId, null);
     }
     clearOnboardingTourForBusiness(userId, businessId);
     sessionStorage.setItem(

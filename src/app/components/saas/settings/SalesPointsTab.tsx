@@ -8,14 +8,18 @@ import {
   isDeliveryAccountFromSources,
   bootstrapRetailStoreAfterCreate,
   loadTpvPointsOfSaleForBusiness,
+  loadDeliveryStores,
   clearDeliveryStoresSessionCache,
   notifyDeliveryWorkCentersChanged,
+  persistRetailScopeAfterStorePdvSave,
   selectDeliveryPointOfSale,
   DELIVERY_WORK_CENTERS_CHANGED,
   readWorkCenterBusinessId,
   resolveBusinessScopeId,
+  knownBusinessIdsFromList,
 } from '../../../lib/deliverySetup';
 import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
+import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -197,7 +201,7 @@ function WorkCenterModal({
     province: '',
     phone: '',
     email: '',
-    expectedStaffCount: '3',
+    expectedStaffCount: '0',
     squareMeters: '',
     notes: '',
     purchasePrice: '',
@@ -259,7 +263,7 @@ function WorkCenterModal({
     } else {
       setForm({
         name: '', centerType: 'punto_de_venta', customTypeName: '', ownership: 'propiedad',
-        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '3', squareMeters: '',
+        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '0', squareMeters: '',
         notes: '', purchasePrice: '', purchaseDate: '', cadastralReference: '',
         contractStartDate: '', contractEndDate: '', monthlyPrice: '', deposit: '',
         landlord: '', landlordPhone: '', landlordEmail: '', contractNotes: '',
@@ -406,10 +410,10 @@ function WorkCenterModal({
       if (
         !String(form.expectedStaffCount ?? '').trim() ||
         !Number.isFinite(staffCount) ||
-        staffCount < 1 ||
+        staffCount < 0 ||
         staffCount > 999
       ) {
-        nextErr.expectedStaffCount = 'Indica cuántos trabajadores prevés (1–999)';
+        nextErr.expectedStaffCount = 'Indica cuántos trabajadores prevés (0–999)';
       }
       return staffCount;
     };
@@ -586,7 +590,7 @@ function WorkCenterModal({
         province: sanitizeRetailTextField(form.province, PDV_RETAIL_LIMITS.cityMax) || undefined,
         phone: sanitizeRetailTextField(form.phone, PDV_RETAIL_LIMITS.phoneMax) || undefined,
         email: sanitizeRetailTextField(form.email, PDV_RETAIL_LIMITS.emailMax) || undefined,
-        expectedStaffCount: Math.max(1, Math.floor(staffCount)),
+        expectedStaffCount: Math.max(0, Math.floor(staffCount)),
         squareMeters: form.squareMeters ? Number(form.squareMeters) : undefined,
         notes: sanitizeRetailTextField(form.notes, PDV_RETAIL_LIMITS.notesMax) || undefined,
         active: editItem ? editItem.active !== false : defaultActiveOnCreate,
@@ -904,10 +908,10 @@ function WorkCenterModal({
                 </label>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={999}
                   className={inputClass('expectedStaffCount')}
-                  placeholder={simplifyPdvCreate ? '3' : 'Obligatorio — número de personas (1–999)'}
+                  placeholder={simplifyPdvCreate ? '0' : 'Obligatorio — número de personas (0–999)'}
                   value={form.expectedStaffCount}
                   onChange={(e) => {
                     clearFieldError('expectedStaffCount');
@@ -1543,6 +1547,18 @@ export function SalesPointsTab() {
   const isDeliveryAccountRef = useRef(isDeliveryAccount);
   isDeliveryAccountRef.current = isDeliveryAccount;
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
+  const activeStore = useActiveStoreScope();
+
+  const orphanRetailCount = useMemo(
+    () =>
+      workCenters.filter(
+        (wc) =>
+          !wc.deletedAt &&
+          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') &&
+          !readWorkCenterBusinessId(wc),
+      ).length,
+    [workCenters],
+  );
 
   const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadTpvPointsOfSaleForBusiness>>) => {
     setWorkCenters(state.workCenters);
@@ -1599,13 +1615,33 @@ export function SalesPointsTab() {
           skipPdvMerge,
           includeInactivePdvs: true,
           accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
+          knownBusinessIds: knownBusinessIdsFromList(businesses),
         });
         if (seq !== loadSeqRef.current) return;
         if ((businessScopeId || resolveBusinessScopeId(currentBusinessRef.current)) !== bid) return;
         applyDeliveryStoresState(state);
-      } catch {
-        if (seq === loadSeqRef.current) {
-          toast.error('Error al cargar los centros de trabajo');
+      } catch (err) {
+        if (seq !== loadSeqRef.current) return;
+        try {
+          const fallback = await loadDeliveryStores(userNow, bizNow, {
+            skipPdvMerge: true,
+            includeInactivePdvs: true,
+            accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
+            knownBusinessIds: knownBusinessIdsFromList(businesses),
+          });
+          if (seq !== loadSeqRef.current) return;
+          applyDeliveryStoresState(fallback);
+          toast.warning(
+            'La tienda se ha cargado, pero la caja (PDV) no se pudo sincronizar. Revisa dirección y cuota de PDV.',
+          );
+        } catch (fallbackErr) {
+          const msg =
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : err instanceof Error
+                ? err.message
+                : 'Error al cargar los centros de trabajo';
+          toast.error(msg);
         }
       } finally {
         if (seq === loadSeqRef.current) setLoading(false);
@@ -1628,8 +1664,8 @@ export function SalesPointsTab() {
       setLoading(false);
       return;
     }
-    void loadData();
-  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, loadData]);
+    void loadData().then(() => activeStore.refresh());
+  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, loadData, activeStore.refresh]);
 
   useEffect(() => {
     const onChanged = () => {
@@ -1911,9 +1947,10 @@ export function SalesPointsTab() {
           const linkedPdv = deliveryPdvsByWorkCenter[updated._id];
           const addr = [updated.address, updated.postalCode, updated.city].filter(Boolean).join(', ');
 
+          let savedPdv: PointOfSale | null = null;
           if (linkedPdv?._id) {
             const codeToPersist = normCode || String(linkedPdv.code || '').trim();
-            await updatePointOfSaleRequest(dataUserId, {
+            savedPdv = await updatePointOfSaleRequest(dataUserId, {
               ...linkedPdv,
               name: displayName,
               code: codeToPersist,
@@ -1923,19 +1960,22 @@ export function SalesPointsTab() {
               active: updated.active !== false,
             });
           } else {
-            await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
+            savedPdv = await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
               business: currentBusiness ?? null,
               pdvCode: normCode || undefined,
               pdvName: displayName,
             });
           }
-          clearDeliveryStoresSessionCache(businessIdForWc);
+          if (savedPdv && businessIdForWc) {
+            persistRetailScopeAfterStorePdvSave(businessIdForWc, updated, savedPdv, {
+              accountBusinessCount,
+            });
+          }
           notifyDeliveryWorkCentersChanged(businessIdForWc);
           notifyDeliveryActiveStoreChanged();
         }
         setWorkCenters(prev => prev.map(wc => wc._id === updated._id ? updated : wc).sort((a, b) => a.name.localeCompare(b.name, 'es')));
         notifyWorkCentersChanged();
-        clearDeliveryStoresSessionCache(businessIdForWc);
         notifyDeliveryWorkCentersChanged(businessIdForWc);
         setShowModal(false);
         setEditingItem(null);
@@ -2025,6 +2065,9 @@ export function SalesPointsTab() {
             storeName: String(wcData.name || ''),
           });
           selectDeliveryPointOfSale(currentBusiness, dataUserId, createdPdv._id);
+          persistRetailScopeAfterStorePdvSave(businessIdForWc, created, createdPdv, {
+            accountBusinessCount,
+          });
         }
         setWorkCenters(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name, 'es')));
         if (createdPdv) {
@@ -2046,7 +2089,6 @@ export function SalesPointsTab() {
           }));
         }
         notifyWorkCentersChanged();
-        clearDeliveryStoresSessionCache(businessIdForWc);
         notifyDeliveryWorkCentersChanged(businessIdForWc);
         setShowModal(false);
         setEditingItem(null);
@@ -2200,6 +2242,17 @@ export function SalesPointsTab() {
           <div className="text-xs text-orange-700 dark:text-orange-400 mt-0.5">Alquiler</div>
         </div>
       </div>
+
+      {orphanRetailCount > 0 && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/90 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-950 dark:text-amber-100 flex gap-2 items-start">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <p>
+            Hemos encontrado {orphanRetailCount === 1 ? 'una tienda' : `${orphanRetailCount} tiendas`} sin
+            asignar a esta empresa. Ábrela, revisa la dirección (mín. 5 caracteres) y pulsa{' '}
+            <strong>Guardar</strong> para activar el PDV de caja.
+          </p>
+        </div>
+      )}
 
       {/* Desglose por tipo */}
       {kpis.total > 0 && (

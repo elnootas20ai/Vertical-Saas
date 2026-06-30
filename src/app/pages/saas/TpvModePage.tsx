@@ -25,6 +25,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { listCatalogItemsRequest, type CatalogItem } from '../../lib/deliveryApi';
+import { resolveCatalogProductImage } from '../../lib/catalogProductPlaceholders';
 import { listClockins, type ClockinRecord } from '../../lib/clockinsApi';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -477,9 +478,9 @@ export function TpvModePage({ salesPoint }: TpvModePageProps = {}) {
                           {inTicket.quantity}
                         </span>
                       )}
-                      {item.image ? (
+                      {resolveCatalogProductImage(item) ? (
                         <img
-                          src={item.image}
+                          src={resolveCatalogProductImage(item)}
                           alt={item.name}
                           className="w-14 h-14 md:w-16 md:h-16 rounded-lg object-cover mb-2"
                         />

@@ -6,6 +6,9 @@ import {
   normalizeTpvDefaultExtraPrice,
   parseCatalogIngredients,
   parseCatalogSupplements,
+  isCatalogIngredientPlaceholder,
+  parseIngredientsBulkText,
+  normalizeCatalogIngredientsForSave,
   resolveTpvCategoryTemplateKey,
 } from '../src/app/lib/catalogCustomization.ts';
 
@@ -77,6 +80,24 @@ describe('catalogCustomization TPV', () => {
       productIngredientsOnly: true,
       tpvFallbackWhenEmpty: true,
     })).toEqual([]);
+  });
+
+  it('ignora placeholder «Ver carta» en ingredientes de ficha', () => {
+    expect(isCatalogIngredientPlaceholder('Ver carta')).toBe(true);
+    expect(parseIngredientsBulkText('Ver carta')).toEqual([]);
+    expect(normalizeCatalogIngredientsForSave('Ver carta')).toBe('');
+    expect(normalizeCatalogIngredientsForSave('Beyond, Queso vegano')).toBe('Beyond, Queso vegano');
+    const burger = {
+      category: 'Burgers',
+      brandIds: ['mod'],
+      customFields: { ingredients: 'Ver carta' },
+    };
+    expect(
+      parseCatalogIngredients(burger, undefined, undefined, undefined, undefined, undefined, {
+        productIngredientsOnly: true,
+        tpvFallbackWhenEmpty: true,
+      }),
+    ).toEqual([]);
   });
 
   it('TPV no usa la lista maestra global cuando la ficha del producto está vacía', () => {
@@ -217,6 +238,19 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogSupplements(burger, undefined, undefined, undefined, master, 0.9)).toEqual([
       { id: 'b1', name: 'Extra bacon', price: 0.9 },
     ]);
+  });
+
+  it('mergeDuplicateStoreIngredients fusiona mismo nombre y marcas', async () => {
+    const { mergeDuplicateStoreIngredients } = await import('../src/app/lib/catalogCustomization.ts');
+    const list = [
+      { id: 'a', name: 'Mozzarella', role: 'base', brandIds: ['b1'], productParts: ['pizzas'] },
+      { id: 'b', name: 'mozzarella', role: 'extra', brandIds: ['b1'], productParts: ['pizzas'] },
+    ];
+    const { items, mergedCount } = mergeDuplicateStoreIngredients(list);
+    expect(items).toHaveLength(1);
+    expect(mergedCount).toBe(1);
+    expect(items[0].role).toBe('extra');
+    expect(items[0].name).toBe('Mozzarella');
   });
 
   it('explodeStoreIngredientsPerBrand crea una fila por línea comercial', async () => {

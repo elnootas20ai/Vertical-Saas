@@ -39,6 +39,7 @@ import {
   shouldUseDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
   resolveBusinessScopeId,
+  knownBusinessIdsFromList,
   filterPointsOfSaleForWorkCenters,
   filterWorkCentersForBusinessScope,
   dedupeRetailWorkCentersForBusiness,
@@ -320,6 +321,7 @@ function ActiveStoreScopeProviderImpl({
         : 1;
       const loadOpts = {
         accountBusinessCount: accountN,
+        knownBusinessIds: knownBusinessIdsFromList(businessesRef.current),
       };
 
       try {
@@ -464,7 +466,21 @@ function ActiveStoreScopeProviderImpl({
   ]);
 
   useEffect(() => {
+    const applyCacheSnapshot = () => {
+      const bid = businessIdRef.current;
+      if (!bid) return;
+      const accountN = businessesFetchSettledRef.current
+        ? (accountBusinessCountRef.current ?? businessesRef.current.length)
+        : undefined;
+      const cacheOpts = accountN !== undefined ? { accountBusinessCount: accountN } : undefined;
+      const cached = readRetailScopeCache(bid, cacheOpts);
+      if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
+        applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
+      }
+    };
+
     const scheduleRefresh = () => {
+      applyCacheSnapshot();
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
       refreshDebounceRef.current = setTimeout(() => {
         refreshDebounceRef.current = null;
@@ -476,7 +492,7 @@ function ActiveStoreScopeProviderImpl({
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
       window.removeEventListener('work-centers:changed', scheduleRefresh);
     };
-  }, []);
+  }, [applyStores]);
 
   useEffect(() => {
     const onExt = () => bump();

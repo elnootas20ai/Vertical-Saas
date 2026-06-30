@@ -73,6 +73,7 @@ import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
+import { TpvPrinterSetupModal } from './TpvPrinterSetupPanel';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   clockIn,
@@ -265,6 +266,9 @@ export interface TpvRegisterContextType {
 /** null = sin caja abierta (o fuera del gate) · objeto = caja activa */
 const TpvRegisterContext = createContext<TpvRegisterContextType | null>(null);
 
+/** true solo cuando el gate ya pasó la apertura de caja y muestra el tablero operativo. */
+const TpvRegisterBoardReadyContext = createContext(false);
+
 export function TpvRegisterProvider({
   value,
   children,
@@ -287,6 +291,11 @@ export function useTpvRegister(): TpvRegisterContextType {
   return ctx;
 }
 
+/** El gate solo monta el tablero TPV tras abrir caja; evita bloquear «Nuevo» por contexto desincronizado. */
+export function useTpvRegisterBoardReady(): boolean {
+  return useContext(TpvRegisterBoardReadyContext);
+}
+
 // ─── Opening Screen ─────────────────────────────────────────────────────────
 
 interface OpeningData {
@@ -301,7 +310,7 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, onRequestPrinter }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
@@ -319,6 +328,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   tabletStoreLabel?: string;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
+  onRequestPrinter?: () => void;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -673,6 +683,17 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
             <span className="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
               Contado: {total.toFixed(2)}€
             </span>
+          )}
+          {onRequestPrinter && (
+            <button
+              type="button"
+              onClick={onRequestPrinter}
+              className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
+              aria-label="Impresora"
+              title="Impresora de tickets"
+            >
+              <Printer className="w-5 h-5 text-gray-500" />
+            </button>
           )}
           <button
             type="button"
@@ -1744,6 +1765,7 @@ function RegisterStatusBar({
   onRequestCashCount,
   onRequestIncident,
   onRequestCashOps,
+  onRequestPrinter,
   clockedInWorkers,
   clockedInWorkersLoading,
   selectedOrderTakerId,
@@ -1757,6 +1779,7 @@ function RegisterStatusBar({
   onRequestCashCount: () => void;
   onRequestIncident: () => void;
   onRequestCashOps: () => void;
+  onRequestPrinter: () => void;
   clockedInWorkers: TpvClockedInWorker[];
   clockedInWorkersLoading: boolean;
   selectedOrderTakerId: string | null;
@@ -1807,6 +1830,9 @@ function RegisterStatusBar({
           <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={`${actionBtn} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400`}>
             <Banknote className="w-3.5 h-3.5 shrink-0" />
           </button>
+          <button type="button" onClick={onRequestPrinter} title="Impresora de tickets" className={`${actionBtn} bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300`}>
+            <Printer className="w-3.5 h-3.5 shrink-0" />
+          </button>
           <button type="button" onClick={onRequestCashCount} title="Arqueo" className={`${actionBtn} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400`}>
             <Calculator className="w-3.5 h-3.5 shrink-0" />
           </button>
@@ -1846,6 +1872,9 @@ function RegisterStatusBar({
         </button>
         <button type="button" onClick={onRequestCashOps} className={`${actionBtn} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50`}>
           <Banknote className="w-3.5 h-3.5 shrink-0" /> Mov. caja
+        </button>
+        <button type="button" onClick={onRequestPrinter} className={`${actionBtn} bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/80`}>
+          <Printer className="w-3.5 h-3.5 shrink-0" /> Impresora
         </button>
         <button type="button" onClick={onRequestCashCount} className={`${actionBtn} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50`}>
           <Calculator className="w-3.5 h-3.5 shrink-0" /> Arqueo
@@ -2159,6 +2188,7 @@ export function TpvRegisterGate({
   const [showCashOps, setShowCashOps] = useState(false);
   const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
+  const [showPrinter, setShowPrinter] = useState(false);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
@@ -3006,6 +3036,11 @@ export function TpvRegisterGate({
     <>
       {wrapRegisterContext(body)}
       {clockInModalEl}
+      {showPrinter && (
+        <TpvGatePortal>
+          <TpvPrinterSetupModal open onClose={() => setShowPrinter(false)} />
+        </TpvGatePortal>
+      )}
     </>
   );
 
@@ -3216,6 +3251,7 @@ export function TpvRegisterGate({
         tabletStoreLabel={tabletBinding?.pdvName}
         restrictedToPdvId={openingRestrictedPdvId}
         onOpeningPdvChange={handleOpeningPdvChange}
+        onRequestPrinter={() => setShowPrinter(true)}
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {
@@ -3230,26 +3266,11 @@ export function TpvRegisterGate({
       />
     );
 
-    if (isTabletSession) {
-      return wrapShell(
-        <>
-          <div className={tpvFrameClass}>
-            <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
-          </div>
-          <TpvGatePortal>
-            <div className="fixed inset-0 z-[60] bg-gray-50 dark:bg-gray-900 overflow-y-auto">
-              {openingScreen}
-            </div>
-          </TpvGatePortal>
-        </>,
-      );
-    }
-
     return wrapShell(openingScreen);
   }
 
   return wrapShell(
-    <>
+    <TpvRegisterBoardReadyContext.Provider value>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
           session={activeSession}
@@ -3258,6 +3279,7 @@ export function TpvRegisterGate({
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
           onRequestCashOps={() => setShowCashOps(true)}
+          onRequestPrinter={() => setShowPrinter(true)}
           clockedInWorkers={activeStaff}
           clockedInWorkersLoading={clockedInWorkersLoading}
           selectedOrderTakerId={selectedOrderTakerId}
@@ -3315,6 +3337,6 @@ export function TpvRegisterGate({
           <IncidentModal session={activeSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />
         </TpvGatePortal>
       )}
-    </>,
+    </TpvRegisterBoardReadyContext.Provider>,
   );
 }

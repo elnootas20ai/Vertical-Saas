@@ -3,7 +3,7 @@ import { useAuthOptional } from '../context/AuthContext';
 import { useBusinessOptional } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
 import { listBrandsRequest } from '../lib/brandApi';
-import { isBrandSetupComplete, isDefaultCommercialBrand } from '../lib/brandUtils';
+import { isDeliveryBrandActivationComplete, resolveBrandSetupContext } from '../lib/brandUtils';
 import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
 import { isDeliveryBusinessType, resolveBusinessScopeId } from '../lib/deliverySetup';
 
@@ -69,14 +69,10 @@ export function useDeliveryActivationNav() {
     try {
       const brands = await listBrandsRequest(businessId).catch(() => []);
       const retailActive = activeStore.retailWorkCenters.filter((wc) => wc.active !== false);
-      const primary =
-        brands.find((b) => isDefaultCommercialBrand(b)) ??
-        brands.find((b) => b.active !== false) ??
-        brands[0] ??
-        null;
-      setBrandReady(
-        primary ? isBrandSetupComplete(primary, { isDelivery: true, retailStoreCount: retailActive.length }) : false,
-      );
+      const setupCtx = resolveBrandSetupContext(true, retailActive, {
+        storesConfirmed: pdvReady || retailActive.length > 0 || activeStore.allPointsOfSale.length > 0,
+      });
+      setBrandReady(isDeliveryBrandActivationComplete(brands, setupCtx));
     } catch {
       setBrandReady(false);
     } finally {

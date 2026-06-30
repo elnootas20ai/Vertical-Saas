@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Burger">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fefce8"/>
+      <stop offset="100%" stop-color="#fde68a"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <path d="M56 92h88l-8 16H64z" fill="#f59e0b"/>
+  <rect x="52" y="84" width="96" height="12" rx="6" fill="#fde68a"/>
+  <rect x="54" y="108" width="92" height="10" rx="5" fill="#92400e"/>
+  <rect x="52" y="118" width="96" height="12" rx="6" fill="#fde68a"/>
+  <rect x="58" y="98" width="84" height="8" rx="4" fill="#84cc16"/>
+</svg>

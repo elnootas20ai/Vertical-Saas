@@ -19,10 +19,11 @@ import {
   sanitizeOcrLog,
   sanitizeOcrProposal,
 } from './couchdb.js';
-import { recordMovement } from './stockMovementService.js';
 import { classifyDocument, shouldAutoApprove } from './ocrClassifier.js';
 import { matchEntities } from './ocrEntityMatcher.js';
 import { validateOcrData, generateOcrFingerprint } from './ocrValidator.js';
+import { enrichOcrLinesForUser, reconcilePurchaseInvoiceFromOcr, createFinanceCobroFromClientInvoice } from './ocrPurchasePipeline.js';
+import { summarizeCatalogMatches } from './ocrCatalogLineMatcher.js';
 import logger from './logger.js';
 
 const fakeReq = { headers: {} };
@@ -69,7 +70,7 @@ export async function checkDuplicate(sourceHash, ocrData, userId) {
 
 // ---- Proposal field builder ----
 
-function buildProposalFields(ocrData, destination, entityMatch) {
+async function buildProposalFieldsAsync(ocrData, destination, entityMatch, userId) {
   const fields = {};
   const docType = ocrData?.documentType || 'otro';
   const conf = ocrData?.confidenceScore || 50;
@@ -84,12 +85,20 @@ function buildProposalFields(ocrData, destination, entityMatch) {
 
   if (destination.module === 'compras' || docType === 'factura_proveedor' || docType === 'albaran') {
     f('supplierName', ocrData.emitter);
-    if (entityMatch?.matchType === 'supplier' && entityMatch.matchedEntity) {
-      f('supplierId', entityMatch.matchedEntity._id, entityMatch.confidence, 'matched');
+    const supplierId = entityMatch?.matchType === 'supplier' && entityMatch.matchedEntity
+      ? entityMatch.matchedEntity._id
+      : '';
+    if (supplierId) {
+      f('supplierId', supplierId, entityMatch.confidence, 'matched');
       f('supplierName', entityMatch.matchedEntity.name, entityMatch.confidence, 'matched');
     }
     f('invoiceNumber', ocrData.documentNumber);
-    f('lines', ocrData.lines);
+    const enrichedLines = userId
+      ? await enrichOcrLinesForUser(ocrData.lines || [], userId, supplierId)
+      : (ocrData.lines || []);
+    f('lines', enrichedLines);
+    const matchSummary = summarizeCatalogMatches(enrichedLines);
+    f('catalogMatchSummary', matchSummary, 100, 'auto');
     f('subtotal', ocrData.subtotal);
     f('taxRate', ocrData.taxRate);
     f('taxAmount', ocrData.taxAmount);
@@ -249,28 +258,24 @@ export async function executeProposal(proposal, userId) {
     const result = await putDocument(fakeReq, db, createdDoc._id, createdDoc);
     logger.info({ tag: 'OCR-ROUTE', action: dest.action, docId: createdDoc._id, db: db }, 'Document created via OCR');
 
-    if (dest.action === 'create_purchase_invoice' && Array.isArray(createdDoc.items)) {
-      for (const item of createdDoc.items) {
-        const catalogItemId = item.catalogItemId || item.productId || '';
-        if (!catalogItemId || !item.quantity) continue;
-        try {
-          await recordMovement(fakeReq, userId, {
-            catalogItemId,
-            movementType: 'purchase_reception',
-            quantity: Number(item.quantity || 0),
-            unitCost: Number(item.unitPrice || item.unitCost || 0),
-            referenceId: createdDoc._id,
-            referenceType: 'purchase_invoice_ocr',
-            notes: `Recepción OCR - Factura ${createdDoc.invoiceNumber || createdDoc._id.slice(-8)}`,
-            performedBy: 'ocr-system',
-          });
-        } catch (err) {
-          logger.warn({ tag: 'OCR-STOCK', err: err?.message, catalogItemId, docId: createdDoc._id }, 'Error registrando stock desde OCR');
-        }
+    let sideEffects = null;
+
+    if (dest.action === 'create_purchase_invoice' || dest.action === 'create_delivery_note') {
+      sideEffects = await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, createdDoc, {
+        performedBy: 'ocr-system',
+      });
+    }
+
+    if (dest.action === 'create_client_invoice') {
+      try {
+        const financeResult = await createFinanceCobroFromClientInvoice(fakeReq, userId, createdDoc);
+        sideEffects = { financeMovementId: financeResult.movementId, financeSkipped: financeResult.skipped };
+      } catch (err) {
+        logger.warn({ tag: 'OCR-FINANCE', err: err?.message }, 'Client invoice finance cobro failed');
       }
     }
 
-    return { documentId: createdDoc._id, database: db, rev: result.rev };
+    return { documentId: createdDoc._id, database: db, rev: result.rev, sideEffects };
   }
 
   throw new Error('Unhandled action: ' + dest.action);
@@ -336,7 +341,7 @@ export async function processOcrResult(params) {
   const ocrFingerprint = await generateOcrFingerprint(ocrData);
 
   // 6. Build proposal
-  const proposalFields = buildProposalFields(ocrData, destination, primaryEntity);
+  const proposalFields = await buildProposalFieldsAsync(ocrData, destination, primaryEntity, userId);
   const autoApproved = shouldAutoApprove(ocrData, entityMatches, validation);
 
   const proposal = buildOcrProposalDocument(userId, {

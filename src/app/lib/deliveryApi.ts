@@ -1334,8 +1334,9 @@ export async function ensureDeliveryPdvForWorkCenter(
         ],
       }),
     );
-  } catch (err) {
-    throw err instanceof Error ? err : new Error('No se pudo crear el punto de venta');
+  } catch {
+    // Un local sin PDV no debe vaciar tiendas / Ajustes (p. ej. cuota, dirección o API caída).
+    return null;
   }
 }
 

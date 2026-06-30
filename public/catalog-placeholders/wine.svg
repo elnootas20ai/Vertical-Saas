@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Vino">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fdf2f8"/>
+      <stop offset="100%" stop-color="#fbcfe8"/>
+    </linearGradient>
+    <linearGradient id="wine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#be123c"/>
+      <stop offset="100%" stop-color="#881337"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <ellipse cx="100" cy="168" rx="36" ry="8" fill="#000" opacity=".08"/>
+  <path d="M100 44c18 0 30 18 30 38 0 24-14 42-30 54-16-12-30-30-30-54 0-20 12-38 30-38z" fill="url(#wine)" opacity=".92"/>
+  <path d="M100 136v18" stroke="#64748b" stroke-width="6" stroke-linecap="round"/>
+  <ellipse cx="100" cy="158" rx="22" ry="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="3"/>
+</svg>

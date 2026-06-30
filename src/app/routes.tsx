@@ -107,6 +107,7 @@ import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
 import { VerticalCatalogEntry, VerticalArticlesRedirect } from './pages/saas/VerticalCatalogEntry';
+import InventoryPage from './pages/saas/InventoryPage';
 import { DealershipWorkers } from './pages/saas/DealershipWorkers';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
@@ -564,6 +565,7 @@ export const router = createBrowserRouter([
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
           { path: 'catalog', Component: VerticalCatalogEntry },
+          { path: 'inventory', element: <RequireBusinessOwner><InventoryPage /></RequireBusinessOwner> },
           { path: 'articles', Component: VerticalArticlesRedirect },
           { path: 'suppliers', element: <RequireBusinessOwner><Outlet /></RequireBusinessOwner>, children: [
             {

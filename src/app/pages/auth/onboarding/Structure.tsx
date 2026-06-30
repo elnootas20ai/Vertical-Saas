@@ -205,17 +205,6 @@ export function Structure() {
             </div>
           </div>
         </div>
-
-        {formData.commercialBrandCount > 0 || formData.locationCount > 1 || formData.businessCount > 1 ? (
-          <p className="text-xs text-violet-800 dark:text-violet-200 bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 rounded-lg px-3 py-2 leading-snug">
-            Con varias empresas, varios PDV o marcas extra te recomendaremos el plan PRO en el siguiente paso de
-            precio.
-          </p>
-        ) : (
-          <p className="text-xs text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 leading-snug">
-            En el siguiente paso elegirás módulos y verás el plan y precio según esta infraestructura.
-          </p>
-        )}
       </form>
     </OnboardingStepShell>
   );

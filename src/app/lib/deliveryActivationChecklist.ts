@@ -59,14 +59,15 @@ const DELIVERY_ACTIVATION_STEP_DEFS = (
     icon: 'store',
     subSteps: [
       { id: 'retail_store', label: 'Primera tienda creada', completed: flags.hasActiveRetailStore },
+      { id: 'pdv_active', label: 'PDV de caja activo', completed: flags.hasActivePdv },
     ],
   },
   {
     id: 'delivery_brand',
     number: 2,
     label: 'Personaliza tu marca',
-    description: 'Edita la carta (nombre, categorías, tiendas); Ir abre el editor',
-    route: '/saas/settings/marca',
+    description: 'Crea tu carta (nombre, categorías, tiendas); Ir abre el asistente',
+    route: '/saas/settings/marca?action=setup-brand',
     icon: 'brand',
     subSteps: [
       {

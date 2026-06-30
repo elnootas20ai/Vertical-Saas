@@ -85,7 +85,18 @@ function invalidateByPrefix(prefix) {
   return count;
 }
 
+const dbGenerations = new Map();
+
+function getDbGeneration(dbName) {
+  return dbGenerations.get(dbName) || 0;
+}
+
+function bumpDbGeneration(dbName) {
+  dbGenerations.set(dbName, getDbGeneration(dbName) + 1);
+}
+
 function invalidateDb(dbName) {
+  bumpDbGeneration(dbName);
   return invalidateByPrefix(`db:${dbName}`);
 }
 
@@ -124,6 +135,8 @@ export {
   invalidate,
   invalidateByPrefix,
   invalidateDb,
+  getDbGeneration,
+  bumpDbGeneration,
   getStats,
   clear,
   getOrFetch,

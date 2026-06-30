@@ -9,6 +9,7 @@ import { useActivationChecklist, type OnboardingStep, type OnboardingSubStep } f
 import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { dismissOnboardingWelcomeTourForActivation } from '../../lib/onboardingLocalKeys';
 
 const ICON_MAP: Record<string, typeof Building2> = {
@@ -281,7 +282,7 @@ function SubStepRow({ sub, stepRoute }: { sub: OnboardingSubStep; stepRoute: str
 
   const goToActivation = () => {
     const uid = String(user?.user_id || user?.id || '').trim();
-    const bid = String(currentBusiness?.business_id || '').trim();
+    const bid = resolveBusinessScopeId(currentBusiness);
     dismissOnboardingWelcomeTourForActivation(uid, bid);
     navigate(buildActivationTargetUrl(stepRoute, sub.id));
   };

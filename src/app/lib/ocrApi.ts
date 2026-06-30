@@ -29,6 +29,10 @@ export interface OcrLine {
   quantity: number | null;
   unitPrice: number | null;
   total: number | null;
+  catalogItemId?: string;
+  catalogItemName?: string;
+  matchConfidence?: number;
+  matchMethod?: string;
 }
 
 export interface OcrResult {
@@ -151,6 +155,22 @@ export async function scanDocument(
   });
 }
 
+export interface OcrRouteSideEffects {
+  stockUpdated?: number;
+  stockUnits?: number;
+  financeMovementId?: string | null;
+  financeSkipped?: boolean;
+  matchedLines?: number;
+  totalLines?: number;
+  unmatchedLines?: number;
+}
+
+export interface OcrRouteResult {
+  documentId: string;
+  database: string;
+  sideEffects?: OcrRouteSideEffects | null;
+}
+
 export async function processOcr(params: {
   ocrData: OcrResult;
   sourceFileName?: string;
@@ -171,7 +191,7 @@ export async function processOcr(params: {
     destination?: unknown;
     entityMatches?: OcrEntityMatch[];
     validation?: { warnings: unknown[]; errors: unknown[]; isValid: boolean };
-    routeResult?: { documentId: string; database: string } | null;
+    routeResult?: OcrRouteResult | null;
     duplicate?: { isDuplicate: boolean; duplicateType: string | null; original: unknown } | null;
   }>('/api/ocr/process', {
     method: 'POST',
@@ -180,7 +200,7 @@ export async function processOcr(params: {
 }
 
 export async function approveProposal(proposalId: string, fields?: Record<string, unknown>) {
-  return request<{ ok: boolean; routeResult: { documentId: string; database: string }; proposal: OcrProposal }>(
+  return request<{ ok: boolean; routeResult: OcrRouteResult; proposal: OcrProposal }>(
     `/api/ocr/proposals/${encodeURIComponent(proposalId)}/approve`,
     { method: 'POST', body: JSON.stringify({ fields }) },
   );

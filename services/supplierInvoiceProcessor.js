@@ -7,6 +7,7 @@ import { connectAndFetchNewEmails, isImapConfigured } from './imapService.js';
 import {
   getCatalogDbName,
   buildPurchaseInvoiceDocument,
+  buildSupplierDocument,
   sanitizePurchaseInvoice,
   listSuppliersByUser,
   findDuplicatePurchaseInvoice,
@@ -24,6 +25,7 @@ import {
 } from './couchdb.js';
 import { broadcastToUser } from './sseService.js';
 import { sendPushToUser } from './pushService.js';
+import { enrichOcrLinesForUser, reconcilePurchaseInvoiceFromOcr } from './ocrPurchasePipeline.js';
 
 const fakeReq = { headers: {} };
 
@@ -213,6 +215,32 @@ async function matchSupplier(userId, ocrData, emailFrom) {
   return { matched: false, method: '', supplier: null };
 }
 
+async function ensureSupplierFromOcr(userId, ocrData, emailFrom) {
+  const matchResult = await matchSupplier(userId, ocrData, emailFrom);
+  if (matchResult.matched && matchResult.supplier) return matchResult;
+
+  const name = String(ocrData?.emitter || '').trim();
+  if (!name) return matchResult;
+
+  try {
+    const doc = buildSupplierDocument(userId, {
+      name,
+      cif: String(ocrData?.emitterCIF || '').trim(),
+      email: String(emailFrom || '').trim().split('<').pop()?.replace('>', '').trim() || '',
+      notes: 'Creado automáticamente desde factura por email (OCR)',
+      active: true,
+    });
+    const db = getCatalogDbName();
+    await ensureDatabase(fakeReq, db);
+    await putDocument(fakeReq, db, doc._id, doc);
+    logger.info({ tag: 'SINV_PROC', supplierId: doc._id, name }, 'Proveedor auto-creado desde OCR email');
+    return { matched: true, method: 'auto_created', supplier: doc };
+  } catch (err) {
+    logger.warn({ tag: 'SINV_PROC', err: err.message, name }, 'No se pudo auto-crear proveedor');
+    return matchResult;
+  }
+}
+
 // ─── Propuesta de categoría y pago ───────────────────────────────────────────
 
 function proposeExpenseAndPayment(ocrData, supplier) {
@@ -341,7 +369,7 @@ async function processSingleEmail(userId, email) {
       logger.error({ tag: 'SINV_PROC', filename: attachment.filename, err: err.message }, 'OCR falló');
     }
 
-    const matchResult = await matchSupplier(userId, ocrData, email.from);
+    const matchResult = await ensureSupplierFromOcr(userId, ocrData, email.from);
 
     const invoiceNumber = ocrData?.documentNumber || '';
     let duplicateResult = null;
@@ -353,6 +381,14 @@ async function processSingleEmail(userId, email) {
 
     const proposal = proposeExpenseAndPayment(ocrData, matchResult.supplier);
 
+    const enrichedLines = !ocrFailed
+      ? await enrichOcrLinesForUser(
+          ocrData?.lines || [],
+          userId,
+          matchResult.supplier?._id || '',
+        )
+      : [];
+
     const invoiceData = {
       ...baseData,
       invoiceNumber: invoiceNumber || '',
@@ -363,7 +399,7 @@ async function processSingleEmail(userId, email) {
       supplierMatchMethod: matchResult.method,
       date: ocrData?.date || email.date?.split('T')[0] || new Date().toISOString().split('T')[0],
       dueDate: ocrData?.dueDate || '',
-      lines: ocrData?.lines || [],
+      lines: enrichedLines.length > 0 ? enrichedLines : (ocrData?.lines || []),
       taxRate: ocrData?.taxRate ?? 21,
       currency: ocrData?.currency || 'EUR',
       ...proposal,
@@ -389,6 +425,16 @@ async function processSingleEmail(userId, email) {
     const db = getCatalogDbName();
     await ensureDatabase(fakeReq, db);
     const saved = await putDocument(fakeReq, db, doc._id, doc);
+
+    if (!ocrFailed) {
+      try {
+        await reconcilePurchaseInvoiceFromOcr(fakeReq, userId, { ...doc, _rev: saved.rev }, {
+          performedBy: 'email-ocr',
+        });
+      } catch (reconcileErr) {
+        logger.warn({ tag: 'SINV_PROC', invoiceId: doc._id, err: reconcileErr.message }, 'Reconciliación stock/finanzas falló');
+      }
+    }
 
     // Guardar el archivo PDF/imagen como adjunto en CouchDB
     try {

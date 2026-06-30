@@ -1,7 +1,7 @@
 import type { DeliveryActivationFlags, DeliveryActivationStepDef } from './deliveryActivationChecklist';
 
 export const DELIVERY_TIENDA_SETTINGS_PATH = '/saas/settings/tienda?action=new-pdv';
-export const DELIVERY_MARCA_SETTINGS_PATH = '/saas/settings/marca';
+export const DELIVERY_MARCA_SETTINGS_PATH = '/saas/settings/marca?action=setup-brand';
 
 export function isDeliveryStoreAndPdvReady(
   flags: Pick<DeliveryActivationFlags, 'hasActiveRetailStore' | 'hasActivePdv'>,
@@ -26,10 +26,24 @@ export function getDeliveryStepLock(
     return { locked: false, unlockRoute: DELIVERY_TIENDA_SETTINGS_PATH };
   }
 
+  if (stepId === 'delivery_brand') {
+    if (!flags.hasActiveRetailStore) {
+      return {
+        locked: true,
+        lockedReason: 'Primero crea tu tienda en Ajustes → Tienda.',
+        unlockRoute: DELIVERY_TIENDA_SETTINGS_PATH,
+      };
+    }
+    return { locked: false, unlockRoute: DELIVERY_MARCA_SETTINGS_PATH };
+  }
+
   if (!pdvReady) {
+    const reason = flags.hasActiveRetailStore
+      ? 'Falta el PDV de caja. Edita la tienda en Ajustes → Tienda o créala de nuevo con dirección válida.'
+      : 'Primero crea tu tienda y PDV en Ajustes → Tienda.';
     return {
       locked: true,
-      lockedReason: 'Primero crea tu tienda activa en Ajustes → Tienda.',
+      lockedReason: reason,
       unlockRoute: DELIVERY_TIENDA_SETTINGS_PATH,
     };
   }
@@ -95,11 +109,15 @@ export function getDeliverySidebarItemLock(
 
 export function applyDeliveryStepLocks(
   steps: DeliveryActivationStepDef[],
-  _flags: DeliveryActivationFlags,
+  flags: DeliveryActivationFlags,
 ): Array<DeliveryActivationStepDef & { locked: boolean; lockedReason?: string; unlockRoute: string }> {
-  return steps.map((step) => ({
-    ...step,
-    locked: false,
-    unlockRoute: step.route,
-  }));
+  return steps.map((step) => {
+    const lock = getDeliveryStepLock(step.id, flags);
+    return {
+      ...step,
+      locked: lock.locked,
+      lockedReason: lock.lockedReason,
+      unlockRoute: lock.unlockRoute || step.route,
+    };
+  });
 }

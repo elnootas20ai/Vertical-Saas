@@ -7,11 +7,10 @@ import {
   cartLineUnitPrice,
   isCustomizableCatalogItem,
   isTpvBuildYourOwnCatalogItem,
+  isTpvHalfHalfCatalogItem,
   parseCatalogIngredients,
   parseCatalogSupplements,
-  productBrandIdsFromItem,
-  resolveTpvCategoryTemplateKey,
-  tpvBaseIngredientNames,
+  tpvBuildYourOwnIngredientPool,
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -69,9 +68,14 @@ export function TpvItemCustomizeModal({
   useModalClose(true, onClose);
 
   const buildYourOwn = isTpvBuildYourOwnCatalogItem(item);
+  const halfHalfSelected = Boolean(
+    initial?.halfHalfPizza?.firstProductId && initial?.halfHalfPizza?.secondProductId,
+  );
   const customizable =
     buildYourOwn ||
     isCustomizableCatalogItem(item, brands) ||
+    isTpvHalfHalfCatalogItem(item) ||
+    halfHalfSelected ||
     (initial?.comboSelections?.length ?? 0) > 0;
   const tpvResolveOptions = useMemo(
     () => ({
@@ -84,16 +88,12 @@ export function TpvItemCustomizeModal({
     }),
     [buildYourOwn, catalogItems, initial?.comboSelections, initial?.halfHalfPizza],
   );
-  const templateKey = useMemo(
-    () => resolveTpvCategoryTemplateKey(item, brands, tpvResolveOptions),
-    [item, brands, tpvResolveOptions],
-  );
   const buildYourOwnPool = useMemo(
     () =>
       buildYourOwn
-        ? tpvBaseIngredientNames(storeIngredients, productBrandIdsFromItem(item), templateKey)
+        ? tpvBuildYourOwnIngredientPool(item, storeIngredients, brandIngredientSelection, brands)
         : [],
-    [buildYourOwn, storeIngredients, item, templateKey],
+    [buildYourOwn, storeIngredients, brandIngredientSelection, brands, item],
   );
   const ingredients = useMemo(
     () =>
@@ -361,27 +361,17 @@ export function TpvItemCustomizeModal({
 
           {customizable && activeTab === 'ingredients' && (
             <section className="space-y-4">
-              <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 px-4 py-3">
-                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                  {buildYourOwn ? 'Elige ingredientes' : 'Ingredientes incluidos'}
-                </p>
-                <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-1">
-                  {buildYourOwn ? (
-                    <>
-                      Toca un ingrediente para <strong>añadirlo</strong> a la pizza al gusto.
-                    </>
-                  ) : (
-                    <>
-                      Toca un ingrediente para <strong>quitarlo</strong> del producto. Los tachados no irán a cocina.
-                    </>
-                  )}
-                </p>
-              </div>
               {(buildYourOwn ? buildYourOwnPool : ingredients).length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 px-4 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 leading-relaxed">
                   {buildYourOwn
                     ? 'Configura ingredientes base en Catálogo → Ingredientes TPV (paso 1, sin precio extra).'
-                    : (
+                    : halfHalfSelected
+                      ? (
+                        <>
+                          Sin ingredientes de las pizzas elegidas. Revisa que «{initial?.halfHalfPizza?.firstProductName}» y «{initial?.halfHalfPizza?.secondProductName}» tengan ingredientes en su ficha de catálogo o en <strong>Ingredientes TPV</strong>.
+                        </>
+                      )
+                      : (
                       <>
                         Sin ingredientes para quitar. En <strong>Catálogo</strong> abre la ficha de «{item.name}» y rellena
                         ingredientes, o impórtalos en Excel (columna <strong>ingredientes</strong>). También puedes marcar

@@ -83,7 +83,7 @@ export function BusinessType() {
         subtitle="Selecciona el sector que mejor describa tu actividad principal."
       />
 
-      <div className="flex-1 min-h-0 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2 auto-rows-fr content-stretch">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-visible grid grid-cols-[repeat(auto-fill,minmax(min(100%,8.75rem),1fr))] gap-2 auto-rows-fr content-start">
         {BUSINESS_TYPES.map((bt) => {
           const Icon = bt.icon;
           const enabled = ENABLED_TYPES.has(bt.id);

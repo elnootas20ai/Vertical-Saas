@@ -3,8 +3,9 @@ import { buildDeliverySidebarStoreRows } from './deliveryApi';
 import { sanitizeRetailScopeSnapshot } from './retailScopeSanitize';
 import type { WorkCenter } from './workCentersApi';
 
-const CACHE_PREFIX = 'vertial.sidebarRetail:v2:';
+const CACHE_PREFIX = 'vertial.sidebarRetail:v3:';
 const LEGACY_CACHE_PREFIX = 'vertial.sidebarRetail:v1:';
+const STALE_CACHE_PREFIX = 'vertial.sidebarRetail:v2:';
 
 export type SidebarRetailSnapshot = {
   rows: DeliverySidebarStoreRow[];
@@ -21,8 +22,13 @@ function purgeLegacySidebarRetailCache(): void {
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
-      if (!key?.startsWith(LEGACY_CACHE_PREFIX) || key.startsWith(CACHE_PREFIX)) continue;
-      localStorage.removeItem(key);
+      if (!key) continue;
+      if (
+        key.startsWith(LEGACY_CACHE_PREFIX) ||
+        key.startsWith(STALE_CACHE_PREFIX)
+      ) {
+        if (!key.startsWith(CACHE_PREFIX)) localStorage.removeItem(key);
+      }
     }
   } catch {
     /* ignore */

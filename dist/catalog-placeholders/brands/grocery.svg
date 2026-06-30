@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Despensa">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <path d="M62 78h76l-10 72H72z" fill="none" stroke="#475569" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M74 78l12-22h28l12 22" fill="none" stroke="#475569" stroke-width="8" stroke-linejoin="round"/>
+  <rect x="82" y="98" width="16" height="22" rx="4" fill="#22c55e"/>
+  <rect x="104" y="98" width="16" height="22" rx="4" fill="#f59e0b"/>
+  <circle cx="88" cy="132" r="8" fill="#ef4444"/>
+  <circle cx="112" cy="132" r="8" fill="#3b82f6"/>
+</svg>

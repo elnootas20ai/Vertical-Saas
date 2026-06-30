@@ -208,3 +208,36 @@ export function printDeliveryTicketBrowser(
     printHtmlInPopup(html);
   }
 }
+
+export function printTestTicketBrowser(paperWidthMm: 58 | 80 = 80) {
+  const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  const doc: TicketDocument = {
+    variant: 'customer',
+    title: 'PRUEBA',
+    ticketNo: 'TEST-001',
+    dateLabel: now,
+    issuer: 'Vertial TPV',
+    taxId: '',
+    addressLine: '',
+    phone: '',
+    salesPointName: '',
+    orderNumber: '0000',
+    customerName: 'Impresion de prueba',
+    customerPhone: '',
+    customerAddress: '',
+    deliveryTypeLabel: '',
+    cashierName: '',
+    lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],
+    base: 8.26,
+    vat: 1.73,
+    vatRate: 21,
+    total: 9.99,
+    paymentLabel: 'Efectivo',
+    paymentStatusLabel: 'Cobrado',
+    refundReason: '',
+    orderNotes: '',
+    footer: 'Si ves esto, la impresora funciona',
+    isRefund: false,
+  };
+  printDeliveryTicketBrowser({} as DeliveryTicketPrintOptions, doc);
+}

@@ -100,6 +100,7 @@ import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js'
 import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements, deductStaffConsumptionStock } from '../services/recipeStockService.js';
+import { deductOrderChannelPackaging } from '../services/orderChannelStockService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
 import {
   canEmitCatalogStockAlerts,
@@ -373,7 +374,17 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
       orderType: 'delivery_order',
       items: orderItems,
       performedBy: 'system',
+      deliveryType: doc.deliveryType || 'domicilio',
     });
+    const channelResult = await deductOrderChannelPackaging(req, userId, {
+      orderId: doc._id,
+      orderType: 'delivery_order',
+      deliveryType: doc.deliveryType || 'domicilio',
+      performedBy: 'system',
+    });
+    if (channelResult.warnings.length > 0) {
+      logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: channelResult.warnings }, 'Advertencias packaging canal');
+    }
     if (result.warnings.length > 0) {
       logger.warn({ tag: 'DELIVERY_STOCK', orderId: doc._id, warnings: result.warnings }, 'Advertencias al descontar stock por receta delivery');
     }
@@ -1269,7 +1280,7 @@ export async function createCatalogItem(req, res) {
     if (duplicate) {
       return res.status(409).json({
         ok: false,
-        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'SKU' : 'nombre'}`,
+        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'código' : 'nombre'}`,
       });
     }
     const saved = await putDocument(req, db, doc._id, doc);
@@ -1337,7 +1348,7 @@ export async function bulkCreateCatalogItems(req, res) {
         duplicateErrors.push({
           index: idx,
           name: doc?.name,
-          error: 'SKU duplicado',
+          error: 'Código duplicado',
         });
         return;
       }
@@ -1349,7 +1360,7 @@ export async function bulkCreateCatalogItems(req, res) {
     if (dedupedDocs.length === 0 && docsToUpdate.length === 0) {
       return res.status(409).json({
         ok: false,
-        error: 'No se pudo importar: todos los artículos están duplicados por SKU',
+        error: 'No se pudo importar: todos los artículos están duplicados por código',
         created: 0,
         errors: duplicateErrors.length,
         items: [],
@@ -1679,7 +1690,7 @@ export async function updateCatalogItem(req, res) {
     if (duplicate) {
       return res.status(409).json({
         ok: false,
-        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'SKU' : 'nombre'}`,
+        error: `Ya existe un artículo con ese ${duplicate.duplicatedField === 'sku' ? 'código' : 'nombre'}`,
       });
     }
     const saved = await putDocument(req, db, doc._id, doc);

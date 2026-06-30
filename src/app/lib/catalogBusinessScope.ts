@@ -1,10 +1,13 @@
 import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
+import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
 import { normalizeBusinessScopeId } from './deliverySetup';
 
 export type CatalogBusinessScopeOptions = {
   /** Número de empresas en la cuenta (evita mezclar legacy sin business_id). */
   accountBusinessCount?: number;
+  /** Tipo de la empresa activa (p. ej. delivery) — desbloquea bebidas/complementos sin línea. */
+  activeBusinessType?: string;
 };
 
 export function readCatalogItemBusinessId(
@@ -35,6 +38,16 @@ export function catalogItemBelongsToBusinessScope(
 
   if (itemBrandIds.length > 0) {
     return itemBrandIds.some((id) => brandIds.has(id));
+  }
+
+  const universalCategory = shouldClearBrandForCategory(String(item.category || ''));
+  if (universalCategory) {
+    if (itemBusinessId) return itemBusinessId === bid;
+    const accountN = options?.accountBusinessCount;
+    if (accountN !== undefined && accountN >= 2) {
+      return String(options?.activeBusinessType || '').trim() === 'delivery';
+    }
+    return brandIds.size > 0;
   }
 
   const accountN = options?.accountBusinessCount;

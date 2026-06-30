@@ -84,7 +84,48 @@ function getHeaders(): Record<string, string> {
   return h;
 }
 
-export const WORK_CENTERS_DB = (env.VITE_COUCHDB_DB || 'vertial') + '-sales-points';
+function couchDbPrefix(): string {
+  return String(env.VITE_COUCHDB_DB || 'vertial').trim().toLowerCase();
+}
+
+export const WORK_CENTERS_DB = `${couchDbPrefix()}-sales-points`;
+
+const LEGACY_WORK_CENTER_DB_PREFIXES = ['udar', 'vertial', 'uriellsaas', 'bbddsaas'];
+
+function legacyWorkCenterDbNames(): string[] {
+  const primary = String(env.VITE_COUCHDB_DB || 'vertial').trim().toLowerCase();
+  const names: string[] = [];
+  for (const prefix of LEGACY_WORK_CENTER_DB_PREFIXES) {
+    if (prefix.toLowerCase() === primary) continue;
+    names.push(`${prefix}-sales-points`);
+  }
+  return names;
+}
+
+async function fetchWorkCenterDocs(dbName: string): Promise<unknown[]> {
+  try {
+    const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(dbName)}`);
+    return payload.docs || [];
+  } catch {
+    return [];
+  }
+}
+
+async function listAllWorkCenterDocs(): Promise<unknown[]> {
+  await ensureDb();
+  const merged = new Map<string, unknown>();
+  for (const doc of await fetchWorkCenterDocs(WORK_CENTERS_DB)) {
+    const id = String((doc as { _id?: string })._id || '').trim();
+    if (id) merged.set(id, doc);
+  }
+  for (const legacyDb of legacyWorkCenterDbNames()) {
+    for (const doc of await fetchWorkCenterDocs(legacyDb)) {
+      const id = String((doc as { _id?: string })._id || '').trim();
+      if (id && !merged.has(id)) merged.set(id, doc);
+    }
+  }
+  return [...merged.values()];
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${getApiBase()}${path}`, {
@@ -166,7 +207,7 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
     province: doc.province ? String(doc.province) : undefined,
     phone: doc.phone ? String(doc.phone) : undefined,
     email: doc.email ? String(doc.email) : undefined,
-    expectedStaffCount: doc.expectedStaffCount != null ? Math.max(1, Math.floor(Number(doc.expectedStaffCount))) : 3,
+    expectedStaffCount: doc.expectedStaffCount != null ? Math.max(0, Math.floor(Number(doc.expectedStaffCount))) : 0,
     squareMeters: doc.squareMeters != null ? Number(doc.squareMeters) : undefined,
     notes: doc.notes ? String(doc.notes) : undefined,
     openingHours:
@@ -183,9 +224,8 @@ function normalizeWorkCenter(value: unknown): WorkCenter | null {
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
 export async function listWorkCenters(userId: string): Promise<WorkCenter[]> {
-  await ensureDb();
-  const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
-  return ((payload.docs || []) as unknown[])
+  const docs = await listAllWorkCenterDocs();
+  return docs
     .map(normalizeWorkCenter)
     .filter((wc): wc is WorkCenter => wc !== null && wc.user_id === userId)
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -202,15 +242,13 @@ export async function listWorkCentersForDelivery(
 ): Promise<WorkCenter[]> {
   const id = String(dataUserId || '').trim();
   if (!id) return [];
-  await ensureDb();
-  const payload = await req<{ docs: unknown[] }>(`/api/couch/docs/${encodeURIComponent(WORK_CENTERS_DB)}`);
   const allowed = new Set<string>();
   addAllowedUserId(allowed, id);
   addAllowedUserId(allowed, String(business?.owner_user_id || '').trim());
   for (const m of business?.members || []) {
     addAllowedUserId(allowed, String(m.user_id || '').trim());
   }
-  return ((payload.docs || []) as unknown[])
+  return (await listAllWorkCenterDocs())
     .map(normalizeWorkCenter)
     .filter((wc): wc is WorkCenter => wc !== null && isAllowedUserId(allowed, wc.user_id))
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));

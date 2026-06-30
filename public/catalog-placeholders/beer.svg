@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Cerveza">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fffbeb"/>
+      <stop offset="100%" stop-color="#fcd34d"/>
+    </linearGradient>
+    <linearGradient id="beer" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <ellipse cx="100" cy="168" rx="40" ry="8" fill="#000" opacity=".08"/>
+  <path d="M72 78h56v72c0 10-12 16-28 16s-28-6-28-16V78z" fill="url(#beer)" stroke="#b45309" stroke-width="3"/>
+  <ellipse cx="100" cy="78" rx="28" ry="8" fill="#fff7ed"/>
+  <path d="M78 70c6-10 38-10 44 0" stroke="#fff" stroke-width="6" stroke-linecap="round" opacity=".7"/>
+  <rect x="128" y="86" width="16" height="44" rx="4" fill="#fef3c7" stroke="#b45309" stroke-width="3"/>
+</svg>

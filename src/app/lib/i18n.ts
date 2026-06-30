@@ -76,7 +76,7 @@ const es = {
       vacations: 'Vacaciones',
       'horarios-vacaciones': 'Horarios y Vacaciones',
       catalog: 'Catálogo',
-      articles: 'Stock',
+      articles: 'Inventario',
       brands: 'Marcas',
       salesPoints: 'Centros de Trabajo',
       suppliers: 'Proveedores',

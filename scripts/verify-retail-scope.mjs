@@ -34,9 +34,9 @@ function filterWC(workCenters, businessId, accountN) {
   const bid = String(businessId || '').trim();
   const active = workCenters.filter((wc) => !wc.deletedAt);
   const mine = active.filter((wc) => readBid(wc) === bid);
+  const mineRetail = mine.filter(isRetail);
   if (accountN === undefined) return mine;
-  if (accountN >= 2) return mine;
-  if (accountN === 1) {
+  if (mineRetail.length === 0) {
     const legacy = active.filter((wc) => !readBid(wc) && isRetail(wc));
     const merged = new Map();
     for (const wc of [...mine, ...legacy]) merged.set(wc._id, wc);

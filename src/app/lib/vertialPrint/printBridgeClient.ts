@@ -1,5 +1,6 @@
 import {
-  VERTIAL_PRINT_BRIDGE_URL,
+  loadPrinterConfig,
+  resolveBridgeUrl,
   type VertialPrinterConfig,
 } from './printerConfig';
 
@@ -40,11 +41,15 @@ export function buildBridgeConnection(config: VertialPrinterConfig): BridgePrint
   return { type: 'system', name };
 }
 
-export async function fetchBridgeHealth(timeoutMs = 1200): Promise<BridgeHealth> {
+function bridgeUrl(config?: VertialPrinterConfig): string {
+  return resolveBridgeUrl(config ?? loadPrinterConfig());
+}
+
+export async function fetchBridgeHealth(timeoutMs = 1200, config?: VertialPrinterConfig): Promise<BridgeHealth> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(`${VERTIAL_PRINT_BRIDGE_URL}/v1/health`, { signal: controller.signal });
+    const res = await fetch(`${bridgeUrl(config)}/v1/health`, { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) return { ok: false };
     const data = await res.json() as BridgeHealth;
@@ -54,9 +59,9 @@ export async function fetchBridgeHealth(timeoutMs = 1200): Promise<BridgeHealth>
   }
 }
 
-export async function fetchBridgePrinters(): Promise<BridgePrinterInfo[]> {
+export async function fetchBridgePrinters(config?: VertialPrinterConfig): Promise<BridgePrinterInfo[]> {
   try {
-    const res = await fetch(`${VERTIAL_PRINT_BRIDGE_URL}/v1/printers`);
+    const res = await fetch(`${bridgeUrl(config)}/v1/printers`);
     if (!res.ok) return [];
     const data = await res.json() as { printers?: BridgePrinterInfo[] };
     return Array.isArray(data.printers) ? data.printers : [];
@@ -71,11 +76,11 @@ export async function sendEscposToBridge(
 ): Promise<{ ok: boolean; error?: string }> {
   const connection = buildBridgeConnection(config);
   if (!connection) {
-    return { ok: false, error: 'Configura la impresora en Ajustes → Tienda → Impresora TPV' };
+    return { ok: false, error: 'Configura la impresora en el TPV (icono de impresora arriba)' };
   }
 
   try {
-    const res = await fetch(`${VERTIAL_PRINT_BRIDGE_URL}/v1/print`, {
+    const res = await fetch(`${bridgeUrl(config)}/v1/print`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -89,6 +94,6 @@ export async function sendEscposToBridge(
     }
     return { ok: true };
   } catch {
-    return { ok: false, error: 'Vertial Print no responde. Ejecuta: npm run print-bridge' };
+    return { ok: false, error: 'No se detectó el servicio de impresión. Comprueba el PC del mostrador.' };
   }
 }

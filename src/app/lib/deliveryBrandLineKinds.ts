@@ -3,6 +3,8 @@ export type DeliveryBrandLineKindId =
   | 'prepared_meals'
   | 'pizza'
   | 'burger_fastfood'
+  | 'kebab'
+  | 'tapas_bar'
   | 'sushi_asian'
   | 'cafe_bakery'
   | 'drinks_desserts'
@@ -22,11 +24,36 @@ export type DeliveryBrandLinePreset = {
   typicalCategories: string[];
 };
 
+const LINE_PHOTO_BASE = '/catalog-placeholders/photos';
+
+/** Foto representativa por tipo de carta (selector de marca). */
+export const DELIVERY_BRAND_LINE_PHOTOS: Record<DeliveryBrandLineKindId, string> = {
+  prepared_meals: `${LINE_PHOTO_BASE}/combo.webp`,
+  pizza: `${LINE_PHOTO_BASE}/pizza-lite.webp`,
+  burger_fastfood: `${LINE_PHOTO_BASE}/burger-lite.webp`,
+  kebab: `${LINE_PHOTO_BASE}/kebab.webp`,
+  tapas_bar: `${LINE_PHOTO_BASE}/tapas.webp`,
+  sushi_asian: `${LINE_PHOTO_BASE}/sushi.webp`,
+  cafe_bakery: `${LINE_PHOTO_BASE}/cafe.webp`,
+  drinks_desserts: `${LINE_PHOTO_BASE}/drink.webp`,
+  groceries: `${LINE_PHOTO_BASE}/grocery.webp`,
+  mixed_restaurant: `${LINE_PHOTO_BASE}/restaurant.webp`,
+  other: `${LINE_PHOTO_BASE}/generic-brand.webp`,
+};
+
+/** Ocultos en el selector (siguen válidos en marcas ya creadas). */
+export const DELIVERY_BRAND_LINE_PICKER_HIDDEN: DeliveryBrandLineKindId[] = [
+  'drinks_desserts',
+  'mixed_restaurant',
+];
+
 /** Pastel + icono (misma línea que tipos de centro en Ajustes → Tienda). */
 export const DELIVERY_BRAND_LINE_ICON_BOX: Record<DeliveryBrandLineKindId, string> = {
   prepared_meals: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400',
   pizza: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',
   burger_fastfood: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  kebab: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
+  tapas_bar: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400',
   sushi_asian: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
   cafe_bakery: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
   drinks_desserts: 'bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400',
@@ -65,6 +92,26 @@ export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
     primaryColor: '#D97706',
     description: 'Hamburguesas, combos y complementos tipo fast food.',
     typicalCategories: ['Burgers', 'Complementos', 'Postres', 'Bebidas'],
+  },
+  {
+    id: 'kebab',
+    label: 'Kebab / döner',
+    hint: 'Kebab, döner, wraps y complementos',
+    suggestedName: 'Kebab',
+    shortCode: 'KEB',
+    primaryColor: '#B45309',
+    description: 'Kebab, döner, wraps y complementos.',
+    typicalCategories: ['Kebab', 'Complementos', 'Bebidas', 'Menús'],
+  },
+  {
+    id: 'tapas_bar',
+    label: 'Bar / tapas',
+    hint: 'Tapas, raciones, cervecería',
+    suggestedName: 'Bar',
+    shortCode: 'BAR',
+    primaryColor: '#7C2D12',
+    description: 'Tapas, raciones y carta de bar.',
+    typicalCategories: ['Tapas', 'Raciones', 'Bebidas', 'Complementos'],
   },
   {
     id: 'sushi_asian',
@@ -127,6 +174,11 @@ export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
     typicalCategories: ['Principales', 'Bebidas', 'Complementos'],
   },
 ];
+
+/** Presets visibles al crear/editar línea comercial. */
+export const DELIVERY_BRAND_LINE_PRESETS_PICKER = DELIVERY_BRAND_LINE_PRESETS.filter(
+  (p) => !DELIVERY_BRAND_LINE_PICKER_HIDDEN.includes(p.id),
+);
 
 export function getDeliveryBrandLinePreset(id: string | undefined | null): DeliveryBrandLinePreset | undefined {
   return DELIVERY_BRAND_LINE_PRESETS.find((p) => p.id === id);

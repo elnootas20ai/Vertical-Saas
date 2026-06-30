@@ -20,6 +20,7 @@ import {
 import { filterStockInventoryItems } from '../../lib/stockInventoryScope';
 import { StockRevisionPanel } from './StockRevisionPanel';
 import { StockPurchaseListPreview } from './StockPurchaseListPreview';
+import { SaasTabWorkspace } from './SaasTabWorkspace';
 import {
   formatStockDate,
   formatStockTime,
@@ -528,54 +529,64 @@ export function StockTabPanel({
           <p className="text-sm font-medium">Cargando inventario…</p>
         </div>
       ) : (
-      <>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl text-sm">
-        <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
-        <span className="text-blue-900 dark:text-blue-100">
-          Stock de <strong>{storeLabel}</strong>
-          {wh?.name ? ` · Almacén: ${wh.name}` : ''}
-        </span>
-        <span className="text-blue-700/70 dark:text-blue-300/70 text-xs">
-          (cambia la tienda en la barra superior)
-        </span>
-      </div>
-
-      {/* Navegación principal */}
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-        {SECTION_TABS.map(({ id, label, icon: Icon }) => {
-          const isActive = section === id;
-          const badge =
-            id === 'operations' && (pendingItems.length > 0 || activeCount)
-              ? (activeCount ? 'en curso' : pendingItems.length)
-              : id === 'inventory' && (inventoryStats.low + inventoryStats.out > 0)
-                ? inventoryStats.low + inventoryStats.out
-                : null;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSection(id)}
-              className={`inline-flex items-center gap-2 px-4 py-3 min-h-[44px] touch-manipulation rounded-xl text-sm font-semibold border transition-colors shrink-0 ${
-                isActive
-                  ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent'
-                  : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-              {badge !== null && (
-                <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${
-                  isActive ? 'bg-white/20 dark:bg-gray-900/20' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
-                }`}
+      <SaasTabWorkspace
+        stats={[
+          { label: 'artículos', value: inventoryStats.total },
+          {
+            label: 'alertas',
+            value: inventoryStats.low + inventoryStats.out,
+            tone: inventoryStats.low + inventoryStats.out > 0 ? 'amber' : 'default',
+          },
+          { label: 'valor €', value: estimatedValue.toFixed(0) },
+        ]}
+        banner={
+          <span className="inline-flex items-center gap-1.5 text-blue-900 dark:text-blue-100">
+            <MapPin className="w-3.5 h-3.5 shrink-0" />
+            Stock de <strong>{storeLabel}</strong>
+            {wh?.name ? ` · ${wh.name}` : ''}
+            <span className="text-blue-700/70 dark:text-blue-300/70">(cambia tienda arriba)</span>
+          </span>
+        }
+        toolbar={
+          <div className="flex gap-1 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+            {SECTION_TABS.map(({ id, label, icon: Icon }) => {
+              const isActive = section === id;
+              const badge =
+                id === 'operations' && (pendingItems.length > 0 || activeCount)
+                  ? (activeCount ? 'en curso' : pendingItems.length)
+                  : id === 'inventory' && (inventoryStats.low + inventoryStats.out > 0)
+                    ? inventoryStats.low + inventoryStats.out
+                    : null;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setSection(id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] touch-manipulation rounded-lg text-xs font-semibold border transition-colors shrink-0 ${
+                    isActive
+                      ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-transparent'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
                 >
-                  {badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                  {badge !== null ? (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        isActive
+                          ? 'bg-white/20 dark:bg-gray-900/20'
+                          : 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        }
+      >
       {/* ── Resumen ── */}
       {section === 'summary' && (
         <div className="space-y-4">
@@ -1041,7 +1052,7 @@ export function StockTabPanel({
         userId={userId}
         businessType={businessType}
       />
-      </>
+      </SaasTabWorkspace>
       )}
     </div>
   );

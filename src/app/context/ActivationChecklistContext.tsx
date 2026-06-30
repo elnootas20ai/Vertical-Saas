@@ -13,16 +13,20 @@ import {
   loadTpvPointsOfSaleForBusiness,
   snapshotDeliveryStoreActivation,
   isDeliveryBusinessType,
+  resolveBusinessScopeId,
 } from '../lib/deliverySetup';
-import { isBrandSetupComplete, isDefaultCommercialBrand } from '../lib/brandUtils';
+import { isDeliveryBrandActivationComplete } from '../lib/brandUtils';
 import { anyActiveRetailStoreHasOpeningHours } from '../lib/businessHoursUtils';
 import {
-  activationInProgressKey,
+  ACTIVATION_IN_PROGRESS_CHANGED,
+  getActivationInProgressStep,
   isActivationChecklistDismissed,
   isActivationChecklistForceVisible,
+  isOnboardingTourActive,
   markOnboardingTourCompleted,
   setActivationChecklistDismissed,
   setActivationChecklistForceVisible,
+  setActivationInProgressStep,
   setOnboardingTourActive,
 } from '../lib/onboardingLocalKeys';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
@@ -79,24 +83,33 @@ function resolveAccountUserId(user: { user_id?: string; id?: string } | null | u
 
 type StepDef = Omit<OnboardingStep, 'status' | 'completedSubSteps' | 'totalSubSteps'>;
 
+function isStepDataComplete(def: Pick<StepDef, 'subSteps'>): boolean {
+  return def.subSteps.length > 0 && def.subSteps.every((s) => s.completed);
+}
+
 function finalizeStepDefs(
   defs: StepDef[],
   activeStepKey: string | null,
 ): OnboardingStep[] {
+  const allStepsGloballyDone =
+    defs.length > 0 && defs.every((d) => isStepDataComplete(d));
+
   const firstActionableId =
     defs.find((d) => {
-      const completedSub = d.subSteps.filter((s) => s.completed).length;
-      const allDone = d.subSteps.length > 0 && completedSub === d.subSteps.length;
+      const allDone = isStepDataComplete(d);
       return !allDone && !d.locked;
     })?.id ?? null;
 
   return defs.map((def) => {
     const completedSub = def.subSteps.filter((s) => s.completed).length;
-    const allDone = def.subSteps.length > 0 && completedSub === def.subSteps.length;
+    const allDone = isStepDataComplete(def);
     const inProgress = completedSub > 0 && !allDone;
 
     let status: StepStatus = 'pending';
-    if (allDone) {
+    const repasar = allDone && activeStepKey === def.id && !allStepsGloballyDone;
+    if (repasar) {
+      status = 'in_progress';
+    } else if (allDone) {
       status = 'completed';
     } else if (def.locked) {
       status = 'pending';
@@ -125,13 +138,14 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const [deliveryFlags, setDeliveryFlags] = useState<DeliveryActivationFlags | null>(null);
   const deliveryFlagsRef = useRef<DeliveryActivationFlags | null>(null);
   const accountUserId = resolveAccountUserId(user);
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const bizName = currentBusiness?.name ?? '';
   const bizTaxId = currentBusiness?.taxId ?? '';
   const bizAddress = currentBusiness?.address ?? '';
   const bizPhone = currentBusiness?.phone ?? '';
   const [isDismissed, setIsDismissed] = useState(false);
   const [forceVisible, setForceVisible] = useState(false);
+  const [activeStepKey, setActiveStepKey] = useState<string | null>(null);
 
   useEffect(() => {
     setIsDismissed(
@@ -144,6 +158,22 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         ? isActivationChecklistForceVisible(accountUserId, businessId)
         : false,
     );
+    setActiveStepKey(
+      accountUserId && businessId
+        ? getActivationInProgressStep(accountUserId, businessId)
+        : null,
+    );
+  }, [accountUserId, businessId]);
+
+  useEffect(() => {
+    if (!accountUserId || !businessId) return;
+    const onStepChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; businessId?: string }>).detail;
+      if (detail?.userId !== accountUserId || detail?.businessId !== businessId) return;
+      setActiveStepKey(getActivationInProgressStep(accountUserId, businessId));
+    };
+    window.addEventListener(ACTIVATION_IN_PROGRESS_CHANGED, onStepChanged);
+    return () => window.removeEventListener(ACTIVATION_IN_PROGRESS_CHANGED, onStepChanged);
   }, [accountUserId, businessId]);
 
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
@@ -188,19 +218,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           catalog,
           businessId,
           brands,
-          { accountBusinessCount: businessesCount },
+          { accountBusinessCount: businessesCount, activeBusinessType: 'delivery' },
         );
         const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
-        const primaryBrand =
-          brands.find((b) => isDefaultCommercialBrand(b)) ??
-          brands.find((b) => b.active !== false) ??
-          brands[0] ??
-          null;
         const setupCtx = { isDelivery: true, retailStoreCount: retailStores.length };
-        const brandReady = primaryBrand
-          ? isBrandSetupComplete(primaryBrand, setupCtx)
-          : false;
+        const brandReady = isDeliveryBrandActivationComplete(brands, setupCtx);
 
         const nextFlags: DeliveryActivationFlags = {
           hasCompanyName: Boolean(bizName.trim()),
@@ -262,17 +285,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   const hasSales = sales.length > 0;
 
   const steps: OnboardingStep[] = useMemo(() => {
-    let activeStepKey: string | null = null;
-    try {
-      activeStepKey =
-        accountUserId && businessId
-          ? localStorage.getItem(activationInProgressKey(accountUserId, businessId))
-          : null;
-    } catch { /* noop */ }
-
     if (isDelivery) {
-      const flags = deliveryFlags ?? deliveryFlagsRef.current;
-      if (!flags) return [];
+      const flags = deliveryFlags ?? deliveryFlagsRef.current ?? EMPTY_DELIVERY_ACTIVATION_FLAGS;
       return finalizeStepDefs(buildDeliveryActivationStepDefs(flags), activeStepKey);
     }
 
@@ -311,6 +325,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     return finalizeStepDefs(defs, activeStepKey);
   }, [
     accountUserId,
+    businessId,
+    activeStepKey,
     isDelivery,
     deliveryFlags,
     hasCompanyName,
@@ -341,7 +357,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     stableStepsRef.current = steps;
   }
 
-  const completedSteps = displaySteps.filter(s => s.status === 'completed').length;
+  const completedSteps = displaySteps.filter(
+    (s) => s.totalSubSteps > 0 && s.completedSubSteps === s.totalSubSteps,
+  ).length;
   const totalSteps = displaySteps.length;
   const completionPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
 
@@ -350,22 +368,41 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     return idx === -1 ? Math.max(displaySteps.length - 1, 0) : idx;
   }, [displaySteps]);
 
+  const deliveryActivationIncomplete = isDelivery && totalSteps > 0 && completionPct < 100;
+
+  useEffect(() => {
+    if (!accountUserId || !businessId || completionPct < 100) return;
+    if (!getActivationInProgressStep(accountUserId, businessId)) return;
+    setActivationInProgressStep(accountUserId, businessId, null);
+    setActiveStepKey(null);
+  }, [completionPct, accountUserId, businessId]);
+
+  useEffect(() => {
+    if (!deliveryActivationIncomplete || !accountUserId || !businessId) return;
+    setIsDismissed(false);
+    setActivationChecklistDismissed(accountUserId, businessId, false);
+  }, [deliveryActivationIncomplete, accountUserId, businessId]);
+
   useEffect(() => {
     if (completionPct !== 100 || !accountUserId || !businessId) return;
+    if (isOnboardingTourActive(accountUserId, businessId)) return;
     markOnboardingTourCompleted(accountUserId, businessId);
     setOnboardingTourActive(accountUserId, businessId, false);
     if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
-    setIsDismissed(true);
-    setActivationChecklistDismissed(accountUserId, businessId, true);
-  }, [completionPct, accountUserId, businessId]);
+    if (!isDelivery) {
+      setIsDismissed(true);
+      setActivationChecklistDismissed(accountUserId, businessId, true);
+    }
+  }, [completionPct, accountUserId, businessId, isDelivery]);
 
   const dismiss = useCallback(() => {
+    if (isDelivery && completionPct < 100) return;
     setIsDismissed(true);
     if (accountUserId && businessId) {
       setActivationChecklistDismissed(accountUserId, businessId, true);
       if (isDelivery) setActivationChecklistForceVisible(accountUserId, businessId, false);
     }
-  }, [accountUserId, businessId, isDelivery]);
+  }, [accountUserId, businessId, isDelivery, completionPct]);
 
   const restore = useCallback(() => {
     setIsDismissed(false);
@@ -382,7 +419,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, []);
 
   const isVisible =
-    totalSteps > 0 && !isDismissed && (completionPct < 100 || forceVisible);
+    totalSteps > 0 &&
+    !isDismissed &&
+    (completionPct < 100 || forceVisible);
 
   return (
     <ActivationChecklistContext.Provider

@@ -10,6 +10,7 @@ import {
   deleteBrandRequest,
   type Brand,
 } from '../../lib/brandApi';
+import { resolveBrandLogo } from '../../lib/brandPlaceholders';
 import {
   Plus,
   Search,
@@ -427,24 +428,11 @@ export function BrandsPage() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    {brand.logo ? (
-                      <img
-                        src={brand.logo}
-                        alt={brand.name}
-                        className="w-10 h-10 rounded-lg object-contain border border-gray-200 dark:border-gray-700 shrink-0"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                          (
-                            e.target as HTMLImageElement
-                          ).nextElementSibling?.classList.remove('hidden');
-                        }}
-                      />
-                    ) : null}
-                    <div
-                      className={`w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 ${brand.logo ? 'hidden' : ''}`}
-                    >
-                      <Tag className="w-5 h-5 text-gray-400" />
-                    </div>
+                    <img
+                      src={resolveBrandLogo(brand)}
+                      alt={brand.name}
+                      className="w-10 h-10 rounded-lg object-contain border border-gray-200 dark:border-gray-700 shrink-0"
+                    />
                     <div className="min-w-0">
                       <h3 className="font-bold text-gray-900 dark:text-gray-100 truncate">
                         {brand.name}

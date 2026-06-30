@@ -557,17 +557,6 @@ export function Login() {
             <button
               type="button"
               onClick={() => {
-                setLoginMode('emailCode');
-                setErrors({});
-              }}
-              disabled={isSubmitting}
-              className="w-full text-sm text-center text-indigo-600 dark:text-indigo-400 hover:underline"
-            >
-              Entrar con código del correo (6 dígitos)
-            </button>
-            <button
-              type="button"
-              onClick={() => {
                 setLoginMode('tpvStore');
                 setErrors({});
               }}

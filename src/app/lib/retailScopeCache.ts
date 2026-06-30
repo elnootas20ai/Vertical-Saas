@@ -105,6 +105,42 @@ export function seedRetailScopeCacheFromTabletLogin(params: {
   });
 }
 
+/** Tras alta/edición de tienda + PDV: actualiza caché al instante (gate Marca / sidebar). */
+export function mergeRetailScopeCacheEntry(
+  businessId: string,
+  workCenter: WorkCenter,
+  pointOfSale: PointOfSale,
+  options?: { accountBusinessCount?: number },
+): void {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid || !workCenter?._id || !pointOfSale?._id) return;
+
+  const existing = readRetailScopeCache(bid, options);
+  const retailWorkCenters = [...(existing?.retailWorkCenters ?? [])];
+  const allPointsOfSale = [...(existing?.allPointsOfSale ?? [])];
+
+  const wcIdx = retailWorkCenters.findIndex((wc) => wc._id === workCenter._id);
+  if (wcIdx >= 0) retailWorkCenters[wcIdx] = workCenter;
+  else retailWorkCenters.push(workCenter);
+
+  const pdvForCache: PointOfSale = {
+    ...pointOfSale,
+    workCenterId: String(pointOfSale.workCenterId || workCenter._id).trim(),
+    active: pointOfSale.active !== false,
+  };
+  const pdvIdx = allPointsOfSale.findIndex((p) => p._id === pdvForCache._id);
+  if (pdvIdx >= 0) allPointsOfSale[pdvIdx] = pdvForCache;
+  else allPointsOfSale.push(pdvForCache);
+
+  writeRetailScopeCache(
+    bid,
+    { retailWorkCenters, allPointsOfSale },
+    options?.accountBusinessCount !== undefined
+      ? { accountBusinessCount: options.accountBusinessCount }
+      : undefined,
+  );
+}
+
 export function clearRetailScopeCache(businessId?: string): void {
   if (typeof sessionStorage === 'undefined') return;
   try {

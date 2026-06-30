@@ -7,10 +7,14 @@ import {
 } from 'lucide-react';
 import { useActivationChecklist, type OnboardingStep } from '../../context/ActivationChecklistContext';
 import { useBusiness } from '../../context/BusinessContext';
-import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { isDeliveryBusinessType, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
 import { useAuth } from '../../context/AuthContext';
-import { dismissOnboardingWelcomeTourForActivation } from '../../lib/onboardingLocalKeys';
+import {
+  dismissOnboardingWelcomeTourForActivation,
+  setActivationInProgressStep,
+  setOnboardingTourActive,
+} from '../../lib/onboardingLocalKeys';
 
 const ACTIVATION_CHECKLIST_EXPANDED_KEY = 'saas_activation_checklist_expanded';
 
@@ -60,7 +64,7 @@ export function ActivationChecklist({ collapsed }: Props) {
   const allStepsDone = totalSteps > 0 && completedSteps >= totalSteps;
   const [expanded, setExpanded] = useState(readExpandedPreference);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const canDismissChecklist = true;
+  const canDismissChecklist = !isDelivery || allStepsDone;
   const checklistTitle = isDelivery ? 'Alta delivery' : 'Arranque rápido';
 
   useEffect(() => {
@@ -132,7 +136,7 @@ export function ActivationChecklist({ collapsed }: Props) {
             <button
               onClick={dismiss}
               className="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors ml-1"
-              title="Ocultar por ahora"
+              title="Ocultar del menú (no volver a mostrar)"
             >
               <X className="w-3 h-3 text-gray-400 dark:text-gray-500" />
             </button>
@@ -165,6 +169,7 @@ export function ActivationChecklist({ collapsed }: Props) {
             <StepRow
               key={step.id}
               step={step}
+              isDelivery={isDelivery}
               onNavigate={(url) => navigate(url)}
             />
           ))}
@@ -185,9 +190,11 @@ export function ActivationChecklist({ collapsed }: Props) {
 function StepRow({
   step,
   onNavigate,
+  isDelivery,
 }: {
   step: OnboardingStep;
   onNavigate: (url: string) => void;
+  isDelivery: boolean;
 }) {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
@@ -196,19 +203,26 @@ function StepRow({
   const isLocked = Boolean(step.locked) && !isCompleted;
   const route = step.locked && step.unlockRoute ? step.unlockRoute : step.route;
 
-  const navigateForActivation = (url: string) => {
+  const navigateForActivation = (url: string, stepId?: string) => {
     const uid = String(user?.user_id || user?.id || '').trim();
-    const bid = String(currentBusiness?.business_id || '').trim();
-    dismissOnboardingWelcomeTourForActivation(uid, bid);
+    const bid = resolveBusinessScopeId(currentBusiness);
+    if (uid && bid && stepId) {
+      setActivationInProgressStep(uid, bid, stepId);
+    }
+    if (isDelivery) {
+      setOnboardingTourActive(uid, bid, true);
+    } else {
+      dismissOnboardingWelcomeTourForActivation(uid, bid);
+    }
     onNavigate(url);
   };
 
   const handleStepClick = () => {
     if (isLocked && step.unlockRoute) {
-      navigateForActivation(step.unlockRoute);
+      navigateForActivation(step.unlockRoute, step.id);
       return;
     }
-    navigateForActivation(route);
+    navigateForActivation(route, step.id);
   };
 
   return (
@@ -313,7 +327,7 @@ function StepRow({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigateForActivation(buildActivationTargetUrl(route, sub.id));
+                        navigateForActivation(buildActivationTargetUrl(route, sub.id), step.id);
                       }}
                       className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-500 hover:bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
                       title={canDeepLink ? 'Ir y resaltar el campo' : 'Ir a la pantalla'}

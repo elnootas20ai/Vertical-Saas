@@ -2,8 +2,10 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { ACCESO__Stepper } from '../../design-system/ACCESO__Stepper';
 import { VertialLogo } from '../../VertialLogo';
+import { AccesoCompactHero } from '../AccesoCompactHero';
 import { OnboardingHeroPanel } from './OnboardingHeroPanel';
 import { ONBOARDING_ROUTES, ONBOARDING_STEPS } from '../../../context/OnboardingContext';
+import { getOnboardingVisualKeyForStep } from '../../../lib/onboardingVisuals';
 
 type Props = {
   stepIndex: number;
@@ -12,7 +14,7 @@ type Props = {
   footer: ReactNode;
 };
 
-/** Pantalla completa: panel formulario + hero Vertial (desktop). */
+/** Pantalla completa: formulario centrado + hero lateral solo en pantallas muy anchas (2xl). */
 export function OnboardingStepShell({
   stepIndex,
   maxWidth = 'max-w-3xl',
@@ -20,9 +22,10 @@ export function OnboardingStepShell({
   footer,
 }: Props) {
   const navigate = useNavigate();
+  const visualKey = getOnboardingVisualKeyForStep(stepIndex);
 
   return (
-    <div className="h-dvh max-h-dvh min-h-0 grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,38%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-dvh 2xl:h-dvh 2xl:max-h-dvh min-h-0 grid 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
       <div className="flex min-h-0 flex-col overflow-hidden">
         <header className="shrink-0 z-20 border-b border-gray-200/80 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 px-4 sm:px-6 pt-3 pb-2.5">
           <div className={`mx-auto flex w-full ${maxWidth} flex-col gap-3`}>
@@ -42,6 +45,11 @@ export function OnboardingStepShell({
             />
           </div>
         </header>
+
+        <AccesoCompactHero
+          visualKey={visualKey}
+          className="mx-4 mt-3 shrink-0 sm:mx-6 2xl:hidden"
+        />
 
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
           <div className={`mx-auto flex w-full ${maxWidth} min-h-0 flex-1 flex-col gap-3 overflow-hidden`}>

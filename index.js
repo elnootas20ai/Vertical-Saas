@@ -224,6 +224,20 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
+/** CouchDB solo admite nombres en minúsculas; el front legacy envía p.ej. BBDDsaas-sales-points. */
+function normalizeCouchDbParam(name) {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_$()+/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+app.param('dbName', (req, _res, next, value) => {
+  req.params.dbName = normalizeCouchDbParam(value);
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());

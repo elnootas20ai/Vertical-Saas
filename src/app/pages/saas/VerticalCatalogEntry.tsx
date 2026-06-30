@@ -16,5 +16,5 @@ export function VerticalArticlesRedirect() {
   if (currentBusiness?.businessType === 'carDealership') {
     return <Navigate to="/saas/vehicles" replace />;
   }
-  return <Navigate to="/saas/catalog?tab=stock" replace />;
+  return <Navigate to="/saas/inventory" replace />;
 }

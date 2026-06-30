@@ -10,6 +10,11 @@ import {
   pickPrimaryAccountByEmail,
 } from './accountEmailRules.js';
 import {
+  ACCOUNT_AUTH_TOKEN_FIELDS,
+  accountMatchesAuthToken,
+  hashAuthToken,
+} from './accountAuthTokens.js';
+import {
   clientMatchesBusinessScope,
   clientSearchPrefersPhone,
   normalizeClientBusinessScopeId,
@@ -174,6 +179,7 @@ export async function getAllDocuments(req, dbName) {
   const cached = cacheService.get(cacheKey);
   if (cached) return cached;
 
+  const generationAtStart = cacheService.getDbGeneration(dbName);
   const encodedDbName = encodeURIComponent(dbName);
   const response = await couchRequest(req, `/${encodedDbName}/_all_docs?include_docs=true`);
   const payload = await response.json().catch(() => ({}));
@@ -183,7 +189,10 @@ export async function getAllDocuments(req, dbName) {
   }
 
   const docs = Array.isArray(payload.rows) ? payload.rows.map((row) => row.doc).filter(Boolean) : [];
-  cacheService.set(cacheKey, docs, cacheService.TTL_PRESETS.DOCS_LIST);
+  // No guardar si hubo escrituras mientras leíamos: evita re-cachear lista obsoleta tras registro/verify.
+  if (cacheService.getDbGeneration(dbName) === generationAtStart) {
+    cacheService.set(cacheKey, docs, cacheService.TTL_PRESETS.DOCS_LIST);
+  }
   return docs;
 }
 
@@ -1412,7 +1421,23 @@ function normalizeSessions(sessions) {
 }
 
 export function hashToken(rawToken) {
-  return crypto.createHash('sha256').update(rawToken).digest('hex');
+  return hashAuthToken(rawToken);
+}
+
+/** Tras localizar una cuenta en lista cacheada, relee el doc en CouchDB antes de confiar en el token. */
+async function readFreshAccountForAuthToken(req, account, rawToken, fields) {
+  if (!account?._id) return null;
+  const fresh = await getDocument(req, ACCOUNTS_DB, account._id);
+  if (!accountMatchesAuthToken(fresh, rawToken, fields)) return null;
+  return fresh;
+}
+
+async function findAccountByAuthTokenInList(req, rawToken, fields) {
+  if (!rawToken) return null;
+  const accounts = await listAccounts(req);
+  const match = accounts.find((a) => accountMatchesAuthToken(a, rawToken, fields));
+  if (!match?._id) return null;
+  return readFreshAccountForAuthToken(req, match, rawToken, fields);
 }
 
 export function hashPassword(password) {
@@ -1432,16 +1457,7 @@ export async function saveResetToken(req, account, rawToken) {
 }
 
 export async function findAccountByResetToken(req, rawToken) {
-  const tokenHash = hashToken(rawToken);
-  const accounts = await listAccounts(req);
-  return (
-    accounts.find(
-      (a) =>
-        a.passwordResetTokenHash === tokenHash &&
-        a.passwordResetExpiry &&
-        new Date(a.passwordResetExpiry) > new Date(),
-    ) || null
-  );
+  return findAccountByAuthTokenInList(req, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset);
 }
 
 const LOGIN_OTP_TTL_MS = 10 * 60 * 1000;
@@ -1465,14 +1481,12 @@ export function canResendLoginOtp(account) {
 }
 
 export async function findAccountByLoginOtp(req, email, rawCode) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(email);
   const code = String(rawCode || '').trim();
   if (!normalizedEmail || !code) return null;
   const account = await findAccountByEmail(req, normalizedEmail);
-  if (!account?.loginOtpHash || !account.loginOtpExpiry) return null;
-  if (new Date(account.loginOtpExpiry) <= new Date()) return null;
-  if (account.loginOtpHash !== hashToken(code)) return null;
-  return account;
+  if (!account?._id) return null;
+  return readFreshAccountForAuthToken(req, account, code, ACCOUNT_AUTH_TOKEN_FIELDS.loginOtp);
 }
 
 export async function clearLoginOtp(req, account) {
@@ -1517,16 +1531,23 @@ export async function markVerificationEmailSent(req, account) {
 }
 
 export async function findAccountByVerificationToken(req, rawToken) {
-  const tokenHash = hashToken(rawToken);
-  const accounts = await listAccounts(req);
-  return (
-    accounts.find(
-      (a) =>
-        a.emailVerificationTokenHash === tokenHash &&
-        a.emailVerificationExpiry &&
-        new Date(a.emailVerificationExpiry) > new Date(),
-    ) || null
-  );
+  return findAccountByAuthTokenInList(req, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.emailVerification);
+}
+
+/**
+ * Verificación por email + token (el enlace del correo incluye ambos).
+ * Localiza por email y valida el token contra el documento fresco en CouchDB.
+ */
+export async function findAccountForEmailVerification(req, email, rawToken) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !rawToken) return null;
+
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const matches = await findAllAccountsByEmail(req, normalizedEmail);
+  const account = pickPrimaryAccountByEmail(matches);
+  if (!account?._id) return null;
+
+  return readFreshAccountForAuthToken(req, account, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.emailVerification);
 }
 
 // A-04: Tokens de invitación de miembros
@@ -1541,16 +1562,7 @@ export async function saveInviteToken(req, account, rawToken) {
 }
 
 export async function findAccountByInviteToken(req, rawToken) {
-  const tokenHash = hashToken(rawToken);
-  const accounts = await listAccounts(req);
-  return (
-    accounts.find(
-      (a) =>
-        a.inviteTokenHash === tokenHash &&
-        a.inviteExpiresAt &&
-        new Date(a.inviteExpiresAt) > new Date(),
-    ) || null
-  );
+  return findAccountByAuthTokenInList(req, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.teamInvite);
 }
 
 // S-03: Lógica de bloqueo progresivo de cuenta
@@ -5484,6 +5496,11 @@ export function sanitizeStoreIngredients(raw) {
     const productParts = Array.isArray(entry.productParts)
       ? [...new Set(entry.productParts.filter((p) => p === 'pizzas' || p === 'hamburguesas'))]
       : [];
+    const tpvChargeExtra = typeof entry.tpvChargeExtra === 'boolean' ? entry.tpvChargeExtra : undefined;
+    const tpvAllowRemove = typeof entry.tpvAllowRemove === 'boolean' ? entry.tpvAllowRemove : undefined;
+    const baseCostRaw = Number(entry.baseCost);
+    const baseCost =
+      Number.isFinite(baseCostRaw) && baseCostRaw >= 0 ? Math.round(baseCostRaw * 100) / 100 : undefined;
     out.push({
       id: String(entry.id || `ing-${idx}-${key.replace(/\s+/g, '-')}`),
       name,
@@ -5492,6 +5509,9 @@ export function sanitizeStoreIngredients(raw) {
       ...(brandIds.length > 0 ? { brandIds } : {}),
       ...(productParts.length > 0 ? { productParts } : {}),
       ...(role === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),
+      ...(tpvChargeExtra !== undefined ? { tpvChargeExtra } : {}),
+      ...(tpvAllowRemove !== undefined ? { tpvAllowRemove } : {}),
+      ...(baseCost !== undefined ? { baseCost } : {}),
     });
   });
   return out;
@@ -9397,8 +9417,20 @@ export function sanitizeCatalogItemForTpv(doc) {
   if (rawCf.halfHalf === true) {
     customFields.halfHalf = true;
   }
+  const halfHalfAllowed = Array.isArray(rawCf.halfHalfAllowedProductIds)
+    ? rawCf.halfHalfAllowedProductIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (halfHalfAllowed.length > 0) {
+    customFields.halfHalfAllowedProductIds = halfHalfAllowed;
+  }
   if (rawCf.buildYourOwn === true) {
     customFields.buildYourOwn = true;
+  }
+  const buildYourOwnAllowed = Array.isArray(rawCf.buildYourOwnAllowedIngredientIds)
+    ? rawCf.buildYourOwnAllowedIngredientIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (buildYourOwnAllowed.length > 0) {
+    customFields.buildYourOwnAllowedIngredientIds = buildYourOwnAllowed;
   }
   return {
     _id: doc._id,
@@ -9415,7 +9447,7 @@ export function sanitizeCatalogItemForTpv(doc) {
     brandIds: Array.isArray(doc.brandIds) ? doc.brandIds : [],
     business_id: String(doc.business_id || doc.businessId || '').trim(),
     active: doc.active !== undefined ? Boolean(doc.active) : true,
-    image: '',
+    image: String(doc.image || doc.images?.[0] || '').trim(),
     images: [],
     description: '',
     notes: '',
@@ -9638,9 +9670,30 @@ export async function listSuppliersByUser(req, userId) {
 export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `pinv-${uuidv4()}`;
-  const invoiceNumber = existing?.invoiceNumber || `FC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const invoiceNumber = String(
+    data.invoiceNumber || data.documentNumber || existing?.invoiceNumber || '',
+  ).trim() || `FC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
 
-  const lines = Array.isArray(data.lines) ? data.lines : (existing?.lines || []);
+  const rawLines = Array.isArray(data.lines) ? data.lines : (existing?.lines || []);
+  const lines = rawLines.map((line, idx) => {
+    const description = String(line.description || line.itemName || '').trim();
+    const quantity = Number(line.quantity || 0);
+    const unitPrice = Number(line.unitPrice || line.unitCost || 0);
+    const total = Number(line.total || 0) || quantity * unitPrice;
+    return {
+      id: line.id || `pinvl-${idx}`,
+      description,
+      itemName: line.itemName || description,
+      quantity,
+      unitPrice,
+      total: Math.round(total * 100) / 100,
+      catalogItemId: String(line.catalogItemId || ''),
+      catalogItemName: String(line.catalogItemName || ''),
+      sku: String(line.sku || ''),
+      matchConfidence: line.matchConfidence ?? null,
+      matchMethod: String(line.matchMethod || ''),
+    };
+  });
   const subtotal = lines.reduce((s, l) => s + Number(l.total || 0), 0);
   const taxRate = Number(data.taxRate ?? existing?.taxRate ?? 21);
   const taxAmount = subtotal * (taxRate / 100);

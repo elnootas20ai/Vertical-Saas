@@ -1,6 +1,7 @@
 import { isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
 import {
   mergeStoreIngredientNames,
+  isIngredientMetaLabel,
   parseIngredientsBulkText,
   resolveBrandTpvCategoryKeys,
   resolveIngredientRole,
@@ -267,6 +268,20 @@ export function inferCommercialLineBrandIdFromProductName(
     if (pizzaLine?._id) return pizzaLine._id;
   }
 
+  if (/kebab|doner|döner|durum|shawarma|gyros/.test(nameKey)) {
+    const kebabLines = commercial.filter((b) => b.deliveryLineKind === 'kebab');
+    if (kebabLines.length === 1) return kebabLines[0]._id;
+    const named = kebabLines.find((b) => /kebab|doner|döner/.test(foldKey(b.name)));
+    if (named?._id) return named._id;
+  }
+
+  if (/tapa|tapas|racion|ración|pincho/.test(nameKey)) {
+    const tapasLines = commercial.filter((b) => b.deliveryLineKind === 'tapas_bar');
+    if (tapasLines.length === 1) return tapasLines[0]._id;
+    const named = tapasLines.find((b) => /bar|tapa/.test(foldKey(b.name)));
+    if (named?._id) return named._id;
+  }
+
   return '';
 }
 
@@ -301,6 +316,20 @@ export function inferCommercialLineBrandId(
     if (burgerLine?._id) return burgerLine._id;
   }
 
+  if (catKey === 'kebab' || catKey === 'kebabs' || catKey === 'doner') {
+    const kebabLine =
+      pool.find((b) => b.deliveryLineKind === 'kebab')
+      ?? pool.find((b) => /kebab|doner|döner/.test(foldKey(b.name)));
+    if (kebabLine?._id) return kebabLine._id;
+  }
+
+  if (catKey === 'tapas' || catKey === 'tapa' || catKey === 'raciones' || catKey === 'racion') {
+    const tapasLine =
+      pool.find((b) => b.deliveryLineKind === 'tapas_bar')
+      ?? pool.find((b) => /bar|tapa/.test(foldKey(b.name)));
+    if (tapasLine?._id) return tapasLine._id;
+  }
+
   const byCatalogCat = commercialAll.filter((b) => brandHasCatalogCategory(b, category));
   if (byCatalogCat.length === 1) return byCatalogCat[0]._id;
   if (byCatalogCat.length > 1) {
@@ -310,8 +339,13 @@ export function inferCommercialLineBrandId(
 
   const kindHints: Record<string, string[]> = {
     pizzas: ['pizza'],
-    hamburguesas: ['burger_fastfood'],
-    burgers: ['burger_fastfood'],
+    hamburguesas: ['burger_fastfood', 'kebab'],
+    burgers: ['burger_fastfood', 'kebab'],
+    kebab: ['kebab'],
+    kebabs: ['kebab'],
+    tapas: ['tapas_bar'],
+    tapa: ['tapas_bar'],
+    raciones: ['tapas_bar'],
     rolls: ['sushi_asian'],
     bowls: ['sushi_asian'],
     bebidas: ['drinks_desserts'],
@@ -352,14 +386,47 @@ export function resolveCatalogImportBrandIds(
   return defaultId ? [defaultId] : [];
 }
 
-export function formatUnmatchedCommercialBrandWarning(unmatchedNames: string[]): string | null {
+/** Nombres de líneas comerciales configuradas (pestañas TPV en Ajustes → Marca). */
+export function formatConfiguredCommercialLineNames(brands: ImportBrandLike[], limit = 5): string {
+  const names = allCommercialLineBrands(brands)
+    .map((b) => String(b.name || '').trim())
+    .filter(Boolean);
+  if (names.length === 0) return 'ninguna — créalas en Ajustes → Marca';
+  const shown = names.slice(0, limit);
+  const extra = names.length > limit ? ` (+${names.length - limit} más)` : '';
+  return `${shown.join(', ')}${extra}`;
+}
+
+/** Aviso por fila cuando la columna «línea» del Excel no existe en Ajustes → Marca. */
+export function formatUnmatchedImportLineRowWarning(
+  unmatchedLineName: string,
+  brands: ImportBrandLike[],
+): string {
+  const configured = formatConfiguredCommercialLineNames(brands);
+  return (
+    `En «línea» pusiste «${unmatchedLineName}», pero esa pestaña no existe en Ajustes → Marca. ` +
+    `Líneas que sí tienes: ${configured}. ` +
+    'El producto se importa igual en la pestaña de su categoría. ' +
+    'Para corregirlo: escribe en el Excel el nombre exacto de una línea existente, o créala en Ajustes → Marca.'
+  );
+}
+
+export function formatUnmatchedCommercialBrandWarning(
+  unmatchedNames: string[],
+  brands: ImportBrandLike[] = [],
+): string | null {
   const unique = [...new Set(unmatchedNames.map((n) => String(n || '').trim()).filter(Boolean))];
   if (unique.length === 0) return null;
   const sample = unique.slice(0, 8).join(', ');
   const extra = unique.length > 8 ? ` (+${unique.length - 8} más)` : '';
+  const configured = brands.length > 0 ? formatConfiguredCommercialLineNames(brands, 8) : '';
+  const configuredHint = configured
+    ? ` Líneas válidas en Ajustes → Marca: ${configured}.`
+    : '';
   return (
-    `Columna «línea/marca»: ${sample}${extra} no coincide con tus organizadores en Ajustes → Marca. ` +
-    'Esos productos se asignan por categoría o a tu línea principal. No se crean líneas nuevas desde el Excel.'
+    `Varias filas tienen «línea» = ${sample}${extra}, que no existe en Ajustes → Marca.${configuredHint} ` +
+    'Esos productos se importan en la pestaña de su categoría (o en la línea principal). ' +
+    'El Excel no crea líneas nuevas: corrige el nombre en el Excel o crea la línea en Ajustes antes de importar.'
   );
 }
 
@@ -445,7 +512,7 @@ export function collectIngredientEntriesFromCatalogImport(
 
     for (const rawName of names) {
       const name = rawName.trim();
-      if (!name) continue;
+      if (!name || isIngredientMetaLabel(name)) continue;
       for (const brandId of itemBrandIds) {
         const brand = brandById.get(brandId);
         let parts = brand ? resolveBrandTpvCategoryKeys(brand) : [];

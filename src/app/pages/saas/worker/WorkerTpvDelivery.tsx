@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
@@ -23,7 +23,7 @@ import {
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
-import { useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../../components/saas/TpvRegisterGate';
+import { useTpvRegisterBoardReady, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import {
@@ -69,12 +69,23 @@ import {
   LogOut,
   ChevronUp,
   ChevronDown,
+  Bike,
+  Car,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
+import { useTpvIncomingOrderSounds } from '../../../hooks/useTpvIncomingOrderSounds';
+import { useDeliveryOrdersLive } from '../../../hooks/useDeliveryOrdersLive';
+import {
+  isTpvBoardSoundEnabled,
+  setTpvBoardSoundEnabled,
+  unlockTpvBoardAudio,
+} from '../../../lib/tpvChannelSounds';
 
 type DeliveryPaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'otro';
 
@@ -85,16 +96,37 @@ const PAYMENT_LABELS: Record<DeliveryPaymentMethod, string> = {
   otro: 'Otros',
 };
 
-const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
-  tpv: { label: 'TPV', className: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200' },
-  web: { label: 'Web', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200' },
-  app: { label: 'App', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200' },
-  phone: { label: 'Tel.', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' },
-  direct: { label: 'Directo', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' },
-  glovo: { label: 'Glovo', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200' },
-  justeat: { label: 'Just Eat', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200' },
-  ubereats: { label: 'Uber', className: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200' },
+const CHANNEL_VISUAL: Record<string, { label: string; className: string; Icon: LucideIcon }> = {
+  tpv: { label: 'TPV', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200', Icon: Plus },
+  web: { label: 'Web', className: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200', Icon: Globe },
+  glovo: { label: 'Glovo', className: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-200', Icon: Bike },
+  justeat: { label: 'Just Eat', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200', Icon: UtensilsCrossed },
+  ubereats: { label: 'Uber', className: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200', Icon: Car },
+  phone: { label: 'Tel.', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200', Icon: Phone },
+  app: { label: 'App', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200', Icon: Smartphone },
+  direct: { label: 'Directo', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300', Icon: User },
 };
+
+function resolveChannelVisual(channel?: string | null) {
+  const key = String(channel || 'tpv').trim().toLowerCase();
+  return CHANNEL_VISUAL[key] || CHANNEL_VISUAL.tpv;
+}
+
+function OrderChannelBadge({ channel, compact = false }: { channel?: string | null; compact?: boolean }) {
+  const visual = resolveChannelVisual(channel);
+  const Icon = visual.Icon;
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded font-bold shrink-0 ${visual.className} ${
+        compact ? 'p-0.5' : 'px-1 py-px text-[9px]'
+      }`}
+      title={visual.label}
+    >
+      <Icon className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+      {!compact && visual.label}
+    </span>
+  );
+}
 
 type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
 
@@ -332,7 +364,6 @@ function OrderCard({
   const routeMinutes = order.departedAt ? elapsedMinutes(order.departedAt) : null;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
   const TypeIcon = typeBadge.Icon;
-  const channelBadge = order.channel && order.channel !== 'tpv' ? CHANNEL_BADGE[order.channel] : null;
   const isUrgent = order.priority === 'urgent' || order.priority === 'high';
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
   const itemPreview = order.items
@@ -388,12 +419,7 @@ function OrderCard({
               <TypeIcon className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
               {typeBadge.label}
             </span>
-            {channelBadge && !compact && (
-              <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] font-bold ${channelBadge.className}`}>
-                <Globe className="w-2.5 h-2.5" />
-                {channelBadge.label}
-              </span>
-            )}
+            <OrderChannelBadge channel={order.channel} compact={compact} />
             {isUrgent && (
               <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[8px]' : 'text-[9px]'}`}>!</span>
             )}
@@ -720,6 +746,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
                 <span className={`inline-flex items-center gap-0.5 rounded-full font-bold ${typeBadge.className} ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
                   <TypeIcon className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} /> {typeBadge.label}
                 </span>
+                <OrderChannelBadge channel={order.channel} compact={compact} />
                 <span className={`inline-flex items-center rounded-full font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
                   {compact ? formatElapsed(orderWaitMinutes(order)) : (
                     <>Espera <span className={`ml-1 tabular-nums font-bold ${timerTone(orderWaitMinutes(order))}`}>{formatElapsed(orderWaitMinutes(order))}</span></>
@@ -922,15 +949,9 @@ export function WorkerTpvDelivery({
   );
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
-  const registerLive = useTpvRegisterIfOpen();
-  const stickyRegisterRef = useRef<TpvRegisterContextType | null>(null);
-  useEffect(() => {
-    if (registerLive && isTpvRegisterSessionOpen(registerLive.session)) {
-      stickyRegisterRef.current = registerLive;
-    }
-  }, [registerLive]);
-  const register = registerLive ?? stickyRegisterRef.current;
-  const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
+  const register = useTpvRegisterIfOpen();
+  const boardReady = useTpvRegisterBoardReady();
+  const registerOpen = boardReady || Boolean(register && isTpvRegisterSessionOpen(register.session));
   const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
@@ -961,7 +982,20 @@ export function WorkerTpvDelivery({
 
   const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
   const [showDelivered, setShowDelivered] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => isTpvBoardSoundEnabled());
   const sessionOpenedAt = register?.session?.openedAt ?? null;
+
+  useEffect(() => {
+    setTpvBoardSoundEnabled(soundEnabled);
+  }, [soundEnabled]);
+
+  useEffect(() => {
+    const unlock = () => unlockTpvBoardAudio();
+    window.addEventListener('pointerdown', unlock, { once: true });
+    return () => window.removeEventListener('pointerdown', unlock);
+  }, []);
+
+  useTpvIncomingOrderSounds(orders, register?.session ?? null, soundEnabled);
 
   const loadOrders = useCallback(async (options?: { silent?: boolean }) => {
     if (!userId) return;
@@ -998,6 +1032,14 @@ export function WorkerTpvDelivery({
   }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
+
+  useDeliveryOrdersLive({
+    authUserId: user?.user_id || user?.id || null,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    onRefresh: () => void loadOrders({ silent: true }),
+    enabled: Boolean(userId) && Boolean(sessionOpenedAt),
+    fallbackPollMs: 30_000,
+  });
 
   useEffect(() => {
     setOrders([]);
@@ -1398,9 +1440,8 @@ export function WorkerTpvDelivery({
                 <button
                   type="button"
                   onClick={() => setView('new-order')}
-                  disabled={!registerOpen}
-                  title={registerOpen ? 'Nuevo pedido' : 'Abre la caja antes de crear pedidos'}
-                  className="flex flex-1 items-center justify-center gap-1 min-h-[30px] px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/45 disabled:cursor-not-allowed text-white font-bold text-[11px] transition-colors touch-manipulation"
+                  title="Nuevo pedido"
+                  className="flex flex-1 items-center justify-center gap-1 min-h-[30px] px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition-colors touch-manipulation"
                 >
                   <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
                   Nuevo
@@ -1409,9 +1450,8 @@ export function WorkerTpvDelivery({
                   <button
                     type="button"
                     onClick={() => setView('staff-consumption')}
-                    disabled={!registerOpen}
                     title="Consumo equipo"
-                    className="flex items-center justify-center min-h-[30px] px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-violet-600/45 text-white font-bold text-[11px] touch-manipulation"
+                    className="flex items-center justify-center min-h-[30px] px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-[11px] touch-manipulation"
                   >
                     <UtensilsCrossed className="w-3.5 h-3.5" />
                   </button>
@@ -1430,6 +1470,18 @@ export function WorkerTpvDelivery({
                 {!isTabletUi && 'Salir'}
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setSoundEnabled((v) => !v)}
+              className={`rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${isTabletUi ? 'p-1.5' : 'p-2'} ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'}`}
+              title={soundEnabled ? 'Silenciar avisos de pedidos externos' : 'Activar avisos (web, Glovo…)'}
+            >
+              {soundEnabled ? (
+                <Volume2 className={isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'} />
+              ) : (
+                <VolumeX className={isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'} />
+              )}
+            </button>
             <button type="button" onClick={() => void loadOrders()} className={`rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${isTabletUi ? 'p-1.5' : 'p-2'}`} title="Refrescar">
               <RefreshCw className={`text-gray-500 ${refreshing ? 'animate-spin' : ''} ${isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
             </button>
@@ -1441,8 +1493,7 @@ export function WorkerTpvDelivery({
             <button
               type="button"
               onClick={() => setView('new-order')}
-              disabled={!registerOpen}
-              className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/45 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25"
+              className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25"
             >
               <Plus className="w-5 h-5" strokeWidth={2.5} />
               Nuevo pedido
@@ -1451,8 +1502,7 @@ export function WorkerTpvDelivery({
               <button
                 type="button"
                 onClick={() => setView('staff-consumption')}
-                disabled={!registerOpen}
-                className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 disabled:bg-violet-600/45 text-white font-bold text-sm sm:text-base shadow-lg"
+                className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm sm:text-base shadow-lg"
               >
                 <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
                 Consumo equipo
@@ -1654,7 +1704,9 @@ export function WorkerTpvDelivery({
                         : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
                     } ${isTabletUi ? 'py-1.5 px-2' : ''}`}
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex items-center gap-1.5">
+                      <OrderChannelBadge channel={order.channel} compact={isTabletUi} />
+                      <div className="min-w-0">
                       <p className={`font-bold text-gray-900 dark:text-gray-100 font-mono ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
                         #{order.orderNumber}
                       </p>
@@ -1662,8 +1714,8 @@ export function WorkerTpvDelivery({
                         {order.customerName || 'Cliente'}
                         {' · '}
                         {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                        {order.channel ? ` · ${String(order.channel).toUpperCase()}` : ''}
                       </p>
+                      </div>
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`font-bold tabular-nums ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>

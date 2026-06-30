@@ -4,7 +4,6 @@ import {
   BarChart3,
   Edit3,
   Loader2,
-  Package,
   Plus,
   Tag,
   TrendingUp,
@@ -20,6 +19,7 @@ import {
   parseIngredientsBulkText,
 } from '../../lib/catalogCustomization';
 import type { CatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
+import { resolveCatalogProductImage } from '../../lib/catalogProductPlaceholders';
 import { useModalClose } from '../../hooks/useModalClose';
 import { CatalogComboCompositionEditor } from './CatalogComboCompositionEditor';
 import { comboStructureFromCustomFields, isComboStructureConfirmed, type ComboStructureSlot } from '../../lib/catalogComboSlots';
@@ -77,6 +77,8 @@ export function CatalogItemDetailModal({
       .filter(Boolean)
       .join(', ');
   }, [item.brandIds, brands]);
+
+  const productImage = useMemo(() => resolveCatalogProductImage(item), [item]);
 
   const [ingredientDraft, setIngredientDraft] = useState('');
   const [newIngredient, setNewIngredient] = useState('');
@@ -161,13 +163,11 @@ export function CatalogItemDetailModal({
       >
         <div className="shrink-0 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-3">
           <div className="min-w-0 flex items-start gap-3">
-            {item.image ? (
-              <img src={item.image} alt="" className="w-14 h-14 rounded-xl object-cover shrink-0" />
-            ) : (
-              <div className="w-14 h-14 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0">
-                <Package className="w-6 h-6 text-gray-400" />
-              </div>
-            )}
+            <img
+              src={productImage}
+              alt=""
+              className="w-16 h-16 rounded-xl object-cover shrink-0 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+            />
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
                 Ficha de producto
@@ -195,6 +195,12 @@ export function CatalogItemDetailModal({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          <section className="flex justify-center">
+            <div className="w-full max-w-xs aspect-square rounded-2xl overflow-hidden border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 shadow-sm">
+              <img src={productImage} alt={item.name} className="w-full h-full object-cover" />
+            </div>
+          </section>
+
           {tpvConfigurable && (
             <section className="rounded-2xl border-2 border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20 p-4 space-y-4">
               <div className="flex items-start gap-2">

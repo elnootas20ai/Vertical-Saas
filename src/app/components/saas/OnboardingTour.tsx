@@ -18,6 +18,7 @@ import {
   setOnboardingTourStep,
 } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
+import { resolveBusinessScopeId, isDeliveryBusinessType } from '../../lib/deliverySetup';
 
 function resolveAccountUserId(user: { user_id?: string; id?: string } | null | undefined): string {
   return String(user?.user_id || user?.id || '').trim();
@@ -60,7 +61,7 @@ export function OnboardingTour({ onComplete }: Props) {
   );
 
   const accountUserId = resolveAccountUserId(user);
-  const businessId = String(currentBusiness?.business_id || '').trim();
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const hasActivationFocus = useMemo(
     () => new URLSearchParams(location.search).has(ACTIVATION_FOCUS_PARAM),
     [location.search],
@@ -115,21 +116,22 @@ export function OnboardingTour({ onComplete }: Props) {
       return;
     }
 
-    if (checklistComplete) {
+    if (checklistComplete && !showLockRef.current) {
       markOnboardingTourCompleted(accountUserId, businessId);
       setOnboardingTourActive(accountUserId, businessId, false);
-      showLockRef.current = false;
       setTourGate('hide');
+      return;
+    }
+    if (checklistComplete && showLockRef.current) {
       return;
     }
 
     const ownerKey = `${accountUserId}::${businessId}`;
     if (ownerRef.current !== ownerKey) {
       ownerRef.current = ownerKey;
-      if (!showLockRef.current) {
-        setPausedThisSession(false);
-        setTourGate('loading');
-      }
+      showLockRef.current = false;
+      setPausedThisSession(false);
+      setTourGate('loading');
     }
 
     const alreadySeen = isOnboardingTourCompleted(accountUserId, businessId);
@@ -166,10 +168,10 @@ export function OnboardingTour({ onComplete }: Props) {
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (!pausedThisSession) {
-      // Solo reanudar si ya pasó el paso de bienvenida; no reabrir welcome al navegar con «Ir».
       if (wasActive && savedStepIndex > 0) {
         openTour();
-      } else if (!wasActive) {
+      } else if (!wasActive || savedStepIndex === 0) {
+        // Primera visita o tour armado en createBusiness antes de montar Layout (wasActive + paso 0).
         timer = setTimeout(openTour, 600);
       }
     } else {
@@ -264,11 +266,13 @@ export function OnboardingTour({ onComplete }: Props) {
 
   useModalClose(tourGate === 'show', pauseTour);
 
-  if (isWorkerAccount(user) || tourGate !== 'show') return null;
+  if (isWorkerAccount(user) || tourGate !== 'show' || steps.length === 0) return null;
 
-  const step = steps[stepIndex];
-  const isLast = stepIndex === steps.length - 1;
-  const progress = ((stepIndex + 1) / steps.length) * 100;
+  const safeIndex = Math.max(0, Math.min(stepIndex, steps.length - 1));
+  const step = steps[safeIndex];
+  if (!step) return null;
+  const isLast = safeIndex === steps.length - 1;
+  const progress = ((safeIndex + 1) / steps.length) * 100;
 
   return (
     <div
@@ -304,7 +308,7 @@ export function OnboardingTour({ onComplete }: Props) {
             </div>
             <div className="flex-1 pt-1">
               <p className="text-sm font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1">
-                Paso {stepIndex + 1} de {steps.length}
+                Paso {safeIndex + 1} de {steps.length}
               </p>
               <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
                 {step.title}
@@ -400,17 +404,25 @@ export function OnboardingTour({ onComplete }: Props) {
 
 export function useRestartTour() {
   const { user } = useAuth();
-  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
+  const businessCtx = useBusinessOptional();
+  const currentBusiness = businessCtx?.currentBusiness ?? null;
   const restart = useCallback(
     (options?: { fromBeginning?: boolean }) => {
       const accountUserId = resolveAccountUserId(user);
-      const businessId = String(currentBusiness?.business_id || '').trim();
+      const businessId = resolveBusinessScopeId(currentBusiness);
       if (!accountUserId) return false;
       if (!businessId) return false;
-      armOnboardingTourForBusiness(accountUserId, businessId, options);
+      const fromBeginning = options?.fromBeginning !== false;
+      const firstActivationStep = isDeliveryBusinessType(currentBusiness?.businessType)
+        ? 'delivery_store'
+        : 'configure_business';
+      armOnboardingTourForBusiness(accountUserId, businessId, {
+        fromBeginning,
+        activationStepId: fromBeginning ? firstActivationStep : undefined,
+      });
       return true;
     },
-    [user, currentBusiness?.business_id],
+    [user, currentBusiness?.business_id, currentBusiness?.businessType],
   );
   return restart;
 }

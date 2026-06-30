@@ -76,6 +76,12 @@ export interface StoreIngredient {
   extraPrices?: Record<string, number>;
   /** @deprecated Usar role === 'escandallo' */
   escandalloOnly?: boolean;
+  /** Puede añadirse como extra de pago en TPV (persistido; role sigue siendo la fuente para el TPV). */
+  tpvChargeExtra?: boolean;
+  /** Puede quitarse del producto en TPV (persistido; role sigue siendo la fuente para el TPV). */
+  tpvAllowRemove?: boolean;
+  /** Coste base por unidad para escandallos (€). */
+  baseCost?: number;
 }
 
 const CUSTOMIZABLE_KEYS = ['pizza', 'pizzas', 'hamburguesa', 'hamburguesas', 'burger', 'burgers'];
@@ -207,24 +213,312 @@ export function isTpvBuildYourOwnCatalogItem(
   return false;
 }
 
+/** Ingredientes base que el cliente puede elegir en TPV (pizza al gusto). */
+export function normalizeBuildYourOwnAllowedIngredientIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))];
+}
+
+function foldIngredientLabel(value: string): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/**
+ * Etiquetas de menú del Excel (p. ej. «0», «3 Ingredientes a elegir»), no ingredientes reales.
+ * Suele venir de la columna ingredientes en filas de pizza al gusto / menús por niveles.
+ */
+export function isIngredientMetaLabel(name: string): boolean {
+  if (isCatalogIngredientPlaceholder(name)) return true;
+  const folded = foldIngredientLabel(name);
+  if (!folded) return true;
+  if (/^\d+$/.test(folded)) return true;
+  if (/^\+\s*\d+/.test(folded)) return true;
+  if (/ingredientes?\s+a\s+elegir/.test(folded)) return true;
+  if (/\d+\s+ingredientes?\s+a\s+elegir/.test(folded)) return true;
+  if (/^elegir\s+\d+/.test(folded)) return true;
+  return false;
+}
+
+/** Bebidas que no deben salir como topping en pizza al gusto (van en Extras o catálogo bebidas). */
+export function isLikelyBeverageIngredient(name: string): boolean {
+  const folded = foldIngredientLabel(name);
+  if (!folded) return false;
+  return /\b(agua|coca|pepsi|fanta|aquarius|nestea|cerveza|refresco|bebida|zumo|juice|cola|sprite|seven\s*up|7up|red\s*bull)\b/.test(
+    folded,
+  );
+}
+
+function isBuildYourOwnSelectableIngredient(
+  ing: StoreIngredient,
+  templateKey: TpvCategoryTemplateKey | null,
+): boolean {
+  if (!ingredientShowsInTpv(ing)) return false;
+  if (isIngredientMetaLabel(ing.name)) return false;
+  if (templateKey === 'pizzas' && isLikelyBeverageIngredient(ing.name)) return false;
+  return true;
+}
+
+/** Ingredientes base configurables en catálogo / TPV para pizza al gusto. */
+export function resolveStoreIngredientsFromBrandSelection(
+  storeIngredients: StoreIngredient[],
+  brandIngredientSelection: TpvBrandIngredientSelection,
+  brandIds: string[],
+): StoreIngredient[] {
+  const byId = storeIngredientsById(storeIngredients);
+  const byName = new Map<string, StoreIngredient>();
+  for (const ing of storeIngredients) {
+    byName.set(ingredientNameKey(ing.name), ing);
+  }
+  const out: StoreIngredient[] = [];
+  const seen = new Set<string>();
+  for (const brandId of brandIds) {
+    for (const raw of brandIngredientSelection[brandId] || []) {
+      const token = String(raw || '').trim();
+      if (!token) continue;
+      const ing = byId.get(token) || byName.get(ingredientNameKey(token));
+      if (!ing) continue;
+      const key = ingredientNameKey(ing.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(ing);
+    }
+  }
+  return out;
+}
+
+function scopeStoreIngredientsToProductBrands(
+  list: StoreIngredient[],
+  productBrandIds: string[],
+  allBrandIds: string[],
+): StoreIngredient[] {
+  if (!list.length) return [];
+  if (productBrandIds.length === 0 || allBrandIds.length <= 1) return list;
+  const seen = new Set<string>();
+  const out: StoreIngredient[] = [];
+  for (const brandId of productBrandIds) {
+    for (const ing of filterStoreIngredientsByBrand(list, brandId, allBrandIds)) {
+      const key = ingredientNameKey(ing.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(ing);
+    }
+  }
+  return out.length > 0 ? out : list;
+}
+
+function catalogBuildYourOwnIngredientPool(
+  pool: StoreIngredient[],
+  productBrandIds: string[],
+  templateKey: TpvCategoryTemplateKey | null,
+): StoreIngredient[] {
+  const selectable = pool.filter((ing) => isBuildYourOwnSelectableIngredient(ing, templateKey));
+  const seen = new Set<string>();
+  const out: StoreIngredient[] = [];
+  const push = (ing: StoreIngredient) => {
+    const key = ingredientNameKey(ing.name);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(ing);
+  };
+
+  for (const ing of tpvBaseStoreIngredients(selectable, productBrandIds, templateKey)) {
+    push(ing);
+  }
+
+  for (const ing of selectable) {
+    if (!ingredientChargesExtra(ing)) continue;
+    if (!storeIngredientAppliesToProductPart(ing, templateKey)) continue;
+    if (
+      productBrandIds.length > 0 &&
+      !storeIngredientAppliesToBrands(ing, productBrandIds) &&
+      normalizeBrandIds(ing.brandIds).length > 0
+    ) {
+      continue;
+    }
+    push(ing);
+  }
+
+  if (out.length > 0) return out;
+
+  for (const ing of selectable.filter((row) => !ingredientChargesExtra(row))) {
+    push(ing);
+  }
+  return out;
+}
+
+/** Ingredientes base configurables en catálogo / TPV para pizza al gusto. */
+export function catalogBuildYourOwnIngredientOptions(
+  item: Pick<CatalogItem, 'brandIds' | 'category' | 'name' | 'customFields'>,
+  storeIngredients: StoreIngredient[] | undefined,
+  brandIngredientSelection?: TpvBrandIngredientSelection,
+  brands?: TpvBrandHint[],
+): StoreIngredient[] {
+  const templateKey = resolveTpvCategoryTemplateKey(item, brands) ?? 'pizzas';
+  const productBrandIds = productBrandIdsFromItem(item);
+  const allBrandIds = (brands || []).map((b) => b._id);
+  const master = storeIngredients || [];
+  const scoped = scopeStoreIngredientsToProductBrands(master, productBrandIds, allBrandIds);
+  const sortByName = (rows: StoreIngredient[]) =>
+    [...rows].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+
+  if (brandIngredientSelection && productBrandIds.length > 0 && scoped.length > 0) {
+    const fromSelection = resolveStoreIngredientsFromBrandSelection(
+      scoped,
+      brandIngredientSelection,
+      productBrandIds,
+    ).filter(
+      (ing) =>
+        isBuildYourOwnSelectableIngredient(ing, templateKey) &&
+        !ingredientChargesExtra(ing) &&
+        storeIngredientAppliesToProductPart(ing, templateKey),
+    );
+    if (fromSelection.length > 0) return sortByName(fromSelection);
+  }
+
+  const fromScoped = catalogBuildYourOwnIngredientPool(scoped, productBrandIds, templateKey);
+  if (fromScoped.length > 0) return sortByName(fromScoped);
+
+  const fromMaster = catalogBuildYourOwnIngredientPool(master, productBrandIds, templateKey);
+  return sortByName(fromMaster);
+}
+
+export function catalogBuildYourOwnIngredientCandidates(
+  item: Pick<CatalogItem, 'brandIds' | 'category' | 'name' | 'customFields'>,
+  storeIngredients: StoreIngredient[] | undefined,
+  brandIngredientSelection?: TpvBrandIngredientSelection,
+  brands?: TpvBrandHint[],
+): StoreIngredient[] {
+  const all = catalogBuildYourOwnIngredientOptions(
+    item,
+    storeIngredients,
+    brandIngredientSelection,
+    brands,
+  );
+  const allowed = normalizeBuildYourOwnAllowedIngredientIds(item.customFields?.buildYourOwnAllowedIngredientIds);
+  if (allowed.length > 0) {
+    const allowedSet = new Set(allowed);
+    return all.filter((ing) => allowedSet.has(ing.id));
+  }
+  return all;
+}
+
+export function tpvBuildYourOwnIngredientPool(
+  item: Pick<CatalogItem, 'brandIds' | 'category' | 'name' | 'customFields'>,
+  storeIngredients?: StoreIngredient[],
+  brandIngredientSelection?: TpvBrandIngredientSelection,
+  brands?: TpvBrandHint[],
+): string[] {
+  return catalogBuildYourOwnIngredientCandidates(
+    item,
+    storeIngredients,
+    brandIngredientSelection,
+    brands,
+  ).map((ing) => ing.name);
+}
+
+/** Sin ingredientes base configurados en Ingredientes TPV. */
+export function isBuildYourOwnIngredientSelectionInvalid(
+  allowedIngredientIds: string[],
+  candidateCount: number,
+): boolean {
+  void allowedIngredientIds;
+  return candidateCount === 0;
+}
+
+/** IDs de pizzas permitidas como sabores en mitad y mitad (vacío = todas las pizzas del catálogo). */
+export function normalizeHalfHalfAllowedProductIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((id) => String(id || '').trim()).filter(Boolean))];
+}
+
+/** Selección inválida: exactamente 1 pizza marcada (0 = todas, ≥2 = ok). */
+export function isHalfHalfFlavorSelectionInvalid(allowedProductIds: string[]): boolean {
+  return allowedProductIds.length === 1;
+}
+
+function catalogPizzaMatchesBrandFilter(
+  item: Pick<CatalogItem, 'brandIds'>,
+  brandIds: string[],
+): boolean {
+  if (brandIds.length === 0) return true;
+  const itemBrandIds = Array.isArray(item.brandIds)
+    ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (itemBrandIds.length === 0) return true;
+  return itemBrandIds.some((id) => brandIds.includes(id));
+}
+
+function isPizzaLineBrandId(brandId: string, brands?: TpvBrandHint[]): boolean {
+  if (!brands?.length) return false;
+  const brand = brands.find((b) => b._id === brandId);
+  return brand?.deliveryLineKind === 'pizza';
+}
+
+function isPizzaLikeCatalogProduct(
+  item: Pick<CatalogItem, 'category' | 'name' | 'brandIds'>,
+  scopeBrandIds: string[],
+  brands?: TpvBrandHint[],
+): boolean {
+  const cat = foldCatalogCategoryLabel(item.category || '');
+  const name = foldCatalogCategoryLabel(item.name || '');
+  if (/combo|menu|menú/.test(cat)) return false;
+  if (cat.includes('pizza') || name.includes('pizza')) return true;
+  if (!scopeBrandIds.length || !brands?.length) return false;
+  const itemBrandIds = Array.isArray(item.brandIds)
+    ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  return scopeBrandIds.some(
+    (brandId) => itemBrandIds.includes(brandId) && isPizzaLineBrandId(brandId, brands),
+  );
+}
+
+/** Pizzas elegibles como sabores al configurar mitad y mitad (sin filtro de whitelist). */
+export function catalogPizzaCandidatesForHalfHalf(
+  catalog: CatalogItem[],
+  excludeProductId?: string,
+  brandIds?: string[],
+  brands?: TpvBrandHint[],
+): CatalogItem[] {
+  return catalogPizzasForHalfHalf(catalog, excludeProductId, { brandIds, brands });
+}
+
 /** Pizzas vendibles como mitad en TPV. */
 export function catalogPizzasForHalfHalf(
   catalog: CatalogItem[],
   halfHalfProductId?: string,
+  options?: {
+    allowedProductIds?: string[];
+    brandIds?: string[];
+    brands?: TpvBrandHint[];
+  },
 ): CatalogItem[] {
-  return catalog
-    .filter((c) => {
-      if (c.active === false || c.available === false) return false;
-      if (halfHalfProductId && c._id === halfHalfProductId) return false;
-      if (c.itemType === 'combo' || c.itemType === 'service') return false;
-      if (isTpvHalfHalfCatalogItem(c)) return false;
-      if (isTpvComboCatalogItem(c)) return false;
-      const cat = foldCatalogCategoryLabel(c.category || '');
-      const name = foldCatalogCategoryLabel(c.name || '');
-      if (/combo|menu|menú/.test(cat)) return false;
-      return cat.includes('pizza') || name.includes('pizza');
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  const brandIds = Array.isArray(options?.brandIds)
+    ? options.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const allowed = normalizeHalfHalfAllowedProductIds(options?.allowedProductIds);
+  const brands = options?.brands;
+
+  let list = catalog.filter((c) => {
+    if (c.active === false || c.available === false) return false;
+    if (halfHalfProductId && c._id === halfHalfProductId) return false;
+    if (c.itemType === 'combo' || c.itemType === 'service') return false;
+    if (isTpvHalfHalfCatalogItem(c)) return false;
+    if (isTpvBuildYourOwnCatalogItem(c)) return false;
+    if (isTpvComboCatalogItem(c)) return false;
+    if (!catalogPizzaMatchesBrandFilter(c, brandIds)) return false;
+    return isPizzaLikeCatalogProduct(c, brandIds, brands);
+  });
+
+  if (allowed.length > 0) {
+    const allowedSet = new Set(allowed);
+    list = list.filter((c) => allowedSet.has(c._id));
+  }
+
+  return list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 /** Menú Modomio (legacy): mitad y mitad dentro del combo — no confundir con producto suelto. */
@@ -296,6 +590,8 @@ export function resolveBrandTpvCategoryKeys(brand: {
   const kind = String(brand.deliveryLineKind || '').trim();
   if (kind === 'pizza') keys.add('pizzas');
   if (kind === 'burger_fastfood') keys.add('hamburguesas');
+  if (kind === 'kebab') keys.add('hamburguesas');
+  if (kind === 'tapas_bar') keys.add('entrantes');
   return [...keys];
 }
 
@@ -311,11 +607,47 @@ function parseIngredientsText(raw: string | undefined | null): string[] {
   return raw
     .split(/[,;\n]/)
     .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((name) => !isCatalogIngredientPlaceholder(name));
+}
+
+/** Textos de importación / carta que no son ingredientes reales para el TPV. */
+export function isCatalogIngredientPlaceholder(name: string): boolean {
+  const key = ingredientNameKey(name);
+  if (!key) return true;
+  const placeholders = new Set([
+    'ver carta',
+    'ver menu',
+    'ver menú',
+    'ver la carta',
+    'consultar carta',
+    'see menu',
+    'ver',
+    '-',
+    '—',
+    'n/a',
+    'na',
+    'sin ingredientes',
+  ]);
+  return placeholders.has(key);
+}
+
+export function isCatalogIngredientsFieldPlaceholder(raw: string | undefined | null): boolean {
+  const parts = String(raw || '')
+    .split(/[,;\n]/)
+    .map((s) => s.trim())
     .filter(Boolean);
+  if (parts.length === 0) return true;
+  return parts.every((part) => isCatalogIngredientPlaceholder(part));
 }
 
 export function parseIngredientsBulkText(raw: string): string[] {
   return parseIngredientsText(raw);
+}
+
+/** Guarda solo ingredientes reales (filtra «Ver carta», etc.). */
+export function normalizeCatalogIngredientsForSave(raw: string | undefined | null): string {
+  return parseIngredientsBulkText(String(raw || '').trim()).join(', ');
 }
 
 function ingredientNameKey(name: string): string {
@@ -333,8 +665,47 @@ export function ingredientShowsInTpv(ing: Pick<StoreIngredient, 'role' | 'escand
   return resolveIngredientRole(ing) !== 'escandallo';
 }
 
-export function ingredientChargesExtra(ing: Pick<StoreIngredient, 'role' | 'escandalloOnly'>): boolean {
+export function ingredientChargesExtra(
+  ing: Pick<StoreIngredient, 'role' | 'escandalloOnly' | 'tpvChargeExtra'>,
+): boolean {
+  if (typeof ing.tpvChargeExtra === 'boolean') return ing.tpvChargeExtra;
   return resolveIngredientRole(ing) === 'extra';
+}
+
+export function readStoreIngredientTpvFlags(
+  ing: Pick<StoreIngredient, 'role' | 'escandalloOnly' | 'tpvChargeExtra' | 'tpvAllowRemove'>,
+): { chargeExtra: boolean; allowRemove: boolean } {
+  const role = resolveIngredientRole(ing);
+  return {
+    chargeExtra: ing.tpvChargeExtra ?? role === 'extra',
+    allowRemove: ing.tpvAllowRemove ?? (role === 'base' || role === 'extra'),
+  };
+}
+
+export function roleFromStoreIngredientTpvFlags(
+  chargeExtra: boolean,
+  allowRemove: boolean,
+): StoreIngredientRole {
+  if (!chargeExtra && !allowRemove) return 'escandallo';
+  if (chargeExtra) return 'extra';
+  return 'base';
+}
+
+export function withStoreIngredientTpvFlags(
+  ing: StoreIngredient,
+  patch: Partial<{ chargeExtra: boolean; allowRemove: boolean }>,
+): StoreIngredient {
+  const current = readStoreIngredientTpvFlags(ing);
+  const chargeExtra = patch.chargeExtra ?? current.chargeExtra;
+  const allowRemove = patch.allowRemove ?? current.allowRemove;
+  const role = roleFromStoreIngredientTpvFlags(chargeExtra, allowRemove);
+  return {
+    ...ing,
+    role,
+    escandalloOnly: role === 'escandallo',
+    tpvChargeExtra: chargeExtra,
+    tpvAllowRemove: allowRemove,
+  };
 }
 
 export function roleFromTpvFlags(showInTpv: boolean, chargeExtra: boolean): StoreIngredientRole {
@@ -532,16 +903,29 @@ export function normalizeStoreIngredients(raw: unknown): StoreIngredient[] {
       role: rec.role as StoreIngredientRole | undefined,
       escandalloOnly: Boolean(rec.escandalloOnly),
     });
+    const tpvChargeExtra =
+      typeof rec.tpvChargeExtra === 'boolean' ? rec.tpvChargeExtra : role === 'extra';
+    const tpvAllowRemove =
+      typeof rec.tpvAllowRemove === 'boolean'
+        ? rec.tpvAllowRemove
+        : role === 'base' || role === 'extra';
     const extraPrices = normalizeExtraPrices(rec.extraPrices);
     const productParts = normalizeProductParts(rec.productParts);
+    const syncedRole = roleFromStoreIngredientTpvFlags(tpvChargeExtra, tpvAllowRemove);
+    const baseCostRaw = Number(rec.baseCost);
+    const baseCost =
+      Number.isFinite(baseCostRaw) && baseCostRaw >= 0 ? Math.round(baseCostRaw * 100) / 100 : undefined;
     out.push({
       id: String(rec.id || `ing-${idx}-${ingredientNameKey(name).replace(/\s+/g, '-')}`),
       name,
-      role,
-      escandalloOnly: role === 'escandallo',
+      role: syncedRole,
+      escandalloOnly: syncedRole === 'escandallo',
+      tpvChargeExtra,
+      tpvAllowRemove,
       ...(brandIds.length > 0 ? { brandIds } : {}),
       ...(productParts.length > 0 ? { productParts } : {}),
-      ...(role === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),
+      ...(syncedRole === 'extra' && Object.keys(extraPrices).length > 0 ? { extraPrices } : {}),
+      ...(baseCost !== undefined ? { baseCost } : {}),
     });
   });
   return out;
@@ -574,6 +958,98 @@ export function mergeStoreIngredientNames(
   return out;
 }
 
+function mergeStoreIngredientRows(a: StoreIngredient, b: StoreIngredient): StoreIngredient {
+  const flagsA = readStoreIngredientTpvFlags(a);
+  const flagsB = readStoreIngredientTpvFlags(b);
+  const chargeExtra = flagsA.chargeExtra || flagsB.chargeExtra;
+  const allowRemove = flagsA.allowRemove || flagsB.allowRemove;
+  const parts = new Set<TpvCategoryTemplateKey>([
+    ...normalizeProductParts(a.productParts),
+    ...normalizeProductParts(b.productParts),
+  ]);
+  const brandIds = normalizeBrandIds(a.brandIds);
+  const brandIdsB = normalizeBrandIds(b.brandIds);
+  const mergedBrands = brandIds.length > 0 ? brandIds : brandIdsB;
+  const pickName = (x: string, y: string) => {
+    const xt = x.trim();
+    const yt = y.trim();
+    if (xt.length !== yt.length) return xt.length > yt.length ? xt : yt;
+    return /[A-ZÁÉÍÓÚÑ]/.test(xt) ? xt : yt;
+  };
+  const pickBaseCost = () => {
+    const ca = Number(a.baseCost);
+    const cb = Number(b.baseCost);
+    if (Number.isFinite(ca) && ca >= 0 && Number.isFinite(cb) && cb >= 0) {
+      return Math.round(Math.max(ca, cb) * 100) / 100;
+    }
+    if (Number.isFinite(ca) && ca >= 0) return Math.round(ca * 100) / 100;
+    if (Number.isFinite(cb) && cb >= 0) return Math.round(cb * 100) / 100;
+    return undefined;
+  };
+  const mergedBaseCost = pickBaseCost();
+  return withStoreIngredientTpvFlags(
+    {
+      id: String(a.id || b.id || '').trim() || `ing-${Date.now()}`,
+      name: pickName(a.name, b.name),
+      role: 'base',
+      escandalloOnly: false,
+      ...(mergedBrands.length > 0 ? { brandIds: mergedBrands } : {}),
+      ...(parts.size > 0 ? { productParts: [...parts] } : {}),
+      ...(mergedBaseCost !== undefined ? { baseCost: mergedBaseCost } : {}),
+    },
+    { chargeExtra, allowRemove },
+  );
+}
+
+/** Fusiona duplicados (mismo nombre normalizado + mismas marcas) sin intervención manual. */
+export function mergeDuplicateStoreIngredients(list: StoreIngredient[]): {
+  items: StoreIngredient[];
+  mergedCount: number;
+} {
+  const map = new Map<string, StoreIngredient>();
+  let mergedCount = 0;
+  for (const ing of list) {
+    const brandIds = normalizeBrandIds(ing.brandIds);
+    const key = ingredientRowKey(ing.name, brandIds);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...ing, brandIds: brandIds.length > 0 ? brandIds : ing.brandIds });
+      continue;
+    }
+    mergedCount += 1;
+    map.set(key, mergeStoreIngredientRows(existing, ing));
+  }
+  return { items: [...map.values()], mergedCount };
+}
+
+/** Productos del catálogo cuya ficha lista este ingrediente (solo lectura). */
+export function catalogItemsUsingIngredient(
+  catalogItems: Array<
+    Pick<CatalogItem, '_id' | 'name' | 'brandIds' | 'customFields' | 'active' | 'module'>
+  >,
+  ingredientName: string,
+  options?: { brandId?: string },
+): Array<Pick<CatalogItem, '_id' | 'name'>> {
+  const needle = ingredientNameKey(ingredientName);
+  if (!needle) return [];
+  const brandId = String(options?.brandId || '').trim();
+  return catalogItems
+    .filter((item) => {
+      if (item.module && item.module !== 'catalog') return false;
+      if (item.active === false) return false;
+      if (brandId) {
+        const ids = Array.isArray(item.brandIds)
+          ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
+          : [];
+        if (ids.length > 0 && !ids.includes(brandId)) return false;
+      }
+      const raw = item.customFields?.ingredients;
+      if (typeof raw !== 'string' || !raw.trim()) return false;
+      return parseIngredientsText(raw).some((part) => ingredientNameKey(part) === needle);
+    })
+    .map((item) => ({ _id: item._id, name: item.name }));
+}
+
 export function storeIngredientNames(list: StoreIngredient[] | undefined): string[] {
   return (list || []).map((i) => i.name).filter(Boolean);
 }
@@ -595,6 +1071,36 @@ export function tpvBaseIngredientNames(
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(ing.name);
+    }
+    return out;
+  };
+
+  const strict = collect(false, false);
+  if (strict.length > 0) return strict;
+  const noBrand = collect(true, false);
+  if (noBrand.length > 0) return noBrand;
+  const noPart = collect(false, true);
+  if (noPart.length > 0) return noPart;
+  return collect(true, true);
+}
+
+/** Ingredientes base (objeto completo) con los mismos criterios relajados que tpvBaseIngredientNames. */
+export function tpvBaseStoreIngredients(
+  list: StoreIngredient[] | undefined,
+  productBrandIds: string[] = [],
+  productPart: TpvCategoryTemplateKey | null = null,
+): StoreIngredient[] {
+  const collect = (ignoreBrand: boolean, ignorePart: boolean): StoreIngredient[] => {
+    const seen = new Set<string>();
+    const out: StoreIngredient[] = [];
+    for (const ing of list || []) {
+      if (resolveIngredientRole(ing) !== 'base') continue;
+      if (!ignoreBrand && !storeIngredientAppliesToBrands(ing, productBrandIds)) continue;
+      if (!ignorePart && !storeIngredientAppliesToProductPart(ing, productPart)) continue;
+      const key = ingredientNameKey(ing.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(ing);
     }
     return out;
   };
@@ -1061,14 +1567,47 @@ export function mergeComboProductIngredients(
 export function mergeHalfHalfProductIngredients(
   selection: HalfHalfPizzaSelection,
   catalog: CatalogItem[],
+  context?: {
+    templates?: TpvCategoryTemplates;
+    storeIngredients?: StoreIngredient[];
+    brandIngredientSelection?: TpvBrandIngredientSelection;
+    legacyBrandIngredients?: TpvBrandCategoryIngredients;
+    brands?: TpvBrandHint[];
+  },
 ): string[] {
-  return mergeComboProductIngredients(
+  const fromProductFields = mergeComboProductIngredients(
     [
       { productId: selection.firstProductId, productName: selection.firstProductName, quantity: 1 },
       { productId: selection.secondProductId, productName: selection.secondProductName, quantity: 1 },
     ],
     catalog,
   );
+  if (fromProductFields.length > 0) return fromProductFields;
+  if (!context) return [];
+
+  const byId = new Map(catalog.map((c) => [c._id, c]));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const productId of [selection.firstProductId, selection.secondProductId]) {
+    const comp = byId.get(String(productId || '').trim());
+    if (!comp) continue;
+    const ing = parseCatalogIngredients(
+      comp,
+      context.templates,
+      context.storeIngredients,
+      context.brandIngredientSelection,
+      context.legacyBrandIngredients,
+      context.brands,
+      { catalogItems: catalog },
+    );
+    for (const name of ing) {
+      const key = ingredientNameKey(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 export function parseCatalogIngredients(
@@ -1093,14 +1632,20 @@ export function parseCatalogIngredients(
       const catalog = options.catalogItems;
       if (catalog?.length) {
         if (options.halfHalfPizza) {
-          const fromHalf = mergeHalfHalfProductIngredients(options.halfHalfPizza, catalog);
+          const fromHalf = mergeHalfHalfProductIngredients(options.halfHalfPizza, catalog, {
+            templates,
+            storeIngredients,
+            brandIngredientSelection,
+            legacyBrandIngredients,
+            brands,
+          });
           if (fromHalf.length > 0) return fromHalf;
         }
         const fromCombo = mergeComboComponentIngredients(item, catalog, options.comboSelections);
         if (fromCombo.length > 0) return fromCombo;
       }
     }
-    return [];
+    if (!options.halfHalfPizza) return [];
   }
 
   if (templateKey && legacyBrandIngredients) {

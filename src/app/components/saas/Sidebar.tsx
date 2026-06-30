@@ -230,7 +230,7 @@ const menuItemDefs = [
 
   // ── Catálogo y Proveedores ───────────────────────────────────────────────────
   { id: 'catalog',          navKey: 'catalog',         icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
-  { id: 'catalog-stock',    navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/catalog?tab=stock' },
+  { id: 'catalog-stock',    navKey: 'articles',        icon: <Boxes className="w-5 h-5" />,       path: '/saas/inventory' },
   { id: 'costing',          navKey: 'costing',         icon: <Calculator className="w-5 h-5" />,  path: '/saas/catalog?tab=escandallo' },
   { id: 'suppliers',        navKey: 'suppliers',       icon: <Factory className="w-5 h-5" />,     path: '/saas/suppliers' },
 
@@ -1009,7 +1009,7 @@ function SidebarInner({
     (item.id === 'cleaning-reviews' && location.pathname.startsWith('/saas/cleaning-reviews')) ||
     (item.id === 'cleaning-incidents' && location.pathname.startsWith('/saas/cleaning-incidents')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
-    (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'stock') ||
+    (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/costing')) ||
     (item.id === 'suppliers' && location.pathname.startsWith('/saas/suppliers')) ||

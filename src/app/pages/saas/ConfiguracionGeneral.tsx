@@ -450,7 +450,7 @@ export function ConfiguracionGeneral() {
       });
     }
 
-    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands);
+    const brandImportWarn = formatUnmatchedCommercialBrandWarning(unmatchedCommercialBrands, brandCache);
     if (brandImportWarn) toast.warning(brandImportWarn, { duration: 14000 });
 
     if (items.length === 0) {

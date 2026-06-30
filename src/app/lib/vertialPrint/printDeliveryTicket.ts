@@ -4,7 +4,7 @@ import { buildTicketDocument } from './ticketDocument';
 import { encodeTicketEscpos } from './escposEncode';
 import { loadPrinterConfig } from './printerConfig';
 import { fetchBridgeHealth, sendEscposToBridge } from './printBridgeClient';
-import { printDeliveryTicketBrowser } from './printBrowser';
+import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 
 export type PrintDeliveryTicketResult = {
   method: 'bridge' | 'browser';
@@ -18,7 +18,7 @@ export async function printDeliveryTicket(
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (config.preferBridge && config.connectionType !== 'browser') {
-    const health = await fetchBridgeHealth();
+    const health = await fetchBridgeHealth(1400, config);
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
       if (result.ok) {
@@ -26,7 +26,7 @@ export async function printDeliveryTicket(
       }
       toast.warning(result.error || 'Impresión directa fallida. Usando navegador…');
     } else if (config.connectionType !== 'browser') {
-      toast.warning('Vertial Print no está activo. Usando impresión del navegador…');
+      toast.warning('No se detectó el servicio de impresión. Usando ventana del dispositivo…');
     }
   }
 
@@ -40,7 +40,7 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
   const escpos = encodeTestTicketEscpos(config.paperWidthMm);
 
   if (config.preferBridge && config.connectionType !== 'browser') {
-    const health = await fetchBridgeHealth();
+    const health = await fetchBridgeHealth(1400, config);
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
       if (result.ok) {
@@ -50,10 +50,11 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       toast.error(result.error || 'No se pudo imprimir la prueba');
       return { method: 'browser' };
     }
-    toast.error('Vertial Print no está activo. Ejecuta: npm run print-bridge');
+    toast.error('No se detectó el servicio de impresión en este dispositivo o PC del mostrador');
     return { method: 'browser' };
   }
 
-  toast.info('Configura impresora de red o activa Vertial Print para prueba térmica');
+  printTestTicketBrowser(config.paperWidthMm);
+  toast.info('Se abrirá la ventana de imprimir de tu dispositivo');
   return { method: 'browser' };
 }

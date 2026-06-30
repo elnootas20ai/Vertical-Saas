@@ -9,6 +9,7 @@ import {
   isDefaultBrandNamePlaceholder,
   isDefaultCommercialBrand,
 } from './brandUtils';
+import { resolveBrandPlaceholderUrl } from './brandPlaceholders';
 import {
   dedupePointsOfSale,
   ensureDeliveryPdvForWorkCenter,
@@ -23,6 +24,7 @@ import { resolveBusinessDataUserId } from './tenantUserId';
 import {
   createWorkCenter,
   listWorkCentersForDelivery,
+  updateWorkCenter,
   type WorkCenter,
 } from './workCentersApi';
 import { clearTpvCatalogCache } from './tpvCatalogCache';
@@ -223,6 +225,17 @@ export function resolveBusinessScopeId(business?: Business | null): string {
   );
 }
 
+export function knownBusinessIdsFromList(
+  businesses: Array<{ business_id?: string; id?: string } | null | undefined>,
+): string[] {
+  const ids = new Set<string>();
+  for (const b of businesses) {
+    const id = resolveBusinessScopeId(b as Business | null);
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+
 /** Lee `businessId` del documento (también alias legacy `business_id`). */
 export function readWorkCenterBusinessId(wc: WorkCenter | Record<string, unknown>): string {
   const raw = wc as Record<string, unknown>;
@@ -231,7 +244,7 @@ export function readWorkCenterBusinessId(wc: WorkCenter | Record<string, unknown
 
 /**
  * Centros visibles solo para la empresa activa (`businessId` exacto).
- * Con 2+ empresas en la cuenta nunca se mezclan tiendas sin etiquetar ni de otra empresa.
+ * Si la empresa tiene oficinas u otros centros pero ninguna tienda retail, incluye tiendas huérfanas.
  */
 export function filterWorkCentersForBusinessScope(
   workCenters: WorkCenter[],
@@ -242,27 +255,23 @@ export function filterWorkCentersForBusinessScope(
   if (!bid) return [];
 
   const active = workCenters.filter((wc) => !wc.deletedAt);
+  const isRetail = (wc: WorkCenter) =>
+    wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
+
   const mine = active.filter((wc) => readWorkCenterBusinessId(wc) === bid);
+  const mineRetail = mine.filter(isRetail);
   const accountN = options?.accountBusinessCount;
 
   if (accountN === undefined) {
     return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
-  if (accountN >= 2) {
-    return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  }
-
-  if (accountN === 1) {
-    const isRetail = (wc: WorkCenter) =>
-      wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
-    // Solo legacy sin businessId si esta empresa aún no tiene tiendas propias.
-    const legacy =
-      mine.length === 0
-        ? active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc))
-        : [];
+  // Clave: mirar tiendas retail, no «cualquier centro». Una oficina etiquetada no debe ocultar «pizzerias».
+  if (mineRetail.length === 0) {
+    const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
     const merged = new Map<string, WorkCenter>();
-    for (const wc of [...mine, ...legacy]) merged.set(wc._id, wc);
+    for (const wc of mine) merged.set(wc._id, wc);
+    for (const wc of legacyRetail) merged.set(wc._id, wc);
     return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
@@ -315,6 +324,42 @@ export function workCentersStrictlyForBusiness(
   return workCenters.filter((wc) => readWorkCenterBusinessId(wc) === bid);
 }
 
+function isRetailWorkCenterType(wc: WorkCenter): boolean {
+  return wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
+}
+
+/** Etiqueta tiendas huérfanas (sin businessId) a la empresa activa cuando aún no tiene ninguna. */
+export async function tagOrphanRetailWorkCentersForBusiness(
+  businessId: string,
+  workCenters: WorkCenter[],
+): Promise<WorkCenter[]> {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return workCenters;
+
+  const hasTaggedRetail = workCenters.some(
+    (wc) => !wc.deletedAt && isRetailWorkCenterType(wc) && readWorkCenterBusinessId(wc) === bid,
+  );
+  if (hasTaggedRetail) return workCenters;
+
+  const orphans = workCenters.filter(
+    (wc) => !wc.deletedAt && isRetailWorkCenterType(wc) && !readWorkCenterBusinessId(wc),
+  );
+  if (orphans.length === 0 || orphans.length > 8) return workCenters;
+
+  const next = [...workCenters];
+  for (const wc of orphans) {
+    try {
+      const patched = await updateWorkCenter({ ...wc, businessId: bid });
+      const idx = next.findIndex((row) => row._id === wc._id);
+      if (idx >= 0) next[idx] = patched;
+    } catch {
+      const idx = next.findIndex((row) => row._id === wc._id);
+      if (idx >= 0) next[idx] = { ...wc, businessId: bid };
+    }
+  }
+  return next;
+}
+
 /** PDV de caja enlazados a centros de la empresa activa (evita mezclar tiendas entre empresas). */
 export function filterPointsOfSaleForWorkCenters(
   pointsOfSale: PointOfSale[],
@@ -337,6 +382,8 @@ export type LoadDeliveryStoresOptions = {
   includeInactivePdvs?: boolean;
   /** Cuántas empresas tiene la cuenta (para no mostrar todas las tiendas en cada una). */
   accountBusinessCount?: number;
+  /** Ids de empresas de la cuenta (reasignar tienda única mal etiquetada). */
+  knownBusinessIds?: string[];
   /** Centro asignado al trabajador (invitación): asegurar PDV aunque falte en el listado filtrado. */
   priorityWorkCenterId?: string;
 };
@@ -373,6 +420,42 @@ export function alignRetailWorkCentersToActiveBusiness(
   });
 }
 
+/**
+ * Empresa sin tienda retail pero con oficina etiquetada, o tienda única mal etiquetada a otra empresa.
+ * Reasigna en memoria para que Ajustes y sidebar coincidan.
+ */
+export function rescueRetailForBusinessWithoutStores(
+  workCenters: WorkCenter[],
+  businessId: string,
+  knownBusinessIds: string[],
+): WorkCenter[] {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return workCenters;
+
+  const isRetail = (wc: WorkCenter) =>
+    !wc.deletedAt && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen');
+
+  if (workCenters.some((wc) => isRetail(wc) && readWorkCenterBusinessId(wc) === bid)) {
+    return workCenters;
+  }
+
+  const legacyRetail = workCenters.filter((wc) => isRetail(wc) && !readWorkCenterBusinessId(wc));
+  if (legacyRetail.length > 0) return workCenters;
+
+  const known = new Set(knownBusinessIds.map(normalizeBusinessScopeId).filter(Boolean));
+  const allRetail = workCenters.filter(isRetail);
+  if (allRetail.length !== 1) return workCenters;
+
+  const only = allRetail[0];
+  const wb = readWorkCenterBusinessId(only);
+  if (!wb || wb === bid) return workCenters;
+  if (known.size > 0 && !known.has(wb)) return workCenters;
+
+  return workCenters.map((wc) =>
+    wc._id === only._id ? { ...wc, businessId: bid, business_id: bid } : wc,
+  );
+}
+
 /** Fuente única: centros de trabajo + PDV de caja enlazados y deduplicados. */
 export async function loadDeliveryStores(
   authUser: AuthLike,
@@ -388,19 +471,36 @@ export async function loadDeliveryStores(
   const includeInactivePdvs = options?.includeInactivePdvs === true;
 
   const [allWorkCenters, rawPdvs] = await Promise.all([
-    listWorkCentersForDelivery(dataUserId, business ?? null),
+    listWorkCentersForDelivery(dataUserId, business ?? null).catch(() => [] as WorkCenter[]),
     listPointsOfSaleRequest(dataUserId, { includeInactive: includeInactivePdvs }).catch(
       () => [] as PointOfSale[],
     ),
   ]);
 
+  // Etiquetar huérfanas en segundo plano: no bloquear Ajustes si falla el PATCH.
+  if (businessId) {
+    void tagOrphanRetailWorkCentersForBusiness(businessId, allWorkCenters).catch(() => {});
+  }
+  const taggedWorkCenters = allWorkCenters;
+
   const dedupeOpts = includeInactivePdvs ? { includeInactive: true as const } : undefined;
 
-  const scopedWorkCenters = alignRetailWorkCentersToActiveBusiness(
-    allWorkCenters,
+  let scopedWorkCenters = alignRetailWorkCentersToActiveBusiness(
+    taggedWorkCenters,
     business ?? null,
     dedupePointsOfSale(rawPdvs, dedupeOpts),
   );
+
+  const knownBusinessIds =
+    options?.knownBusinessIds ??
+    (businessId ? [businessId] : []);
+  if (businessId && knownBusinessIds.length > 0) {
+    scopedWorkCenters = rescueRetailForBusinessWithoutStores(
+      scopedWorkCenters,
+      businessId,
+      knownBusinessIds,
+    );
+  }
 
   let workCenters = filterWorkCentersForBusinessScope(scopedWorkCenters, businessId, {
     accountBusinessCount: options?.accountBusinessCount,
@@ -452,15 +552,20 @@ export async function loadTpvPointsOfSaleForBusiness(
     );
   }
   for (const wc of retail) {
-    const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, wc, {
-      business: business ?? null,
-      existingPdvs: pointsOfSale,
-    });
-    if (!ensured) continue;
-    const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
-    if (idx >= 0) pointsOfSale[idx] = ensured;
-    else pointsOfSale.push(ensured);
-    pointsOfSale = dedupePointsOfSale(pointsOfSale);
+    try {
+      const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, wc, {
+        business: business ?? null,
+        existingPdvs: pointsOfSale,
+      });
+      if (!ensured) continue;
+      const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
+      if (idx >= 0) pointsOfSale[idx] = ensured;
+      else pointsOfSale.push(ensured);
+      pointsOfSale = dedupePointsOfSale(pointsOfSale);
+    } catch {
+      // Un PDV que no se puede crear/enlazar no debe impedir ver la tienda.
+      continue;
+    }
   }
 
   pointsOfSale = await ensureTabletCodesForPointsOfSale(state.dataUserId, pointsOfSale);
@@ -476,15 +581,19 @@ export async function loadTpvPointsOfSaleForBusiness(
       state.workCenters.find((wc) => wc._id === priorityWcId) ||
       retail.find((wc) => wc._id === priorityWcId);
     if (priorityWc) {
-      const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, priorityWc, {
-        business: business ?? null,
-        existingPdvs: pointsOfSale,
-      });
-      if (ensured) {
-        const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
-        if (idx >= 0) pointsOfSale[idx] = ensured;
-        else pointsOfSale.push(ensured);
-        pointsOfSale = dedupePointsOfSale(pointsOfSale);
+      try {
+        const ensured = await ensureDeliveryPdvForWorkCenter(state.dataUserId, priorityWc, {
+          business: business ?? null,
+          existingPdvs: pointsOfSale,
+        });
+        if (ensured) {
+          const idx = pointsOfSale.findIndex((p) => p._id === ensured._id);
+          if (idx >= 0) pointsOfSale[idx] = ensured;
+          else pointsOfSale.push(ensured);
+          pointsOfSale = dedupePointsOfSale(pointsOfSale);
+        }
+      } catch {
+        // Sin PDV prioritario: el centro sigue visible en scope.
       }
     }
   }
@@ -514,6 +623,7 @@ export async function ensureDeliveryDefaultBrand(
       active: true,
       isDefault: true,
       primaryColor: '#6366F1',
+      logo: resolveBrandPlaceholderUrl({ name: preferred || DEFAULT_COMMERCIAL_BRAND_NAME }),
       salesPointIds: [],
     });
     brands = [defaultBrand, ...brands];
@@ -606,7 +716,7 @@ export async function setupDeliveryRetailStore(
     postalCode: payload.postalCode?.trim() || undefined,
     phone: payload.phone?.trim() || undefined,
     active: true,
-    expectedStaffCount: 3,
+    expectedStaffCount: 0,
     businessId: payload.businessId,
   });
 
@@ -622,6 +732,11 @@ export async function setupDeliveryRetailStore(
     pointOfSale: pdv,
     storeName: trimmedName,
   });
+
+  const businessId = resolveBusinessScopeId(business);
+  if (businessId) {
+    persistRetailScopeAfterStorePdvSave(businessId, wc, pdv);
+  }
 
   return { workCenter: wc, pointOfSale: pdv };
 }
@@ -666,20 +781,33 @@ export const DELIVERY_CATALOG_CHANGED = 'catalog:changed';
 export const DELIVERY_CONFIG_CHANGED = 'delivery-config:changed';
 export const DELIVERY_BRANDS_CHANGED = 'brands:changed';
 
-/** Invalida caché de tiendas en sesión (sidebar / scope) tras alta o edición. */
+import {
+  clearRetailScopeCache,
+  mergeRetailScopeCacheEntry,
+} from './retailScopeCache';
+import { clearSidebarRetailCache } from './sidebarRetailCache';
+
+/** Invalida caché de tiendas en sesión (sidebar / scope) tras baja o cambio de empresa. */
 export function clearDeliveryStoresSessionCache(businessId?: string): void {
-  void import('./retailScopeCache').then(({ clearRetailScopeCache }) => {
-    clearRetailScopeCache(businessId);
-  });
-  void import('./sidebarRetailCache').then(({ clearSidebarRetailCache }) => {
-    clearSidebarRetailCache(businessId);
-  });
+  clearRetailScopeCache(businessId);
+  clearSidebarRetailCache(businessId);
 }
 
-export function notifyDeliveryWorkCentersChanged(businessId?: string): void {
+/** Tras crear/editar tienda + PDV: caché al instante para gate Marca y sidebar. */
+export function persistRetailScopeAfterStorePdvSave(
+  businessId: string,
+  workCenter: WorkCenter,
+  pointOfSale: PointOfSale,
+  options?: { accountBusinessCount?: number },
+): void {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return;
+  mergeRetailScopeCacheEntry(bid, workCenter, pointOfSale, options);
+}
+
+export function notifyDeliveryWorkCentersChanged(_businessId?: string): void {
   if (typeof window === 'undefined') return;
   try {
-    clearDeliveryStoresSessionCache(businessId);
     window.dispatchEvent(new CustomEvent(DELIVERY_WORK_CENTERS_CHANGED));
     notifyDeliveryActiveStoreChanged();
   } catch {

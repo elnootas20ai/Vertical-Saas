@@ -31,8 +31,6 @@ import { ModalModulo } from '../../components/gate/ModalModulo';
 import { VehicleImportWizard } from '../../components/saas/VehicleImportWizard';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import {
-  ensureDeliveryDefaultBrand,
-  isDeliveryBusinessType,
   readStoredOnboardingBusinessType,
 } from '../../lib/deliverySetup';
 import type { BusinessType } from '../../lib/businessApi';
@@ -292,16 +290,6 @@ export function Gate() {
     void createBusiness(onboardingPayload)
       .then(async (result) => {
         if (!result.success || !result.business?.business_id) return;
-        const createdType = String(result.business.businessType || onboardingPayload.businessType || '').trim();
-        if (isDeliveryBusinessType(createdType)) {
-          try {
-            await ensureDeliveryDefaultBrand(result.business.business_id, {
-              preferredName: onboardingPayload.name,
-            });
-          } catch {
-            /* noop */
-          }
-        }
         await reloadBusinesses();
         switchBusiness(result.business.business_id);
         navigate('/saas/dashboard', { replace: true });

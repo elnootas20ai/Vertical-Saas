@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Restaurante">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#eef2ff"/>
+      <stop offset="100%" stop-color="#c7d2fe"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="24" fill="url(#bg)"/>
+  <ellipse cx="100" cy="132" rx="58" ry="12" fill="#374151"/>
+  <ellipse cx="100" cy="128" rx="54" ry="10" fill="#111827"/>
+  <path d="M78 72v56" stroke="#6366f1" stroke-width="6" stroke-linecap="round"/>
+  <path d="M66 72c0 12 6 18 12 18s12-6 12-18" fill="none" stroke="#6366f1" stroke-width="6" stroke-linecap="round"/>
+  <path d="M122 72v56" stroke="#6366f1" stroke-width="6" stroke-linecap="round"/>
+  <path d="M110 72c0 10 5 16 12 16s12-6 12-16" fill="none" stroke="#6366f1" stroke-width="6" stroke-linecap="round"/>
+  <rect x="88" y="96" width="24" height="18" rx="6" fill="#f59e0b"/>
+</svg>

@@ -1,28 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import type { ReactNode } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
-  Beef,
-  Coffee,
-  CupSoda,
   Edit3,
   ImagePlus,
   Layers,
   Link2,
   Lock,
-  Pizza,
   Plus,
   Search,
-  ShoppingBasket,
   Store,
   Tag,
   Trash2,
-  UtensilsCrossed,
   X,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
@@ -46,6 +39,8 @@ import {
   isDefaultCommercialBrand,
   resolveBrandActiveOnCreate,
   isBrandSetupComplete,
+  findBrandToCompleteInActivation,
+  isIncompleteActivationShell,
   sortBrandsForDisplay,
   suggestBrandShortCodeFromName,
 } from '../../../lib/brandUtils';
@@ -53,12 +48,14 @@ import { DeliveryActivationGatePanel } from '../DeliveryActivationGatePanel';
 import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap, ActivationFocusBanner } from '../ActivationGuideUi';
 import { useDeliveryStorePdvGate } from '../../../hooks/useDeliveryStorePdvGate';
-import { ensureDeliveryDefaultBrand, notifyDeliveryBrandsChanged } from '../../../lib/deliverySetup';
+import { notifyDeliveryBrandsChanged } from '../../../lib/deliverySetup';
 import { readImageFileAsDataUrl } from '../../../lib/readImageAsDataUrl';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   DELIVERY_BRAND_LINE_ICON_BOX,
+  DELIVERY_BRAND_LINE_PHOTOS,
   DELIVERY_BRAND_LINE_PRESETS,
+  DELIVERY_BRAND_LINE_PRESETS_PICKER,
   deliveryBrandLineKindLabel,
   getDeliveryBrandLinePreset,
   type DeliveryBrandLineKindId,
@@ -68,11 +65,11 @@ import {
   isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
-import { resolveTpvCatalogBusinessId } from '../../../lib/tpvRegisterScope';
 import { useTenantEntitlements, countCommercialBrands } from '../../../hooks/useTenantEntitlements';
 import { writeBillingSelection } from '../../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import { listWorkCentersForDelivery, type WorkCenter } from '../../../lib/workCentersApi';
+import { resolveBrandLogo, resolveBrandPlaceholderUrl, shouldPersistBrandPlaceholderLogo } from '../../../lib/brandPlaceholders';
 import { BrandLogoPreview, isExtremeWideLogo } from './BrandLogoPreview';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
@@ -88,25 +85,12 @@ import {
   settingsSearchInputClass,
   settingsStatusPillClass,
   settingsChoiceGridClass,
-  settingsChoiceIconBoxClass,
   settingsChoiceRowClass,
   settingsWizardLeadClass,
   settingsLogoPreviewBoxClass,
   settingsWizardSectionClass,
   settingsWizardSectionCompactClass,
 } from './settingsFormStyles';
-
-const BRAND_LINE_ICONS: Record<DeliveryBrandLineKindId, ReactNode> = {
-  prepared_meals: <UtensilsCrossed className="h-4 w-4" />,
-  pizza: <Pizza className="h-4 w-4" />,
-  burger_fastfood: <Beef className="h-4 w-4" />,
-  sushi_asian: <UtensilsCrossed className="h-4 w-4" />,
-  cafe_bakery: <Coffee className="h-4 w-4" />,
-  drinks_desserts: <CupSoda className="h-4 w-4" />,
-  groceries: <ShoppingBasket className="h-4 w-4" />,
-  mixed_restaurant: <UtensilsCrossed className="h-4 w-4" />,
-  other: <Tag className="h-4 w-4" />,
-};
 
 const BRAND_WIZARD_STEP_HINTS: Record<string, string> = {
   negocio: 'Tipo de carta',
@@ -219,6 +203,8 @@ function BrandLineModal({
     setForm((f) => {
       const nextName = shouldAutofillDefaultName(f.name) ? preset.suggestedName : f.name;
       const nextShortCode = syncShortCodeFromName(nextName, preset.shortCode) ?? f.shortCode;
+      const linePhoto = DELIVERY_BRAND_LINE_PHOTOS[kindId];
+      const nextLogo = shouldPersistBrandPlaceholderLogo(f.logo) ? linePhoto : f.logo;
       return {
         ...f,
         deliveryLineKind: kindId,
@@ -227,25 +213,30 @@ function BrandLineModal({
         description: !f.description.trim() ? preset.description : f.description,
         shortCode: nextShortCode,
         primaryColor: preset.primaryColor,
+        logo: nextLogo,
       };
     });
   };
 
   const nameSuggestions = useMemo(() => {
-    if (!isDefault) return [];
+    if (editingBrand && !isDefault) return [];
     const preset = getDeliveryBrandLinePreset(form.deliveryLineKind);
     const fromPreset = preset ? [preset.suggestedName, ...preset.typicalCategories.slice(0, 2)] : [];
     const merged = [...fromPreset, ...DEFAULT_BRAND_NAME_SUGGESTIONS];
     return [...new Set(merged.map((s) => s.trim()).filter(Boolean))].slice(0, 8);
-  }, [isDefault, form.deliveryLineKind]);
+  }, [isDefault, editingBrand, form.deliveryLineKind]);
 
   const defaultNameUnset =
     isDefault && (!form.name.trim() || isDefaultBrandNamePlaceholder(form.name));
 
   useEffect(() => {
     if (!isOpen || !activationHighlight) return;
-    if (activationHighlight === 'brand-name' || activationHighlight === 'edit-brand') {
-      setStep(showDeliveryWizard ? 'identidad' : 'identidad');
+    if (
+      activationHighlight === 'brand-name' ||
+      activationHighlight === 'edit-brand' ||
+      activationHighlight === 'create-brand'
+    ) {
+      setStep(showDeliveryWizard ? (activationHighlight === 'create-brand' ? 'negocio' : 'identidad') : 'identidad');
     }
   }, [isOpen, activationHighlight, showDeliveryWizard]);
 
@@ -440,7 +431,16 @@ function BrandLineModal({
   };
 
   const previewName = form.name.trim() || (defaultNameUnset ? 'Tu marca' : 'Marca');
-  const previewInitial = previewName.charAt(0).toUpperCase();
+  const formLogoDisplay = useMemo(
+    () =>
+      resolveBrandLogo({
+        logo: form.logo,
+        name: form.name,
+        deliveryLineKind: form.deliveryLineKind,
+        catalogCategories: form.catalogCategories,
+      }),
+    [form.logo, form.name, form.deliveryLineKind, form.catalogCategories],
+  );
 
   if (!isOpen) return null;
 
@@ -480,18 +480,7 @@ function BrandLineModal({
             style={{ background: brandPreviewGradient(form.primaryColor) }}
           >
             <div className="mx-auto w-full max-w-[12.5rem] overflow-hidden rounded-2xl bg-white/95 p-2 shadow-lg ring-2 ring-white/40">
-              {form.logo ? (
-                <BrandLogoPreview src={form.logo} size="lg" boxClassName="min-h-[9rem]" />
-              ) : (
-                <div className="flex min-h-[9rem] items-center justify-center">
-                <span
-                  className="text-3xl font-bold"
-                  style={{ color: form.primaryColor }}
-                >
-                  {previewInitial}
-                </span>
-                </div>
-              )}
+              <BrandLogoPreview src={formLogoDisplay} size="lg" boxClassName="min-h-[9rem]" />
             </div>
             <p className="mt-4 line-clamp-2 text-lg font-bold leading-tight drop-shadow-sm">{previewName}</p>
             {form.shortCode ? (
@@ -549,7 +538,7 @@ function BrandLineModal({
                   Elige el tipo de carta. En el siguiente paso podrás ajustar nombre, color y categorías.
                 </p>
                 <div className={settingsChoiceGridClass}>
-                  {DELIVERY_BRAND_LINE_PRESETS.map((preset) => {
+                  {DELIVERY_BRAND_LINE_PRESETS_PICKER.map((preset) => {
                     const selected = form.deliveryLineKind === preset.id;
                     return (
                       <button
@@ -559,9 +548,13 @@ function BrandLineModal({
                         onClick={() => applyPreset(preset.id)}
                         className={settingsChoiceRowClass(selected)}
                       >
-                        <span className={settingsChoiceIconBoxClass(DELIVERY_BRAND_LINE_ICON_BOX[preset.id])}>
-                          {BRAND_LINE_ICONS[preset.id]}
-                        </span>
+                        <img
+                          src={DELIVERY_BRAND_LINE_PHOTOS[preset.id]}
+                          alt=""
+                          className="h-11 w-11 shrink-0 rounded-lg object-cover bg-gray-100 ring-1 ring-black/5 dark:bg-gray-800 dark:ring-white/10"
+                          loading="lazy"
+                          decoding="async"
+                        />
                         <div className="min-w-0">
                           <span className="block font-medium leading-tight text-gray-900 line-clamp-2 dark:text-gray-100">
                             {preset.label}
@@ -607,11 +600,11 @@ function BrandLineModal({
                           return nextShortCode ? { ...f, name, shortCode: nextShortCode } : { ...f, name };
                         });
                       }}
-                      autoFocus={isDefault && defaultNameUnset}
+                      autoFocus={!editingBrand || (isDefault && defaultNameUnset)}
                     />
                   </div>
                 </ActivationFieldWrap>
-                  {isDefault && nameSuggestions.length > 0 ? (
+                  {(isDefault || !editingBrand) && nameSuggestions.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {nameSuggestions.map((suggestion) => {
                         const active = form.name.trim() === suggestion;
@@ -648,6 +641,11 @@ function BrandLineModal({
                 </div>
                 <div className="rounded-2xl border-2 border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30 sm:p-5">
                   <p className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Aspecto visual</p>
+                  {form.deliveryLineKind && shouldPersistBrandPlaceholderLogo(form.logo) ? (
+                    <p className="mb-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                      Usamos la foto del tipo de carta elegido. Si quieres otro logo, súbelo abajo.
+                    </p>
+                  ) : null}
                   <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
                     <div className="w-full shrink-0 space-y-2 sm:max-w-[15rem]">
                       <label className={settingsLabelClass}>Logo (archivo en tu ordenador)</label>
@@ -659,12 +657,15 @@ function BrandLineModal({
                       >
                         {logoUploading ? (
                           <span className="text-sm text-gray-500">Cargando…</span>
-                        ) : form.logo ? (
-                          <BrandLogoPreview src={form.logo} size="xl" boxClassName="min-h-[11rem] w-full" />
                         ) : (
-                          <div className="p-2 text-center">
-                            <ImagePlus className="mx-auto mb-2 h-8 w-8 text-gray-400" />
-                            <span className="text-xs font-semibold text-gray-500">Clic para elegir archivo</span>
+                          <div className="relative w-full">
+                            <BrandLogoPreview src={formLogoDisplay} size="xl" boxClassName="min-h-[11rem] w-full" />
+                            {shouldPersistBrandPlaceholderLogo(form.logo) ? (
+                              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/75 p-2 text-center dark:bg-gray-900/75">
+                                <ImagePlus className="mx-auto mb-2 h-8 w-8 text-gray-400" />
+                                <span className="text-xs font-semibold text-gray-500">Clic para subir tu logo</span>
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </button>
@@ -699,17 +700,22 @@ function BrandLineModal({
                           </p>
                         </div>
                       ) : null}
-                      {form.logo ? (
+                      {form.logo && !shouldPersistBrandPlaceholderLogo(form.logo) ? (
                         <button
                           type="button"
                           onClick={() => {
-                            setForm((f) => ({ ...f, logo: '' }));
+                            const fallback =
+                              form.deliveryLineKind &&
+                              form.deliveryLineKind in DELIVERY_BRAND_LINE_PHOTOS
+                                ? DELIVERY_BRAND_LINE_PHOTOS[form.deliveryLineKind as DeliveryBrandLineKindId]
+                                : '';
+                            setForm((f) => ({ ...f, logo: fallback }));
                             setLogoFileName('');
                             setLogoAspectHint(false);
                           }}
                           className="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400"
                         >
-                          Quitar logo
+                          Quitar logo personalizado
                         </button>
                       ) : null}
                     </div>
@@ -745,16 +751,14 @@ function BrandLineModal({
                       </div>
                     </div>
                   </div>
-                  {form.logo ? (
-                    <div className="mt-2 rounded-2xl border-2 border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                        Vista ampliada
-                      </p>
-                      <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-800/80">
-                        <BrandLogoPreview src={form.logo} size="xl" boxClassName="min-h-[14rem] w-full" />
-                      </div>
+                  <div className="mt-2 rounded-2xl border-2 border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      Vista ampliada
+                    </p>
+                    <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-800/80">
+                      <BrandLogoPreview src={formLogoDisplay} size="xl" boxClassName="min-h-[14rem] w-full" />
                     </div>
-                  ) : null}
+                  </div>
                 </div>
               </div>
             )}
@@ -918,13 +922,11 @@ function BrandMarcaHero({
       <div className="px-5 py-6 text-white sm:px-8 sm:py-8" style={{ background: brandPreviewGradient(color) }}>
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
           <div className="mx-auto flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/95 p-2 shadow-lg ring-2 ring-white/30 sm:mx-0">
-            {brand.logo ? (
-              <BrandLogoPreview src={brand.logo} size="lg" boxClassName="h-full w-full min-h-[6rem]" />
-            ) : (
-              <span className="text-3xl font-bold" style={{ color }}>
-                {(nameUnset ? '…' : brand.name.charAt(0)).toUpperCase()}
-              </span>
-            )}
+            <BrandLogoPreview
+              src={resolveBrandLogo(brand)}
+              size="lg"
+              boxClassName="h-full w-full min-h-[6rem]"
+            />
           </div>
           <div className="min-w-0 flex-1 text-center sm:text-left">
             <p className="text-[11px] font-bold uppercase tracking-wider text-white/75">Tu marca en Vertial</p>
@@ -975,27 +977,25 @@ function BrandMarcaHero({
 
 export function CompanyMarcaSettings() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
-  const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
-  const brandBusinessId = useMemo(
-    () => resolveTpvCatalogBusinessId(scopeBusinessId, businesses),
-    [scopeBusinessId, businesses],
-  );
-  const isDelivery = useMemo(
-    () =>
-      isDeliveryBusinessType(currentBusiness?.businessType)
-      || businesses.some((b) => isDeliveryBusinessType(b.businessType)),
-    [currentBusiness?.businessType, businesses],
-  );
-  const deliveryBusinessForScope = useMemo(
-    () => businesses.find((b) => resolveBusinessScopeId(b) === brandBusinessId) ?? currentBusiness,
-    [businesses, brandBusinessId, currentBusiness],
-  );
-  const useSelectorPdvGate = isDeliveryBusinessType(currentBusiness?.businessType);
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pdvGate = useDeliveryStorePdvGate();
+  const pdvGateReloadedRef = useRef(false);
+
+  useEffect(() => {
+    pdvGateReloadedRef.current = false;
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!isDelivery || pdvGate.loading || pdvGate.ready || pdvGateReloadedRef.current) return;
+    pdvGateReloadedRef.current = true;
+    void pdvGate.reload();
+  }, [isDelivery, pdvGate.loading, pdvGate.ready, pdvGate.reload]);
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [stores, setStores] = useState<WorkCenter[]>([]);
@@ -1004,13 +1004,13 @@ export function CompanyMarcaSettings() {
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [search, setSearch] = useState('');
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
-  const [ensuringDefault, setEnsuringDefault] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [hoverBrandId, setHoverBrandId] = useState<string | null>(null);
   const [deactivateBrandTarget, setDeactivateBrandTarget] = useState<Brand | null>(null);
   const [togglingBrandId, setTogglingBrandId] = useState<string | null>(null);
   const [modalActivationHighlight, setModalActivationHighlight] = useState<string | null>(null);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
+  const newBrandQueryHandledRef = useRef(false);
 
   const commercialBrandCount = useMemo(() => countCommercialBrands(brands), [brands]);
   const entitlements = useTenantEntitlements({ commercialBrandCount });
@@ -1022,21 +1022,10 @@ export function CompanyMarcaSettings() {
   }, [stores, isDelivery]);
 
   const loadAll = useCallback(async () => {
-    if (!brandBusinessId) return;
+    if (!businessId) return;
     setLoading(true);
     try {
-      setEnsuringDefault(true);
-      try {
-        const tradeName = String(deliveryBusinessForScope?.name || currentBusiness?.name || '').trim();
-        await ensureDeliveryDefaultBrand(brandBusinessId, {
-          preferredName: tradeName || undefined,
-        });
-      } catch {
-        /* ignore */
-      } finally {
-        setEnsuringDefault(false);
-      }
-      const list = await listBrandsRequest(brandBusinessId).catch(() => [] as Brand[]);
+      const list = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
       setBrands(sortBrandsForDisplay(list));
     } catch {
       setBrands([]);
@@ -1044,7 +1033,7 @@ export function CompanyMarcaSettings() {
     } finally {
       setLoading(false);
     }
-  }, [brandBusinessId, deliveryBusinessForScope?.name, currentBusiness?.name]);
+  }, [businessId]);
 
   const loadStores = useCallback(async () => {
     if (!dataUserId) {
@@ -1052,27 +1041,15 @@ export function CompanyMarcaSettings() {
       return;
     }
     try {
-      const wcs = await listWorkCentersForDelivery(dataUserId, deliveryBusinessForScope ?? null);
-      const scoped = filterWorkCentersForBusinessScope(wcs, brandBusinessId, {
+      const wcs = await listWorkCentersForDelivery(dataUserId, currentBusiness ?? null);
+      const scoped = filterWorkCentersForBusinessScope(wcs, businessId, {
         accountBusinessCount,
       });
       setStores(scoped);
-      if (brandBusinessId && isDelivery) {
-        const firstRetail = scoped.find(
-          (s) => s.active !== false && (s.centerType === 'punto_de_venta' || s.centerType === 'almacen'),
-        );
-        if (firstRetail?._id) {
-          try {
-            await ensureDeliveryDefaultBrand(brandBusinessId, { workCenterId: firstRetail._id });
-          } catch {
-            /* ignore */
-          }
-        }
-      }
     } catch {
       setStores([]);
     }
-  }, [dataUserId, deliveryBusinessForScope, brandBusinessId, isDelivery, accountBusinessCount]);
+  }, [dataUserId, currentBusiness, businessId, accountBusinessCount]);
 
   useEffect(() => {
     void loadAll();
@@ -1101,21 +1078,80 @@ export function CompanyMarcaSettings() {
     [isDelivery, retailStores.length],
   );
 
+  const openCreate = useCallback(() => {
+    const pending = findBrandToCompleteInActivation(brands, setupCtx);
+    if (isDelivery && pending) {
+      setEditingBrand(pending);
+      setShowModal(true);
+      return;
+    }
+    const isFirstBrand = brands.length === 0;
+    if (!isFirstBrand && !entitlements.canCreateCommercialBrand) {
+      setShowUpgradeModal(true);
+      return;
+    }
+    setEditingBrand(null);
+    setShowModal(true);
+  }, [entitlements.canCreateCommercialBrand, brands, setupCtx, isDelivery]);
+
+  const openBrandWizardForActivation = useCallback(
+    (highlight?: string | null) => {
+      const pending = findBrandToCompleteInActivation(brands, setupCtx);
+      if (pending) {
+        setEditingBrand(pending);
+        setShowModal(true);
+        setModalActivationHighlight(highlight ?? 'create-brand');
+        return;
+      }
+      setEditingBrand(null);
+      setShowModal(true);
+      setModalActivationHighlight(highlight ?? 'create-brand');
+    },
+    [brands, setupCtx],
+  );
+
   useEffect(() => {
     if (!activationFocus || loading) return;
+    if (activationFocus === 'create-brand') {
+      openBrandWizardForActivation('create-brand');
+      clearActivationFocus();
+      return;
+    }
     if (activationFocus === 'edit-brand' || activationFocus === 'brand-name') {
-      const target =
-        brands.find((b) => !isBrandSetupComplete(b, setupCtx)) ??
-        brands.find((b) => isDefaultCommercialBrand(b)) ??
-        brands[0];
-      if (target) {
-        setEditingBrand(target);
-        setShowModal(true);
-        setModalActivationHighlight(activationFocus);
-      }
+      openBrandWizardForActivation(activationFocus);
       clearActivationFocus();
     }
-  }, [activationFocus, loading, brands, setupCtx, clearActivationFocus]);
+  }, [activationFocus, loading, clearActivationFocus, openBrandWizardForActivation]);
+
+  useEffect(() => {
+    const wantsSetup =
+      searchParams.get('action') === 'setup-brand' || searchParams.get('action') === 'new-brand';
+    if (!wantsSetup) {
+      newBrandQueryHandledRef.current = false;
+      return;
+    }
+    if (loading || (isDelivery && pdvGate.loading)) return;
+    if (isDelivery && !pdvGate.ready) {
+      void pdvGate.reload();
+      return;
+    }
+    if (newBrandQueryHandledRef.current) return;
+    newBrandQueryHandledRef.current = true;
+
+    openBrandWizardForActivation('create-brand');
+
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    setSearchParams(next, { replace: true });
+  }, [
+    loading,
+    isDelivery,
+    pdvGate.loading,
+    pdvGate.ready,
+    searchParams,
+    setSearchParams,
+    openBrandWizardForActivation,
+  ]);
 
   const accentBrand = useMemo(() => {
     if (hoverBrandId) {
@@ -1142,15 +1178,6 @@ export function CompanyMarcaSettings() {
     };
   }, [brands, setupCtx]);
 
-  const openCreate = () => {
-    if (!entitlements.canCreateCommercialBrand) {
-      setShowUpgradeModal(true);
-      return;
-    }
-    setEditingBrand(null);
-    setShowModal(true);
-  };
-
   const openEdit = (brand: Brand) => {
     setEditingBrand(brand);
     setShowModal(true);
@@ -1163,12 +1190,19 @@ export function CompanyMarcaSettings() {
   };
 
   const persistBrand = async (form: BrandFormState) => {
-    if (!brandBusinessId) return;
+    if (!businessId) return;
     const isDefault = editingBrand ? isDefaultCommercialBrand(editingBrand) : false;
+    const resolvedLogo = shouldPersistBrandPlaceholderLogo(form.logo)
+      ? resolveBrandPlaceholderUrl({
+          name: form.name,
+          deliveryLineKind: form.deliveryLineKind,
+          catalogCategories: form.catalogCategories,
+        })
+      : form.logo.trim();
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
-      logo: form.logo.trim(),
+      logo: resolvedLogo,
       website: form.website.trim(),
       primaryColor: form.primaryColor,
       shortCode: form.shortCode.trim() || suggestBrandShortCodeFromName(form.name) || undefined,
@@ -1176,18 +1210,25 @@ export function CompanyMarcaSettings() {
       deliveryLineKind: form.deliveryLineKind || undefined,
       catalogCategories: form.catalogCategories.length > 0 ? form.catalogCategories : undefined,
       active: editingBrand?.active ?? true,
-      isDefault: editingBrand?.isDefault ?? false,
+      isDefault: editingBrand?.isDefault ?? brands.length === 0,
     };
     try {
       if (editingBrand) {
-        const updated = await updateBrandRequest(brandBusinessId, { ...editingBrand, ...payload } as Brand);
+        const updated = await updateBrandRequest(businessId, { ...editingBrand, ...payload } as Brand);
         setBrands((prev) => sortBrandsForDisplay(prev.map((b) => (b._id === updated._id ? updated : b))));
         toast.success(`«${updated.name}» actualizada`);
       } else {
-        const created = await createBrandRequest(brandBusinessId, {
+        const pendingShell = findBrandToCompleteInActivation(brands, setupCtx);
+        if (isDelivery && pendingShell) {
+          toast.error('Ya tienes una marca pendiente. Complétala en el asistente antes de crear otra.');
+          setEditingBrand(pendingShell);
+          setShowModal(true);
+          throw new Error('pending brand exists');
+        }
+        const created = await createBrandRequest(businessId, {
           ...payload,
           active: resolveBrandActiveOnCreate(brands),
-          isDefault: false,
+          isDefault: brands.length === 0,
         });
         setBrands((prev) => sortBrandsForDisplay([created, ...prev]));
         toast.success(
@@ -1204,10 +1245,11 @@ export function CompanyMarcaSettings() {
   };
 
   const handleDelete = async (brand: Brand) => {
-    if (isDefaultCommercialBrand(brand)) return;
+    const shell = isIncompleteActivationShell(brand, setupCtx);
+    if (isDefaultCommercialBrand(brand) && !shell) return;
     if (!confirm(`¿Eliminar la marca «${brand.name}»?`)) return;
     try {
-      await deleteBrandRequest(brandBusinessId, brand._id);
+      await deleteBrandRequest(businessId, brand._id);
       setBrands((prev) => prev.filter((b) => b._id !== brand._id));
       toast.success('Marca eliminada');
       notifyDeliveryBrandsChanged();
@@ -1219,7 +1261,7 @@ export function CompanyMarcaSettings() {
   const applyBrandActive = async (brand: Brand, nextActive: boolean) => {
     setTogglingBrandId(brand._id);
     try {
-      const updated = await updateBrandRequest(brandBusinessId, { ...brand, active: nextActive });
+      const updated = await updateBrandRequest(businessId, { ...brand, active: nextActive });
       setBrands((prev) => sortBrandsForDisplay(prev.map((b) => (b._id === updated._id ? updated : b))));
       toast.success(nextActive ? `"${updated.name}" activada` : `"${updated.name}" desactivada`);
       notifyDeliveryBrandsChanged();
@@ -1254,7 +1296,7 @@ export function CompanyMarcaSettings() {
     await applyBrandActive(target, false);
   };
 
-  if (!brandBusinessId) {
+  if (!businessId) {
     return (
       <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
         Selecciona una empresa en el selector superior.
@@ -1262,7 +1304,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && useSelectorPdvGate && pdvGate.loading) {
+  if (isDelivery && pdvGate.loading) {
     return (
       <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
         Comprobando tienda y PDV…
@@ -1270,7 +1312,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && useSelectorPdvGate && !pdvGate.ready) {
+  if (isDelivery && !pdvGate.ready) {
     return (
       <div className="py-6">
         <DeliveryActivationGatePanel kind="store_pdv" />
@@ -1317,9 +1359,9 @@ export function CompanyMarcaSettings() {
         </div>
       </div>
 
-      {!entitlements.canCreateCommercialBrand ? (
+      {!entitlements.canCreateCommercialBrand && brands.length > 0 ? (
         <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100">
-          Tu plan <strong>{entitlements.planLabel}</strong> incluye la marca principal «General» para operar con una
+          Tu plan <strong>{entitlements.planLabel}</strong> incluye una marca principal para operar con una
           sola línea de negocio. Para añadir líneas extra (p. ej. Pizzería, Burger) necesitas{' '}
           {entitlements.needsCommercialBrandAddon ? 'ampliar el cupo en Facturación' : 'el plan PRO'}.
         </div>
@@ -1355,7 +1397,7 @@ export function CompanyMarcaSettings() {
         </button>
       </div>
 
-      {loading || ensuringDefault ? (
+      {loading ? (
         <div className="flex items-center justify-center py-16 text-gray-500 dark:text-gray-400">
           <div className="mr-3 h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100" />
           Cargando marcas…
@@ -1364,22 +1406,21 @@ export function CompanyMarcaSettings() {
         <div className={settingsEmptyStateClass}>
           <Layers className="mb-3 h-12 w-12 text-gray-300 dark:text-gray-600" />
           <p className="font-semibold text-gray-700 dark:text-gray-300">
-            {brands.length === 0 ? 'No hay marcas configuradas' : 'Sin resultados'}
+            {brands.length === 0 ? 'Aún no tienes ninguna marca' : 'Sin resultados'}
           </p>
           <p className="mt-1 text-sm">
             {brands.length === 0
-              ? 'Configura la marca principal de tu negocio. Las líneas extra requieren plan PRO.'
+              ? 'Crea la carta de tu negocio con el asistente (nombre, categorías y tiendas).'
               : 'Prueba con otros términos de búsqueda.'}
           </p>
           {brands.length === 0 ? (
             <button
               type="button"
-              onClick={() => void loadAll()}
+              onClick={openCreate}
               className={`${settingsPrimaryBtnClass} mt-4`}
-              disabled={ensuringDefault}
             >
               <Plus className="h-4 w-4" />
-              {ensuringDefault ? 'Preparando marca…' : 'Configurar marca principal'}
+              Crear marca principal
             </button>
           ) : null}
         </div>
@@ -1393,6 +1434,7 @@ export function CompanyMarcaSettings() {
             const inactive = brand.active === false;
             const setupPending = getBrandSetupPending(brand, setupCtx);
             const needsSetup = setupPending.length > 0;
+            const incompleteShell = isIncompleteActivationShell(brand, setupCtx);
             const nameUnset = isDefault && isDefaultBrandNamePlaceholder(brand.name);
 
             const isAccent = accentBrand?._id === brand._id;
@@ -1426,16 +1468,11 @@ export function CompanyMarcaSettings() {
                       className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 dark:bg-gray-900"
                       style={{ borderColor: brandTint(color, '44') }}
                     >
-                      {brand.logo ? (
-                        <BrandLogoPreview src={brand.logo} size="md" boxClassName="h-full w-full min-h-[3rem]" />
-                      ) : (
-                        <span
-                          className="flex h-full w-full items-center justify-center rounded-lg text-lg font-bold"
-                          style={{ backgroundColor: brandTint(color, '22'), color }}
-                        >
-                          {(nameUnset ? '…' : brand.name.charAt(0)).toUpperCase()}
-                        </span>
-                      )}
+                      <BrandLogoPreview
+                        src={resolveBrandLogo(brand)}
+                        size="md"
+                        boxClassName="h-full w-full min-h-[3rem]"
+                      />
                     </div>
                     <div className="min-w-0">
                       <div
@@ -1563,7 +1600,7 @@ export function CompanyMarcaSettings() {
                   >
                     <Edit3 className="h-4 w-4" />
                   </button>
-                  {!isDefault ? (
+                  {!isDefault || incompleteShell ? (
                     <button
                       type="button"
                       onClick={(e) => {

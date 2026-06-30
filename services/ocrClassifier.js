@@ -321,6 +321,15 @@ export function shouldAutoApprove(ocrResult, entityMatches, validationResult) {
   if (!validationResult.isValid) return false;
   if (validationResult.errors.length > 0) return false;
 
+  const docType = ocrResult?.documentType || '';
+  const supplierDocTypes = ['factura_proveedor', 'albaran'];
+  if (supplierDocTypes.includes(docType)) {
+    const supplierMatch = (entityMatches || []).find((m) => m.matchType === 'supplier');
+    if (!supplierMatch?.matchedEntity || supplierMatch.suggestNew) {
+      return false;
+    }
+  }
+
   const confidence = ocrResult?.confidenceScore || 0;
   if (confidence < 85) return false;
 

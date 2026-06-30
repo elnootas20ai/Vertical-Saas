@@ -171,6 +171,13 @@ describe('catalogComboSlots', () => {
     expect(catalogProductsForComboSection(sideSection, catalog).map((p) => p._id)).toEqual(['c1']);
   });
 
+  it('buildComboMenuSections sin bebidas en catálogo sigue agrupando por tipo', () => {
+    const catalog = [item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' })];
+    const sections = buildComboMenuSections('estandar', catalog);
+    expect(sections.find((s) => s.slotKind === 'side')?.groupBySlotKind).toBe(true);
+    expect(sections.find((s) => s.slotKind === 'drink')?.groupBySlotKind).toBe(true);
+  });
+
   it('Sides se normaliza a Complementos al importar', async () => {
     const { normalizeImportCategory } = await import('../src/app/lib/deliveryCatalogImportLogic.ts');
     expect(normalizeImportCategory('Sides')).toBe('Complementos');

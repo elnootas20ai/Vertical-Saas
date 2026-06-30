@@ -58,6 +58,7 @@ import {
   Banknote,
   Globe,
 } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { ClientsPage } from './ClientsPage';
 import { PromotionsPage } from './PromotionsPage';
 
@@ -123,7 +124,6 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   /** Solo útil fuera de paneles con scroll interno; dentro de Ops evita huecos raros */
   sticky?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const nav = useNavigate();
   const { user } = useAuth();
   const pointOfSaleAccess = usePointOfSaleAccess(pdvs.length);
@@ -165,44 +165,68 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
       ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
       : 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30');
 
-  const ac = [
-    pdvs.length > 1 ? filters.salesPointId : '',
-    filters.channel,
-    filters.timeSlot,
-  ].filter(Boolean).length;
-  const sel = 'px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
+  const sel = 'w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
   const today = localDateInputValue();
   const selectedDate = filters.date || today;
   const isToday = selectedDate === today;
+  const activeFilterCount = [
+    filters.channel,
+    filters.timeSlot,
+    !isToday ? selectedDate : '',
+  ].filter(Boolean).length;
 
-  const inner = (
-    <div className="flex flex-wrap gap-2 items-center">
-      {pdvs.length > 1 ? (
-        <select
-          className={sel}
-          value={
-            filters.salesPointId && pdvs.some((p) => p._id === filters.salesPointId)
-              ? filters.salesPointId
-              : ''
-          }
-          onChange={(e) => onChange({ ...filters, salesPointId: e.target.value || undefined })}
-        >
-          <option value="">Todas las tiendas</option>
-          {pdvs.map((p) => (
-            <option key={p._id} value={p._id}>
-              {pointOfSaleDisplayLabel(p)}
-            </option>
-          ))}
-        </select>
-      ) : pdvs.length === 1 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <div
-            className={`${sel} flex items-center gap-2 border-gray-900/25 dark:border-gray-400/30 bg-gray-50 dark:bg-gray-800/90 font-medium text-gray-900 dark:text-gray-100`}
-            title="Centro de trabajo / PDV activo en esta vista"
+  const filterSummary = [
+    filters.channel ? (CH_LABELS[filters.channel] || filters.channel) : 'Todos los canales',
+    filters.timeSlot
+      ? (config?.activeTimeSlots?.find((s) => s.id === filters.timeSlot)?.label || filters.timeSlot)
+      : 'Todo el día',
+    isToday
+      ? 'Hoy'
+      : new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+  ].join(' · ');
+
+  const wrapClass = sticky ? 'sticky top-0 z-10' : '';
+
+  return (
+    <div className={wrapClass}>
+      <div className="bg-white/95 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200/90 dark:border-gray-700 rounded-xl px-3 py-2 shadow-sm flex flex-wrap gap-2 items-center">
+        {pdvs.length > 1 ? (
+          <select
+            className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none"
+            value={
+              filters.salesPointId && pdvs.some((p) => p._id === filters.salesPointId)
+                ? filters.salesPointId
+                : ''
+            }
+            onChange={(e) => onChange({ ...filters, salesPointId: e.target.value || undefined })}
           >
-            <Store className="w-4 h-4 shrink-0 opacity-80" />
-            <span className="truncate max-w-[14rem]">{pointOfSaleDisplayLabel(pdvs[0])}</span>
+            <option value="">Todas las tiendas</option>
+            {pdvs.map((p) => (
+              <option key={p._id} value={p._id}>
+                {pointOfSaleDisplayLabel(p)}
+              </option>
+            ))}
+          </select>
+        ) : pdvs.length === 1 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              className="px-3 py-2 border border-gray-900/25 dark:border-gray-400/30 rounded-lg text-sm flex items-center gap-2 bg-gray-50 dark:bg-gray-800/90 font-medium text-gray-900 dark:text-gray-100"
+              title="Centro de trabajo / PDV activo en esta vista"
+            >
+              <Store className="w-4 h-4 shrink-0 opacity-80" />
+              <span className="truncate max-w-[14rem]">{pointOfSaleDisplayLabel(pdvs[0])}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddPdvClick}
+              className={addPdvButtonClass}
+              title={addPdvTitle}
+            >
+              {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3.5 h-3.5" />}
+              {addPdvLabel}
+            </button>
           </div>
+        ) : (
           <button
             type="button"
             onClick={handleAddPdvClick}
@@ -212,83 +236,87 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
             {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3.5 h-3.5" />}
             {addPdvLabel}
           </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={handleAddPdvClick}
-          className={addPdvButtonClass}
-          title={addPdvTitle}
-        >
-          {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3.5 h-3.5" />}
-          {addPdvLabel}
-        </button>
-      )}
-      <select className={sel} value={filters.channel || ''} onChange={e => onChange({ ...filters, channel: e.target.value || undefined })}>
-        <option value="">Todos los canales</option>
-        {(config?.activeChannels || []).map(ch => <option key={ch} value={ch}>{CH_LABELS[ch] || ch}</option>)}
-      </select>
-      {config?.activeTimeSlots && config.activeTimeSlots.length > 0 && (
-        <select className={sel} value={filters.timeSlot || ''} onChange={e => onChange({ ...filters, timeSlot: e.target.value || undefined })}>
-          <option value="">Todo el día</option>
-          {config.activeTimeSlots.map(s => <option key={s.id} value={s.id}>{s.label} ({s.start}–{s.end})</option>)}
-        </select>
-      )}
-      <div className="flex items-center gap-1.5">
-        <input
-          type="date"
-          className={sel}
-          value={selectedDate}
-          max={today}
-          onChange={(e) => onChange({ ...filters, date: e.target.value || today })}
-        />
-        <button
-          type="button"
-          onClick={() => onChange({ ...filters, date: today })}
-          className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-colors shrink-0 ${
-            isToday
-              ? 'border-teal-600 bg-teal-600 text-white'
-              : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
-          }`}
-          title={`Ver operativa de hoy (${new Date(`${today}T12:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })})`}
-        >
-          Hoy
-        </button>
-      </div>
-      {ac > 0 && (
-        <button
-          onClick={() => onChange({
-            date: today,
-            ...(filters.salesPointId ? { salesPointId: filters.salesPointId } : {}),
-          })}
-          className="px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center gap-1"
-        >
-          <X className="w-3.5 h-3.5" /> Limpiar
-        </button>
-      )}
-    </div>
-  );
-
-  const desktopWrap = sticky ? 'sticky top-0 z-10' : '';
-
-  return (
-    <>
-      <div className={`hidden md:block ${desktopWrap}`}>
-        <div className="bg-white/95 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200/90 dark:border-gray-700 rounded-xl px-3 py-2 shadow-sm">
-          {inner}
-        </div>
-      </div>
-      <div className="md:hidden">
-        <button onClick={() => setOpen(!open)} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold flex items-center gap-2 bg-white dark:bg-gray-800">
-          <Filter className="w-4 h-4" /> Filtros {ac > 0 && <span className="px-1.5 py-0.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-full text-xs font-bold">{ac}</span>}
-        </button>
-        {open && (
-          <div className="mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-2.5">
-            {inner}
-          </div>
         )}
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="px-2.5 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700/80 transition-colors shrink-0"
+              title={filterSummary}
+            >
+              <Filter className="w-3.5 h-3.5 shrink-0" />
+              Filtro
+              {activeFilterCount > 0 && (
+                <span className="px-1 py-0.5 min-w-[1.125rem] text-center bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-full text-[10px] font-bold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80 p-3 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">Canal</label>
+                <select className={sel} value={filters.channel || ''} onChange={(e) => onChange({ ...filters, channel: e.target.value || undefined })}>
+                  <option value="">Todos los canales</option>
+                  {(config?.activeChannels || []).map((ch) => (
+                    <option key={ch} value={ch}>{CH_LABELS[ch] || ch}</option>
+                  ))}
+                </select>
+              </div>
+              {config?.activeTimeSlots && config.activeTimeSlots.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">Franja horaria</label>
+                  <select className={sel} value={filters.timeSlot || ''} onChange={(e) => onChange({ ...filters, timeSlot: e.target.value || undefined })}>
+                    <option value="">Todo el día</option>
+                    {config.activeTimeSlots.map((s) => (
+                      <option key={s.id} value={s.id}>{s.label} ({s.start}–{s.end})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">Fecha</label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="date"
+                    className={sel}
+                    value={selectedDate}
+                    max={today}
+                    onChange={(e) => onChange({ ...filters, date: e.target.value || today })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ...filters, date: today })}
+                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-colors shrink-0 ${
+                      isToday
+                        ? 'border-teal-600 bg-teal-600 text-white'
+                        : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    title={`Ver operativa de hoy (${new Date(`${today}T12:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })})`}
+                  >
+                    Hoy
+                  </button>
+                </div>
+              </div>
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onChange({
+                    date: today,
+                    ...(filters.salesPointId ? { salesPointId: filters.salesPointId } : {}),
+                  })}
+                  className="w-full px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center gap-1 border-t border-gray-100 dark:border-gray-800 pt-3"
+                >
+                  <X className="w-3.5 h-3.5" /> Limpiar filtros
+                </button>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
-    </>
+    </div>
   );
 }
 

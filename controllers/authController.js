@@ -18,7 +18,7 @@ import {
   findAccountByRefreshToken,
   findAccountByResetToken,
   findAccountByUserId,
-  findAccountByVerificationToken,
+  findAccountForEmailVerification,
   findCardByUserId,
   findBusinessById,
   findBusinessByCompanyCode,
@@ -2473,8 +2473,8 @@ export async function verifyEmail(req, res) {
       return badRequest(res, 'Token y email son obligatorios');
     }
 
-    const account = await findAccountByVerificationToken(req, String(token));
-    if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
+    const account = await findAccountForEmailVerification(req, String(email), String(token));
+    if (!account) {
       return res.status(400).json({ ok: false, error: 'Enlace de verificación inválido o expirado' });
     }
 
@@ -2529,23 +2529,36 @@ async function resolveFreshAccount(req, account) {
 async function sendAccountVerificationEmail(req, account) {
   const fresh = await resolveFreshAccount(req, account);
   const rawToken = crypto.randomBytes(32).toString('hex');
-  const { subject, html } = buildEmailVerificationEmail(fresh.email, rawToken);
-  await sendEmail({
-    to: fresh.email,
-    subject,
-    html,
-    requireDelivery: process.env.NODE_ENV === 'production',
-  });
+  // Guardar token antes de enviar el correo: el enlace es válido en cuanto el usuario lo recibe.
+  const latest = await resolveFreshAccount(req, fresh);
+  const saved = await persistEmailVerificationAfterSend(req, latest, rawToken);
+
+  const { subject, html } = buildEmailVerificationEmail(saved.email, rawToken);
+  try {
+    await sendEmail({
+      to: saved.email,
+      subject,
+      html,
+      requireDelivery: process.env.NODE_ENV === 'production',
+    });
+  } catch (emailErr) {
+    logger.error(
+      { tag: 'AUTH_VERIFY_SEND', email: saved.email, err: emailErr?.message || emailErr },
+      'Token guardado pero falló el envío del correo de verificación',
+    );
+    if (process.env.NODE_ENV === 'production') throw emailErr;
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const baseUrl = String(process.env.APP_URL || `http://localhost:${process.env.VITE_PORT || 3015}`).replace(/\/+$/, '');
-    const verifyUrl = `${baseUrl}/auth/verify-email-pending?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(fresh.email)}`;
+    const verifyUrl = `${baseUrl}/auth/verify-email-pending?token=${encodeURIComponent(rawToken)}&email=${encodeURIComponent(saved.email)}`;
     logger.info(
-      { tag: 'AUTH_VERIFY_DEV', email: fresh.email, verifyUrl },
+      { tag: 'AUTH_VERIFY_DEV', email: saved.email, verifyUrl },
       'Enlace de verificación (solo desarrollo — cópialo si no llega el correo)',
     );
   }
-  const latest = await resolveFreshAccount(req, fresh);
-  return persistEmailVerificationAfterSend(req, latest, rawToken);
+
+  return saved;
 }
 
 export async function resendVerificationEmail(req, res) {

@@ -5,6 +5,8 @@ export interface VertialPrinterConfig {
   networkHost: string;
   networkPort: number;
   systemPrinterName: string;
+  /** IP del PC del mostrador con Vertial Print (iPad/tablet → PC en la misma WiFi). Vacío = este dispositivo. */
+  bridgeHost: string;
   paperWidthMm: 58 | 80;
   preferBridge: boolean;
 }
@@ -19,9 +21,18 @@ export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
   networkHost: '',
   networkPort: 9100,
   systemPrinterName: '',
+  bridgeHost: '',
   paperWidthMm: 80,
   preferBridge: true,
 };
+
+export function resolveBridgeUrl(config?: Pick<VertialPrinterConfig, 'bridgeHost'>): string {
+  const raw = String(config?.bridgeHost || '').trim();
+  if (!raw) return VERTIAL_PRINT_BRIDGE_URL;
+  const normalized = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  if (normalized.includes(':')) return `http://${normalized}`;
+  return `http://${normalized}:${VERTIAL_PRINT_BRIDGE_PORT}`;
+}
 
 export function loadPrinterConfig(): VertialPrinterConfig {
   try {

@@ -3,6 +3,8 @@ import { Check, X } from 'lucide-react';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import {
   catalogPizzasForHalfHalf,
+  normalizeHalfHalfAllowedProductIds,
+  productBrandIdsFromItem,
   type HalfHalfPizzaSelection,
 } from '../../../lib/catalogCustomization';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -11,6 +13,7 @@ import { TpvModalRoot } from './TpvModalRoot';
 type TpvHalfHalfCustomizeModalProps = {
   item: CatalogItem;
   catalogItems: CatalogItem[];
+  brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   initial?: HalfHalfPizzaSelection;
   formatPrice: (n: number) => string;
   onClose: () => void;
@@ -22,6 +25,7 @@ type ActiveHalf = 'first' | 'second';
 export function TpvHalfHalfCustomizeModal({
   item,
   catalogItems,
+  brands,
   initial,
   formatPrice,
   onClose,
@@ -30,8 +34,15 @@ export function TpvHalfHalfCustomizeModal({
   useModalClose(true, onClose);
 
   const pizzas = useMemo(
-    () => catalogPizzasForHalfHalf(catalogItems, item._id),
-    [catalogItems, item._id],
+    () =>
+      catalogPizzasForHalfHalf(catalogItems, item._id, {
+        allowedProductIds: normalizeHalfHalfAllowedProductIds(
+          item.customFields?.halfHalfAllowedProductIds,
+        ),
+        brandIds: productBrandIdsFromItem(item),
+        brands,
+      }),
+    [catalogItems, item._id, item.customFields?.halfHalfAllowedProductIds, item.brandIds, brands],
   );
 
   const [activeHalf, setActiveHalf] = useState<ActiveHalf>('first');

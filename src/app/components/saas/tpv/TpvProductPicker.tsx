@@ -11,6 +11,15 @@ import {
 import { brandTint } from '../../../lib/brandUtils';
 import { isTpvComboCatalogItem } from '../../../lib/catalogComboSlots';
 import { isTpvHalfHalfCatalogItem, isTpvBuildYourOwnCatalogItem } from '../../../lib/catalogCustomization';
+import { resolveCatalogProductImage } from '../../../lib/catalogProductPlaceholders';
+import {
+  readTpvCategoryOrder,
+  readTpvSectionOrder,
+  tpvPickerOrderStorageKey,
+  writeTpvCategoryOrder,
+  writeTpvSectionOrder,
+} from '../../../lib/tpvPickerOrder';
+import { TpvReorderableChipRow } from './TpvReorderableChipRow';
 
 function BrandSectionChip({
   section,
@@ -94,6 +103,9 @@ type TpvProductPickerProps = {
   hideCatalogAdminLink?: boolean;
   /** TPV tablet: layout denso, catálogo + carrito en fila y más espacio útil. */
   compact?: boolean;
+  /** Persiste el orden de marcas/categorías por usuario y negocio. */
+  userId?: string;
+  businessId?: string;
 };
 
 function categoryShortLabel(label: string): string {
@@ -123,7 +135,8 @@ const ProductTile = memo(function ProductTile({
   compact?: boolean;
 }) {
   const price = Number(item.unitPrice || 0);
-  const hasImage = Boolean(item.image?.trim());
+  const imageUrl = resolveCatalogProductImage(item);
+  const hasImage = Boolean(imageUrl);
   const inCart = qty > 0;
   const isCombo = isTpvComboCatalogItem(item);
   const isHalfHalf = isTpvHalfHalfCatalogItem(item);
@@ -147,7 +160,7 @@ const ProductTile = memo(function ProductTile({
       >
         <div className={`relative bg-gray-100 dark:bg-gray-800 overflow-hidden ${compact ? 'aspect-square' : 'aspect-square'}`}>
           {hasImage ? (
-            <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+            <img src={imageUrl} alt="" className="w-full h-full object-cover" loading="lazy" />
           ) : (
             <div
               className="w-full h-full flex items-center justify-center"
@@ -289,8 +302,17 @@ export function TpvProductPicker({
   onImportCatalog,
   hideCatalogAdminLink = false,
   compact = false,
+  userId,
+  businessId,
 }: TpvProductPickerProps) {
   const [productSearch, setProductSearch] = useState('');
+  const [sectionOrder, setSectionOrder] = useState<string[]>([]);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+
+  const orderStorageKey = useMemo(
+    () => (userId && businessId ? tpvPickerOrderStorageKey(userId, businessId) : ''),
+    [userId, businessId],
+  );
 
   useEffect(() => {
     if (resetSignal > 0) {
@@ -339,6 +361,55 @@ export function TpvProductPicker({
     [sections],
   );
 
+  const sectionById = useMemo(
+    () => new Map(topBarSections.map((section) => [section.id, section])),
+    [topBarSections],
+  );
+
+  useEffect(() => {
+    const ids = topBarSections.map((section) => section.id);
+    if (!orderStorageKey) {
+      setSectionOrder(ids);
+      return;
+    }
+    setSectionOrder(readTpvSectionOrder(orderStorageKey, ids));
+  }, [orderStorageKey, topBarSections]);
+
+  useEffect(() => {
+    if (!orderStorageKey) {
+      setCategoryOrder(categories);
+      return;
+    }
+    setCategoryOrder(readTpvCategoryOrder(orderStorageKey, selectedSectionId, categories));
+  }, [orderStorageKey, selectedSectionId, categories]);
+
+  const orderedTopBarSections = useMemo(
+    () =>
+      sectionOrder
+        .map((id) => sectionById.get(id))
+        .filter((section): section is TpvCatalogSection => Boolean(section)),
+    [sectionOrder, sectionById],
+  );
+
+  const orderedCategories = useMemo(() => {
+    const known = new Set(categories);
+    const fromOrder = categoryOrder.filter((cat) => known.has(cat));
+    for (const cat of categories) {
+      if (!fromOrder.includes(cat)) fromOrder.push(cat);
+    }
+    return fromOrder;
+  }, [categories, categoryOrder]);
+
+  const handleSectionReorder = (nextIds: string[]) => {
+    setSectionOrder(nextIds);
+    if (orderStorageKey) writeTpvSectionOrder(orderStorageKey, nextIds);
+  };
+
+  const handleCategoryReorder = (nextIds: string[]) => {
+    setCategoryOrder(nextIds);
+    if (orderStorageKey) writeTpvCategoryOrder(orderStorageKey, selectedSectionId, nextIds);
+  };
+
   return (
     <div
       className={
@@ -376,20 +447,27 @@ export function TpvProductPicker({
 
         {!isSearchMode && topBarSections.length > 0 && (
           <div className={`shrink-0 border-b border-gray-200 dark:border-gray-800 bg-gray-100/80 dark:bg-gray-950/50 ${compact ? 'px-2 py-1' : 'px-2 py-2'}`}>
-            <div className={`flex overflow-x-auto scrollbar-hide items-end ${compact ? 'gap-1.5' : 'gap-2'}`}>
-              {topBarSections.map((section) => (
-                <BrandSectionChip
-                  key={section.id}
-                  section={section}
-                  active={selectedSectionId === section.id}
-                  compact={compact}
-                  onSelect={() => {
-                    onSelectedSectionChange(section.id);
-                    onSelectedCategoryChange(null);
-                  }}
-                />
-              ))}
-            </div>
+            <TpvReorderableChipRow
+              itemIds={orderedTopBarSections.map((section) => section.id)}
+              onReorder={handleSectionReorder}
+              gapClassName={compact ? 'gap-1.5' : 'gap-2'}
+              alignClassName="items-end"
+              renderItem={(sectionId) => {
+                const section = sectionById.get(sectionId);
+                if (!section) return null;
+                return (
+                  <BrandSectionChip
+                    section={section}
+                    active={selectedSectionId === section.id}
+                    compact={compact}
+                    onSelect={() => {
+                      onSelectedSectionChange(section.id);
+                      onSelectedCategoryChange(null);
+                    }}
+                  />
+                );
+              }}
+            />
           </div>
         )}
 
@@ -397,36 +475,41 @@ export function TpvProductPicker({
           <>
             {categories.length > 0 && (
               <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 ${compact ? 'px-2 py-1' : 'px-2 py-2'}`}>
-                <div className={`flex overflow-x-auto scrollbar-hide items-start ${compact ? 'gap-1.5' : 'gap-2'}`}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectedCategoryChange(null)}
-                    className={`shrink-0 flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
-                  >
-                    <span
-                      className={`rounded-xl flex items-center justify-center font-bold transition-all ${
-                        compact ? 'w-11 h-11 text-[10px]' : 'w-11 h-11 text-[10px]'
-                      } ${
-                        !selectedCategory
-                          ? 'text-white shadow-md scale-105'
-                          : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
-                      }`}
-                      style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
+                <TpvReorderableChipRow
+                  itemIds={orderedCategories}
+                  onReorder={handleCategoryReorder}
+                  gapClassName={compact ? 'gap-1.5' : 'gap-2'}
+                  alignClassName="items-start"
+                  prefix={(
+                    <button
+                      type="button"
+                      onClick={() => onSelectedCategoryChange(null)}
+                      className={`flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
                     >
-                      ALL
-                    </span>
-                    <span className={`font-medium text-center leading-tight ${compact ? 'text-[9px]' : 'text-[9px]'} ${!selectedCategory ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
-                      Todas
-                    </span>
-                  </button>
-                  {categories.map((cat) => {
+                      <span
+                        className={`rounded-xl flex items-center justify-center font-bold transition-all ${
+                          compact ? 'w-11 h-11 text-[10px]' : 'w-11 h-11 text-[10px]'
+                        } ${
+                          !selectedCategory
+                            ? 'text-white shadow-md scale-105'
+                            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
+                        }`}
+                        style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
+                      >
+                        ALL
+                      </span>
+                      <span className={`font-medium text-center leading-tight ${compact ? 'text-[9px]' : 'text-[9px]'} ${!selectedCategory ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
+                        Todas
+                      </span>
+                    </button>
+                  )}
+                  renderItem={(cat) => {
                     const active = selectedCategory === cat;
                     return (
                       <button
-                        key={cat}
                         type="button"
                         onClick={() => onSelectedCategoryChange(active ? null : cat)}
-                        className={`shrink-0 flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
+                        className={`flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
                       >
                         <span
                           className={`rounded-xl flex items-center justify-center font-bold transition-all ${
@@ -455,8 +538,8 @@ export function TpvProductPicker({
                         </span>
                       </button>
                     );
-                  })}
-                </div>
+                  }}
+                />
               </div>
             )}
           </>

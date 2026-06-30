@@ -19,22 +19,22 @@ function filterWorkCentersForBusinessScope(
   if (!bid) return [];
 
   const active = workCenters.filter((wc) => !wc.deletedAt);
+  const isRetail = (wc: WorkCenter) =>
+    wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
+
   const mine = active.filter((wc) => readWorkCenterBusinessId(wc) === bid);
+  const mineRetail = mine.filter(isRetail);
   const accountN = options?.accountBusinessCount;
 
-  if (accountN === undefined || accountN >= 2) {
+  if (accountN === undefined) {
     return mine.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
-  if (accountN === 1) {
-    const isRetail = (wc: WorkCenter) =>
-      wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
-    const legacy =
-      mine.length === 0
-        ? active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc))
-        : [];
+  if (mineRetail.length === 0) {
+    const legacyRetail = active.filter((wc) => !readWorkCenterBusinessId(wc) && isRetail(wc));
     const merged = new Map<string, WorkCenter>();
-    for (const wc of [...mine, ...legacy]) merged.set(wc._id, wc);
+    for (const wc of mine) merged.set(wc._id, wc);
+    for (const wc of legacyRetail) merged.set(wc._id, wc);
     return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 

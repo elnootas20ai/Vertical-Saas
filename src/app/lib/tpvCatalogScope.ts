@@ -17,6 +17,7 @@ export type TpvCatalogLoadScope = {
   scopeBusinessId: string;
   catalogBusinessId: string;
   accountBusinessCount?: number;
+  activeBusinessType?: string;
 };
 
 export function resolveTpvCatalogLoadScope(
@@ -25,10 +26,17 @@ export function resolveTpvCatalogLoadScope(
   accountBusinessCount?: number,
 ): TpvCatalogLoadScope {
   const catalogBusinessId = resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
+  const match = businesses.find(
+    (b) =>
+      String(b.business_id || b.id || '')
+        .replace(/^business:/, '')
+        .trim() === catalogBusinessId,
+  );
   return {
     scopeBusinessId: String(scopeBusinessId || '').trim(),
     catalogBusinessId,
     accountBusinessCount,
+    activeBusinessType: match?.businessType,
   };
 }
 
@@ -71,6 +79,7 @@ export function filterTpvCatalogItems(
 ): CatalogItem[] {
   const options: CatalogBusinessScopeOptions = {
     accountBusinessCount: scope.accountBusinessCount,
+    activeBusinessType: scope.activeBusinessType,
   };
 
   let items = filterCatalogItemsForBusinessScope(

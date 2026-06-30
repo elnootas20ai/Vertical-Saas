@@ -10,6 +10,7 @@ import {
   allCommercialLineBrands,
   shouldClearBrandForCategory,
   isImportComboCategory,
+  formatUnmatchedImportLineRowWarning,
   type ImportBrandLike,
 } from './deliveryCatalogImportLogic';
 
@@ -28,7 +29,7 @@ export const DELIVERY_CATALOG_CORE_COLUMNS = DELIVERY_CATALOG_IMPORT_COLUMNS;
 
 export const DELIVERY_CATALOG_IMPORT_LABELS: Record<(typeof DELIVERY_CATALOG_IMPORT_COLUMNS)[number], string> = {
   name: 'nombre',
-  sku: 'sku',
+  sku: 'codigo',
   category: 'categoria',
   linea: 'linea',
   price: 'precio',
@@ -42,7 +43,7 @@ export const DELIVERY_CATALOG_TEMPLATE_HEADERS = DELIVERY_CATALOG_IMPORT_COLUMNS
 );
 
 /** Versión de la plantilla (solo cambiar si hay migración acordada). */
-export const DELIVERY_CATALOG_TEMPLATE_VERSION = 3;
+export const DELIVERY_CATALOG_TEMPLATE_VERSION = 4;
 
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_delivery_tpv.xlsx';
 
@@ -51,7 +52,7 @@ export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 5000;
 
 export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'name', label: 'nombre', required: true, example: 'Pizza Margarita' },
-  { key: 'sku', label: 'sku', example: 'PIZ-001' },
+  { key: 'sku', label: 'codigo', example: 'PIZ-001' },
   { key: 'category', label: 'categoria', required: true, example: 'Pizzas' },
   { key: 'linea', label: 'linea', example: 'modomio' },
   { key: 'price', label: 'precio', required: true, example: '9.50' },
@@ -62,7 +63,7 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
 /** Sinónimos de cabecera para auto-mapeo (plantilla oficial + exportaciones habituales). */
 export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   name: ['nombre', 'name', 'producto', 'product', 'articulo', 'nombre producto', 'product name'],
-  sku: ['sku', 'codigo', 'codigo sku', 'ref', 'referencia', 'cod'],
+  sku: ['codigo', 'codigo producto', 'id producto', 'sku', 'codigo sku', 'ref', 'referencia', 'cod'],
   category: ['categoria', 'category', 'seccion', 'familia', 'tipo', 'categoria tpv', 'grupo', 'departamento'],
   linea: ['linea', 'line', 'marca', 'organizador', 'linea comercial', 'linea tpv', 'brand line'],
   price: ['precio', 'price', 'pvp', 'precio venta', 'unit price', 'precio unitario'],
@@ -281,7 +282,7 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '  · opcional: columna tipo_menu → estandar | duo | familiar | con_postre',
     '',
     'RECOMENDADO:',
-    '  · sku — código único (PIZ-001). Mismo SKU = actualiza sin duplicar',
+    '  · codigo — referencia única por producto (PIZ-001). Opcional. Mismo código = actualiza sin duplicar',
     '  · linea — pestaña TPV: ' + namesText,
     '  · linea VACÍA en Bebidas, Complementos y Postres',
     '  · ingredientes — solo pizzas/burgers: Tomate, Mozzarella, Jamón',
@@ -293,9 +294,14 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
   const coreHeaders = DELIVERY_CATALOG_CORE_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]);
   if (headers.length < coreHeaders.length) return false;
-  return coreHeaders.every(
-    (expected, idx) => normalizeImportHeader(String(headers[idx] ?? '')) === normalizeImportHeader(expected),
-  );
+  return coreHeaders.every((expected, idx) => {
+    const actual = normalizeImportHeader(String(headers[idx] ?? ''));
+    const exp = normalizeImportHeader(expected);
+    if (DELIVERY_CATALOG_CORE_COLUMNS[idx] === 'sku') {
+      return actual === exp || actual === 'sku';
+    }
+    return actual === exp;
+  });
 }
 
 export function buildDeliveryCatalogImportWorkbook(commercialLines: ImportBrandLike[] = []) {
@@ -353,7 +359,6 @@ function isTemplateExampleImportRow(entry: Record<string, string>): boolean {
 
 type CatalogImportRowContext = {
   commercial: ImportBrandLike[];
-  lineNames: Set<string>;
   brands: ImportBrandLike[];
   seenSkus: Set<string>;
 };
@@ -409,7 +414,12 @@ function collectDeliveryCatalogImportRowIssues(
 
   if (sku) {
     if (ctx.seenSkus.has(sku)) {
-      issues.push({ row, field: 'sku', message: `SKU duplicado «${entry.sku}» en el archivo`, severity: 'error' });
+      issues.push({
+        row,
+        field: 'codigo',
+        message: `Código duplicado «${entry.sku}» en el archivo (cada producto debe llevar uno distinto)`,
+        severity: 'error',
+      });
     } else {
       ctx.seenSkus.add(sku);
     }
@@ -421,18 +431,11 @@ function collectDeliveryCatalogImportRowIssues(
       issues.push({
         row,
         field: 'linea',
-        message: `Línea «${unmatchedNames[0]}» no coincide con Ajustes → Marca (${[...ctx.lineNames].slice(0, 5).join(', ') || 'sin líneas'}). Se asignará por categoría.`,
+        message: formatUnmatchedImportLineRowWarning(unmatchedNames[0], ctx.brands),
         severity: 'warning',
       });
     }
-    if (shouldClearBrandForCategory(category)) {
-      issues.push({
-        row,
-        field: 'linea',
-        message: `Categoría «${category}» es compartida: deja linea vacía`,
-        severity: 'warning',
-      });
-    }
+    // Complementos, postres, bebidas…: la linea se ignora al importar (pestaña TPV compartida).
   } else if (isImportComboCategory(category)) {
     issues.push({
       row,
@@ -461,7 +464,6 @@ export function partitionDeliveryCatalogImportEntries(
   const validEntries: Record<string, string>[] = [];
   const ctx: CatalogImportRowContext = {
     commercial: organizerBrandsForCatalogTemplate(brands),
-    lineNames: new Set(allCommercialLineBrands(brands).map((b) => String(b.name || '').trim().toLowerCase())),
     brands,
     seenSkus: new Set<string>(),
   };

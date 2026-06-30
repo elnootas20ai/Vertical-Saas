@@ -68,6 +68,12 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
     bannerDetail: 'Se abrirá la tienda en el paso «Horarios» del asistente. Guarda al terminar.',
   },
   // Marca
+  'create-brand': {
+    fieldKey: 'create-brand',
+    label: 'Crear carta',
+    bannerTitle: 'Crea tu marca',
+    bannerDetail: 'Se abre el asistente «Nueva línea comercial». Completa nombre, categorías y tiendas.',
+  },
   'edit-brand': {
     fieldKey: 'edit-brand',
     label: 'Editar carta',
@@ -147,9 +153,9 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
   },
   // Delivery — marca
   brand_ready: {
-    fieldKey: 'edit-brand',
-    route: '/saas/settings/marca',
-    clickHint: 'Ajustes → Marca → ✏️ Editar la carta',
+    fieldKey: 'create-brand',
+    route: '/saas/settings/marca?action=setup-brand',
+    clickHint: 'Ajustes → Marca → asistente (completa o crea tu carta)',
   },
   // Delivery — catálogo
   first_product: {

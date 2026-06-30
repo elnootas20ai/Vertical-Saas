@@ -1,6 +1,7 @@
 import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
+import { resolveBrandLogo } from './brandPlaceholders';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
 
@@ -137,7 +138,7 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
       label: brand.name,
       color: brand.primaryColor,
       shortCode: brand.shortCode,
-      logo: brand.logo,
+      logo: resolveBrandLogo(brand),
     });
   }
 

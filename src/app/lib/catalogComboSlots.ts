@@ -345,6 +345,7 @@ export function buildComboMenuSections(
         expectedCount: slot.slotKind === 'main' ? quota : 0,
         required: slot.required,
         slotQuota: quota,
+        ...(slot.slotKind !== 'main' ? { groupBySlotKind: true as const } : {}),
       });
       continue;
     }
@@ -536,6 +537,11 @@ const SLOT_CATALOG_CATEGORIES: Record<Exclude<ComboSlotKind, 'other'>, Set<strin
     'entrante',
     'guarniciones',
     'guarnicion',
+    'patatas',
+    'alitas',
+    'nuggets',
+    'acompanamientos',
+    'acompañamientos',
   ]),
   drink: new Set([
     'bebidas',

@@ -6,6 +6,7 @@ import { DELIVERY_CATALOG_CHANGED, DELIVERY_BRANDS_CHANGED } from '../lib/delive
 import {
   fetchTpvCatalog,
   readTpvCatalogCache,
+  ensureTpvCatalogCacheSchema,
   tpvCatalogSnapshotNeedsBrandRefetch,
   type TpvCatalogFetchInput,
 } from '../lib/tpvCatalogCache';
@@ -91,6 +92,10 @@ export function useTpvCatalog(
     },
     [applySnapshot, catalog.length],
   );
+
+  useEffect(() => {
+    ensureTpvCatalogCacheSchema();
+  }, []);
 
   useEffect(() => {
     const uid = String(userId || '').trim();

@@ -10,6 +10,9 @@ import {
   readImportLineText,
   resolveCatalogImportBrandIds,
   resolveCommercialLineIdsFromText,
+  formatUnmatchedImportLineRowWarning,
+  formatUnmatchedCommercialBrandWarning,
+  formatConfiguredCommercialLineNames,
 } from '../src/app/lib/deliveryCatalogImportLogic.ts';
 
 describe('deliveryCatalogImport', () => {
@@ -92,6 +95,23 @@ describe('deliveryCatalogImport', () => {
     ];
     expect(resolveCommercialLineIdsFromText('Black Burger', brands).brandIds).toEqual(['bb']);
     expect(resolveCommercialLineIdsFromText('modomio', brands).brandIds).toEqual(['mod']);
+  });
+
+  it('formatUnmatchedImportLineRowWarning explains unknown line names clearly', () => {
+    const brands = [{ _id: 'hp', name: 'holapizza', active: true, catalogCategories: ['Pizzas'] }];
+    const msg = formatUnmatchedImportLineRowWarning('burgerrodriguez', brands);
+    expect(msg).toContain('burgerrodriguez');
+    expect(msg).toContain('holapizza');
+    expect(msg).toContain('Ajustes → Marca');
+    expect(formatConfiguredCommercialLineNames(brands)).toBe('holapizza');
+  });
+
+  it('formatUnmatchedCommercialBrandWarning lists valid configured lines', () => {
+    const brands = [{ _id: 'hp', name: 'holapizza', active: true, catalogCategories: ['Pizzas'] }];
+    const msg = formatUnmatchedCommercialBrandWarning(['burgerrodriguez', 'otra'], brands);
+    expect(msg).toContain('burgerrodriguez');
+    expect(msg).toContain('holapizza');
+    expect(msg).toContain('no crea líneas nuevas');
   });
 
   it('assigns BlackBurger products to blackburger line even when inactive', () => {
@@ -229,6 +249,9 @@ describe('deliveryCatalogExcelTemplate', () => {
     );
     expect(isOfficialCatalogTemplateHeaders(DELIVERY_CATALOG_TEMPLATE_HEADERS)).toBe(true);
     expect(
+      isOfficialCatalogTemplateHeaders(['nombre', 'codigo', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion']),
+    ).toBe(true);
+    expect(
       isOfficialCatalogTemplateHeaders(['nombre', 'sku', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion']),
     ).toBe(true);
     expect(isOfficialCatalogTemplateHeaders(['Nombre', 'SKU', 'Categoría', 'Línea', 'Precio', 'Descripción'])).toBe(false);
@@ -240,15 +263,25 @@ describe('deliveryCatalogExcelTemplate', () => {
     const { DELIVERY_CATALOG_IMPORT_FIELDS, DELIVERY_CATALOG_HEADER_ALIASES } = await import(
       '../src/app/lib/deliveryCatalogExcelTemplate.ts',
     );
-    const headers = ['nombre', 'sku', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion'];
+    const headers = ['nombre', 'codigo', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion'];
     const map = autoMapImportFields(DELIVERY_CATALOG_IMPORT_FIELDS, headers, DELIVERY_CATALOG_HEADER_ALIASES);
     expect(map.name).toBe('nombre');
-    expect(map.sku).toBe('sku');
+    expect(map.sku).toBe('codigo');
     expect(map.category).toBe('categoria');
     expect(map.linea).toBe('linea');
     expect(map.price).toBe('precio');
     expect(map.ingredients).toBe('ingredientes');
     expect(map.description).toBe('descripcion');
+  });
+
+  it('autoMapImportFields sigue aceptando columna sku legacy', async () => {
+    const { autoMapImportFields } = await import('../src/app/lib/importHeaderMapping.ts');
+    const { DELIVERY_CATALOG_IMPORT_FIELDS, DELIVERY_CATALOG_HEADER_ALIASES } = await import(
+      '../src/app/lib/deliveryCatalogExcelTemplate.ts',
+    );
+    const headers = ['nombre', 'sku', 'categoria', 'linea', 'precio', 'ingredientes', 'descripcion'];
+    const map = autoMapImportFields(DELIVERY_CATALOG_IMPORT_FIELDS, headers, DELIVERY_CATALOG_HEADER_ALIASES);
+    expect(map.sku).toBe('sku');
   });
 
   it('autoMapImportFields maps accented and English catalog headers', async () => {
@@ -283,7 +316,8 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(result.issues.some((i) => i.field === 'nombre')).toBe(true);
     expect(result.issues.some((i) => i.field === 'categoria' && i.message.includes('Dato'))).toBe(true);
     expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('fantasma') && i.severity === 'warning')).toBe(true);
-    expect(result.issues.some((i) => i.field === 'sku')).toBe(true);
+    expect(result.issues.some((i) => i.field === 'linea' && i.message.includes('Ajustes → Marca') && i.severity === 'warning')).toBe(true);
+    expect(result.issues.some((i) => i.field === 'codigo')).toBe(true);
   });
 
   it('partitionDeliveryCatalogImportEntries imports valid rows and skips bad ones', async () => {

@@ -8,13 +8,24 @@ dotenv.config({ path: path.join(root, '.env') });
 
 const BASE = String(process.env.VERIFY_API_BASE || 'https://vertialapp.com').replace(/\/+$/, '');
 
-function scopeFilter(items, businessId, brands, accountBusinessCount) {
+function scopeFilter(items, businessId, brands, accountBusinessCount, activeBusinessType) {
   const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
+  const universal = (cat) => {
+    const c = String(cat || '').trim().toLowerCase();
+    return ['bebidas', 'bebida', 'complementos', 'complemento', 'extras', 'postres', 'postre', 'salsas', 'otros'].includes(c);
+  };
   return items.filter((item) => {
     const ib = String(item.business_id || '').replace(/^business:/, '').trim();
     const itemBrandIds = (item.brandIds ?? []).map((id) => String(id).trim()).filter(Boolean);
     if (ib) return ib === businessId;
     if (itemBrandIds.length > 0) return itemBrandIds.some((id) => brandIds.has(id));
+    if (universal(item.category)) {
+      if (ib) return ib === businessId;
+      if (accountBusinessCount !== undefined && accountBusinessCount >= 2) {
+        return activeBusinessType === 'delivery';
+      }
+      return brandIds.size > 0;
+    }
     if (accountBusinessCount !== undefined && accountBusinessCount >= 2) return false;
     return brandIds.size > 0;
   });

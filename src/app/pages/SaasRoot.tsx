@@ -21,8 +21,6 @@ import { ScrapyardProvider } from '../context/ScrapyardContext';
 import { useAuth } from '../context/AuthContext';
 import { isWorkerAccount } from '../lib/authApi';
 import {
-  ensureDeliveryDefaultBrand,
-  isDeliveryBusinessType,
   readStoredOnboardingBusinessType,
 } from '../lib/deliverySetup';
 import {
@@ -279,26 +277,6 @@ function SaasContent() {
           }
 
           const created = result.business;
-
-          const createdType = String(created?.businessType || bt || '').trim();
-
-          if (created?.business_id && isDeliveryBusinessType(createdType)) {
-
-            try {
-
-              await ensureDeliveryDefaultBrand(created.business_id, {
-
-                preferredName: companyName,
-
-              });
-
-            } catch {
-
-              /* Marca se crea al abrir Ajustes → Marca */
-
-            }
-
-          }
 
           await reloadBusinesses?.();
 

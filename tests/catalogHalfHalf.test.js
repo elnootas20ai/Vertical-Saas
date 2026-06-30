@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  catalogBuildYourOwnIngredientCandidates,
   catalogPizzasForHalfHalf,
+  catalogPizzaCandidatesForHalfHalf,
   customizationSignature,
   isTpvBuildYourOwnCatalogItem,
   isTpvHalfHalfCatalogItem,
+  isHalfHalfFlavorSelectionInvalid,
+  mergeHalfHalfProductIngredients,
+  normalizeHalfHalfAllowedProductIds,
+  tpvBuildYourOwnIngredientPool,
 } from '../src/app/lib/catalogCustomization.js';
 
 describe('isTpvHalfHalfCatalogItem', () => {
@@ -89,6 +95,87 @@ describe('catalogPizzasForHalfHalf', () => {
     const list = catalogPizzasForHalfHalf(catalog, 'hh');
     expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
   });
+
+  it('filters by allowed product ids when configured', () => {
+    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
+      allowedProductIds: ['p1'],
+    });
+    expect(list.map((p) => p._id)).toEqual(['p1']);
+  });
+
+  it('returns empty when allowed ids do not match any pizza', () => {
+    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
+      allowedProductIds: ['missing'],
+    });
+    expect(list).toEqual([]);
+  });
+
+  it('excludes pizza al gusto from half-half flavor list', () => {
+    const withByo = [
+      ...catalog,
+      {
+        _id: 'byo',
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        itemType: 'product',
+        active: true,
+        customFields: { buildYourOwn: true },
+      },
+    ];
+    const list = catalogPizzasForHalfHalf(withByo, 'hh');
+    expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
+  });
+
+  it('shows only configured flavors when half-half whitelist has two pizzas', () => {
+    const list = catalogPizzasForHalfHalf(catalog, 'hh', {
+      allowedProductIds: ['p1', 'p2'],
+    });
+    expect(list.map((p) => p._id)).toEqual(['p2', 'p1']);
+  });
+});
+
+describe('normalizeHalfHalfAllowedProductIds', () => {
+  it('dedupes and trims ids', () => {
+    expect(normalizeHalfHalfAllowedProductIds([' p1 ', 'p1', '', 'p2'])).toEqual(['p1', 'p2']);
+  });
+
+  it('returns empty for invalid input', () => {
+    expect(normalizeHalfHalfAllowedProductIds(null)).toEqual([]);
+  });
+});
+
+describe('catalogPizzaCandidatesForHalfHalf', () => {
+  it('filters candidates by brand when brandIds provided', () => {
+    const catalog = [
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: { halfHalf: true } },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: {} },
+      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b2'], customFields: {} },
+    ];
+    const list = catalogPizzaCandidatesForHalfHalf(catalog, 'hh', ['b1']);
+    expect(list.map((p) => p._id)).toEqual(['p1']);
+  });
+
+  it('includes products from pizza line brand even without pizza in category name', () => {
+    const catalog = [
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, brandIds: ['b1'], customFields: { halfHalf: true } },
+      { _id: 'p1', name: 'Margarita', category: 'Carta', itemType: 'product', active: true, brandIds: ['b1'], customFields: {} },
+    ];
+    const list = catalogPizzaCandidatesForHalfHalf(catalog, 'hh', ['b1'], [
+      { _id: 'b1', deliveryLineKind: 'pizza' },
+    ]);
+    expect(list.map((p) => p._id)).toEqual(['p1']);
+  });
+});
+
+describe('isHalfHalfFlavorSelectionInvalid', () => {
+  it('allows empty (todas) and two or more', () => {
+    expect(isHalfHalfFlavorSelectionInvalid([])).toBe(false);
+    expect(isHalfHalfFlavorSelectionInvalid(['a', 'b'])).toBe(false);
+  });
+
+  it('rejects exactly one selected pizza', () => {
+    expect(isHalfHalfFlavorSelectionInvalid(['a'])).toBe(true);
+  });
 });
 
 describe('isTpvComboCatalogItem half-half', () => {
@@ -103,6 +190,136 @@ describe('isTpvComboCatalogItem half-half', () => {
         customFields: { halfHalf: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe('tpvBuildYourOwnIngredientPool', () => {
+  const storeIngredients = [
+    { id: 'ing-1', name: 'Mozzarella', role: 'base', productParts: ['pizzas'] },
+    { id: 'ing-2', name: 'Tomate', role: 'base', productParts: ['pizzas'] },
+    { id: 'ing-3', name: 'Bacon', role: 'extra', productParts: ['pizzas'] },
+  ];
+
+  it('lists base pizza ingredients for al gusto', () => {
+    const names = tpvBuildYourOwnIngredientPool(
+      {
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        brandIds: [],
+        customFields: { buildYourOwn: true },
+      },
+      storeIngredients,
+    );
+    expect(names).toEqual(['Bacon', 'Mozzarella', 'Tomate']);
+  });
+
+  it('relaxes brand filter when product brand does not match ingredient brand', () => {
+    const perBrand = [
+      { id: 'ing-a', name: 'Mozzarella', role: 'base', brandIds: ['brand-modomio'], productParts: ['pizzas'] },
+      { id: 'ing-b', name: 'Tomate', role: 'base', brandIds: ['brand-modomio'], productParts: ['pizzas'] },
+    ];
+    const names = tpvBuildYourOwnIngredientPool(
+      {
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        brandIds: ['brand-other'],
+        customFields: { buildYourOwn: true },
+      },
+      perBrand,
+    );
+    expect(names).toEqual(['Mozzarella', 'Tomate']);
+  });
+
+  it('lists TPV extras when no base ingredients exist (import Excel)', () => {
+    const extrasOnly = [
+      { id: 'ing-1', name: 'Mozzarella', role: 'extra', productParts: ['pizzas'], extraPrices: { '': 1 } },
+      { id: 'ing-2', name: 'Tomate', role: 'extra', productParts: ['pizzas'], extraPrices: { '': 1 } },
+    ];
+    const names = tpvBuildYourOwnIngredientPool(
+      {
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        brandIds: [],
+        customFields: { buildYourOwn: true },
+      },
+      extrasOnly,
+    );
+    expect(names).toEqual(['Mozzarella', 'Tomate']);
+  });
+
+  it('ignores Excel menu tier labels and beverages in build-your-own pool', () => {
+    const mixed = [
+      { id: 'm0', name: '0', role: 'extra', productParts: ['pizzas'] },
+      { id: 'm3', name: '3 Ingredientes a elegir', role: 'extra', productParts: ['pizzas'] },
+      { id: 'm5', name: '+ 5 Ingredientes a elegir', role: 'extra', productParts: ['pizzas'] },
+      { id: 'bev', name: 'Agua', role: 'extra', productParts: ['pizzas'] },
+      { id: 'ing-1', name: 'Mozzarella', role: 'extra', productParts: ['pizzas'] },
+      { id: 'ing-2', name: 'Tomate', role: 'base', productParts: ['pizzas'] },
+    ];
+    const names = tpvBuildYourOwnIngredientPool(
+      {
+        name: 'Pizza al gusto',
+        category: 'Pizzas',
+        brandIds: [],
+        customFields: { buildYourOwn: true },
+      },
+      mixed,
+    );
+    expect(names).toEqual(['Mozzarella', 'Tomate']);
+  });
+});
+
+describe('mergeHalfHalfProductIngredients', () => {
+  it('merges ingredient lists from both pizza fichas', () => {
+    const catalog = [
+      {
+        _id: 'p1',
+        name: 'Margarita',
+        category: 'Pizzas',
+        customFields: { ingredients: 'Tomate, Mozzarella' },
+      },
+      {
+        _id: 'p2',
+        name: 'Barbacoa',
+        category: 'Pizzas',
+        customFields: { ingredients: 'Salsa BBQ, Mozzarella, Bacon' },
+      },
+    ];
+    const merged = mergeHalfHalfProductIngredients(
+      {
+        firstProductId: 'p1',
+        firstProductName: 'Margarita',
+        secondProductId: 'p2',
+        secondProductName: 'Barbacoa',
+      },
+      catalog,
+    );
+    expect(merged).toEqual(['Tomate', 'Mozzarella', 'Salsa BBQ', 'Bacon']);
+  });
+
+  it('falls back to store ingredients when pizza ficha has no ingredientes', () => {
+    const catalog = [
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', brandIds: ['b1'], customFields: {} },
+      { _id: 'p2', name: 'Barbacoa', category: 'Pizzas', brandIds: ['b1'], customFields: {} },
+    ];
+    const storeIngredients = [
+      { id: 'i1', name: 'Tomate', brandIds: ['b1'], role: 'base' },
+      { id: 'i2', name: 'Mozzarella', brandIds: ['b1'], role: 'base' },
+    ];
+    const merged = mergeHalfHalfProductIngredients(
+      {
+        firstProductId: 'p1',
+        firstProductName: 'Margarita',
+        secondProductId: 'p2',
+        secondProductName: 'Barbacoa',
+      },
+      catalog,
+      {
+        storeIngredients,
+        brands: [{ _id: 'b1', deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] }],
+      },
+    );
+    expect(merged).toEqual(['Tomate', 'Mozzarella']);
   });
 });
 

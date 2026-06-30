@@ -1,22 +1,77 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target } from 'lucide-react';
+import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target, PackagePlus, Factory } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useCamera } from '../../hooks/useCamera';
 import {
-  scanDocument, processOcr, approveProposal,
+  scanDocument, processOcr, approveProposal, editProposal,
   DOC_TYPE_LABELS, DOC_TYPE_ICONS, DOC_TYPE_COLORS, MODULE_LABELS,
   type OcrResult, type OcrProposal, type OcrEntityMatch, type OcrScanMeta,
+  type OcrRouteResult,
 } from '../../lib/ocrApi';
+import { createSupplierRequest } from '../../lib/deliveryApi';
+import { toast } from 'sonner';
 
 const MAX_IMAGE_DIMENSION = 2000;
 const JPEG_QUALITY = 0.85;
 
 type Step = 'upload' | 'scanning' | 'processing' | 'result' | 'saving' | 'done' | 'duplicate' | 'error';
 
+type ProposalLine = {
+  description?: string;
+  itemName?: string;
+  quantity?: number;
+  total?: number;
+  catalogItemId?: string;
+  catalogItemName?: string;
+  matchConfidence?: number;
+  matchMethod?: string;
+};
+
+function readProposalField<T>(proposal: OcrProposal | null, key: string): T | null {
+  if (!proposal?.fields) return null;
+  const raw = proposal.fields[key as keyof typeof proposal.fields];
+  if (raw == null) return null;
+  if (typeof raw === 'object' && raw !== null && 'value' in raw) {
+    return (raw as { value: T }).value;
+  }
+  return raw as T;
+}
+
+function isComprasPurchaseDoc(ocrResult: OcrResult | null, targetModule?: string): boolean {
+  if (!ocrResult) return targetModule === 'compras';
+  return ['factura_proveedor', 'albaran'].includes(ocrResult.documentType || '') || targetModule === 'compras';
+}
+
+function countUnmatchedStockLines(lines: Array<ProposalLine | Record<string, unknown>>): number {
+  return lines.filter((line) => {
+    const pl = line as ProposalLine;
+    const hasQty = Number(pl.quantity || 0) > 0;
+    const hasLabel = Boolean(String(pl.description || pl.itemName || '').trim());
+    if (!hasQty && !hasLabel) return false;
+    return !String(pl.catalogItemId || '').trim();
+  }).length;
+}
+
+function sideEffectsSummary(sideEffects: OcrRouteResult['sideEffects']) {
+  if (!sideEffects) return null;
+  const parts: string[] = [];
+  if (sideEffects.stockUpdated && sideEffects.stockUpdated > 0) {
+    parts.push(`${sideEffects.stockUpdated} artículo(s) en inventario (+${sideEffects.stockUnits ?? 0} ud)`);
+  }
+  if (sideEffects.financeMovementId && !sideEffects.financeSkipped) {
+    parts.push('Pago registrado en Finanzas');
+  }
+  if (sideEffects.matchedLines != null && sideEffects.totalLines != null) {
+    parts.push(`${sideEffects.matchedLines}/${sideEffects.totalLines} líneas vinculadas al catálogo`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onDocumentCreated?: (payload: Record<string, unknown>) => Promise<void>;
+  userId?: string;
   targetModule?: string;
   context?: Record<string, unknown>;
   vehicles?: Array<{ id: string; brand?: string; model?: string; registrationPlate?: string }>;
@@ -131,7 +186,8 @@ async function pdfFileToPngBase64(file: File): Promise<string> {
   return dataUrl.split(',')[1] || '';
 }
 
-export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetModule, context, vehicles, clients, defaultOcrMode, autoOpenCamera }: Props) {
+export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId, targetModule, context, vehicles, clients, defaultOcrMode, autoOpenCamera }: Props) {
+  const { takePhoto, isNative } = useCamera();
   const [ocrMode, setOcrMode] = useState<'financial' | 'vehicle'>(defaultOcrMode || 'financial');
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -145,15 +201,29 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
   const [destinationInfo, setDestinationInfo] = useState<Record<string, unknown> | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string>('');
   const [duplicateInfo, setDuplicateInfo] = useState<Record<string, unknown> | null>(null);
-  const [routeResult, setRouteResult] = useState<{ documentId: string; database: string } | null>(null);
+  const [routeResult, setRouteResult] = useState<OcrRouteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [supplierDecision, setSupplierDecision] = useState<'pending' | 'created' | 'skipped'>('pending');
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [linkedSupplier, setLinkedSupplier] = useState<{ _id: string; name: string } | null>(null);
+  const [stockMatchDecision, setStockMatchDecision] = useState<'pending' | 'confirmed'>('pending');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
   const base64Ref = useRef<string>('');
   const mimeRef = useRef<string>('');
-  const { takePhoto, isNative } = useCamera();
+  const applyEntityMatches = useCallback((matches: OcrEntityMatch[]) => {
+    setEntityMatches(matches);
+    const sm = matches.find((m) => m.matchType === 'supplier');
+    if (sm?.matchedEntity && !sm.suggestNew) {
+      setLinkedSupplier({ _id: sm.matchedEntity._id, name: sm.matchedEntity.name });
+      setSupplierDecision('created');
+    } else {
+      setLinkedSupplier(null);
+      setSupplierDecision('pending');
+    }
+  }, []);
 
   // Limpia el objectURL anterior cuando cambia (o al desmontar) para no
   // dejar bitmaps colgando en memoria en móvil.
@@ -172,6 +242,8 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
     setEntityMatches([]); setValidation(null); setDestinationInfo(null);
     setPipelineStatus(''); setDuplicateInfo(null); setRouteResult(null);
     setError(null); setShowPreview(false);
+    setSupplierDecision('pending'); setCreatingSupplier(false); setLinkedSupplier(null);
+    setStockMatchDecision('pending');
     setOcrMode(defaultOcrMode || 'financial');
     base64Ref.current = ''; mimeRef.current = '';
   }, [defaultOcrMode, setPreview]);
@@ -340,13 +412,26 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
       }
 
       if (processRes.proposal) setProposal(processRes.proposal);
-      if (processRes.entityMatches) setEntityMatches(processRes.entityMatches);
+      if (processRes.entityMatches) applyEntityMatches(processRes.entityMatches);
       if (processRes.validation) setValidation(processRes.validation as typeof validation);
       if (processRes.destination) setDestinationInfo(processRes.destination as Record<string, unknown>);
       if (processRes.routeResult) setRouteResult(processRes.routeResult);
 
       if (processRes.status === 'auto_approved' && processRes.routeResult) {
         setStep('done');
+        if (onDocumentCreated && scanRes.data && file) {
+          void onDocumentCreated({
+            name: scanRes.data.documentTypeLabel || file.name,
+            ocrData: scanRes.data,
+            file,
+            fileBase64: base64Ref.current,
+            fileMimeType: mimeRef.current,
+            proposalId: processRes.proposal?._id,
+            documentId: processRes.routeResult.documentId,
+            database: processRes.routeResult.database,
+            sideEffects: processRes.routeResult.sideEffects,
+          }).catch(() => {});
+        }
       } else {
         setStep('result');
       }
@@ -356,11 +441,86 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
     }
   };
 
+  const handleCreateSupplier = async () => {
+    const name = String(ocrResult?.emitter || readProposalField<string>(proposal, 'supplierName') || '').trim();
+    if (!userId || !proposal || !name) {
+      toast.error('Faltan datos para crear el proveedor');
+      return;
+    }
+    setCreatingSupplier(true);
+    try {
+      const created = await createSupplierRequest(userId, {
+        name,
+        cif: String(ocrResult?.emitterCIF || '').trim(),
+        notes: 'Creado automáticamente desde OCR',
+        active: true,
+      });
+      const editRes = await editProposal(proposal._id, {
+        fields: {
+          supplierId: { value: created._id, confidence: 100, source: 'created' },
+          supplierName: { value: created.name, confidence: 100, source: 'created' },
+        },
+      });
+      setProposal(editRes.proposal);
+      setLinkedSupplier({ _id: created._id, name: created.name });
+      setEntityMatches((prev) =>
+        prev.map((m) =>
+          m.matchType === 'supplier'
+            ? {
+                ...m,
+                matchedEntity: {
+                  _id: created._id,
+                  name: created.name,
+                  cif: created.cif || '',
+                  email: created.email || '',
+                },
+                confidence: 100,
+                suggestNew: false,
+              }
+            : m,
+        ),
+      );
+      setSupplierDecision('created');
+      toast.success(`Proveedor «${created.name}» creado y vinculado`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear proveedor');
+    } finally {
+      setCreatingSupplier(false);
+    }
+  };
+
   const handleApprove = async () => {
     if (!proposal) return;
+    const sm = entityMatches.find((m) => m.matchType === 'supplier');
+    const supplierNameCheck = String(ocrResult?.emitter || readProposalField<string>(proposal, 'supplierName') || '').trim();
+    const comprasDoc =
+      ocrResult &&
+      (['factura_proveedor', 'albaran'].includes(ocrResult.documentType || '') || targetModule === 'compras');
+    const pendingSupplier =
+      comprasDoc &&
+      Boolean(supplierNameCheck) &&
+      (!sm?.matchedEntity || sm.suggestNew) &&
+      !linkedSupplier &&
+      supplierDecision === 'pending';
+    if (pendingSupplier) {
+      toast.error('Indica si quieres crear el proveedor o continuar sin vincularlo');
+      return;
+    }
+    const linesForCheck = readProposalField<ProposalLine[]>(proposal, 'lines') || ocrResult?.lines || [];
+    const unmatchedStockLines = isComprasPurchaseDoc(ocrResult, targetModule) ? countUnmatchedStockLines(linesForCheck) : 0;
+    if (unmatchedStockLines > 0 && stockMatchDecision === 'pending') {
+      toast.error('Confirma si quieres continuar sin subir stock en las líneas sin vínculo');
+      return;
+    }
     setStep('saving');
     try {
-      const res = await approveProposal(proposal._id);
+      const approveFields = linkedSupplier
+        ? {
+            supplierId: { value: linkedSupplier._id, confidence: 100, source: 'created' },
+            supplierName: { value: linkedSupplier.name, confidence: 100, source: 'created' },
+          }
+        : undefined;
+      const res = await approveProposal(proposal._id, approveFields);
       setRouteResult(res.routeResult);
       setProposal(res.proposal);
       setStep('done');
@@ -372,6 +532,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
           file, fileBase64: base64Ref.current, fileMimeType: mimeRef.current,
           proposalId: proposal._id, documentId: res.routeResult.documentId,
           database: res.routeResult.database,
+          sideEffects: res.routeResult.sideEffects,
         }).catch(() => {});
       }
     } catch (err: unknown) {
@@ -393,7 +554,7 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
       });
       setPipelineStatus(processRes.status);
       if (processRes.proposal) setProposal(processRes.proposal);
-      if (processRes.entityMatches) setEntityMatches(processRes.entityMatches);
+      if (processRes.entityMatches) applyEntityMatches(processRes.entityMatches);
       if (processRes.validation) setValidation(processRes.validation as typeof validation);
       if (processRes.destination) setDestinationInfo(processRes.destination as Record<string, unknown>);
       setStep('result');
@@ -408,6 +569,16 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
 
   const docType = ocrResult?.documentType || 'otro';
   const moduleLabel = destinationInfo ? MODULE_LABELS[(destinationInfo as Record<string, string>).module] || (destinationInfo as Record<string, string>).module : '';
+  const proposalLines = readProposalField<ProposalLine[]>(proposal, 'lines');
+  const displayLines = (proposalLines && proposalLines.length > 0 ? proposalLines : ocrResult?.lines) || [];
+  const catalogMatchSummary = readProposalField<{ matchedLines: number; totalLines: number }>(proposal, 'catalogMatchSummary');
+  const isComprasDoc = isComprasPurchaseDoc(ocrResult, targetModule);
+  const supplierMatch = entityMatches.find((m) => m.matchType === 'supplier');
+  const ocrSupplierName = String(ocrResult?.emitter || readProposalField<string>(proposal, 'supplierName') || '').trim();
+  const needsNewSupplier = isComprasDoc && Boolean(ocrSupplierName) && (!supplierMatch?.matchedEntity || supplierMatch.suggestNew) && !linkedSupplier;
+  const unmatchedStockLineCount = isComprasDoc ? countUnmatchedStockLines(displayLines) : 0;
+  const needsStockMatchConfirm = isComprasDoc && unmatchedStockLineCount > 0 && stockMatchDecision === 'pending';
+  const canApprove = (!needsNewSupplier || supplierDecision !== 'pending') && !needsStockMatchConfirm;
 
   const stepIndicators = [
     { key: 'upload', label: 'Subir', icon: Upload },
@@ -593,6 +764,99 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                 </div>
               </div>
 
+              {needsNewSupplier && (
+                <div className="p-4 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <Factory className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+                        Este proveedor no existe en tu lista
+                      </p>
+                      <p className="text-sm text-amber-800 dark:text-amber-200 mt-1">
+                        <strong>{ocrSupplierName}</strong>
+                        {ocrResult?.emitterCIF ? ` · CIF ${ocrResult.emitterCIF}` : ''}
+                      </p>
+                      <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-1">
+                        ¿Quieres crearlo automáticamente y vincularlo a esta factura?
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCreateSupplier()}
+                      disabled={creatingSupplier || !userId}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+                    >
+                      {creatingSupplier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Factory className="w-4 h-4" />}
+                      Sí, crear proveedor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupplierDecision('skipped');
+                        toast.message('Continuarás sin proveedor vinculado');
+                      }}
+                      disabled={creatingSupplier}
+                      className="px-4 py-2 rounded-xl border border-amber-300 dark:border-amber-600 text-amber-800 dark:text-amber-200 text-sm font-semibold hover:bg-amber-100/60 dark:hover:bg-amber-900/20 transition-colors"
+                    >
+                      No, continuar sin proveedor
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {unmatchedStockLineCount > 0 && isComprasDoc && (
+                <div className="p-4 rounded-xl border-2 border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/30 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-orange-900 dark:text-orange-100">
+                        {unmatchedStockLineCount} línea{unmatchedStockLineCount === 1 ? '' : 's'} sin vínculo al inventario
+                      </p>
+                      <p className="text-xs text-orange-800 dark:text-orange-200 mt-1">
+                        Esas líneas <strong>no subirán stock</strong> al aprobar. La factura y el pago en Finanzas sí se registrarán.
+                        Revisa los nombres en inventario o confirma para continuar.
+                      </p>
+                    </div>
+                  </div>
+                  {needsStockMatchConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStockMatchDecision('confirmed');
+                        toast.message('Continuarás sin subir stock en las líneas sin vínculo');
+                      }}
+                      className="px-4 py-2 rounded-xl border border-orange-300 dark:border-orange-600 text-orange-800 dark:text-orange-200 text-sm font-semibold hover:bg-orange-100/60 dark:hover:bg-orange-900/20 transition-colors"
+                    >
+                      Entiendo, continuar sin subir esas líneas
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle className="w-4 h-4 shrink-0" />
+                      Confirmado: solo subirán stock las líneas vinculadas
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {supplierDecision === 'created' && linkedSupplier && (
+                <div className="flex items-center gap-2 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-sm text-emerald-800 dark:text-emerald-200">
+                  <CheckCircle className="w-4 h-4 shrink-0" />
+                  Proveedor vinculado: <strong>{linkedSupplier.name}</strong>
+                </div>
+              )}
+
+              {isComprasDoc && (
+                <div className="flex items-start gap-2 p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-xs text-emerald-800 dark:text-emerald-200">
+                  <PackagePlus className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>
+                    Al aprobar: factura en Compras, <strong>pago en Finanzas</strong> y <strong>entrada de stock</strong> en artículos vinculados del inventario.
+                    {catalogMatchSummary ? ` ${catalogMatchSummary.matchedLines}/${catalogMatchSummary.totalLines} líneas ya emparejadas.` : ''}
+                  </span>
+                </div>
+              )}
+
               {moduleLabel && (
                 <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-sm">
                   <Send className="w-4 h-4 text-blue-500" />
@@ -659,22 +923,39 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                 </div>
               )}
 
-              {ocrResult.lines && ocrResult.lines.length > 0 && (
+              {displayLines.length > 0 && (
                 <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
                     <Receipt className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Lineas ({ocrResult.lines.length})</span>
+                    <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Lineas ({displayLines.length})</span>
+                    {catalogMatchSummary ? (
+                      <span className="ml-auto text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        {catalogMatchSummary.matchedLines}/{catalogMatchSummary.totalLines} en inventario
+                      </span>
+                    ) : null}
                   </div>
                   <div className="divide-y divide-gray-50 dark:divide-gray-700/50 max-h-48 overflow-y-auto">
-                    {ocrResult.lines.map((line, i) => (
-                      <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
-                        <div className="flex-1 min-w-0">
-                          <span className="text-gray-900 dark:text-gray-100">{line.description}</span>
-                          {line.quantity != null && <span className="text-gray-400 ml-2">&times;{line.quantity}</span>}
+                    {displayLines.map((line, i) => {
+                      const pl = line as ProposalLine;
+                      const label = pl.description || pl.itemName || '';
+                      return (
+                        <div key={i} className="px-4 py-2.5 flex items-center justify-between gap-3 text-sm">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-gray-900 dark:text-gray-100">{label}</span>
+                            {pl.catalogItemName ? (
+                              <div className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate mt-0.5">
+                                → {pl.catalogItemName}
+                                {pl.matchConfidence ? ` (${Math.round(pl.matchConfidence * 100)}%)` : ''}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Sin vínculo inventario</div>
+                            )}
+                            {line.quantity != null && <span className="text-gray-400 ml-2">&times;{line.quantity}</span>}
+                          </div>
+                          <span className="font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">{formatCurrency(line.total, ocrResult?.currency)}</span>
                         </div>
-                        <span className="font-semibold text-gray-900 dark:text-gray-100 flex-shrink-0">{formatCurrency(line.total, ocrResult.currency)}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   {(ocrResult.subtotal != null || ocrResult.taxAmount != null) && (
                     <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 space-y-1 bg-gray-50 dark:bg-gray-700/30">
@@ -707,7 +988,11 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
 
               <div className="flex gap-3 pt-2">
                 <button onClick={reset} className="flex-1 px-6 py-3 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors">Escanear otro</button>
-                <button onClick={handleApprove} className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
+                <button
+                  onClick={handleApprove}
+                  disabled={!canApprove}
+                  className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
                   <CheckCircle className="w-4 h-4" /> Aprobar y guardar
                 </button>
               </div>
@@ -748,8 +1033,33 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, targetM
                 {pipelineStatus === 'auto_approved' ? 'Auto-aprobado y guardado automaticamente' : 'El documento ha sido registrado correctamente'}
                 {moduleLabel && <><br />Destino: <strong>{moduleLabel}</strong></>}
               </p>
+              {routeResult?.sideEffects && isComprasDoc && (
+                <div className="text-sm max-w-md mx-auto space-y-1">
+                  {routeResult.sideEffects.stockUpdated && routeResult.sideEffects.stockUpdated > 0 ? (
+                    <p className="text-emerald-700 dark:text-emerald-400">
+                      Stock actualizado en {routeResult.sideEffects.stockUpdated} artículo(s).
+                    </p>
+                  ) : (
+                    <p className="text-orange-700 dark:text-orange-400">
+                      Ninguna línea subió stock. Revisa el inventario y vincula los artículos.
+                    </p>
+                  )}
+                  {routeResult.sideEffects.matchedLines != null &&
+                    routeResult.sideEffects.totalLines != null &&
+                    routeResult.sideEffects.matchedLines < routeResult.sideEffects.totalLines && (
+                      <p className="text-orange-600 dark:text-orange-400 text-xs">
+                        {routeResult.sideEffects.totalLines - routeResult.sideEffects.matchedLines} línea(s) sin vínculo al inventario.
+                      </p>
+                    )}
+                </div>
+              )}
               {routeResult && (
-                <div className="text-xs text-gray-400 font-mono">ID: {routeResult.documentId}</div>
+                <div className="text-xs text-gray-500 space-y-1">
+                  <div className="font-mono">ID: {routeResult.documentId}</div>
+                  {sideEffectsSummary(routeResult.sideEffects) ? (
+                    <div className="text-emerald-700 dark:text-emerald-400 font-medium">{sideEffectsSummary(routeResult.sideEffects)}</div>
+                  ) : null}
+                </div>
               )}
               <div className="flex gap-3 justify-center pt-2">
                 <button onClick={reset} className="px-6 py-3 border-2 border-gray-200 dark:border-gray-700 hover:border-gray-300 text-gray-700 dark:text-gray-300 font-medium rounded-xl transition-colors">Escanear otro</button>
