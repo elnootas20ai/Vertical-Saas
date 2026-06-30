@@ -57,3 +57,4 @@ deploy/local-values.env
 
 # Backups locales CouchDB (no versionar volúmenes de datos)
 backups/*.json.gz
+backups/_extract_tmp/
