@@ -3,6 +3,7 @@ export type DeliveryBrandLineKindId =
   | 'prepared_meals'
   | 'pizza'
   | 'burger_fastfood'
+  | 'tacos_mexican'
   | 'kebab'
   | 'tapas_bar'
   | 'sushi_asian'
@@ -31,6 +32,7 @@ export const DELIVERY_BRAND_LINE_PHOTOS: Record<DeliveryBrandLineKindId, string>
   prepared_meals: `${LINE_PHOTO_BASE}/combo.webp`,
   pizza: `${LINE_PHOTO_BASE}/pizza-lite.webp`,
   burger_fastfood: `${LINE_PHOTO_BASE}/burger-lite.webp`,
+  tacos_mexican: `${LINE_PHOTO_BASE}/tapas.webp`,
   kebab: `${LINE_PHOTO_BASE}/kebab.webp`,
   tapas_bar: `${LINE_PHOTO_BASE}/tapas.webp`,
   sushi_asian: `${LINE_PHOTO_BASE}/sushi.webp`,
@@ -52,6 +54,7 @@ export const DELIVERY_BRAND_LINE_ICON_BOX: Record<DeliveryBrandLineKindId, strin
   prepared_meals: 'bg-orange-100 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400',
   pizza: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',
   burger_fastfood: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  tacos_mexican: 'bg-lime-100 text-lime-800 dark:bg-lime-900/40 dark:text-lime-300',
   kebab: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
   tapas_bar: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400',
   sushi_asian: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
@@ -92,6 +95,16 @@ export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
     primaryColor: '#D97706',
     description: 'Hamburguesas, combos y complementos tipo fast food.',
     typicalCategories: ['Burgers', 'Complementos', 'Postres', 'Bebidas'],
+  },
+  {
+    id: 'tacos_mexican',
+    label: 'Tacos / mexicano',
+    hint: 'Tacos, burritos, quesadillas, nachos',
+    suggestedName: 'Tacos',
+    shortCode: 'TAC',
+    primaryColor: '#16A34A',
+    description: 'Tacos, burritos, quesadillas y carta mexicana.',
+    typicalCategories: ['Tacos', 'Complementos', 'Bebidas'],
   },
   {
     id: 'kebab',

@@ -18,6 +18,7 @@ import {
 } from '../../lib/catalogBusinessScope';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import { repairVertialFoodEscandallo } from '../../lib/deliveryCatalogImport';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
 import {
   getDeliveryConfigRequest,
@@ -441,6 +442,7 @@ export function EscandalloPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingProduct, setEditingProduct] = useState<CatalogItem | null>(null);
   const [showCategoryPanel, setShowCategoryPanel] = useState(false);
+  const [regeneratingEscandallo, setRegeneratingEscandallo] = useState(false);
 
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
 
@@ -539,11 +541,29 @@ export function EscandalloPanel() {
     setCatalogItems((prev) => prev.map((item) => byId.get(item._id) ?? item));
   };
 
+  const handleRegenerateAllEscandallo = useCallback(async () => {
+    const uid = dataUserId || user?.id;
+    if (!uid || !businessId || regeneratingEscandallo) return;
+    setRegeneratingEscandallo(true);
+    try {
+      const result = await repairVertialFoodEscandallo(uid, businessId, { allMenuProducts: true });
+      await load();
+      toast.success(
+        `Escandallos Vertial: ${result.updated} actualizado(s) · ${result.recipe} receta · ${result.fixed} coste fijo`,
+        { duration: 9000 },
+      );
+    } catch {
+      toast.error('No se pudieron generar los escandallos');
+    } finally {
+      setRegeneratingEscandallo(false);
+    }
+  }, [businessId, dataUserId, load, regeneratingEscandallo, user?.id]);
+
   if (!isDeliveryBusinessType(businessType)) {
     return (
       <SaasTabEmpty
         title="Escandallo disponible en Delivery"
-        description="Cambia a tu empresa de delivery (Modomio) para ver pizzas, burgers y escandallos."
+        description="Cambia a tu empresa de delivery (Modomio) para ver pizzas, burgers, tacos y escandallos."
       />
     );
   }
@@ -600,15 +620,30 @@ export function EscandalloPanel() {
               </>
             }
             right={
-              categories.length > 0 ? (
-                <SaasTabSecondaryButton
-                  onClick={() => setShowCategoryPanel((open) => !open)}
-                  className={showCategoryPanel ? 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300' : ''}
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  Costes por categoría
-                </SaasTabSecondaryButton>
-              ) : null
+              <>
+                {catalogItems.length > 0 ? (
+                  <SaasTabSecondaryButton
+                    disabled={regeneratingEscandallo}
+                    onClick={() => void handleRegenerateAllEscandallo()}
+                  >
+                    {regeneratingEscandallo ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Calculator className="w-3.5 h-3.5" />
+                    )}
+                    Generar escandallos (todas las marcas)
+                  </SaasTabSecondaryButton>
+                ) : null}
+                {categories.length > 0 ? (
+                  <SaasTabSecondaryButton
+                    onClick={() => setShowCategoryPanel((open) => !open)}
+                    className={showCategoryPanel ? 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300' : ''}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    Costes por categoría
+                  </SaasTabSecondaryButton>
+                ) : null}
+              </>
             }
           />
         }

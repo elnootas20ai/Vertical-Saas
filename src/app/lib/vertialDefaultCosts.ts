@@ -73,6 +73,18 @@ export const VERTIAL_LINE_INGREDIENT_COSTS: Partial<Record<DeliveryBrandLineKind
     { patterns: ['huevo'], cost: 0.25 },
     { patterns: ['patata', 'frita'], cost: 2.0 },
   ],
+  tacos_mexican: [
+    { patterns: ['tortilla', 'maiz', 'maíz'], cost: 0.18 },
+    { patterns: ['carne', 'pastor', 'carnitas', 'barbacoa', 'cochinita'], cost: 9.0 },
+    { patterns: ['pollo', 'chicken'], cost: 7.5 },
+    { patterns: ['guacamole', 'aguacate'], cost: 8.0 },
+    { patterns: ['salsa', 'pico', 'verde', 'roja'], cost: 5.0 },
+    { patterns: ['queso', 'cotija', 'cheddar'], cost: 7.0 },
+    { patterns: ['cebolla', 'cilantro'], cost: 3.0 },
+    { patterns: ['lime', 'limon', 'limón'], cost: 0.15 },
+    { patterns: ['frijol', 'refrito'], cost: 4.0 },
+    { patterns: ['arroz'], cost: 3.0 },
+  ],
   mixed_restaurant: [
     { patterns: ['pollo', 'chicken'], cost: 7.5 },
     { patterns: ['cerdo', 'pork'], cost: 8.0 },

@@ -60,10 +60,26 @@ const BURGER_QUANTITY_RULES: QuantityRule[] = [
   { patterns: ['patata', 'frita'], quantity: 0.12, unit: 'kg' },
 ];
 
+const TACO_QUANTITY_RULES: QuantityRule[] = [
+  { patterns: ['tortilla', 'maiz', 'maíz', 'trigo'], quantity: 3, unit: 'ud' },
+  { patterns: ['carne', 'pastor', 'carnitas', 'barbacoa', 'pollo', 'cochinita', 'vacuno'], quantity: 0.12, unit: 'kg' },
+  { patterns: ['guacamole', 'aguacate'], quantity: 0.04, unit: 'kg' },
+  { patterns: ['salsa', 'pico', 'verde', 'roja', 'habanero'], quantity: 0.03, unit: 'kg' },
+  { patterns: ['queso', 'cotija', 'cheddar'], quantity: 0.025, unit: 'kg' },
+  { patterns: ['cebolla', 'cilantro', 'col'], quantity: 0.02, unit: 'kg' },
+  { patterns: ['lime', 'limon', 'limón'], quantity: 0.5, unit: 'ud' },
+  { patterns: ['frijol', 'refrito'], quantity: 0.05, unit: 'kg' },
+  { patterns: ['arroz', 'rice'], quantity: 0.06, unit: 'kg' },
+];
+
 /** Máximo de toppings del Excel en escandallo auto (evita costes absurdos). */
 const MAX_EXCEL_TOPPING_LINES = 8;
 
-const DEFAULT_TOPPING_QTY = { pizza: { quantity: 0.045, unit: 'kg' }, burger: { quantity: 0.03, unit: 'kg' } };
+const DEFAULT_TOPPING_QTY = {
+  pizza: { quantity: 0.045, unit: 'kg' },
+  burger: { quantity: 0.03, unit: 'kg' },
+  taco: { quantity: 0.025, unit: 'kg' },
+};
 
 const COMBO_SLOT_DEFAULT_COST: Record<ComboSlotKind, number> = {
   main: 3.2,
@@ -92,6 +108,8 @@ const CATEGORY_FIXED_FALLBACK: Record<string, number> = {
   burgers: 2.6,
   burger: 2.6,
   hamburguesas: 2.6,
+  tacos: 2.4,
+  taco: 2.4,
   combos: 5.5,
   combo: 5.5,
   complementos: 1.15,
@@ -102,6 +120,9 @@ const CATEGORY_FIXED_FALLBACK: Record<string, number> = {
 type DeliveryBrandLineKindId =
   | 'pizza'
   | 'burger_fastfood'
+  | 'tacos_mexican'
+  | 'kebab'
+  | 'tapas_bar'
   | 'mixed_restaurant'
   | 'prepared_meals'
   | 'drinks_desserts'
@@ -138,6 +159,8 @@ function normalizeImportCategoryLocal(value: string): string {
     burgers: 'Burgers',
     burger: 'Burgers',
     hamburguesas: 'Hamburguesas',
+    tacos: 'Tacos',
+    taco: 'Tacos',
     combos: 'Combos',
     combo: 'Combos',
     bebidas: 'Bebidas',
@@ -215,14 +238,20 @@ function resolveQuantityRule(
       ? PIZZA_QUANTITY_RULES
       : lineKind === 'burger_fastfood' || /burger|hamburguesa/.test(folded)
         ? BURGER_QUANTITY_RULES
-        : PIZZA_QUANTITY_RULES;
+        : lineKind === 'tacos_mexican' || /taco|burrito|quesadilla|pastor|carnitas/.test(folded)
+          ? TACO_QUANTITY_RULES
+          : PIZZA_QUANTITY_RULES;
 
   for (const rule of rules) {
     if (matchesQuantityRule(folded, rule)) return { quantity: rule.quantity, unit: rule.unit };
   }
 
   const topping =
-    lineKind === 'burger_fastfood' ? DEFAULT_TOPPING_QTY.burger : DEFAULT_TOPPING_QTY.pizza;
+    lineKind === 'burger_fastfood'
+      ? DEFAULT_TOPPING_QTY.burger
+      : lineKind === 'tacos_mexican'
+        ? DEFAULT_TOPPING_QTY.taco
+        : DEFAULT_TOPPING_QTY.pizza;
   return topping;
 }
 
@@ -239,6 +268,9 @@ export function inferImportCostingLineKind(
   if (/pizza|calzone|especialidad|premium/.test(cat) || /pizza|calzone/.test(name)) return 'pizza';
   if (/burger|hamburguesa|top burger/.test(cat) || /burger|hamburguesa/.test(name)) {
     return 'burger_fastfood';
+  }
+  if (/taco|burrito|quesadilla|mexican|pastor|carnitas/.test(cat) || /taco|burrito|quesadilla/.test(name)) {
+    return 'tacos_mexican';
   }
   return 'generic';
 }
@@ -316,7 +348,7 @@ export function needsVertialFoodEscandalloRepair(
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
 ): boolean {
   const lk = inferImportCostingLineKind(item, brands);
-  if (lk !== 'pizza' && lk !== 'burger_fastfood') return false;
+  if (lk !== 'pizza' && lk !== 'burger_fastfood' && lk !== 'tacos_mexican') return false;
   return explicitProductCostingStatus(item) !== 'recipe';
 }
 
@@ -334,6 +366,10 @@ function enrichRecipeIngredientNames(
   } else if (lineKind === 'burger_fastfood') {
     if (!folded.some((f) => /pan|bollo|brioche/.test(f))) out.unshift('Pan brioche');
     if (!folded.some((f) => /carne|burger|vacuno|ternera|pollo/.test(f))) out.unshift('Carne burger');
+  } else if (lineKind === 'tacos_mexican') {
+    if (!folded.some((f) => /tortilla|maiz|maíz/.test(f))) out.unshift('Tortilla maíz');
+    if (!folded.some((f) => /carne|pastor|carnitas|pollo|barbacoa/.test(f))) out.unshift('Carne al pastor');
+    if (!folded.some((f) => /cebolla|cilantro/.test(f))) out.push('Cebolla y cilantro');
   }
 
   return [...new Set(out.map((n) => n.trim()).filter(Boolean))];
@@ -348,7 +384,8 @@ function buildRecipeLinesFromIngredients(
   const text = String(item.customFields?.ingredients || '').trim();
   const parsed = text ? parseImportIngredientNames(text) : [];
   const useVertialDefaults =
-    parsed.length === 0 && (lineKind === 'pizza' || lineKind === 'burger_fastfood');
+    parsed.length === 0 &&
+    (lineKind === 'pizza' || lineKind === 'burger_fastfood' || lineKind === 'tacos_mexican');
   if (parsed.length === 0 && !useVertialDefaults) return [];
 
   const brandIds = (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean);
@@ -452,6 +489,9 @@ function isBaseRecipeIngredientName(name: string, lineKind: DeliveryBrandLineKin
   if (lineKind === 'burger_fastfood') {
     return /pan|bollo|brioche|carne|burger|vacuno|ternera|pollo/.test(folded);
   }
+  if (lineKind === 'tacos_mexican') {
+    return /tortilla|maiz|maíz|carne|pastor|carnitas|pollo|barbacoa/.test(folded);
+  }
   return false;
 }
 
@@ -502,6 +542,7 @@ function resolveCategoryFixedFallback(
   }
   if (lineKind === 'pizza') return CATEGORY_FIXED_FALLBACK.pizzas;
   if (lineKind === 'burger_fastfood') return CATEGORY_FIXED_FALLBACK.burgers;
+  if (lineKind === 'tacos_mexican') return CATEGORY_FIXED_FALLBACK.tacos;
   return null;
 }
 
@@ -620,6 +661,7 @@ function shouldRunAutoCosting(
 const VERTIAL_ESCANDALLO_BASE_NAMES: Partial<Record<DeliveryBrandLineKindId, string[]>> = {
   pizza: ['Masa', 'Salsa tomate', 'Mozzarella'],
   burger_fastfood: ['Pan brioche', 'Carne burger'],
+  tacos_mexican: ['Tortilla maíz', 'Carne al pastor', 'Cebolla y cilantro'],
 };
 
 export function ensureVertialEscandalloBaseStoreIngredients(
@@ -651,6 +693,7 @@ export function ensureVertialEscandalloBaseStoreIngredients(
 
   addForKind('pizza', VERTIAL_ESCANDALLO_BASE_NAMES.pizza ?? []);
   addForKind('burger_fastfood', VERTIAL_ESCANDALLO_BASE_NAMES.burger_fastfood ?? []);
+  addForKind('tacos_mexican', VERTIAL_ESCANDALLO_BASE_NAMES.tacos_mexican ?? []);
 
   const prepared = applyVertialDefaultsToStoreIngredients(merged, brands);
   return { items: prepared.items, added };

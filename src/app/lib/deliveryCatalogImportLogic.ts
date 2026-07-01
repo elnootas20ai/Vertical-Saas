@@ -124,6 +124,13 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   principales: 'Principales',
   burgers: 'Burgers',
   hamburguesas: 'Hamburguesas',
+  tacos: 'Tacos',
+  taco: 'Tacos',
+  burritos: 'Tacos',
+  burrito: 'Tacos',
+  quesadillas: 'Tacos',
+  quesadilla: 'Tacos',
+  nachos: 'Complementos',
   rolls: 'Rolls',
   bowls: 'Bowls',
   cafe: 'Café',
@@ -274,6 +281,13 @@ export function inferCommercialLineBrandIdFromProductName(
     if (named?._id) return named._id;
   }
 
+  if (/taco|burrito|quesadilla|nachos|mexican|pastor|carnitas|barbacoa|guacamole/.test(nameKey)) {
+    const tacoLines = commercial.filter((b) => b.deliveryLineKind === 'tacos_mexican');
+    if (tacoLines.length === 1) return tacoLines[0]._id;
+    const named = tacoLines.find((b) => /taco|mex/.test(foldKey(b.name)));
+    if (named?._id) return named._id;
+  }
+
   if (/tapa|tapas|racion|ración|pincho/.test(nameKey)) {
     const tapasLines = commercial.filter((b) => b.deliveryLineKind === 'tapas_bar');
     if (tapasLines.length === 1) return tapasLines[0]._id;
@@ -315,6 +329,13 @@ export function inferCommercialLineBrandId(
     if (burgerLine?._id) return burgerLine._id;
   }
 
+  if (catKey === 'tacos' || catKey === 'taco') {
+    const tacoLine =
+      pool.find((b) => b.deliveryLineKind === 'tacos_mexican')
+      ?? pool.find((b) => /taco|mex/.test(foldKey(b.name)));
+    if (tacoLine?._id) return tacoLine._id;
+  }
+
   if (catKey === 'kebab' || catKey === 'kebabs' || catKey === 'doner') {
     const kebabLine =
       pool.find((b) => b.deliveryLineKind === 'kebab')
@@ -340,6 +361,8 @@ export function inferCommercialLineBrandId(
     pizzas: ['pizza'],
     hamburguesas: ['burger_fastfood', 'kebab'],
     burgers: ['burger_fastfood', 'kebab'],
+    tacos: ['tacos_mexican'],
+    taco: ['tacos_mexican'],
     kebab: ['kebab'],
     kebabs: ['kebab'],
     tapas: ['tapas_bar'],

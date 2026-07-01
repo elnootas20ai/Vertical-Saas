@@ -314,14 +314,15 @@ export async function syncAutoCostingAfterCatalogImport(
   return result.costing;
 }
 
-/** Repara pizzas/burgers que quedaron con coste fijo sin escandallo tras un import antiguo. */
+/** Repara pizzas/burgers/tacos que quedaron con coste fijo sin escandallo tras un import antiguo. */
 export async function repairVertialFoodEscandallo(
   userId: string,
   businessId: string,
-): Promise<{ updated: number; recipe: number; basesAdded: number }> {
+  options?: { allMenuProducts?: boolean },
+): Promise<{ updated: number; recipe: number; fixed: number; basesAdded: number }> {
   const uid = String(userId || '').trim();
   const bid = String(businessId || '').trim();
-  if (!uid || !bid) return { updated: 0, recipe: 0, basesAdded: 0 };
+  if (!uid || !bid) return { updated: 0, recipe: 0, fixed: 0, basesAdded: 0 };
 
   const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
   const brandIds = brands.map((b) => b._id);
@@ -345,9 +346,14 @@ export async function repairVertialFoodEscandallo(
   const scoped = filterCatalogItemsForBusinessScope(catalog, bid, brands, {
     activeBusinessType: 'delivery',
   });
-  const repairTargets = scoped.filter((item) => needsVertialFoodEscandalloRepair(item, brands));
+  const menuItems = scoped.filter(
+    (item) => (item.module || 'catalog') === 'catalog' && item.itemType !== 'service' && item.active !== false,
+  );
+  const repairTargets = options?.allMenuProducts
+    ? menuItems
+    : scoped.filter((item) => needsVertialFoodEscandalloRepair(item, brands));
   if (repairTargets.length === 0) {
-    return { updated: 0, recipe: 0, basesAdded };
+    return { updated: 0, recipe: 0, fixed: 0, basesAdded };
   }
 
   const result = await runVertialStockAutomationPipeline(uid, {
@@ -365,6 +371,7 @@ export async function repairVertialFoodEscandallo(
   return {
     updated: result.costing.updated,
     recipe: result.costing.recipe,
+    fixed: result.costing.fixed,
     basesAdded,
   };
 }
