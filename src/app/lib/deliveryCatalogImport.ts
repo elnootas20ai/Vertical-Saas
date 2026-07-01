@@ -42,6 +42,7 @@ import {
   DEFAULT_COMBO_STRUCTURE,
   type ComboStructureSlot,
 } from './catalogComboSlots';
+import { buildStableImportCatalogSku } from '../../../shared/catalog/catalogItemIdentity.js';
 
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
@@ -498,7 +499,15 @@ export async function mapImportEntryToCatalogItem(
       .map((a) => a.trim())
       .filter(Boolean),
     image: String(entry.image || '').trim() || undefined,
-    sku: String(entry.sku || '').trim() || undefined,
+    sku:
+      String(entry.sku || '').trim() ||
+      buildStableImportCatalogSku({
+        name,
+        category,
+        business_id: options.businessId,
+        module: 'catalog',
+      }) ||
+      undefined,
     unit: String(entry.unit || entry.unidad || 'ud').trim() || 'ud',
     active: true,
     available: true,

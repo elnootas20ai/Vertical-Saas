@@ -148,7 +148,6 @@ export function normalizeImportCategory(value: string): string {
   if (!raw) return '';
   const alias = IMPORT_CATEGORY_ALIASES[foldKey(raw)];
   if (alias) return alias;
-  if (/^dato\s*\d+$/i.test(raw)) return 'Principales';
   return raw;
 }
 

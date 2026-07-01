@@ -21,7 +21,7 @@ describe('deliveryCatalogImport', () => {
     expect(normalizeImportCategory('Refrescos')).toBe('Bebidas');
     expect(normalizeImportCategory('Cervezas')).toBe('Bebidas');
     expect(normalizeImportCategory('Pizzas')).toBe('Pizzas');
-    expect(normalizeImportCategory('Dato 14')).toBe('Principales');
+    expect(normalizeImportCategory('Dato 14')).toBe('Dato 14');
   });
 
   it('resolveCatalogImportBrandIds clears brand for drink synonyms', () => {

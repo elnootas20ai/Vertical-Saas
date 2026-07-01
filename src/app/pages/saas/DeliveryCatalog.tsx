@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
-import { filterCatalogItemsForBusinessScope } from '../../lib/catalogBusinessScope';
+import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
@@ -2469,6 +2469,18 @@ export function CatalogPage() {
     [allCatalogItems, businessId, brands, accountBusinessCount, currentBusiness?.businessType],
   );
 
+  /** Solo productos de carta TPV (excluye ingredientes/almacén module stock). */
+  const catalogMenuItemsRaw = useMemo(
+    () => catalogItems.filter((item) => (item.module || 'catalog') === 'catalog'),
+    [catalogItems],
+  );
+
+  /** Una fila por producto en UI (oculta duplicados legacy del mismo código/nombre). */
+  const catalogMenuItems = useMemo(
+    () => dedupeCatalogItemsForDisplay(catalogMenuItemsRaw, businessId),
+    [catalogMenuItemsRaw, businessId],
+  );
+
   /** Catálogo completo para armar menús/combos (pizzas + bebidas + complementos). */
   const catalogForComboEditor = useMemo(
     () => catalogItems.filter((item) => item.active !== false),
@@ -2731,7 +2743,8 @@ export function CatalogPage() {
       toast.warning(`ZIP: ${unmatchedImageRefs.length} producto(s) sin imagen coincidente. Se importarán igual. Ej: ${sample}`);
     }
     let result = await bulkCreateCatalogItemsRequest(dataUserId, items);
-    const suspiciousSingleCreate = items.length > 1 && result.created <= 1 && result.errors >= items.length - 1;
+    const suspiciousSingleCreate =
+      items.length > 1 && result.created === 0 && result.errors >= items.length;
     if (suspiciousSingleCreate) {
       let recovered = 0;
       let recoveredErrors = 0;
@@ -3215,7 +3228,8 @@ export function CatalogPage() {
 
   const handleBulkDeleteSelected = () => {
     if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog) return;
-    const items = filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
+    const visible = filteredCatalog.filter((item) => selectedCatalogIds.has(item._id));
+    const items = expandCatalogItemsForDeletion(visible, catalogMenuItemsRaw);
     if (items.length === 0) {
       toast.error('Selecciona al menos un artículo');
       return;
@@ -3229,14 +3243,16 @@ export function CatalogPage() {
   };
 
   const handleDeleteAllFilteredCatalog = () => {
-    if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0) return;
+    if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || catalogMenuItems.length === 0) return;
+    const visible = searchCatalog.trim() ? filteredCatalog : catalogMenuItems;
+    const deleteCount = expandCatalogItemsForDeletion(visible, catalogMenuItemsRaw).length;
     setCatalogSelectMode(true);
-    setSelectedCatalogIds(new Set(filteredCatalog.map((item) => item._id)));
+    setSelectedCatalogIds(new Set(visible.map((item) => item._id)));
     setBulkDeleteConfirmStep(true);
     toast.warning(
       searchCatalog.trim()
-        ? `${filteredCatalog.length} producto(s) visibles seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`
-        : `${filteredCatalog.length} producto(s) seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`,
+        ? `${deleteCount} producto(s) visibles seleccionados. Pulsa «Estoy seguro» y confirma el borrado.`
+        : `${deleteCount} producto(s) en catálogo (${catalogMenuItems.length} visibles). Pulsa «Estoy seguro» y confirma el borrado.`,
       { duration: 8000 },
     );
   };
@@ -3492,7 +3508,7 @@ export function CatalogPage() {
   }, [activationFocus, openNewCatalogItemManual, clearActivationFocus]);
 
   const filteredCatalog = useMemo(() => {
-    return catalogItems.filter((item) => {
+    return catalogMenuItems.filter((item) => {
       if (!searchCatalog) return true;
       const q = searchCatalog.toLowerCase();
       const brandNames = catalogItemBrandNames(item, brands).toLowerCase();
@@ -3504,7 +3520,7 @@ export function CatalogPage() {
         brandNames.includes(q)
       );
     });
-  }, [catalogItems, searchCatalog, brands]);
+  }, [catalogMenuItems, searchCatalog, brands]);
 
   const catalogGroupedByCategory = useMemo(() => {
     const map = new Map<string, CatalogItem[]>();
@@ -3666,19 +3682,20 @@ export function CatalogPage() {
   );
 
   const catalogKpis = useMemo(() => ({
-    totalItems: catalogItems.length,
-    products: catalogItems.filter(i => (i.itemType || 'product') === 'product').length,
-    services: catalogItems.filter(i => i.itemType === 'service').length,
-    combos: catalogItems.filter(i => i.itemType === 'combo').length,
-    lowStock: catalogItems.filter(i => i.active && (i.itemType || 'product') === 'product' && Number(i.minStock || 0) > 0 && Number(i.stockQuantity || 0) <= Number(i.minStock || 0)).length,
-    categories: new Set(catalogItems.map(i => i.category).filter(Boolean)).size,
-    inventoryValue: catalogItems.reduce((s, i) => {
+    totalItems: catalogMenuItems.length,
+    rawTotalItems: catalogMenuItemsRaw.length,
+    products: catalogMenuItems.filter(i => (i.itemType || 'product') === 'product').length,
+    services: catalogMenuItems.filter(i => i.itemType === 'service').length,
+    combos: catalogMenuItems.filter(i => i.itemType === 'combo').length,
+    lowStock: catalogMenuItems.filter(i => i.active && (i.itemType || 'product') === 'product' && Number(i.minStock || 0) > 0 && Number(i.stockQuantity || 0) <= Number(i.minStock || 0)).length,
+    categories: new Set(catalogMenuItems.map(i => i.category).filter(Boolean)).size,
+    inventoryValue: catalogMenuItems.reduce((s, i) => {
       if (!i.active || (i.itemType || 'product') !== 'product') return s;
       const quantity = Math.max(0, Number(i.stockQuantity || 0));
       const cost = Number(i.costPrice || 0);
       return s + quantity * cost;
     }, 0),
-  }), [catalogItems]);
+  }), [catalogMenuItems, catalogMenuItemsRaw.length]);
 
   const supplierKpis = useMemo(() => ({
     total: suppliers.length,
@@ -4451,7 +4468,7 @@ export function CatalogPage() {
   // ── Tabs config ─────────────────────────────────────────────────────────────
 
   const tabsConfig = useMemo(() => [
-    { id: 'catalog', label: 'Catálogo', count: catalogItems.filter((i) => i.active && i.module === 'catalog').length || undefined },
+    { id: 'catalog', label: 'Catálogo', count: catalogMenuItems.filter((i) => i.active).length || undefined },
     { id: 'ingredientes', label: 'Ingredientes' },
     { id: 'escandallo', label: 'Escandallos' },
     { id: 'stock', label: 'Inventario', count: stockTabCount || undefined },

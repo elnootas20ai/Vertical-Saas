@@ -379,6 +379,13 @@ function collectDeliveryCatalogImportRowIssues(
 
   if (!name) {
     issues.push({ row, field: 'nombre', message: 'Falta el nombre del producto', severity: 'error' });
+  } else if (/^dato\s*\d+$/i.test(name)) {
+    issues.push({
+      row,
+      field: 'nombre',
+      message: `«${name}» no es un nombre de producto (revisa columnas del Excel)`,
+      severity: 'error',
+    });
   } else if (/^ejemplo · borra/i.test(name) || /^ejemplo ·/i.test(name)) {
     issues.push({
       row,

@@ -2,6 +2,9 @@ import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
 import { isDeliveryBusinessType, normalizeBusinessScopeId } from './deliverySetup';
+import {
+  catalogImportIdentityKey,
+} from '../../../shared/catalog/catalogItemIdentity.js';
 
 export type CatalogBusinessScopeOptions = {
   /** Número de empresas en la cuenta (evita mezclar legacy sin business_id). */
@@ -91,24 +94,37 @@ export function filterCatalogItemsForBusinessScope(
   );
 }
 
-function normalizeCatalogItemIdentityValue(value?: string | null): string {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, ' ');
-}
-
 /** Clave estable para detectar el mismo producto importado o legacy duplicado. */
 export function catalogItemIdentityKey(
-  item: Pick<CatalogItem, 'sku' | 'name' | 'category'>,
+  item: Pick<CatalogItem, 'sku' | 'name' | 'category' | 'module' | 'business_id'>,
 ): string {
-  const sku = normalizeCatalogItemIdentityValue(item.sku);
-  if (sku) return `sku:${sku}`;
-  const name = normalizeCatalogItemIdentityValue(item.name);
-  const category = normalizeCatalogItemIdentityValue(item.category);
-  return `name:${name}::${category}`;
+  return catalogImportIdentityKey(item);
+}
+
+function isCatalogMenuItem(item: CatalogItem): boolean {
+  return String(item.module || 'catalog') === 'catalog';
+}
+
+/** Incluye duplicados legacy con la misma identidad (para borrado masivo completo). */
+export function expandCatalogItemsForDeletion(
+  selected: CatalogItem[],
+  allItems: CatalogItem[],
+): CatalogItem[] {
+  const keys = new Set(selected.map((item) => catalogItemIdentityKey(item)));
+  const byId = new Map<string, CatalogItem>();
+
+  for (const item of allItems) {
+    if (!isCatalogMenuItem(item)) continue;
+    if (keys.has(catalogItemIdentityKey(item))) {
+      byId.set(item._id, item);
+    }
+  }
+
+  for (const item of selected) {
+    if (isCatalogMenuItem(item)) byId.set(item._id, item);
+  }
+
+  return [...byId.values()];
 }
 
 function catalogItemDisplayRank(item: CatalogItem, businessId?: string): number {

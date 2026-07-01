@@ -96,6 +96,10 @@ import {
   accumulateDeliveredOrderLines,
   roundRevenueMap,
 } from '../shared/delivery/orderLineRevenueSplit.js';
+import {
+  buildStableImportCatalogSku,
+  catalogImportIdentityKey,
+} from '../shared/catalog/catalogItemIdentity.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
 import { recordMovement } from '../services/stockMovementService.js';
@@ -1313,47 +1317,51 @@ export async function bulkCreateCatalogItems(req, res) {
 
     const docs = items
       .filter(item => item && typeof item === 'object' && item.name)
-      .map(item => buildCatalogItemDocument(userId, item));
+      .map(item => {
+        const prepared = { ...item };
+        if (!String(prepared.sku || '').trim()) {
+          const stableSku = buildStableImportCatalogSku(prepared);
+          if (stableSku) prepared.sku = stableSku;
+        }
+        return buildCatalogItemDocument(userId, prepared);
+      });
 
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
     const existingItems = await listCatalogItemsByUser(req, userId);
-    const existingBySku = new Map();
+    const existingByIdentity = new Map();
     existingItems.forEach((existing) => {
       if (!existing) return;
-      const moduleKey = String(existing.module || 'catalog');
-      const businessKey = String(existing.business_id || '');
-      const skuKey = normalizeDuplicateValue(existing.sku);
-      if (skuKey) existingBySku.set(`${moduleKey}|${businessKey}|sku|${skuKey}`, existing);
+      const key = catalogImportIdentityKey(existing);
+      if (!existingByIdentity.has(key)) existingByIdentity.set(key, existing);
     });
 
-    const batchSkuKeys = new Set();
+    const batchIdentityKeys = new Set();
     const dedupedDocs = [];
     const docsToUpdate = [];
     const duplicateErrors = [];
 
     docs.forEach((doc, idx) => {
-      const moduleKey = String(doc.module || 'catalog');
-      const businessKey = String(doc.business_id || '');
-      const skuKey = normalizeDuplicateValue(doc.sku);
-      const skuComposite = skuKey ? `${moduleKey}|${businessKey}|sku|${skuKey}` : '';
-      const repeatedSku = !!skuComposite && (existingBySku.has(skuComposite) || batchSkuKeys.has(skuComposite));
+      const identityKey = catalogImportIdentityKey(doc);
+      const repeatedInBatch = batchIdentityKeys.has(identityKey);
+      const existing = existingByIdentity.get(identityKey);
 
-      if (repeatedSku) {
-        const existing = existingBySku.get(skuComposite);
-        if (existing) {
-          docsToUpdate.push({ existing, doc, index: idx });
-          return;
-        }
+      if (repeatedInBatch && !existing) {
         duplicateErrors.push({
           index: idx,
           name: doc?.name,
-          error: 'Código duplicado',
+          error: 'Producto duplicado en el mismo archivo',
         });
         return;
       }
 
-      if (skuComposite) batchSkuKeys.add(skuComposite);
+      if (existing) {
+        docsToUpdate.push({ existing, doc, index: idx });
+        batchIdentityKeys.add(identityKey);
+        return;
+      }
+
+      batchIdentityKeys.add(identityKey);
       dedupedDocs.push(doc);
     });
 

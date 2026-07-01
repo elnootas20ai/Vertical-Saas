@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   catalogItemBelongsToBusinessScope,
   dedupeCatalogItemsForDisplay,
+  expandCatalogItemsForDeletion,
   filterCatalogItemsForBusinessScope,
 } from '../src/app/lib/catalogBusinessScope.ts';
 
@@ -85,7 +86,7 @@ describe('catalogBusinessScope', () => {
         name: 'Napolitana',
         category: 'Pizzas',
         sku: 'PIZ-001',
-        business_id: '',
+        business_id: 'biz-a',
         customFields: { costingType: 'fixed' },
         updatedAt: '2024-01-01T00:00:00.000Z',
       },
@@ -112,5 +113,15 @@ describe('catalogBusinessScope', () => {
     const deduped = dedupeCatalogItemsForDisplay(items, 'biz-a');
     expect(deduped).toHaveLength(2);
     expect(deduped.find((i) => i.name === 'Napolitana')?._id).toBe('new');
+  });
+
+  it('expandCatalogItemsForDeletion incluye duplicados legacy con la misma identidad', () => {
+    const raw = [
+      { _id: '1', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'B1' },
+      { _id: '2', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'B1' },
+      { _id: '3', module: 'stock', name: 'Carne', category: 'Ingredientes' },
+    ];
+    const expanded = expandCatalogItemsForDeletion([raw[0]], raw);
+    expect(expanded.map((i) => i._id).sort()).toEqual(['1', '2']);
   });
 });
