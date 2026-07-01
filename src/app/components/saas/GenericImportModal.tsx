@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { autoMapImportFields, type ImportHeaderAliases } from '../../lib/importHeaderMapping';
-import type { CatalogImportReport } from '../../lib/catalogImportReport';
+import type { CatalogImportProgressReporter, CatalogImportReport } from '../../lib/catalogImportReport';
 import { CatalogImportReportPanel } from './CatalogImportReportPanel';
 
 export type CatalogImportHandlerResult = number | { count: number; report?: CatalogImportReport | null };
@@ -24,7 +24,10 @@ interface GenericImportModalProps {
   importLabel?: string;
   templateFileName?: string;
   fields: ImportFieldDef[];
-  onImport: (entries: Record<string, string>[]) => Promise<CatalogImportHandlerResult | void> | CatalogImportHandlerResult | void;
+  onImport: (
+    entries: Record<string, string>[],
+    onProgress?: CatalogImportProgressReporter,
+  ) => Promise<CatalogImportHandlerResult | void> | CatalogImportHandlerResult | void;
   extraFileUpload?: {
     label: string;
     helpText?: string;
@@ -66,6 +69,13 @@ export function GenericImportModal({
   const [rawData, setRawData] = useState<string[][]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    phase: string;
+    detail?: string;
+    current?: number;
+    total?: number;
+    percent?: number;
+  } | null>(null);
   const [importReport, setImportReport] = useState<CatalogImportReport | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const extraFileRef = useRef<HTMLInputElement>(null);
@@ -73,11 +83,13 @@ export function GenericImportModal({
   const normalizedImportLabel = (importLabel || moduleLabel).trim();
 
   const handleClose = () => {
+    if (importing) return;
     setStep('upload');
     setRawHeaders([]);
     setRawData([]);
     setMapping({});
     setImporting(false);
+    setImportProgress(null);
     setImportReport(null);
     onClose();
   };
@@ -214,9 +226,14 @@ export function GenericImportModal({
     }
     setImporting(true);
     setImportReport(null);
+    setImportProgress({
+      phase: 'Iniciando importación…',
+      detail: `${mappedEntries.length} fila(s) en el archivo`,
+      percent: 2,
+    });
     setStep('importing');
     try {
-      const raw = await onImport(mappedEntries);
+      const raw = await onImport(mappedEntries, (update) => setImportProgress(update));
       const count =
         typeof raw === 'number' ? raw : typeof raw === 'object' && raw != null ? raw.count : mappedEntries.length;
       const report =
@@ -226,12 +243,14 @@ export function GenericImportModal({
         setImportReport(report);
         setStep('results');
         setImporting(false);
+        setImportProgress(null);
         return;
       }
 
       if (count <= 0) {
         setStep('preview');
         setImporting(false);
+        setImportProgress(null);
         toast.error('No se importó ninguna fila. Revisa el Excel.');
         return;
       }
@@ -240,6 +259,7 @@ export function GenericImportModal({
         setImportReport(report);
         setStep('results');
         setImporting(false);
+        setImportProgress(null);
         return;
       }
 
@@ -249,15 +269,30 @@ export function GenericImportModal({
       toast.error('Error durante la importación');
       setStep('preview');
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
-  useModalClose(isOpen, handleClose);
+  const importProgressPercent = useMemo(() => {
+    if (!importProgress) return 0;
+    if (typeof importProgress.percent === 'number') {
+      return Math.max(0, Math.min(100, Math.round(importProgress.percent)));
+    }
+    if (importProgress.total && importProgress.current != null && importProgress.total > 0) {
+      return Math.max(0, Math.min(100, Math.round((importProgress.current / importProgress.total) * 100)));
+    }
+    return null;
+  }, [importProgress]);
+
+  useModalClose(isOpen && !importing, handleClose);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={handleClose}>
+    <div
+      className={`fixed inset-0 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm ${importing ? 'z-[120]' : 'z-50'}`}
+      onClick={importing ? undefined : handleClose}
+    >
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -273,12 +308,17 @@ export function GenericImportModal({
                 {step === 'upload' && (extraFileUpload ? 'Sube un archivo Excel (recomendado) o CSV y, opcionalmente, un ZIP de imágenes' : 'Sube un archivo Excel (recomendado) o CSV')}
                 {step === 'mapping' && 'Mapea las columnas del archivo'}
                 {step === 'preview' && `${mappedEntries.length} entradas listas para importar`}
-                {step === 'importing' && 'Importando datos...'}
+                {step === 'importing' && (importProgress?.phase || 'Importando datos…')}
                 {step === 'results' && 'Resultado de la importación'}
               </p>
             </div>
           </div>
-          <button onClick={handleClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors">
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={importing}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             <X className="w-5 h-5 text-gray-500 dark:text-gray-400" />
           </button>
         </div>
@@ -480,12 +520,43 @@ export function GenericImportModal({
           )}
 
           {step === 'importing' && (
-            <div className="flex flex-col items-center justify-center py-16 space-y-4">
-              <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-              <div className="text-center">
-                <p className="font-semibold text-gray-900 dark:text-gray-100">Importando datos...</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {mappedEntries.length} entradas en proceso
+            <div className="flex flex-col items-center justify-center py-10 space-y-6 max-w-lg mx-auto w-full">
+              <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
+              <div className="w-full space-y-3">
+                <div className="h-3 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                  {importProgressPercent == null ? (
+                    <div className="h-full w-2/5 rounded-full bg-blue-500 animate-pulse" />
+                  ) : (
+                    <div
+                      className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out"
+                      style={{ width: `${importProgressPercent}%` }}
+                    />
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                  <span>{importProgressPercent == null ? 'Procesando…' : `${importProgressPercent}%`}</span>
+                  {importProgress?.current != null && importProgress.total ? (
+                    <span>
+                      {importProgress.current} / {importProgress.total}
+                    </span>
+                  ) : (
+                    <span>{mappedEntries.length} fila(s)</span>
+                  )}
+                </div>
+              </div>
+              <div className="text-center space-y-2">
+                <p className="font-semibold text-gray-900 dark:text-gray-100">
+                  {importProgress?.phase || 'Importando catálogo…'}
+                </p>
+                {importProgress?.detail ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{importProgress.detail}</p>
+                ) : (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Puede tardar 1–2 minutos con muchos productos. No cierres esta ventana.
+                  </p>
+                )}
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+                  La app espera a que termine — es normal que no puedas usar otras pantallas ahora.
                 </p>
               </div>
             </div>
@@ -502,7 +573,13 @@ export function GenericImportModal({
         </div>
 
         {/* Footer */}
-        {step !== 'importing' && (
+        {step === 'importing' ? (
+          <div className="border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0 bg-amber-50/80 dark:bg-amber-950/30">
+            <p className="text-center text-sm font-medium text-amber-800 dark:text-amber-200">
+              Importación en curso — no cierres ni recargues la página
+            </p>
+          </div>
+        ) : (
           <div className="border-t border-gray-200 dark:border-gray-700 p-6 flex gap-3 flex-shrink-0 bg-gray-50 dark:bg-gray-900">
             {step === 'results' && (
               <>

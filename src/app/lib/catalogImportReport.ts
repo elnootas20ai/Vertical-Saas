@@ -24,6 +24,18 @@ export type CatalogImportRunResult = {
   report: CatalogImportReport | null;
 };
 
+/** Progreso en vivo durante importaciones largas (catálogo delivery, etc.). */
+export type CatalogImportProgressUpdate = {
+  phase: string;
+  detail?: string;
+  current?: number;
+  total?: number;
+  /** 0–100; si falta, se calcula con current/total o barra indeterminada. */
+  percent?: number;
+};
+
+export type CatalogImportProgressReporter = (update: CatalogImportProgressUpdate) => void;
+
 function mapIssue(issue: DeliveryCatalogImportIssue): CatalogImportReportLine {
   return {
     row: issue.row,

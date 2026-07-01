@@ -122,6 +122,7 @@ import {
   catalogImportReportFromBulkErrors,
   catalogImportReportFromValidation,
   catalogImportReportSimple,
+  type CatalogImportProgressReporter,
   type CatalogImportReport,
   type CatalogImportRunResult,
 } from '../../lib/catalogImportReport';
@@ -2642,13 +2643,22 @@ export function CatalogPage() {
     }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]): Promise<CatalogImportRunResult> => {
+  const handleImportEntries = async (
+    entries: Record<string, string>[],
+    onProgress?: CatalogImportProgressReporter,
+  ): Promise<CatalogImportRunResult> => {
+    const progress = (phase: string, opts?: { detail?: string; current?: number; total?: number; percent?: number }) => {
+      onProgress?.({ phase, ...opts });
+    };
+
     const finish = (result: CatalogImportRunResult): CatalogImportRunResult => {
       if (result.report) setCatalogImportReport(result.report);
       return result;
     };
 
     if (!dataUserId) return finish({ count: 0, report: null });
+
+    progress('Validando filas del Excel…', { percent: 5, detail: `${entries.length} fila(s) leídas` });
 
     const productRows = entries.filter((entry) => {
       const name = String(entry.name || '').trim();
@@ -2670,6 +2680,13 @@ export function CatalogPage() {
       productRows,
       brands,
     );
+
+    progress('Filas válidas listas', {
+      percent: 10,
+      current: importRows.length,
+      total: productRows.length,
+      detail: `${importRows.length} producto(s) a importar`,
+    });
 
     if (importRows.length === 0) {
       const validation = { ok: false, issues: importIssues };
@@ -2704,6 +2721,14 @@ export function CatalogPage() {
 
     for (let index = 0; index < importRows.length; index += 1) {
       const entry = importRows[index];
+      if (index === 0 || index === importRows.length - 1 || index % 4 === 0) {
+        progress('Preparando productos…', {
+          current: index + 1,
+          total: importRows.length,
+          percent: 10 + Math.round(((index + 1) / importRows.length) * 28),
+          detail: entry.name ? String(entry.name).trim().slice(0, 48) : undefined,
+        });
+      }
       const mapped = await mapImportEntryToCatalogItem(entry, {
         businessId: businessId || '',
         brandCache,
@@ -2743,6 +2768,14 @@ export function CatalogPage() {
       const sample = unmatchedImageRefs.slice(0, 6).join(', ');
       toast.warning(`ZIP: ${unmatchedImageRefs.length} producto(s) sin imagen coincidente. Se importarán igual. Ej: ${sample}`);
     }
+
+    progress('Guardando catálogo en el servidor…', {
+      percent: 42,
+      current: items.length,
+      total: items.length,
+      detail: 'Un momento — no cierres la ventana',
+    });
+
     let result = await bulkCreateCatalogItemsRequest(dataUserId, items);
     const suspiciousSingleCreate =
       items.length > 1 && result.created === 0 && result.errors >= items.length;
@@ -2770,6 +2803,7 @@ export function CatalogPage() {
     }
     const totalOk = (result.created || 0) + (result.updated ?? 0);
     if (totalOk > 0) {
+      progress('Sincronizando marcas y TPV…', { percent: 58 });
       if (businessId) {
         const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
         const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
@@ -2777,6 +2811,10 @@ export function CatalogPage() {
       }
       const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
       if (withIngredients > 0 && businessId) {
+        progress('Configurando ingredientes TPV…', {
+          percent: 72,
+          detail: `${withIngredients} producto(s) con ingredientes`,
+        });
         const ingSync = await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
         if (ingSync.added > 0 || ingSync.promoted > 0) {
           const parts = [];
@@ -2788,6 +2826,7 @@ export function CatalogPage() {
         }
       }
       if (businessId) {
+        progress('Generando escandallos…', { percent: 86 });
         const fresh = await listCatalogItemsRequest(dataUserId).catch(() => [] as CatalogItem[]);
         const costingTargets = resolveImportedCatalogItemsForCosting(items, fresh);
         if (costingTargets.length > 0) {
@@ -2800,6 +2839,7 @@ export function CatalogPage() {
           }
         }
       }
+      progress('Actualizando listado…', { percent: 95 });
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       setCatalogSectionsOpen((prev) => {
@@ -2820,6 +2860,8 @@ export function CatalogPage() {
           (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
       );
     }
+
+    progress('Importación completada', { percent: 100, detail: `${totalOk} producto(s) procesados` });
 
     const bulkReport = catalogImportReportFromBulkErrors(
       result.errorDetails,
