@@ -8,7 +8,7 @@ import {
   isHalfHalfCatalogProduct,
 } from '../src/app/lib/catalogImportCosting.ts';
 import { explicitProductCostingStatus } from '../src/app/lib/catalogCategoryCosting.ts';
-import { productCostingStatus } from '../src/app/lib/catalogCosting.ts';
+import { productCostingStatus, readProductRecipeLines } from '../src/app/lib/catalogCosting.ts';
 
 const brands = [
   { _id: 'brand-pizza', deliveryLineKind: 'pizza' },
@@ -25,6 +25,15 @@ const storeIngredients = [
 
 test('findStoreIngredientForCosting matches by name within brand', () => {
   const hit = findStoreIngredientForCosting('mozzarella', storeIngredients, ['brand-pizza']);
+  assert.equal(hit?.id, 'ing-moz');
+});
+
+test('findStoreIngredientForCosting picks best match when duplicate names across brands', () => {
+  const multiBrand = [
+    ...storeIngredients,
+    { id: 'ing-moz-burger', name: 'Mozzarella', brandIds: ['brand-burger'], baseCost: 5.8 },
+  ];
+  const hit = findStoreIngredientForCosting('Mozzarella', multiBrand, ['brand-pizza']);
   assert.equal(hit?.id, 'ing-moz');
 });
 
@@ -64,6 +73,39 @@ test('applyVertialAutoCostingToCatalogItem fixed cost for drinks', () => {
   const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands);
   assert.equal(mode, 'fixed');
   assert.equal(next.costPrice, 0.65);
+});
+
+test('applyVertialAutoCostingToCatalogItem builds recipe for pizza without ingredients column', () => {
+  const item = {
+    _id: 'p3',
+    name: 'Barbacoa',
+    category: 'Pizzas',
+    brandIds: ['brand-pizza'],
+    unitPrice: 11,
+    costPrice: 3.2,
+    customFields: { costingType: 'fixed' },
+  };
+  const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands, {
+    upgradeAutoFixedFood: true,
+  });
+  assert.equal(mode, 'recipe');
+  assert.equal(productCostingStatus(next), 'recipe');
+  assert.ok(readProductRecipeLines(next).length >= 2);
+});
+
+test('applyVertialAutoCostingToCatalogItem builds recipe for pizza with no customFields', () => {
+  const item = {
+    _id: 'p4',
+    name: 'Cuatro quesos',
+    category: 'Pizzas',
+    brandIds: ['brand-pizza'],
+    unitPrice: 12,
+    costPrice: 0,
+    customFields: {},
+  };
+  const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands);
+  assert.equal(mode, 'recipe');
+  assert.ok(next.costPrice > 0);
 });
 
 test('applyVertialAutoCostingToCatalogItem skips already configured', () => {

@@ -36,12 +36,12 @@ import {
 } from './deliveryCatalogImportLogic';
 import { parseImportPrice } from './deliveryCatalogExcelTemplate';
 import { resolveCatalogProductPlaceholderUrl } from './catalogProductPlaceholders';
+import { ensureVertialEscandalloBaseStoreIngredients } from './catalogImportCosting';
 import {
   COMBO_MENU_PRESETS,
   DEFAULT_COMBO_STRUCTURE,
   type ComboStructureSlot,
 } from './catalogComboSlots';
-import { resolveCatalogProductPlaceholderUrl } from './catalogProductPlaceholders';
 
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
@@ -183,6 +183,29 @@ export async function syncTpvOrganizersAfterCatalogImport(
   return { updatedBrands };
 }
 
+/** Quita una categoría/organizador del catálogo en las líneas comerciales (pestañas TPV). */
+export async function removeCatalogCategoryFromBrands(
+  businessId: string,
+  categoryName: string,
+): Promise<number> {
+  const bid = String(businessId || '').trim();
+  const target = normalizeImportCategory(categoryName);
+  if (!bid || !target) return 0;
+
+  const brands = await listBrandsRequest(bid).catch(() => [] as Brand[]);
+  let updatedBrands = 0;
+
+  for (const brand of brands) {
+    const prev = brand.catalogCategories ?? [];
+    const next = prev.filter((c) => normalizeImportCategory(c) !== target);
+    if (next.length === prev.length) continue;
+    await updateBrandRequest(bid, { ...brand, catalogCategories: next });
+    updatedBrands += 1;
+  }
+
+  return updatedBrands;
+}
+
 /**
  * Tras importar productos con columna ingredientes, añade nombres únicos a la lista
  * maestra (Catálogo → Ingredientes) como extras de pago listos para el TPV.
@@ -258,18 +281,76 @@ export async function syncAutoCostingAfterCatalogImport(
   const brandIds = brands.map((b) => b._id);
   const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
   const existing = unifyStoreIngredientsFromConfig(cfg, brandIds);
-  const storeIngredients = normalizeStoreIngredients(existing);
+  const { items: withBases, added: basesAdded } = ensureVertialEscandalloBaseStoreIngredients(
+    normalizeStoreIngredients(existing),
+    brands,
+  );
+
+  if (basesAdded > 0 && cfg) {
+    await updateDeliveryConfigRequest(uid, {
+      _id: cfg._id || `dlvconf-${normalizeTenantUserId(uid)}`,
+      _rev: cfg._rev,
+      storeIngredients: withBases,
+    });
+    notifyDeliveryConfigChanged();
+  }
 
   const result = await runVertialStockAutomationPipeline(uid, {
     businessType: 'delivery',
     businessId: bid,
-    storeIngredients,
+    storeIngredients: withBases,
     brands,
     costingTargets: catalogItems,
+    upgradeAutoFixedFood: true,
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
 
   return result.costing;
+}
+
+/** Repara pizzas/burgers que quedaron con coste fijo sin escandallo tras un import antiguo. */
+export async function repairVertialFoodEscandallo(
+  userId: string,
+  businessId: string,
+): Promise<{ updated: number; recipe: number; basesAdded: number }> {
+  const uid = String(userId || '').trim();
+  const bid = String(businessId || '').trim();
+  if (!uid || !bid) return { updated: 0, recipe: 0, basesAdded: 0 };
+
+  const brands = commercialLineBrands(await listBrandsRequest(bid).catch(() => [] as Brand[]));
+  const brandIds = brands.map((b) => b._id);
+  const cfg = await getDeliveryConfigRequest(uid).catch(() => null);
+  const existing = unifyStoreIngredientsFromConfig(cfg, brandIds);
+  const { items: withBases, added: basesAdded } = ensureVertialEscandalloBaseStoreIngredients(
+    normalizeStoreIngredients(existing),
+    brands,
+  );
+
+  if (basesAdded > 0 && cfg) {
+    await updateDeliveryConfigRequest(uid, {
+      _id: cfg._id || `dlvconf-${normalizeTenantUserId(uid)}`,
+      _rev: cfg._rev,
+      storeIngredients: withBases,
+    });
+    notifyDeliveryConfigChanged();
+  }
+
+  const catalog = await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]);
+  const result = await runVertialStockAutomationPipeline(uid, {
+    businessType: 'delivery',
+    businessId: bid,
+    storeIngredients: withBases,
+    brands,
+    catalogItems: catalog,
+    upgradeAutoFixedFood: true,
+    updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
+  });
+
+  return {
+    updated: result.costing.updated,
+    recipe: result.costing.recipe,
+    basesAdded,
+  };
 }
 
 /** Pipeline completo: inventario + escandallo (packaging) + recetas CouchDB. */

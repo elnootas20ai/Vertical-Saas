@@ -13,6 +13,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
 import { listBrandsRequest } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
+import { repairVertialFoodEscandallo } from '../../lib/deliveryCatalogImport';
+import { needsVertialFoodEscandalloRepair } from '../../lib/catalogImportCosting';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
 import {
   getDeliveryConfigRequest,
@@ -443,7 +445,7 @@ export function EscandalloPanel() {
     }
     setLoading(true);
     try {
-      const [items, config] = await Promise.all([
+      let [items, config] = await Promise.all([
         listCatalogItemsRequest(user.id),
         getDeliveryConfigRequest(user.id),
       ]);
@@ -452,6 +454,26 @@ export function EscandalloPanel() {
             commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])),
           )
         : [];
+
+      const needsFoodEscandalloRepair =
+        Boolean(businessId) &&
+        items.some((item) => needsVertialFoodEscandalloRepair(item, lineBrands));
+
+      if (needsFoodEscandalloRepair && businessId) {
+        const repair = await repairVertialFoodEscandallo(user.id, businessId);
+        if (repair.updated > 0 || repair.basesAdded > 0) {
+          if (repair.updated > 0) {
+            toast.success(
+              `Escandallo Vertial aplicado a ${repair.updated} producto${repair.updated === 1 ? '' : 's'}`,
+            );
+          }
+          [items, config] = await Promise.all([
+            listCatalogItemsRequest(user.id),
+            getDeliveryConfigRequest(user.id),
+          ]);
+        }
+      }
+
       setBrands(lineBrands);
       setCatalogItems(items.filter(isCatalogCostingProduct));
       const brandIds = lineBrands.map((b) => b._id);

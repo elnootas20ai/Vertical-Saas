@@ -29,6 +29,14 @@ Muchas verticales futuras (bares, tienda de ropa, retail similar) comparten **la
 - No diseñar ni implementar otras verticales hasta que delivery esté cerrado, salvo que el usuario lo pida.
 - Al implementar en delivery, preguntarse: ¿esto es **core**, **motor reutilizable** o **solo config/reglas de esta vertical**?
 
+## Módulo Delivery (código)
+
+- Frontera del vertical: `src/app/verticals/delivery/` + registro en `src/app/verticals/registry.ts`.
+- API pública delivery: `src/app/verticals/delivery/index.ts` (importar desde aquí, no disperso).
+- Regla detallada: `.cursor/rules/delivery-module-isolation.mdc`.
+- Test de aislamiento: `npm run test:verticals` (compraventa no debe importar cocina/catálogo delivery, etc.).
+- **No mezclar** lógica compraventa ↔ delivery; solo PDV/tiendas legacy compartido (`deliverySetup`, `deliveryApi`…).
+
 ## Principios de implementación
 
 - Cambios **mínimos**; sin refactors grandes salvo petición explícita.

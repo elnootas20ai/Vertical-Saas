@@ -1,0 +1,43 @@
+---
+description: Aislamiento del módulo Delivery — no mezclar con otras verticales
+alwaysApply: true
+---
+
+# Módulo Delivery — aislamiento obligatorio
+
+Uriel necesita que **Delivery sea un módulo de código independiente**. Al programar compraventa u otras verticales, **no debe romperse delivery** ni mezclarse lógica entre verticales.
+
+## Fronteras (respetar siempre)
+
+| Capa | Dónde | Qué puede hacer |
+|------|--------|-----------------|
+| **Core** | `context/`, auth, billing, equipo genérico | Sin imports de páginas/lib **de negocio** delivery o compraventa |
+| **Módulo Delivery** | `src/app/verticals/delivery/`, `pages/saas/Delivery*`, `components/delivery/`, `lib/delivery*` | Solo delivery; **no** importar `compraventa/` ni `vehicles/` de compraventa |
+| **Módulo Compraventa** | `vertical/compraventa/`, `components/saas/compraventa/`, `lib/compraventa*` | Solo compraventa; **no** importar pantallas/lib delivery (catálogo TPV, cocina, reparto…) |
+| **Retail compartido (legacy)** | `deliverySetup`, `deliveryApi` (PDV/tiendas), `workCentersApi`, `brandsApi` | Única excepción documentada entre verticales retail; **no añadir** más acoplamientos aquí |
+
+Registro central: `src/app/verticals/registry.ts`  
+API pública delivery: `src/app/verticals/delivery/index.ts`
+
+## Reglas al codificar
+
+1. **Código nuevo de delivery** → crear en `src/app/verticals/delivery/` y exportar por el barrel `verticals/delivery/index.ts`.
+2. **Código nuevo de compraventa** → en `components/saas/compraventa/` o `verticals/compraventa/`; **nunca** tocar archivos delivery salvo legacy PDV listado arriba.
+3. **No** añadir `if (businessType === 'delivery')` dispersos → usar `getVerticalModule()` / `isDeliveryModuleRoute()` del registro.
+4. **No** mover lógica de compraventa a `deliveryApi.ts` ni al revés.
+5. **No** refactor masivo de archivos viejos salvo petición explícita; priorizar **no romper producción**.
+6. Tras cambios que toquen imports entre verticales → `npx vitest run tests/verticalModuleBoundaries.test.js`.
+
+## Comportamiento actual
+
+La app **sigue igual para el usuario**. Este módulo define **dónde escribir código** y **qué no mezclar**. Migrar archivos viejos a carpetas nuevas es gradual; lo prohibido es **nuevo acoplamiento cruzado**.
+
+## Fase actual (producto)
+
+- Cerrar delivery v1 estable.
+- Compraventa y otras verticales: **misma cuenta SaaS, otro módulo**, otro `businessType`.
+- Motor reutilizable (pedidos/PDV) ≠ vertical delivery; no hardcodear nombres delivery en código que será genérico.
+
+## Al terminar tareas
+
+Explicar a Uriel en castellano simple si el cambio es **solo delivery**, **solo compraventa**, **core** o **retail legacy compartido**, y cómo probarlo en UI.

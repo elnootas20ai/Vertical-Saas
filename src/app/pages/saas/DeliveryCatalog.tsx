@@ -43,6 +43,7 @@ import {
   syncAutoCostingAfterCatalogImport,
   syncStoreIngredientsFromCatalogImport,
   syncTpvOrganizersAfterCatalogImport,
+  removeCatalogCategoryFromBrands,
 } from '../../lib/deliveryCatalogImport';
 import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
@@ -2527,7 +2528,7 @@ export function CatalogPage() {
   type CatalogDeleteOp =
     | null
     | { mode: 'single'; item: CatalogItem }
-    | { mode: 'bulk'; items: CatalogItem[] };
+    | { mode: 'bulk'; items: CatalogItem[]; categoryLabel?: string };
   const [catalogDeleteGuard, setCatalogDeleteGuard] = useState<CatalogDeleteOp>(null);
   const catalogDeleteOpRef = useRef<CatalogDeleteOp>(null);
   useEffect(() => {
@@ -2773,11 +2774,8 @@ export function CatalogPage() {
         }
       }
       if (businessId) {
-        let costingTargets: CatalogItem[] = Array.isArray(result.items) ? result.items : [];
-        if (costingTargets.length === 0) {
-          const fresh = await listCatalogItemsRequest(dataUserId).catch(() => [] as CatalogItem[]);
-          costingTargets = resolveImportedCatalogItemsForCosting(items, fresh);
-        }
+        const fresh = await listCatalogItemsRequest(dataUserId).catch(() => [] as CatalogItem[]);
+        const costingTargets = resolveImportedCatalogItemsForCosting(items, fresh);
         if (costingTargets.length > 0) {
           const costing = await syncAutoCostingAfterCatalogImport(dataUserId, businessId, costingTargets);
           if (costing.updated > 0) {
@@ -3269,6 +3267,7 @@ export function CatalogPage() {
     }
 
     const list = op.items;
+    const categoryLabel = op.categoryLabel;
     setBulkDeletingCatalog(true);
     let deleted = 0;
     let failed = 0;
@@ -3281,9 +3280,26 @@ export function CatalogPage() {
           failed += 1;
         }
       }
+      if (categoryLabel && businessId && deleted > 0) {
+        try {
+          const updatedBrands = await removeCatalogCategoryFromBrands(businessId, categoryLabel);
+          if (updatedBrands > 0) {
+            setBrands(await listBrandsRequest(businessId));
+            notifyDeliveryBrandsChanged();
+          }
+        } catch {
+          /* productos ya borrados; fallo al limpiar pestaña TPV no bloquea */
+        }
+      }
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
-      if (deleted > 0) toast.success(`${deleted} artículo(s) eliminado(s)`);
+      if (deleted > 0) {
+        toast.success(
+          categoryLabel
+            ? `Organizador «${categoryLabel}» eliminado (${deleted} producto${deleted !== 1 ? 's' : ''})`
+            : `${deleted} artículo(s) eliminado(s)`,
+        );
+      }
       if (failed > 0) toast.error(`${failed} artículo(s) no se pudieron eliminar`);
     } finally {
       setBulkDeletingCatalog(false);
@@ -3573,6 +3589,14 @@ export function CatalogPage() {
     [filteredCatalog, selectedCatalogIds],
   );
 
+  const handleDeleteCategorySection = useCallback(
+    (category: string, items: CatalogItem[]) => {
+      if (!dataUserId || bulkDeletingCatalog || bulkMovingCatalog || items.length === 0) return;
+      setCatalogDeleteGuard({ mode: 'bulk', items, categoryLabel: category });
+    },
+    [dataUserId, bulkDeletingCatalog, bulkMovingCatalog],
+  );
+
   const handleDeleteEmptyOrganizer = useCallback(
     async (brand: Brand) => {
       if (!businessId) return;
@@ -3849,24 +3873,38 @@ export function CatalogPage() {
                 key={category}
                 className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden"
               >
-                <button
-                  type="button"
-                  onClick={() => toggleCatalogSection(category)}
-                  className="w-full flex items-center justify-between gap-3 px-4 py-3.5 bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-left"
-                  aria-expanded={!isCollapsed}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    {isCollapsed ? (
-                      <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
-                    )}
-                    <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{category}</span>
-                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
-                      {items.length} producto{items.length !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                </button>
+                <div className="flex items-stretch bg-gray-50 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={() => toggleCatalogSection(category)}
+                    className="flex-1 flex items-center justify-between gap-3 px-4 py-3.5 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-left min-w-0"
+                    aria-expanded={!isCollapsed}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isCollapsed ? (
+                        <ChevronRight className="w-5 h-5 text-gray-500 shrink-0" />
+                      ) : (
+                        <ChevronDown className="w-5 h-5 text-gray-500 shrink-0" />
+                      )}
+                      <span className="font-semibold text-gray-900 dark:text-gray-100 truncate">{category}</span>
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums shrink-0">
+                        {items.length} producto{items.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  </button>
+                  {!catalogSelectMode ? (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCategorySection(category, items)}
+                      disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 m-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50 shrink-0"
+                      title={`Eliminar organizador «${category}» y todos sus productos`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar
+                    </button>
+                  ) : null}
+                </div>
                 {!isCollapsed && (
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[820px]">
@@ -4614,7 +4652,11 @@ export function CatalogPage() {
           catalogDeleteGuard?.mode === 'single'
             ? { mode: 'single', itemName: catalogDeleteGuard.item.name }
             : catalogDeleteGuard?.mode === 'bulk'
-              ? { mode: 'bulk', count: catalogDeleteGuard.items.length }
+              ? {
+                  mode: 'bulk',
+                  count: catalogDeleteGuard.items.length,
+                  organizerLabel: catalogDeleteGuard.categoryLabel,
+                }
               : null
         }
         onClose={() => {

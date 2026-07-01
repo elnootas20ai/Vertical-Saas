@@ -245,6 +245,44 @@ function brandScopeMatch(ing: CostingStoreIngredient, brandIds: string[]): boole
   return brandIds.some((id) => ingBrands.includes(id));
 }
 
+function pickBestIngredientNameMatch(
+  name: string,
+  candidates: CostingStoreIngredient[],
+  brandIds: string[],
+): CostingStoreIngredient | undefined {
+  const folded = foldName(name);
+  if (!folded || candidates.length === 0) return undefined;
+
+  const exact = candidates.filter((ing) => foldName(ing.name) === folded);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) {
+    return (
+      exact.find((ing) => brandScopeMatch(ing, brandIds)) ??
+      exact.sort((a, b) => foldName(a.name).length - foldName(b.name).length)[0]
+    );
+  }
+
+  const partial = candidates.filter((ing) => {
+    const f = foldName(ing.name);
+    return f.includes(folded) || folded.includes(f);
+  });
+  if (partial.length === 0) return undefined;
+  if (partial.length === 1) return partial[0];
+
+  const ranked = [...partial].sort((a, b) => {
+    const aFold = foldName(a.name);
+    const bFold = foldName(b.name);
+    const aBrand = brandIds.length > 0 && brandScopeMatch(a, brandIds) ? 0 : 1;
+    const bBrand = brandIds.length > 0 && brandScopeMatch(b, brandIds) ? 0 : 1;
+    if (aBrand !== bBrand) return aBrand - bBrand;
+    const aExactish = aFold === folded ? 0 : 1;
+    const bExactish = bFold === folded ? 0 : 1;
+    if (aExactish !== bExactish) return aExactish - bExactish;
+    return aFold.length - bFold.length;
+  });
+  return ranked[0];
+}
+
 export function findStoreIngredientForCosting(
   name: string,
   ingredients: CostingStoreIngredient[],
@@ -254,15 +292,24 @@ export function findStoreIngredientForCosting(
   if (!folded) return undefined;
 
   const scoped = ingredients.filter((ing) => brandScopeMatch(ing, brandIds));
-  const exact = scoped.find((ing) => foldName(ing.name) === folded);
-  if (exact) return exact;
+  const hit = pickBestIngredientNameMatch(name, scoped, brandIds);
+  if (hit) return hit;
+  if (brandIds.length === 0) return undefined;
+  return pickBestIngredientNameMatch(
+    name,
+    ingredients.filter((ing) => brandScopeMatch(ing, [])),
+    [],
+  );
+}
 
-  const partial = scoped.filter((ing) => {
-    const f = foldName(ing.name);
-    return f.includes(folded) || folded.includes(f);
-  });
-  if (partial.length === 1) return partial[0];
-  return undefined;
+/** Pizza/burger con ingredientes en Excel pero sin líneas de escandallo guardadas. */
+export function needsVertialFoodEscandalloRepair(
+  item: CatalogItem,
+  brands: Array<{ _id: string; deliveryLineKind?: string }>,
+): boolean {
+  const lk = inferImportCostingLineKind(item, brands);
+  if (lk !== 'pizza' && lk !== 'burger_fastfood') return false;
+  return explicitProductCostingStatus(item) !== 'recipe';
 }
 
 function enrichRecipeIngredientNames(
@@ -291,10 +338,13 @@ function buildRecipeLinesFromIngredients(
   lineKind: DeliveryBrandLineKindId | 'generic',
 ): ProductRecipeLine[] {
   const text = String(item.customFields?.ingredients || '').trim();
-  if (!text) return [];
+  const parsed = text ? parseImportIngredientNames(text) : [];
+  const useVertialDefaults =
+    parsed.length === 0 && (lineKind === 'pizza' || lineKind === 'burger_fastfood');
+  if (parsed.length === 0 && !useVertialDefaults) return [];
 
   const brandIds = (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean);
-  const names = enrichRecipeIngredientNames(parseImportIngredientNames(text), lineKind);
+  const names = enrichRecipeIngredientNames(parsed, lineKind);
   const lines: ProductRecipeLine[] = [];
   const usedIds = new Set<string>();
 
@@ -492,6 +542,68 @@ function applyHalfHalfCosting(
   };
 }
 
+export type AutoCostingApplyOptions = {
+  overwrite?: boolean;
+  /** Sustituye coste fijo auto (import antiguo) por escandallo Vertial en pizza/burger. */
+  upgradeAutoFixedFood?: boolean;
+  catalog?: CatalogItem[];
+  inventoryItems?: CatalogItem[];
+};
+
+function shouldRunAutoCosting(
+  item: CatalogItem,
+  brands: Array<{ _id: string; deliveryLineKind?: string }>,
+  options?: AutoCostingApplyOptions,
+): boolean {
+  if (options?.overwrite) return true;
+  const status = explicitProductCostingStatus(item);
+  if (status === 'none') return true;
+  if (options?.upgradeAutoFixedFood) {
+    return needsVertialFoodEscandalloRepair(item, brands);
+  }
+  return false;
+}
+
+/** Bases Vertial (Masa, mozzarella…) que deben existir en ingredientes para el escandallo. */
+const VERTIAL_ESCANDALLO_BASE_NAMES: Partial<Record<DeliveryBrandLineKindId, string[]>> = {
+  pizza: ['Masa', 'Salsa tomate', 'Mozzarella'],
+  burger_fastfood: ['Pan brioche', 'Carne burger'],
+};
+
+export function ensureVertialEscandalloBaseStoreIngredients(
+  existing: CostingStoreIngredient[],
+  brands: Array<{ _id: string; deliveryLineKind?: string }>,
+): { items: CostingStoreIngredient[]; added: number } {
+  let merged = [...existing];
+  let added = 0;
+
+  const addForKind = (lineKind: DeliveryBrandLineKindId, names: string[]) => {
+    const brandIds = brands.filter((b) => b.deliveryLineKind === lineKind).map((b) => b._id);
+    const scopeIds = brandIds.length > 0 ? brandIds : [];
+    for (const name of names) {
+      const exists =
+        findStoreIngredientForCosting(name, merged, scopeIds) ??
+        findStoreIngredientForCosting(name, merged, []);
+      if (exists) continue;
+      const baseCost = resolveVertialDefaultBaseCost(name, lineKind);
+      merged.push({
+        id: `ing-vertial-${foldName(name)}-${lineKind}`,
+        name,
+        role: 'escandallo',
+        ...(scopeIds.length > 0 ? { brandIds: scopeIds } : {}),
+        ...(baseCost != null ? { baseCost } : {}),
+      });
+      added += 1;
+    }
+  };
+
+  addForKind('pizza', VERTIAL_ESCANDALLO_BASE_NAMES.pizza ?? []);
+  addForKind('burger_fastfood', VERTIAL_ESCANDALLO_BASE_NAMES.burger_fastfood ?? []);
+
+  const prepared = applyVertialDefaultsToStoreIngredients(merged, brands);
+  return { items: prepared.items, added };
+}
+
 export type AutoCostingApplyResult = {
   item: CatalogItem;
   mode: 'recipe' | 'fixed' | 'skipped';
@@ -502,9 +614,9 @@ export function applyVertialAutoCostingToCatalogItem(
   item: CatalogItem,
   storeIngredients: CostingStoreIngredient[],
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
-  options?: { overwrite?: boolean; catalog?: CatalogItem[]; inventoryItems?: CatalogItem[] },
+  options?: AutoCostingApplyOptions,
 ): AutoCostingApplyResult {
-  if (!options?.overwrite && explicitProductCostingStatus(item) !== 'none') {
+  if (!shouldRunAutoCosting(item, brands, options)) {
     return { item, mode: 'skipped' };
   }
 
@@ -617,12 +729,13 @@ export function applyVertialAutoCostingBatch(
   allCatalog: CatalogItem[],
   storeIngredients: CostingStoreIngredient[],
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
-  options?: { overwrite?: boolean; inventoryItems?: CatalogItem[] },
+  options?: Pick<AutoCostingApplyOptions, 'overwrite' | 'upgradeAutoFixedFood' | 'inventoryItems'>,
 ): AutoCostingApplyResult[] {
   const working = new Map(allCatalog.map((item) => [item._id, { ...item }]));
   const results: AutoCostingApplyResult[] = [];
   const sharedOptions = {
     overwrite: options?.overwrite,
+    upgradeAutoFixedFood: options?.upgradeAutoFixedFood,
     inventoryItems: options?.inventoryItems,
   };
 

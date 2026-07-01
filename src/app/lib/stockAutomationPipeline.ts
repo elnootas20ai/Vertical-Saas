@@ -30,6 +30,8 @@ export type StockAutomationPipelineOptions = {
   updateCatalogItem: (item: CatalogItem) => Promise<CatalogItem>;
   /** inventory = solo stock (rápido). full = escandallo + recetas CouchDB. */
   mode?: 'inventory' | 'full';
+  /** Tras import: convierte coste fijo auto de pizza/burger en escandallo Vertial. */
+  upgradeAutoFixedFood?: boolean;
   onAfterInventory?: () => void | Promise<void>;
 };
 
@@ -87,7 +89,10 @@ export async function runVertialStockAutomationPipeline(
     refreshedCatalog,
     storeIngredients,
     options.brands ?? [],
-    { inventoryItems },
+    {
+      inventoryItems,
+      upgradeAutoFixedFood: options.upgradeAutoFixedFood,
+    },
   );
   const costingSummary = summarizeAutoCostingResults(costingResults);
 

@@ -9,7 +9,7 @@ const BULK_PHRASE_NO_PIN = 'BORRADO MASIVO';
 
 export type CatalogDeleteGuardPayload =
   | { mode: 'single'; itemName: string }
-  | { mode: 'bulk'; count: number };
+  | { mode: 'bulk'; count: number; organizerLabel?: string };
 
 function normalizePhrase(s: string) {
   return s.trim().replace(/\s+/g, ' ');
@@ -101,6 +101,13 @@ export function CatalogDeleteGuardModal({
             <>
               Vas a eliminar <strong className="text-gray-900 dark:text-gray-100">{payload.itemName}</strong>. Esta acción
               no se puede deshacer.
+            </>
+          ) : payload.organizerLabel ? (
+            <>
+              Vas a eliminar el organizador{' '}
+              <strong className="text-gray-900 dark:text-gray-100">«{payload.organizerLabel}»</strong> y sus{' '}
+              <strong className="text-gray-900 dark:text-gray-100">{payload.count}</strong> producto
+              {payload.count !== 1 ? 's' : ''}. Esta acción no se puede deshacer.
             </>
           ) : (
             <>
