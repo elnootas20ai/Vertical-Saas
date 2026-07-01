@@ -23,6 +23,7 @@ import {
   updateBusinessRequest,
 } from '../lib/businessApi';
 import { notifyDeliveryWorkCentersChanged, normalizeBusinessScopeId } from '../lib/deliverySetup';
+import { readTpvTabletBinding } from '../lib/tpvTabletSession';
 
 export type { BusinessContextType } from './businessContextRef';
 
@@ -140,6 +141,21 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
             prev?.business_id === linkedBiz.business_id ? prev : linkedBiz,
           );
           storeBusinessId(userId, linkedBiz.business_id);
+          return;
+        }
+      }
+
+      const tabletBusinessId = String(readTpvTabletBinding()?.businessId || '').trim();
+      if (tabletBusinessId) {
+        const tabletBiz = list.find(
+          (b) =>
+            normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(tabletBusinessId),
+        );
+        if (tabletBiz) {
+          setCurrentBusiness((prev) =>
+            prev?.business_id === tabletBiz.business_id ? prev : tabletBiz,
+          );
+          storeBusinessId(userId, tabletBiz.business_id);
           return;
         }
       }

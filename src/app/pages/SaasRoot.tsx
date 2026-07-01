@@ -19,6 +19,9 @@ import { SetupProgressProvider } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
+import {
+  isTpvTabletSaasSession,
+} from '../lib/tpvTabletSession';
 import { isWorkerAccount } from '../lib/authApi';
 import {
   readStoredOnboardingBusinessType,
@@ -87,6 +90,7 @@ function SaasContent() {
   const location = useLocation();
 
   const navigate = useNavigate();
+  const tpvTabletSaasSession = isTpvTabletSaasSession(location.pathname);
 
   const [isAutoCreating, setIsAutoCreating] = useState(false);
 
@@ -198,7 +202,8 @@ function SaasContent() {
       businesses.length > 0 ||
       isAutoCreating ||
       autoCreateAttempted.current ||
-      isUserAccount
+      isUserAccount ||
+      tpvTabletSaasSession
     ) {
       return;
     }
@@ -320,6 +325,8 @@ function SaasContent() {
 
     navigate,
 
+    tpvTabletSaasSession,
+
   ]);
 
 
@@ -355,12 +362,14 @@ function SaasContent() {
     || location.pathname === '/saas/user-dashboard'
     || location.pathname === '/saas/invitations'
     || billingRecoveryMode
+    || tpvTabletSaasSession
     || (unlinkedWorkerNeedsCompany && isWorkerUnlinkedAllowedPath(location.pathname))
     || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
 
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
     if (isUserAccount || isLinkedWorker) return;
+    if (tpvTabletSaasSession) return;
     if (!businessesFetchSettled || isLoadingBusinesses) return;
     if (businesses.length > 0) return;
     if (isAutoCreating || autoCreateAttempted.current) return;
@@ -371,6 +380,7 @@ function SaasContent() {
     user,
     isUserAccount,
     isLinkedWorker,
+    tpvTabletSaasSession,
     businessesFetchSettled,
     isLoadingBusinesses,
     businesses.length,
@@ -409,6 +419,13 @@ function SaasContent() {
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
+    if (tpvTabletSaasSession) {
+      return (
+        <>
+          <Outlet />
+        </>
+      );
+    }
     if (isAutoCreating || autoCreateAttempted.current) {
       return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">

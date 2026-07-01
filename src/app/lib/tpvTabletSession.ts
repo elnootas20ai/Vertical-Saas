@@ -85,6 +85,17 @@ export function isTpvTabletBound(): boolean {
   return readTpvTabletBinding() !== null;
 }
 
+/** Rutas del TPV operativo tras activar tablet (código de tienda). */
+export function isTpvTabletWorkerPath(pathname: string): boolean {
+  const path = String(pathname || '').trim();
+  return path === TPV_TABLET_DELIVERY_PATH || path.startsWith('/saas/worker/tpv');
+}
+
+/** Sesión tablet con binding válido en ruta TPV — no forzar selector de empresas. */
+export function isTpvTabletSaasSession(pathname: string): boolean {
+  return isTpvTabletBound() && isTpvTabletWorkerPath(pathname);
+}
+
 /** Destino del TPV según el binding tablet (independiente del vertical de la empresa). */
 export function resolveTpvTabletWorkerPath(): string {
   const binding = readTpvTabletBinding();
