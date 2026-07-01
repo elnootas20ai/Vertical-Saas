@@ -16,6 +16,7 @@ import {
   listCatalogItems,
   createCatalogItem,
   bulkCreateCatalogItems,
+  bulkPatchCatalogItems,
   bulkApplyStaffPrices,
   bulkUpdateCatalogStock,
   bulkRemoveCatalogItems,
@@ -139,6 +140,7 @@ deliveryRouter.delete('/orders/:userId/:orderId', removeDeliveryOrder);
 deliveryRouter.get('/catalog/:userId', listCatalogItems);
 deliveryRouter.post('/catalog/:userId', createCatalogItem);
 deliveryRouter.post('/catalog/:userId/bulk', bulkCreateCatalogItems);
+deliveryRouter.post('/catalog/:userId/bulk-patch', bulkPatchCatalogItems);
 deliveryRouter.post('/catalog/:userId/bulk-delete', bulkRemoveCatalogItems);
 deliveryRouter.post('/catalog/:userId/bulk-staff-prices', bulkApplyStaffPrices);
 deliveryRouter.post('/catalog/:userId/bulk-stock', bulkUpdateCatalogStock);

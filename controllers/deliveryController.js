@@ -98,7 +98,11 @@ import {
 } from '../shared/delivery/orderLineRevenueSplit.js';
 import {
   buildStableImportCatalogSku,
+  buildCatalogImportIndexes,
   catalogImportIdentityKey,
+  catalogLooseIdentityKey,
+  isSameLooseCatalogProduct,
+  resolveExistingCatalogItemForImport,
 } from '../shared/catalog/catalogItemIdentity.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
@@ -254,6 +258,82 @@ function normalizeDuplicateValue(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function catalogItemDedupeRank(item, businessId = '') {
+  const bid = String(businessId || '').trim();
+  let score = 0;
+  const itemBiz = String(item?.business_id || '').trim();
+  if (bid && itemBiz === bid) score += 1_000_000;
+
+  const cf = item?.customFields || {};
+  const recipe = cf.costingRecipe;
+  if (cf.costingType === 'recipe' && Array.isArray(recipe) && recipe.length > 0) score += 100_000;
+  else if (cf.costingType === 'fixed') score += 10_000;
+  else if (Number(item?.costPrice) > 0) score += 1_000;
+
+  if (String(item?.sku || '').trim()) score += 100;
+  if (String(cf.ingredients || '').trim()) score += 10;
+
+  const updated = Date.parse(String(item?.updatedAt || item?.createdAt || ''));
+  return score + (Number.isFinite(updated) ? updated / 1000 : 0);
+}
+
+async function purgeLooseDuplicateCatalogItems(req, userId, options = {}) {
+  const moduleFilter = String(options.module || 'catalog');
+  const scopeBusinessId = String(options.businessId || '').trim();
+  const items = await listCatalogItemsByUser(req, userId, { module: moduleFilter });
+  const active = items.filter((item) => item && !item.deletedAt);
+  const byLoose = new Map();
+
+  for (const item of active) {
+    const key = catalogLooseIdentityKey(item);
+    if (!byLoose.has(key)) byLoose.set(key, []);
+    byLoose.get(key).push(item);
+  }
+
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const now = new Date().toISOString();
+  const deleteDocs = [];
+  let purged = 0;
+
+  for (const group of byLoose.values()) {
+    if (group.length <= 1) continue;
+    const sorted = [...group].sort(
+      (a, b) => catalogItemDedupeRank(b, scopeBusinessId) - catalogItemDedupeRank(a, scopeBusinessId),
+    );
+    const keep = sorted[0];
+    for (const dup of sorted.slice(1)) {
+      deleteDocs.push({
+        ...dup,
+        deletedAt: now,
+        updatedAt: now,
+      });
+      purged += 1;
+    }
+    if (scopeBusinessId && keep && !String(keep.business_id || '').trim()) {
+      try {
+        const upgraded = buildCatalogItemDocument(
+          userId,
+          { business_id: scopeBusinessId, vertical: keep.vertical || 'delivery' },
+          keep,
+        );
+        await putDocument(req, db, upgraded._id, upgraded);
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
+  if (deleteDocs.length > 0) {
+    const chunkSize = 100;
+    for (let i = 0; i < deleteDocs.length; i += chunkSize) {
+      await bulkPutDocuments(req, db, deleteDocs.slice(i, i + chunkSize));
+    }
+  }
+
+  return purged;
+}
+
 function isSameCatalogScope(base, candidate) {
   if ((base.module || 'catalog') !== (candidate.module || 'catalog')) return false;
   const baseBusinessId = String(base.business_id || '').trim();
@@ -264,19 +344,27 @@ function isSameCatalogScope(base, candidate) {
 
 async function findCatalogDuplicate(req, userId, itemCandidate, excludeId = '') {
   const items = await listCatalogItemsByUser(req, userId, { module: itemCandidate.module || 'catalog' });
-  const candidateName = normalizeDuplicateValue(itemCandidate.name);
   const candidateSku = normalizeDuplicateValue(itemCandidate.sku);
   const excluded = String(excludeId || '').trim();
 
-  if (!candidateName && !candidateSku) return null;
+  if (!String(itemCandidate.name || '').trim() && !candidateSku) return null;
 
   for (const item of items) {
     if (!item || String(item._id || '') === excluded) continue;
     if (!isSameCatalogScope(itemCandidate, item)) continue;
-    const sameName = !!candidateName && normalizeDuplicateValue(item.name) === candidateName;
+    if (excluded) {
+      const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
+      if (sameSku) {
+        return { item, duplicatedField: 'sku' };
+      }
+      continue;
+    }
+    if (isSameLooseCatalogProduct(itemCandidate, item)) {
+      return { item, duplicatedField: 'name' };
+    }
     const sameSku = !!candidateSku && normalizeDuplicateValue(item.sku) === candidateSku;
-    if (sameName || sameSku) {
-      return { item, duplicatedField: sameSku ? 'sku' : 'name' };
+    if (sameSku) {
+      return { item, duplicatedField: 'sku' };
     }
   }
 
@@ -1329,22 +1417,20 @@ export async function bulkCreateCatalogItems(req, res) {
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
     const existingItems = await listCatalogItemsByUser(req, userId);
-    const existingByIdentity = new Map();
-    existingItems.forEach((existing) => {
-      if (!existing) return;
-      const key = catalogImportIdentityKey(existing);
-      if (!existingByIdentity.has(key)) existingByIdentity.set(key, existing);
-    });
+    const importIndexes = buildCatalogImportIndexes(existingItems);
 
     const batchIdentityKeys = new Set();
+    const batchLooseKeys = new Set();
     const dedupedDocs = [];
     const docsToUpdate = [];
     const duplicateErrors = [];
 
     docs.forEach((doc, idx) => {
       const identityKey = catalogImportIdentityKey(doc);
-      const repeatedInBatch = batchIdentityKeys.has(identityKey);
-      const existing = existingByIdentity.get(identityKey);
+      const looseKey = catalogLooseIdentityKey(doc);
+      const repeatedInBatch =
+        batchIdentityKeys.has(identityKey) || batchLooseKeys.has(looseKey);
+      const existing = resolveExistingCatalogItemForImport(doc, importIndexes);
 
       if (repeatedInBatch && !existing) {
         duplicateErrors.push({
@@ -1358,10 +1444,12 @@ export async function bulkCreateCatalogItems(req, res) {
       if (existing) {
         docsToUpdate.push({ existing, doc, index: idx });
         batchIdentityKeys.add(identityKey);
+        batchLooseKeys.add(looseKey);
         return;
       }
 
       batchIdentityKeys.add(identityKey);
+      batchLooseKeys.add(looseKey);
       dedupedDocs.push(doc);
     });
 
@@ -1423,6 +1511,21 @@ export async function bulkCreateCatalogItems(req, res) {
 
     if (duplicateErrors.length > 0) errors.push(...duplicateErrors);
 
+    const scopeBusinessId = String(
+      docs.find((doc) => String(doc?.business_id || '').trim())?.business_id || '',
+    ).trim();
+    let purged = 0;
+    if (created.length > 0 || updated.length > 0) {
+      try {
+        purged = await purgeLooseDuplicateCatalogItems(req, userId, {
+          module: dedupedDocs[0]?.module || docsToUpdate[0]?.doc?.module || 'catalog',
+          businessId: scopeBusinessId,
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+
     if (created.length > 0) {
       await logAccountActivity(req, {
         actorUserId: userId,
@@ -1440,12 +1543,88 @@ export async function bulkCreateCatalogItems(req, res) {
       ok: true,
       created: created.length,
       updated: updated.length,
+      purged,
       errors: errors.length,
       items: [...created, ...updated],
       errorDetails: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error en importación masiva' });
+  }
+}
+
+/** Actualiza muchos artículos en una sola pasada (escandallo / costes tras import). */
+export async function bulkPatchCatalogItems(req, res) {
+  try {
+    const { userId } = req.params;
+    const { items } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(items) || items.length === 0) {
+      return badRequest(res, 'Falta el array items en el body');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const existingItems = await listCatalogItemsByUser(req, userId);
+    const byId = new Map(existingItems.map((item) => [item._id, item]));
+
+    const docs = [];
+    const errors = [];
+    items.forEach((patch, index) => {
+      if (!patch || typeof patch !== 'object') return;
+      const id = String(patch._id || '').trim();
+      if (!id) {
+        errors.push({ index, error: 'Falta _id del artículo' });
+        return;
+      }
+      const existing = byId.get(id);
+      if (!existing || existing.deletedAt) {
+        errors.push({ index, name: patch?.name, error: 'Artículo no encontrado' });
+        return;
+      }
+      docs.push(buildCatalogItemDocument(userId, { ...existing, ...patch }, existing));
+    });
+
+    if (docs.length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Ningún artículo válido para actualizar',
+        updated: 0,
+        errors: errors.length,
+        errorDetails: errors.length > 0 ? errors : undefined,
+      });
+    }
+
+    const updated = [];
+    const chunkSize = 100;
+    for (let i = 0; i < docs.length; i += chunkSize) {
+      const chunk = docs.slice(i, i + chunkSize);
+      const results = await bulkPutDocuments(req, db, chunk);
+      results.forEach((result, idx) => {
+        if (result.ok) {
+          updated.push(sanitizeCatalogItem({ ...chunk[idx], _rev: result.rev }));
+        } else {
+          errors.push({
+            index: i + idx,
+            name: chunk[idx]?.name,
+            error: result.error || result.reason || 'Error al guardar',
+          });
+        }
+      });
+    }
+
+    return res.json({
+      ok: errors.length === 0,
+      updated: updated.length,
+      errors: errors.length,
+      items: updated,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error en actualización masiva' });
   }
 }
 

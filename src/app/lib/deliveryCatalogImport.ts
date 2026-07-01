@@ -19,6 +19,7 @@ import { syncInventoryCatalogFromSources } from './inventorySync';
 import { runVertialStockAutomationPipeline } from './stockAutomationPipeline';
 import { notifyDeliveryConfigChanged } from './deliverySetup';
 import { normalizeTenantUserId } from './tenantUserId';
+import { filterCatalogItemsForBusinessScope } from './catalogBusinessScope';
 import {
   buildBrandCategoryMapFromItems,
   applyCatalogImportIngredientEntries,
@@ -36,13 +37,16 @@ import {
 } from './deliveryCatalogImportLogic';
 import { parseImportPrice } from './deliveryCatalogExcelTemplate';
 import { resolveCatalogProductPlaceholderUrl } from './catalogProductPlaceholders';
-import { ensureVertialEscandalloBaseStoreIngredients } from './catalogImportCosting';
+import {
+  ensureVertialEscandalloBaseStoreIngredients,
+  needsVertialFoodEscandalloRepair,
+} from './catalogImportCosting';
 import {
   COMBO_MENU_PRESETS,
   DEFAULT_COMBO_STRUCTURE,
   type ComboStructureSlot,
 } from './catalogComboSlots';
-import { buildStableImportCatalogSku } from '../../../shared/catalog/catalogItemIdentity.js';
+import { buildStableImportCatalogSku, catalogLooseIdentityKey } from '../../../shared/catalog/catalogItemIdentity.js';
 
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
@@ -303,6 +307,7 @@ export async function syncAutoCostingAfterCatalogImport(
     brands,
     costingTargets: catalogItems,
     upgradeAutoFixedFood: true,
+    mode: 'costing',
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
 
@@ -337,13 +342,23 @@ export async function repairVertialFoodEscandallo(
   }
 
   const catalog = await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]);
+  const scoped = filterCatalogItemsForBusinessScope(catalog, bid, brands, {
+    activeBusinessType: 'delivery',
+  });
+  const repairTargets = scoped.filter((item) => needsVertialFoodEscandalloRepair(item, brands));
+  if (repairTargets.length === 0) {
+    return { updated: 0, recipe: 0, basesAdded };
+  }
+
   const result = await runVertialStockAutomationPipeline(uid, {
     businessType: 'delivery',
     businessId: bid,
     storeIngredients: withBases,
     brands,
     catalogItems: catalog,
+    costingTargets: repairTargets,
     upgradeAutoFixedFood: true,
+    mode: 'costing',
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
 
@@ -385,19 +400,19 @@ export async function syncFullStockAutomationAfterCatalogImport(
   });
 }
 
-/** Resuelve ítems del lote importado (por _id, sku o nombre) contra el catálogo actual. */
+/** Resuelve ítems del lote importado (por _id, sku o nombre+categoría) contra el catálogo actual. */
 export function resolveImportedCatalogItemsForCosting(
-  batch: Array<Pick<CatalogItem, '_id' | 'sku' | 'name'>>,
+  batch: Array<Pick<CatalogItem, '_id' | 'sku' | 'name' | 'category'>>,
   catalog: CatalogItem[],
 ): CatalogItem[] {
   const byId = new Map(catalog.map((item) => [item._id, item]));
+  const byLoose = new Map<string, CatalogItem>();
   const bySku = new Map<string, CatalogItem>();
-  const byName = new Map<string, CatalogItem>();
   for (const item of catalog) {
+    const loose = catalogLooseIdentityKey(item);
+    if (!byLoose.has(loose)) byLoose.set(loose, item);
     const sku = String(item.sku || '').trim().toLowerCase();
-    const name = String(item.name || '').trim().toLowerCase();
     if (sku && !bySku.has(sku)) bySku.set(sku, item);
-    if (name && !byName.has(name)) byName.set(name, item);
   }
 
   const out: CatalogItem[] = [];
@@ -407,8 +422,12 @@ export function resolveImportedCatalogItemsForCosting(
     let hit = id ? byId.get(id) : undefined;
     if (!hit) {
       const sku = String(ref.sku || '').trim().toLowerCase();
-      const name = String(ref.name || '').trim().toLowerCase();
-      hit = (sku && bySku.get(sku)) || (name && byName.get(name));
+      const loose = catalogLooseIdentityKey({
+        module: 'catalog',
+        name: ref.name,
+        category: ref.category,
+      });
+      hit = (sku && bySku.get(sku)) || byLoose.get(loose);
     }
     if (!hit || seen.has(hit._id)) continue;
     seen.add(hit._id);

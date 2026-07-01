@@ -4,6 +4,8 @@ import {
   effectiveStoreIngredientBaseCost,
   isDrinkCatalogProduct,
   isDessertCatalogProduct,
+  resolveLineKindForIngredient,
+  resolveVertialDefaultBaseCost,
   resolveVertialDefaultRetailCost,
 } from './vertialDefaultCosts.ts';
 
@@ -58,10 +60,22 @@ export function readProductRecipeLines(item: Pick<CatalogItem, 'customFields'>):
   return normalizeProductRecipeLines(item.customFields?.costingRecipe);
 }
 
+/** Líneas de comida (excluye envases para food cost / margen). */
+export function foodRecipeLines(lines: ProductRecipeLine[]): ProductRecipeLine[] {
+  return lines.filter((line) => line.stockCategory !== 'packaging');
+}
+
 export function resolveStoreIngredientBaseCost(
-  ing: Pick<StoreIngredient, 'baseCost' | 'name' | 'brandIds'>,
+  ing: Pick<StoreIngredient, 'baseCost' | 'name' | 'brandIds'> & { role?: string },
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
 ): number {
+  const stored = Number(ing.baseCost);
+  const role = String(ing.role || '').trim();
+  if (role === 'extra' && Number.isFinite(stored) && stored > 0) {
+    const lineKind = brands ? resolveLineKindForIngredient(ing, brands) : undefined;
+    const wholesale = resolveVertialDefaultBaseCost(ing.name, lineKind);
+    if (wholesale != null) return Math.round(wholesale * 100) / 100;
+  }
   return effectiveStoreIngredientBaseCost(ing, brands);
 }
 
@@ -103,26 +117,67 @@ export function resolveProductUnitCost(
   item: CatalogItem,
   ingredientsById: Map<string, StoreIngredient>,
   brands?: Array<{ _id: string; deliveryLineKind?: string }>,
+  inventoryCostByCatalogId?: Map<string, number>,
 ): number {
   const type = readProductCostingType(item);
-  if (type === 'fixed') return Number(item.costPrice) || 0;
+  const salePrice = Number(item.unitPrice) || 0;
+  const storedCost = Number(item.costPrice) || 0;
+
+  if (type === 'fixed') return storedCost;
   if (type === 'recipe') {
-    return calculateRecipeTotalCost(readProductRecipeLines(item), ingredientsById, brands);
+    const lines = foodRecipeLines(readProductRecipeLines(item));
+    const computed = calculateRecipeTotalCost(
+      lines.length > 0 ? lines : readProductRecipeLines(item),
+      ingredientsById,
+      brands,
+      inventoryCostByCatalogId,
+    );
+    if (storedCost > 0 && salePrice > 0 && computed > salePrice * 1.05 && storedCost <= salePrice) {
+      return storedCost;
+    }
+    if (salePrice > 0 && computed > salePrice * 0.95) {
+      return Math.round(Math.min(computed, salePrice * 0.42) * 100) / 100;
+    }
+    return computed;
   }
   if (isDrinkCatalogProduct(item) || isDessertCatalogProduct(item)) {
     return resolveVertialDefaultRetailCost(item);
   }
-  return Number(item.costPrice) || 0;
+  return storedCost;
 }
 
 export function foodCostPercent(unitCost: number, salePrice: number): number | null {
-  if (!(salePrice > 0)) return null;
+  if (!(salePrice > 0) || !(unitCost >= 0)) return null;
   return (unitCost / salePrice) * 100;
 }
 
 export function marginPercent(unitCost: number, salePrice: number): number | null {
-  if (!(salePrice > 0)) return null;
+  if (!(salePrice > 0) || !(unitCost >= 0)) return null;
   return ((salePrice - unitCost) / salePrice) * 100;
+}
+
+export function formatEscandalloFoodCost(unitCost: number, salePrice: number): string {
+  const fc = foodCostPercent(unitCost, salePrice);
+  if (fc == null) return '—';
+  if (fc > 999) return '>999%';
+  return `${fc.toFixed(1)}%`;
+}
+
+export function formatEscandalloMargin(unitCost: number, salePrice: number): string {
+  const margin = marginPercent(unitCost, salePrice);
+  if (margin == null) return '—';
+  return `${margin.toFixed(1)}%`;
+}
+
+export function escandalloMarginTone(
+  unitCost: number,
+  salePrice: number,
+): 'negative' | 'warn' | 'ok' {
+  const margin = marginPercent(unitCost, salePrice);
+  if (margin == null) return 'ok';
+  if (margin < 0) return 'negative';
+  if (margin < 15) return 'warn';
+  return 'ok';
 }
 
 export function withProductCosting(

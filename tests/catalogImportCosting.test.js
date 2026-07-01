@@ -108,6 +108,22 @@ test('applyVertialAutoCostingToCatalogItem builds recipe for pizza with no custo
   assert.ok(next.costPrice > 0);
 });
 
+test('applyVertialAutoCostingToCatalogItem burger with bacon stays under PVP food cost', () => {
+  const item = {
+    _id: 'b1',
+    name: 'BBQ Bacon',
+    category: 'Burgers',
+    brandIds: ['brand-burger'],
+    unitPrice: 9.5,
+    costPrice: 0,
+    customFields: { ingredients: 'Carne, Bacon, Queso cheddar, Salsa' },
+  };
+  const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands);
+  assert.equal(mode, 'recipe');
+  assert.ok(next.costPrice > 0);
+  assert.ok(next.costPrice < item.unitPrice * 0.5, `cost ${next.costPrice} too high for PVP ${item.unitPrice}`);
+});
+
 test('applyVertialAutoCostingToCatalogItem skips already configured', () => {
   const item = {
     _id: 'p2',

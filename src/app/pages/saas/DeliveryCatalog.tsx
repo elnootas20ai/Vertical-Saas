@@ -2777,30 +2777,6 @@ export function CatalogPage() {
     });
 
     let result = await bulkCreateCatalogItemsRequest(dataUserId, items);
-    const suspiciousSingleCreate =
-      items.length > 1 && result.created === 0 && result.errors >= items.length;
-    if (suspiciousSingleCreate) {
-      let recovered = 0;
-      let recoveredErrors = 0;
-      for (const item of items) {
-        try {
-          await createCatalogItemRequest(dataUserId, item);
-          recovered += 1;
-        } catch (error) {
-          recoveredErrors += 1;
-          const message = error instanceof Error ? error.message : '';
-          if (!message.toLowerCase().includes('ya existe')) {
-            console.warn('Import recovery failed for item', item?.name, message);
-          }
-        }
-      }
-      result = {
-        ...result,
-        created: recovered,
-        errors: recoveredErrors,
-      };
-      toast.warning('Detectado fallo en bulk; se aplicó importación por ítem para recuperar el lote.');
-    }
     const totalOk = (result.created || 0) + (result.updated ?? 0);
     if (totalOk > 0) {
       progress('Sincronizando marcas y TPV…', { percent: 58 });
@@ -4531,7 +4507,7 @@ export function CatalogPage() {
     { id: 'purchase-orders', label: 'Compras' },
     { id: 'invoices', label: 'Facturas', count: invoiceKpis.pending || undefined },
     { id: 'staff-consumption', label: 'Consumos de equipo' },
-  ], [stockTabCount, catalogItems, supplierKpis.active, invoiceKpis.pending]);
+  ], [stockTabCount, catalogMenuItems, supplierKpis.active, invoiceKpis.pending]);
 
   const brandSetupCtx = useMemo(
     () =>

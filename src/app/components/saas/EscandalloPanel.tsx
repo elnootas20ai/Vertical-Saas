@@ -18,8 +18,6 @@ import {
 } from '../../lib/catalogBusinessScope';
 import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
-import { repairVertialFoodEscandallo } from '../../lib/deliveryCatalogImport';
-import { needsVertialFoodEscandalloRepair } from '../../lib/catalogImportCosting';
 import { sortBrandsForDisplay } from '../../lib/brandUtils';
 import {
   getDeliveryConfigRequest,
@@ -41,6 +39,9 @@ import {
 import {
   calculateRecipeTotalCost,
   foodCostPercent,
+  formatEscandalloFoodCost,
+  formatEscandalloMargin,
+  escandalloMarginTone,
   isCatalogCostingProduct,
   marginPercent,
   productCostingStatus,
@@ -451,7 +452,7 @@ export function EscandalloPanel() {
     }
     setLoading(true);
     try {
-      let [items, config] = await Promise.all([
+      const [items, config] = await Promise.all([
         listCatalogItemsRequest(uid),
         getDeliveryConfigRequest(uid),
       ]);
@@ -460,32 +461,6 @@ export function EscandalloPanel() {
             commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])),
           )
         : [];
-
-      const scopedItems = businessId
-        ? filterCatalogItemsForBusinessScope(items, businessId, lineBrands, {
-            accountBusinessCount,
-            activeBusinessType: businessType,
-          })
-        : items;
-
-      const needsFoodEscandalloRepair =
-        Boolean(businessId) &&
-        scopedItems.some((item) => needsVertialFoodEscandalloRepair(item, lineBrands));
-
-      if (needsFoodEscandalloRepair && businessId) {
-        const repair = await repairVertialFoodEscandallo(uid, businessId);
-        if (repair.updated > 0 || repair.basesAdded > 0) {
-          if (repair.updated > 0) {
-            toast.success(
-              `Escandallo Vertial aplicado a ${repair.updated} producto${repair.updated === 1 ? '' : 's'}`,
-            );
-          }
-          [items, config] = await Promise.all([
-            listCatalogItemsRequest(uid),
-            getDeliveryConfigRequest(uid),
-          ]);
-        }
-      }
 
       const visibleItems = businessId
         ? filterCatalogItemsForBusinessScope(items, businessId, lineBrands, {
@@ -542,10 +517,12 @@ export function EscandalloPanel() {
     const recipe = catalogItems.filter((item) => productCostingStatus(item) === 'recipe').length;
     const none = catalogItems.length - fixed - recipe;
     const withPrice = catalogItems.filter((item) => item.unitPrice > 0);
-    const foodCosts = withPrice.map((item) => {
-      const cost = resolveProductUnitCost(item, ingredientsById, brands);
-      return foodCostPercent(cost, item.unitPrice) ?? 0;
-    });
+    const foodCosts = withPrice
+      .map((item) => {
+        const cost = resolveProductUnitCost(item, ingredientsById, brands);
+        return foodCostPercent(cost, item.unitPrice);
+      })
+      .filter((fc): fc is number => fc != null && Number.isFinite(fc) && fc >= 0 && fc <= 120);
     const avgFc = foodCosts.length > 0 ? foodCosts.reduce((s, v) => s + v, 0) / foodCosts.length : 0;
     const highCostCount = foodCosts.filter((fc) => fc > 35).length;
     return { total: catalogItems.length, fixed, recipe, none, avgFc, highCostCount };
@@ -678,6 +655,7 @@ export function EscandalloPanel() {
                 const salePrice = Number(product.unitPrice) || 0;
                 const fc = foodCostPercent(unitCost, salePrice);
                 const margin = marginPercent(unitCost, salePrice);
+                const marginTone = escandalloMarginTone(unitCost, salePrice);
                 const recipeLines = readProductRecipeLines(product);
                 const isExpanded = expandedId === product._id;
 
@@ -709,7 +687,21 @@ export function EscandalloPanel() {
                         {salePrice > 0 ? formatMoney(salePrice) : '—'}
                       </div>
                       <div className="hidden md:block text-right text-sm font-semibold tabular-nums">
-                        {margin != null ? `${margin.toFixed(1)}%` : '—'}
+                        {margin != null ? (
+                          <span
+                            className={
+                              marginTone === 'negative'
+                                ? 'text-red-600'
+                                : marginTone === 'warn'
+                                  ? 'text-amber-600'
+                                  : 'text-emerald-600'
+                            }
+                          >
+                            {formatEscandalloMargin(unitCost, salePrice)}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
                       </div>
                       <div className="hidden md:block text-right">
                         <span
@@ -721,7 +713,7 @@ export function EscandalloPanel() {
                                 : 'text-emerald-600'
                           }`}
                         >
-                          {fc != null ? `${fc.toFixed(1)}%` : '—'}
+                          {formatEscandalloFoodCost(unitCost, salePrice)}
                         </span>
                       </div>
                       <div className="hidden md:flex justify-end">
@@ -754,12 +746,17 @@ export function EscandalloPanel() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {recipeLines.map((line) => {
-                                    const ing = ingredientsById.get(line.storeIngredientId);
+                                  {recipeLines.map((line, lineIdx) => {
+                                    const ing = line.storeIngredientId
+                                      ? ingredientsById.get(line.storeIngredientId)
+                                      : undefined;
                                     const unit = ing ? resolveStoreIngredientBaseCost(ing, brands) : 0;
                                     const total = unit * line.quantity;
                                     return (
-                                      <tr key={`${line.storeIngredientId}-${line.quantity}`} className="border-t border-gray-100 dark:border-gray-800">
+                                      <tr
+                                        key={`${line.storeIngredientId || line.name}-${lineIdx}`}
+                                        className="border-t border-gray-100 dark:border-gray-800"
+                                      >
                                         <td className="px-3 py-2">{line.name}</td>
                                         <td className="px-3 py-2 text-right tabular-nums">
                                           {line.quantity} {line.unit}

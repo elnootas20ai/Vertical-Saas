@@ -115,10 +115,38 @@ describe('catalogBusinessScope', () => {
     expect(deduped.find((i) => i.name === 'Napolitana')?._id).toBe('new');
   });
 
+  it('dedupeCatalogItemsForDisplay colapsa legacy sin SKU y reimport VT', () => {
+    const items = [
+      {
+        _id: 'legacy',
+        name: 'Margarita',
+        category: 'Pizzas',
+        sku: '',
+        customFields: { costingType: 'fixed' },
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      },
+      {
+        _id: 'imported',
+        name: 'Margarita',
+        category: 'Pizzas',
+        sku: 'VT-pizzas-margarita',
+        business_id: 'biz-a',
+        customFields: {
+          costingType: 'recipe',
+          costingRecipe: [{ storeIngredientId: 'a', name: 'Masa', quantity: 1, unit: 'ud' }],
+        },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+    const deduped = dedupeCatalogItemsForDisplay(items, 'biz-a');
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0]._id).toBe('imported');
+  });
+
   it('expandCatalogItemsForDeletion incluye duplicados legacy con la misma identidad', () => {
     const raw = [
       { _id: '1', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'B1' },
-      { _id: '2', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'B1' },
+      { _id: '2', module: 'catalog', name: 'Burger', category: 'Burgers', sku: 'VT-burgers-burger' },
       { _id: '3', module: 'stock', name: 'Carne', category: 'Ingredientes' },
     ];
     const expanded = expandCatalogItemsForDeletion([raw[0]], raw);

@@ -4,6 +4,7 @@ import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
 import { isDeliveryBusinessType, normalizeBusinessScopeId } from './deliverySetup';
 import {
   catalogImportIdentityKey,
+  catalogLooseIdentityKey,
 } from '../../../shared/catalog/catalogItemIdentity.js';
 
 export type CatalogBusinessScopeOptions = {
@@ -101,6 +102,13 @@ export function catalogItemIdentityKey(
   return catalogImportIdentityKey(item);
 }
 
+/** Clave laxa (nombre + categoría) tras filtrar por empresa activa. */
+export function catalogItemLooseIdentityKey(
+  item: Pick<CatalogItem, 'name' | 'category' | 'module'>,
+): string {
+  return catalogLooseIdentityKey(item);
+}
+
 function isCatalogMenuItem(item: CatalogItem): boolean {
   return String(item.module || 'catalog') === 'catalog';
 }
@@ -110,12 +118,12 @@ export function expandCatalogItemsForDeletion(
   selected: CatalogItem[],
   allItems: CatalogItem[],
 ): CatalogItem[] {
-  const keys = new Set(selected.map((item) => catalogItemIdentityKey(item)));
+  const keys = new Set(selected.map((item) => catalogItemLooseIdentityKey(item)));
   const byId = new Map<string, CatalogItem>();
 
   for (const item of allItems) {
     if (!isCatalogMenuItem(item)) continue;
-    if (keys.has(catalogItemIdentityKey(item))) {
+    if (keys.has(catalogItemLooseIdentityKey(item))) {
       byId.set(item._id, item);
     }
   }
@@ -152,7 +160,7 @@ export function dedupeCatalogItemsForDisplay(
 ): CatalogItem[] {
   const bestByKey = new Map<string, CatalogItem>();
   for (const item of items) {
-    const key = catalogItemIdentityKey(item);
+    const key = catalogItemLooseIdentityKey(item);
     const prev = bestByKey.get(key);
     if (!prev || catalogItemDisplayRank(item, businessId) > catalogItemDisplayRank(prev, businessId)) {
       bestByKey.set(key, item);

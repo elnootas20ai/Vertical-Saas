@@ -551,6 +551,25 @@ export async function bulkCreateCatalogItemsRequest(userId: string, items: Parti
   );
 }
 
+export interface BulkPatchCatalogResult {
+  ok: boolean;
+  updated: number;
+  errors: number;
+  items: CatalogItem[];
+  errorDetails?: { index: number; name?: string; error: string }[];
+}
+
+export async function bulkPatchCatalogItemsRequest(
+  userId: string,
+  items: CatalogItem[],
+): Promise<BulkPatchCatalogResult> {
+  const id = normalizeUserId(userId);
+  return request<BulkPatchCatalogResult>(
+    `/api/delivery/catalog/${encodeURIComponent(id)}/bulk-patch`,
+    { method: 'POST', body: JSON.stringify({ items }) },
+  );
+}
+
 export interface BulkDeleteCatalogResult {
   ok: boolean;
   deleted: number;

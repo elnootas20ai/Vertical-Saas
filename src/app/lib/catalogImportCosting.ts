@@ -26,6 +26,7 @@ type CostingStoreIngredient = {
   name: string;
   brandIds?: string[];
   baseCost?: number;
+  role?: string;
 };
 
 type ComboSlotKind = 'main' | 'drink' | 'dessert' | 'side' | 'other';
@@ -51,13 +52,16 @@ const PIZZA_QUANTITY_RULES: QuantityRule[] = [
 const BURGER_QUANTITY_RULES: QuantityRule[] = [
   { patterns: ['carne', 'burger', 'vacuno', 'ternera', 'hamburguesa', 'pollo'], quantity: 0.18, unit: 'kg' },
   { patterns: ['pan', 'bollo', 'brioche'], quantity: 1, unit: 'ud' },
-  { patterns: ['queso', 'cheddar'], quantity: 1, unit: 'ud' },
-  { patterns: ['bacon', 'panceta'], quantity: 2, unit: 'ud' },
+  { patterns: ['queso', 'cheddar'], quantity: 0.02, unit: 'kg' },
+  { patterns: ['bacon', 'panceta'], quantity: 0.035, unit: 'kg' },
   { patterns: ['huevo'], quantity: 1, unit: 'ud' },
   { patterns: ['salsa', 'mayonesa', 'ketchup', 'mostaza'], quantity: 0.02, unit: 'kg' },
   { patterns: ['lechuga', 'tomate', 'cebolla', 'pepinillo', 'pickle'], quantity: 0.03, unit: 'kg' },
   { patterns: ['patata', 'frita'], quantity: 0.12, unit: 'kg' },
 ];
+
+/** Máximo de toppings del Excel en escandallo auto (evita costes absurdos). */
+const MAX_EXCEL_TOPPING_LINES = 8;
 
 const DEFAULT_TOPPING_QTY = { pizza: { quantity: 0.045, unit: 'kg' }, burger: { quantity: 0.03, unit: 'kg' } };
 
@@ -292,12 +296,16 @@ export function findStoreIngredientForCosting(
   if (!folded) return undefined;
 
   const scoped = ingredients.filter((ing) => brandScopeMatch(ing, brandIds));
-  const hit = pickBestIngredientNameMatch(name, scoped, brandIds);
+  const preferNonExtra = (list: CostingStoreIngredient[]) => {
+    const base = list.filter((ing) => String(ing.role || '').trim() !== 'extra');
+    return base.length > 0 ? base : list;
+  };
+  const hit = pickBestIngredientNameMatch(name, preferNonExtra(scoped), brandIds);
   if (hit) return hit;
   if (brandIds.length === 0) return undefined;
   return pickBestIngredientNameMatch(
     name,
-    ingredients.filter((ing) => brandScopeMatch(ing, [])),
+    preferNonExtra(ingredients.filter((ing) => brandScopeMatch(ing, []))),
     [],
   );
 }
@@ -344,7 +352,7 @@ function buildRecipeLinesFromIngredients(
   if (parsed.length === 0 && !useVertialDefaults) return [];
 
   const brandIds = (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean);
-  const names = enrichRecipeIngredientNames(parsed, lineKind);
+  const names = limitRecipeIngredientNames(enrichRecipeIngredientNames(parsed, lineKind), lineKind);
   const lines: ProductRecipeLine[] = [];
   const usedIds = new Set<string>();
 
@@ -436,6 +444,49 @@ function buildFullRecipeLines(
   return [...base, ...packaging];
 }
 
+function isBaseRecipeIngredientName(name: string, lineKind: DeliveryBrandLineKindId | 'generic'): boolean {
+  const folded = foldName(name);
+  if (lineKind === 'pizza' || lineKind === 'generic') {
+    return /masa|harina|base|salsa|tomate|mozzarella|queso/.test(folded);
+  }
+  if (lineKind === 'burger_fastfood') {
+    return /pan|bollo|brioche|carne|burger|vacuno|ternera|pollo/.test(folded);
+  }
+  return false;
+}
+
+function limitRecipeIngredientNames(
+  names: string[],
+  lineKind: DeliveryBrandLineKindId | 'generic',
+): string[] {
+  const bases: string[] = [];
+  const toppings: string[] = [];
+  for (const name of names) {
+    if (isBaseRecipeIngredientName(name, lineKind)) bases.push(name);
+    else toppings.push(name);
+  }
+  return [...bases, ...toppings.slice(0, MAX_EXCEL_TOPPING_LINES)];
+}
+
+/** Techo de coste auto: no superar ~42% del PVP ni mucho el fallback de categoría. */
+export function capVertialAutoCostEstimate(
+  item: Pick<CatalogItem, 'unitPrice' | 'category' | 'name'>,
+  computedCost: number,
+  lineKind: DeliveryBrandLineKindId | 'generic',
+): number {
+  const sale = Number(item.unitPrice) || 0;
+  const fallback = resolveCategoryFixedFallback(item, lineKind) ?? computedCost;
+  if (!(computedCost > 0)) return fallback;
+
+  const ceiling =
+    sale > 0
+      ? Math.min(sale * 0.42, Math.max(fallback, sale * 0.12) * 1.35)
+      : fallback * 1.35;
+
+  if (computedCost <= ceiling) return roundMoney(computedCost);
+  return roundMoney(Math.max(fallback, Math.min(ceiling, computedCost * 0.65)));
+}
+
 function resolveCategoryFixedFallback(
   item: Pick<CatalogItem, 'category' | 'name'>,
   lineKind: DeliveryBrandLineKindId | 'generic',
@@ -523,16 +574,17 @@ function applyHalfHalfCosting(
   const ingredientsById = storeIngredientsById(storeIngredients);
 
   if (recipeLines.length > 0) {
-    return {
-      item: withProductCosting(
-        item,
-        { costingType: 'recipe', recipeLines },
-        ingredientsById,
-        brands,
-        inventoryContext?.costByCatalogId,
-      ),
-      mode: 'recipe',
-    };
+    const draft = withProductCosting(
+      item,
+      { costingType: 'recipe', recipeLines },
+      ingredientsById,
+      brands,
+      inventoryContext?.costByCatalogId,
+    );
+    const cappedCost = capVertialAutoCostEstimate(item, Number(draft.costPrice) || 0, lineKind);
+    const next =
+      cappedCost !== draft.costPrice ? { ...draft, costPrice: cappedCost } : draft;
+    return { item: next, mode: 'recipe' };
   }
 
   const fixedCost = resolveReferencePizzaCost(catalog, ingredientsById, brands);
@@ -689,16 +741,19 @@ export function applyVertialAutoCostingToCatalogItem(
 
   if (recipeLines.length > 0) {
     const ingredientsById = storeIngredientsById(storeIngredients);
-    return {
-      item: withProductCosting(
-        item,
-        { costingType: 'recipe', recipeLines },
-        ingredientsById,
-        brands,
-        inventoryContext?.costByCatalogId,
-      ),
-      mode: 'recipe',
-    };
+    const draft = withProductCosting(
+      item,
+      { costingType: 'recipe', recipeLines },
+      ingredientsById,
+      brands,
+      inventoryContext?.costByCatalogId,
+    );
+    const cappedCost = capVertialAutoCostEstimate(item, Number(draft.costPrice) || 0, lineKind);
+    const next =
+      cappedCost !== draft.costPrice
+        ? { ...draft, costPrice: cappedCost }
+        : draft;
+    return { item: next, mode: 'recipe' };
   }
 
   const fallback = resolveCategoryFixedFallback(item, lineKind);

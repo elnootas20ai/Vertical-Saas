@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 import {
   calculateRecipeTotalCost,
   normalizeProductRecipeLines,
+  marginPercent,
   productCostingStatus,
   resolveStoreIngredientBaseCost,
+  formatEscandalloFoodCost,
+  formatEscandalloMargin,
+  escandalloMarginTone,
   storeIngredientsById,
   withProductCosting,
 } from '../src/app/lib/catalogCosting.ts';
@@ -59,6 +63,20 @@ test('withProductCosting recipe calculates costPrice', () => {
   );
   assert.equal(next.costPrice, 1.5);
   assert.equal(productCostingStatus(next), 'recipe');
+});
+
+test('resolveStoreIngredientBaseCost ignores TPV extra price for escandallo', () => {
+  assert.equal(
+    resolveStoreIngredientBaseCost({ name: 'Mozzarella', baseCost: 2.5, role: 'extra' }),
+    5.5,
+  );
+});
+
+test('formatEscandalloMargin and food cost helpers', () => {
+  assert.equal(formatEscandalloMargin(2, 10), '80.0%');
+  assert.equal(formatEscandalloMargin(12, 10), '-20.0%');
+  assert.equal(formatEscandalloFoodCost(4.5, 10), '45.0%');
+  assert.equal(escandalloMarginTone(12, 10), 'negative');
 });
 
 test('normalizeProductRecipeLines skips invalid rows', () => {

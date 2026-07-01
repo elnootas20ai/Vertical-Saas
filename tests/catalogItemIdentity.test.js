@@ -2,7 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildStableImportCatalogSku,
+  buildCatalogImportIndexes,
   catalogImportIdentityKey,
+  catalogLooseIdentityKey,
+  resolveExistingCatalogItemForImport,
 } from '../shared/catalog/catalogItemIdentity.js';
 
 describe('catalogItemIdentity', () => {
@@ -29,5 +32,42 @@ describe('catalogItemIdentity', () => {
     expect(catalogImportIdentityKey(a)).toBe(catalogImportIdentityKey(b));
     expect(catalogImportIdentityKey(a)).not.toBe(catalogImportIdentityKey(c));
     expect(catalogImportIdentityKey(a)).toBe(catalogImportIdentityKey({ ...c, sku: 'PIZ-001' }));
+  });
+
+  it('catalogLooseIdentityKey colapsa legacy sin empresa y reimport con SKU VT', () => {
+    const legacy = {
+      module: 'catalog',
+      name: 'Margarita',
+      category: 'Pizzas',
+      sku: '',
+    };
+    const imported = {
+      module: 'catalog',
+      business_id: 'biz-a',
+      name: 'Margarita',
+      category: 'Pizzas',
+      sku: 'VT-pizzas-margarita',
+    };
+    expect(catalogLooseIdentityKey(legacy)).toBe(catalogLooseIdentityKey(imported));
+    expect(catalogImportIdentityKey(legacy)).not.toBe(catalogImportIdentityKey(imported));
+  });
+
+  it('resolveExistingCatalogItemForImport encuentra legacy por nombre+categoría', () => {
+    const legacy = {
+      _id: 'old',
+      module: 'catalog',
+      name: 'Margarita',
+      category: 'Pizzas',
+      sku: '',
+    };
+    const imported = {
+      module: 'catalog',
+      business_id: 'biz-a',
+      name: 'Margarita',
+      category: 'Pizzas',
+      sku: 'VT-pizzas-margarita',
+    };
+    const indexes = buildCatalogImportIndexes([legacy]);
+    expect(resolveExistingCatalogItemForImport(imported, indexes)?._id).toBe('old');
   });
 });

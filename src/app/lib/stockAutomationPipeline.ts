@@ -1,5 +1,5 @@
 import type { CatalogItem } from './deliveryApi';
-import { listCatalogItemsRequest } from './deliveryApi';
+import { bulkPatchCatalogItemsRequest, listCatalogItemsRequest } from './deliveryApi';
 import { filterStockInventoryItems } from './stockInventoryScope';
 import {
   applyVertialAutoCostingBatch,
@@ -28,8 +28,8 @@ export type StockAutomationPipelineOptions = {
   catalogItems?: CatalogItem[];
   costingTargets?: CatalogItem[];
   updateCatalogItem: (item: CatalogItem) => Promise<CatalogItem>;
-  /** inventory = solo stock (rápido). full = escandallo + recetas CouchDB. */
-  mode?: 'inventory' | 'full';
+  /** inventory = solo stock. costing = escandallo sin inventario/recetas. full = todo. */
+  mode?: 'inventory' | 'costing' | 'full';
   /** Tras import: convierte coste fijo auto de pizza/burger en escandallo Vertial. */
   upgradeAutoFixedFood?: boolean;
   onAfterInventory?: () => void | Promise<void>;
@@ -53,27 +53,31 @@ export async function runVertialStockAutomationPipeline(
   if (!uid) return EMPTY_RESULT;
 
   const mode = options.mode ?? 'full';
-
   const fullCatalog =
     options.catalogItems ?? (await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]));
 
-  const inventory = await syncInventoryCatalogFromSources(uid, {
-    businessType: options.businessType,
-    businessId: options.businessId,
-    storeIngredients: options.storeIngredients,
-    catalogItems: fullCatalog,
-    brands: options.brands,
-  });
-
-  if (options.onAfterInventory) {
-    await options.onAfterInventory();
+  let inventory = { created: 0, updated: 0, skipped: 0, candidates: 0 };
+  if (mode !== 'costing') {
+    inventory = await syncInventoryCatalogFromSources(uid, {
+      businessType: options.businessType,
+      businessId: options.businessId,
+      storeIngredients: options.storeIngredients,
+      catalogItems: fullCatalog,
+      brands: options.brands,
+    });
+    if (options.onAfterInventory) {
+      await options.onAfterInventory();
+    }
   }
 
   if (mode === 'inventory') {
     return { ...EMPTY_RESULT, inventory };
   }
 
-  const refreshedCatalog = await listCatalogItemsRequest(uid).catch(() => fullCatalog);
+  const refreshedCatalog =
+    mode === 'costing'
+      ? fullCatalog
+      : await listCatalogItemsRequest(uid).catch(() => fullCatalog);
   const inventoryItems = pickInventoryForRecipeSync(refreshedCatalog);
   const storeIngredients = prepareStoreIngredientsForImportCosting(
     options.storeIngredients,
@@ -95,17 +99,36 @@ export async function runVertialStockAutomationPipeline(
     },
   );
   const costingSummary = summarizeAutoCostingResults(costingResults);
+  const itemsToPersist = costingResults
+    .filter((result) => result.mode !== 'skipped')
+    .map((result) => result.item);
 
   let costingUpdated = 0;
   let costingFailed = 0;
-  for (const result of costingResults) {
-    if (result.mode === 'skipped') continue;
+  if (itemsToPersist.length > 0) {
     try {
-      await options.updateCatalogItem(result.item);
-      costingUpdated += 1;
+      const bulk = await bulkPatchCatalogItemsRequest(uid, itemsToPersist);
+      costingUpdated = bulk.updated;
+      costingFailed = bulk.errors;
     } catch {
-      costingFailed += 1;
+      for (const result of costingResults) {
+        if (result.mode === 'skipped') continue;
+        try {
+          await options.updateCatalogItem(result.item);
+          costingUpdated += 1;
+        } catch {
+          costingFailed += 1;
+        }
+      }
     }
+  }
+
+  if (mode === 'costing') {
+    return {
+      inventory,
+      costing: { updated: costingUpdated, ...costingSummary, failed: costingFailed },
+      recipes: { created: 0, updated: 0, skipped: 0 },
+    };
   }
 
   const catalogAfterCosting = await listCatalogItemsRequest(uid).catch(() => refreshedCatalog);
