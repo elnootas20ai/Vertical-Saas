@@ -47,6 +47,18 @@ describe('catalogBusinessScope', () => {
     expect(scoped.map((i) => i._id).sort()).toEqual(['b1', 'c1', 'p1']);
   });
 
+  it('oculta catálogo delivery en empresa events', () => {
+    const items = [
+      { _id: 'p1', name: 'Napolitana', category: 'Pizzas', vertical: 'delivery', brandIds: ['brand-a'] },
+      { _id: 'e1', name: 'Menú catering', category: 'Servicios', vertical: 'events' },
+    ];
+    const scoped = filterCatalogItemsForBusinessScope(items, 'biz-events', [], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'events',
+    });
+    expect(scoped.map((i) => i._id)).toEqual(['e1']);
+  });
+
   it('no mezcla legacy sin business_id entre varias empresas', () => {
     const items = [{ _id: 'beb', name: 'Coca-Cola', category: 'Bebidas', brandIds: [] }];
     const multi = filterCatalogItemsForBusinessScope(items, 'biz-a', [brandA], {

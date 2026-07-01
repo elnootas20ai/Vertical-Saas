@@ -822,10 +822,14 @@ function SidebarInner({
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => {
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
     const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
+    let itemIds = override ? [...override] : [...g.itemIds];
+    if (g.id === 'catalogProviders' && vertical !== 'delivery') {
+      itemIds = itemIds.filter((id) => id !== 'costing');
+    }
     return {
       id: g.id,
       icon: isCompraventaCommercial ? null : g.icon,
-      itemIds: override ? [...override] : [...g.itemIds],
+      itemIds,
       label: g.id === 'equipo'
         ? 'RRHH'
         : isCompraventaCommercial

@@ -32,22 +32,13 @@ function isDeliveryBusinessType(businessType?: string | null): boolean {
 }
 
 /**
- * Catálogo TPV delivery: si el selector global apunta a otra vertical (p. ej. limpieza),
- * usar la empresa delivery de la cuenta (Modomio) donde viven marcas y productos.
+ * Catálogo TPV: usa la empresa del selector global (sin saltar a otra vertical).
  */
 export function resolveTpvCatalogBusinessId(
   scopeBusinessId: string,
-  businesses: BusinessScopeRef[],
+  _businesses: BusinessScopeRef[],
 ): string {
-  const bid = businessScopeIdFromRawId(scopeBusinessId);
-  const match = businesses.find(
-    (b) => businessScopeIdFromRawId(b.business_id || b.id) === bid,
-  );
-  if (match && isDeliveryBusinessType(match.businessType)) return bid;
-
-  const delivery = businesses.find((b) => isDeliveryBusinessType(b.businessType));
-  const deliveryId = businessScopeIdFromRawId(delivery?.business_id || delivery?.id);
-  return deliveryId || bid;
+  return businessScopeIdFromRawId(scopeBusinessId);
 }
 
 /** Si el selector global no es delivery, devolver el id delivery de la cuenta (TPV / catálogo). */

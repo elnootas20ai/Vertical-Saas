@@ -1,7 +1,7 @@
 import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
-import { normalizeBusinessScopeId } from './deliverySetup';
+import { isDeliveryBusinessType, normalizeBusinessScopeId } from './deliverySetup';
 
 export type CatalogBusinessScopeOptions = {
   /** Número de empresas en la cuenta (evita mezclar legacy sin business_id). */
@@ -17,7 +17,11 @@ export function readCatalogItemBusinessId(
   return normalizeBusinessScopeId(String(raw || ''));
 }
 
-/** Artículos visibles solo para la empresa activa (marca / business_id). */
+export function readCatalogItemVertical(item: Pick<CatalogItem, 'vertical'>): string {
+  return String(item.vertical || '').trim().toLowerCase();
+}
+
+/** Artículos visibles solo para la empresa activa (marca / business_id / vertical). */
 export function catalogItemBelongsToBusinessScope(
   item: CatalogItem,
   businessId: string,
@@ -27,35 +31,45 @@ export function catalogItemBelongsToBusinessScope(
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return false;
 
+  const activeType = String(options?.activeBusinessType || '').trim().toLowerCase();
+  const itemVertical = readCatalogItemVertical(item);
   const itemBusinessId = readCatalogItemBusinessId(item);
-  const itemBrandIds = (item.brandIds ?? [])
-    .map((id) => String(id).trim())
-    .filter(Boolean);
+  const accountN = options?.accountBusinessCount;
+  const multiAccount = accountN !== undefined && accountN >= 2;
+
+  if (itemVertical === 'delivery' && !isDeliveryBusinessType(activeType)) {
+    return false;
+  }
+  if (isDeliveryBusinessType(activeType) && itemVertical && itemVertical !== 'delivery') {
+    return false;
+  }
 
   if (itemBusinessId) {
     return itemBusinessId === bid;
   }
 
-  if (itemBrandIds.length > 0) {
-    return itemBrandIds.some((id) => brandIds.has(id));
+  if (itemVertical && activeType && itemVertical === activeType) {
+    return true;
+  }
+
+  const itemBrandIds = (item.brandIds ?? [])
+    .map((id) => String(id).trim())
+    .filter(Boolean);
+  if (itemBrandIds.some((id) => brandIds.has(id))) {
+    return true;
   }
 
   const universalCategory = shouldClearBrandForCategory(String(item.category || ''));
   if (universalCategory) {
-    if (itemBusinessId) return itemBusinessId === bid;
-    const accountN = options?.accountBusinessCount;
-    if (accountN !== undefined && accountN >= 2) {
-      return String(options?.activeBusinessType || '').trim() === 'delivery';
-    }
+    if (activeType && !isDeliveryBusinessType(activeType)) return false;
+    if (multiAccount) return isDeliveryBusinessType(activeType);
     return brandIds.size > 0;
   }
 
-  const accountN = options?.accountBusinessCount;
-  if (accountN !== undefined && accountN >= 2) {
+  if (multiAccount) {
     return false;
   }
 
-  // Legacy sin business_id ni línea: solo cuenta con una empresa y marcas configuradas.
   return brandIds.size > 0;
 }
 

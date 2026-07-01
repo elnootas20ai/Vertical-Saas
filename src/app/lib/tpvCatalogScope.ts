@@ -89,16 +89,6 @@ export function filterTpvCatalogItems(
     options,
   );
 
-  if (items.length > 0 || rawItems.length === 0 || brands.length === 0) {
-    return items;
-  }
-
-  // Último recurso: productos con brandIds conocidos (legacy sin business_id).
-  const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
-  items = rawItems.filter((item) =>
-    (item.brandIds ?? []).some((id) => brandIds.has(String(id).trim())),
-  );
-
   return items;
 }
 

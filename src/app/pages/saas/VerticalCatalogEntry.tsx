@@ -1,14 +1,20 @@
 import { Navigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
-import { CatalogPage } from './DeliveryCatalog';
+import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { CatalogPage as DeliveryCatalogPage } from './DeliveryCatalog';
+import { CatalogPage as GenericCatalogPage } from './CatalogPage';
 
-/** Catálogo: delivery usa DeliveryCatalog; compraventa va a stock vehículos. */
+/** Catálogo: delivery → módulo TPV/pizzas; compraventa → vehículos; resto → catálogo genérico. */
 export function VerticalCatalogEntry() {
   const { currentBusiness } = useBusiness();
-  if (currentBusiness?.businessType === 'carDealership') {
+  const businessType = currentBusiness?.businessType;
+  if (businessType === 'carDealership') {
     return <Navigate to="/saas/vehicles" replace />;
   }
-  return <CatalogPage />;
+  if (isDeliveryBusinessType(businessType)) {
+    return <DeliveryCatalogPage />;
+  }
+  return <GenericCatalogPage />;
 }
 
 export function VerticalArticlesRedirect() {

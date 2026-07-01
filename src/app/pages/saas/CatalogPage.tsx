@@ -8,6 +8,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
 import {
+  dedupeCatalogItemsForDisplay,
+  filterCatalogItemsForBusinessScope,
+} from '../../lib/catalogBusinessScope';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
   updateCatalogItemRequest,
@@ -840,7 +845,9 @@ function CreateItemModal({
 
 export function CatalogPage() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness);
+  const accountBusinessCount = businesses.length;
   const { createNotification } = useApp();
   const navigate = useNavigate();
   const { config: verticalConfig, businessType, isLoading: vcLoading } = useVerticalCatalog();
@@ -1102,18 +1109,28 @@ export function CatalogPage() {
       const promises: Promise<any>[] = [
         listCatalogItemsRequest(user.id, 'catalog'),
       ];
-      if (currentBusiness?.business_id) {
-        promises.push(listBrandsRequest(currentBusiness.business_id));
+      if (businessId) {
+        promises.push(listBrandsRequest(businessId));
       }
       const [items, brs] = await Promise.all(promises);
-      setCatalogItems(items);
-      if (brs) setBrands(brs);
+      const lineBrands = Array.isArray(brs) ? brs : [];
+      const scoped = businessId
+        ? dedupeCatalogItemsForDisplay(
+            filterCatalogItemsForBusinessScope(items, businessId, lineBrands, {
+              accountBusinessCount,
+              activeBusinessType: currentBusiness?.businessType,
+            }),
+            businessId,
+          )
+        : [];
+      setCatalogItems(scoped);
+      if (lineBrands.length > 0) setBrands(lineBrands);
     } catch {
       toast.error('Error al cargar los datos del catálogo');
     } finally {
       setLoading(false);
     }
-  }, [user?.id, currentBusiness?.business_id]);
+  }, [user?.id, businessId, accountBusinessCount, currentBusiness?.businessType]);
 
   const handleCreateBrand = useCallback(async (name: string): Promise<Brand> => {
     if (!currentBusiness?.business_id) throw new Error('Sin empresa');
