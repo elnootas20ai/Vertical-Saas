@@ -7,6 +7,7 @@ import { mapAcquisitionToCompra, buildVehicleLabel } from '../../../../lib/compr
 import { ComprasListPanel } from './ComprasListPanel';
 import { ComprasDetailPanel } from './ComprasDetailPanel';
 import { ComprasNewPurchaseButton } from './ComprasDetailActionBar';
+import { ComprasNewPurchaseWizard } from './ComprasNewPurchaseWizard';
 import type { CompraListItem } from './comprasListData';
 
 export function ComprasModuleShell() {
@@ -17,6 +18,7 @@ export function ComprasModuleShell() {
   const [purchases, setPurchases] = useState<CompraListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const vehicleLabelById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -59,7 +61,7 @@ export function ComprasModuleShell() {
             Registro y seguimiento de compras de vehículos
           </p>
         </div>
-        <ComprasNewPurchaseButton disabled={loading} />
+        <ComprasNewPurchaseButton disabled={loading} onClick={() => setWizardOpen(true)} />
       </div>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
@@ -70,6 +72,15 @@ export function ComprasModuleShell() {
         />
         <ComprasDetailPanel purchase={selectedPurchase} />
       </div>
+
+      <ComprasNewPurchaseWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreated={async (acquisitionId) => {
+          await loadPurchases();
+          setSelectedId(acquisitionId);
+        }}
+      />
     </div>
   );
 }

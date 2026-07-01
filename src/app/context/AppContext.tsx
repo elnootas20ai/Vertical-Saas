@@ -13,6 +13,7 @@ import {
   createVehicleRequest,
   deleteVehicleRequest,
   archiveVehicleRequest,
+  restoreVehicleRequest,
   listVehiclesRequest,
   updateVehicleRequest,
 } from '../lib/vehicleApi';
@@ -208,7 +209,7 @@ export interface Vehicle {
   supplierName?: string;
   tradeInId?: string;
   acquisitionId?: string;
-  status: 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido';
+  status: 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido' | 'entregado';
   location?: string;
   daysInStock: number;
   images?: string[];
@@ -648,7 +649,9 @@ export interface AppContextType {
   addVehiclesBulk: (vehicles: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>[]) => Promise<Vehicle[]>;
   updateVehicle: (id: string, updates: Partial<Vehicle>, priceChangeReason?: string, priceChangeReasonCategory?: PriceChangeReasonCategory) => Promise<Vehicle | void>;
   syncVehicle: (vehicle: Vehicle) => void;
+  mergeVehicles: (vehicles: Vehicle[]) => void;
   archiveVehicle: (id: string) => Promise<Vehicle | void>;
+  restoreVehicle: (id: string) => Promise<Vehicle | void>;
   deleteVehicle: (id: string) => Promise<void>;
   addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'status'>) => Promise<Lead | void>;
   updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
@@ -730,7 +733,9 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       addVehiclesBulk: async () => [],
       updateVehicle: async () => {},
       syncVehicle: () => {},
+      mergeVehicles: () => {},
       archiveVehicle: async () => {},
+      restoreVehicle: async () => {},
       deleteVehicle: async () => {},
       addLead: async () => undefined, updateLead: async () => {}, deleteLead: async () => {},
       refreshLeads: async () => {},
@@ -1903,6 +1908,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setVehicles((prev) => prev.map((v) => (v.id === nextVehicle.id ? nextVehicle : v)));
   };
 
+  const mergeVehicles = (incoming: Vehicle[]) => {
+    const nextItems = incoming.map(deserializeVehicle);
+    setVehicles((prev) => {
+      const byId = new Map(prev.map((v) => [v.id, v]));
+      for (const item of nextItems) byId.set(item.id, item);
+      return Array.from(byId.values());
+    });
+  };
+
   const archiveVehicle = async (id: string) => {
     if (!authUser?.user_id) {
       setVehicles(prev => prev.map(v => v.id === id ? { ...v, archived: true, archivedAt: new Date().toISOString() } : v));
@@ -1910,6 +1924,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     const response = await archiveVehicleRequest(authUser.user_id, id);
+    if (response.vehicle) {
+      const nextVehicle = deserializeVehicle(response.vehicle);
+      setVehicles(prev => prev.map(v => v.id === id ? nextVehicle : v));
+      return nextVehicle;
+    }
+  };
+
+  const restoreVehicle = async (id: string) => {
+    if (!authUser?.user_id) {
+      setVehicles(prev => prev.map(v => v.id === id
+        ? { ...v, archived: false, archivedAt: undefined, status: 'available' as Vehicle['status'] }
+        : v));
+      return;
+    }
+
+    const response = await restoreVehicleRequest(authUser.user_id, id);
     if (response.vehicle) {
       const nextVehicle = deserializeVehicle(response.vehicle);
       setVehicles(prev => prev.map(v => v.id === id ? nextVehicle : v));
@@ -2479,7 +2509,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDevExtraBrandSlots,
     setDevExtraBusinessSlots,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
-    addVehicle, addVehiclesBulk, updateVehicle, syncVehicle, archiveVehicle, deleteVehicle,
+    addVehicle, addVehiclesBulk, updateVehicle, syncVehicle, mergeVehicles, archiveVehicle, restoreVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,
     addClient, updateClient, deleteClient, refreshClients,
     createNotification, markNotificationAsRead, markAllNotificationsAsRead,

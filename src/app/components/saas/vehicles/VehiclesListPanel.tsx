@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   ArrowUpDown,
+  Archive,
   Car,
   Search,
   SlidersHorizontal,
@@ -10,133 +11,130 @@ import { VEHICLE_STATUS_TOKEN, type VehicleStatus } from '../DesignTokens';
 import { VehicleListCard } from './VehicleListCard';
 import {
   VEHICLE_SORT_OPTIONS,
-  vehicleEstimatedMargin,
-  vehicleListStatusLabel,
   type VehicleListItem,
   type VehicleSortKey,
 } from './vehiclesListData';
+import {
+  buildVehicleFilterOptions,
+  countActiveVehicleFilters,
+  countVehiclesByStatus,
+  EMPTY_VEHICLE_LIST_FILTERS,
+  filterAndSortVehicles,
+  vehicleListStatusLabel,
+  type VehicleListFilters,
+} from './vehicleListUtils';
+import { VEHICLE_MODULE_STATUS_OPTIONS } from './vehicleStatusMap';
 
 type VehiclesListPanelProps = {
   vehicles: VehicleListItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  viewMode?: 'active' | 'archived';
+  onViewModeChange?: (mode: 'active' | 'archived') => void;
+  archivedCount?: number;
 };
 
-type StatusFilter = VehicleStatus | 'all';
-type BrandFilter = string;
-type LocationFilter = string;
+const FUEL_FILTER_LABELS: Record<string, string> = {
+  gasolina: 'Gasolina',
+  diesel: 'Diésel',
+  hibrido: 'Híbrido',
+  electrico: 'Eléctrico',
+  glp: 'GLP',
+  otro: 'Otro',
+};
 
-const STATUS_FILTER_OPTIONS: { id: StatusFilter; label: string }[] = [
+const TRANSMISSION_FILTER_LABELS: Record<string, string> = {
+  manual: 'Manual',
+  automatico: 'Automático',
+  semiauto: 'Semiautomático',
+};
+
+const STATUS_FILTER_OPTIONS: { id: VehicleStatus | 'all'; label: string }[] = [
   { id: 'all', label: 'Todos' },
-  { id: 'listo', label: 'Disponible' },
-  { id: 'reservado', label: 'Reservado' },
-  { id: 'preparacion', label: 'En preparación' },
-  { id: 'entrada', label: 'Entrada' },
-  { id: 'vendido', label: 'Vendido' },
+  ...VEHICLE_MODULE_STATUS_OPTIONS.map((o) => ({ id: o.value, label: o.label })),
 ];
 
-function sortVehicles(items: VehicleListItem[], sortKey: VehicleSortKey): VehicleListItem[] {
-  const sorted = [...items];
-  switch (sortKey) {
-    case 'priceAsc':
-      return sorted.sort((a, b) => a.price - b.price);
-    case 'priceDesc':
-      return sorted.sort((a, b) => b.price - a.price);
-    case 'daysAsc':
-      return sorted.sort((a, b) => a.daysInStock - b.daysInStock);
-    case 'daysDesc':
-      return sorted.sort((a, b) => b.daysInStock - a.daysInStock);
-    case 'marginDesc':
-      return sorted.sort((a, b) => vehicleEstimatedMargin(b) - vehicleEstimatedMargin(a));
-    case 'recent':
-    default:
-      return sorted.sort((a, b) => a.daysInStock - b.daysInStock);
-  }
-}
-
-function matchesSearch(vehicle: VehicleListItem, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const haystack = [
-    vehicle.brand,
-    vehicle.model,
-    vehicle.plate,
-    vehicle.location,
-    String(vehicle.year),
-    vehicleListStatusLabel(vehicle.status),
-  ]
-    .join(' ')
-    .toLowerCase();
-  return haystack.includes(q);
-}
+const QUICK_STATUS_CHIPS: VehicleStatus[] = ['listo', 'reservado', 'vendido', 'entregado'];
 
 export function VehiclesListPanel({
   vehicles = [],
   selectedId,
   onSelect,
+  viewMode = 'active',
+  onViewModeChange,
+  archivedCount = 0,
 }: VehiclesListPanelProps) {
   const safeVehicles = vehicles ?? [];
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [brandFilter, setBrandFilter] = useState<BrandFilter>('all');
-  const [locationFilter, setLocationFilter] = useState<LocationFilter>('all');
-  const [sortKey, setSortKey] = useState<VehicleSortKey>('recent');
+  const [filters, setFilters] = useState<VehicleListFilters>(EMPTY_VEHICLE_LIST_FILTERS);
+  const [sortKey, setSortKey] = useState<VehicleSortKey>('createdAt_desc');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const brands = useMemo(
-    () => [...new Set(safeVehicles.map((v) => v.brand))].sort(),
-    [safeVehicles],
-  );
-  const locations = useMemo(
-    () => [...new Set(safeVehicles.map((v) => v.location))].sort(),
-    [safeVehicles],
+  const filterOptions = useMemo(() => buildVehicleFilterOptions(safeVehicles), [safeVehicles]);
+
+  const filteredVehicles = useMemo(
+    () => filterAndSortVehicles(safeVehicles, filters, sortKey),
+    [safeVehicles, filters, sortKey],
   );
 
-  const filteredVehicles = useMemo(() => {
-    const filtered = safeVehicles.filter((vehicle) => {
-      if (!matchesSearch(vehicle, search)) return false;
-      if (statusFilter !== 'all' && vehicle.status !== statusFilter) return false;
-      if (brandFilter !== 'all' && vehicle.brand !== brandFilter) return false;
-      if (locationFilter !== 'all' && vehicle.location !== locationFilter) return false;
-      return true;
-    });
-    return sortVehicles(filtered, sortKey);
-  }, [safeVehicles, search, statusFilter, brandFilter, locationFilter, sortKey]);
+  const statusCounts = useMemo(
+    () => countVehiclesByStatus(safeVehicles, filters.search),
+    [safeVehicles, filters.search],
+  );
 
-  const statusCounts = useMemo(() => {
-    const base = safeVehicles.filter((v) => matchesSearch(v, search));
-    const counts: Partial<Record<VehicleStatus, number>> = {};
-    for (const v of base) {
-      counts[v.status] = (counts[v.status] ?? 0) + 1;
-    }
-    return counts;
-  }, [safeVehicles, search]);
+  const activeFiltersCount = countActiveVehicleFilters(filters);
 
-  const activeFiltersCount =
-    (statusFilter !== 'all' ? 1 : 0)
-    + (brandFilter !== 'all' ? 1 : 0)
-    + (locationFilter !== 'all' ? 1 : 0);
+  const clearFilters = () => setFilters(EMPTY_VEHICLE_LIST_FILTERS);
 
-  const clearFilters = () => {
-    setStatusFilter('all');
-    setBrandFilter('all');
-    setLocationFilter('all');
+  const setFilter = <K extends keyof VehicleListFilters>(key: K, value: VehicleListFilters[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   const isEmptyStock = safeVehicles.length === 0;
   const hasNoResults = !isEmptyStock && filteredVehicles.length === 0;
+  const isArchivedView = viewMode === 'archived';
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-gray-200/80 bg-[#fafafa] dark:border-gray-800 dark:bg-gray-950/60">
       <div className="shrink-0 space-y-3 border-b border-gray-200/80 p-4 dark:border-gray-800">
+        {onViewModeChange ? (
+          <div className="flex rounded-xl border border-gray-200/80 bg-white p-1 dark:border-gray-700 dark:bg-gray-900">
+            <button
+              type="button"
+              onClick={() => onViewModeChange('active')}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                viewMode === 'active'
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+            >
+              Activos
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange('archived')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                viewMode === 'archived'
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+            >
+              <Archive className="h-3.5 w-3.5" />
+              Archivados
+              {archivedCount > 0 ? (
+                <span className="tabular-nums opacity-80">({archivedCount})</span>
+              ) : null}
+            </button>
+          </div>
+        ) : null}
+
         <div className="flex gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
             <input
               type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar marca, modelo, matrícula…"
+              value={filters.search}
+              onChange={(e) => setFilter('search', e.target.value)}
+              placeholder="Matrícula, VIN, marca, modelo…"
               disabled={isEmptyStock}
               className="h-10 w-full rounded-xl border border-gray-200/80 bg-white pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200/80 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:focus:ring-gray-700"
             />
@@ -168,7 +166,7 @@ export function VehiclesListPanel({
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as VehicleSortKey)}
               disabled={isEmptyStock}
-              className="h-8 appearance-none rounded-lg border border-gray-200/80 bg-white py-0 pl-2.5 pr-7 text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              className="h-8 max-w-[200px] appearance-none rounded-lg border border-gray-200/80 bg-white py-0 pl-2.5 pr-7 text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
               aria-label="Ordenar"
             >
               {VEHICLE_SORT_OPTIONS.map((opt) => (
@@ -192,71 +190,85 @@ export function VehiclesListPanel({
           ) : null}
         </div>
 
-        {filtersOpen && !isEmptyStock ? (
+        {filtersOpen && !isEmptyStock && !isArchivedView ? (
           <div className="grid gap-2 rounded-xl border border-gray-200/80 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
             <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Estado
-              </span>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">Estado</span>
               <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                value={filters.status}
+                onChange={(e) => setFilter('status', e.target.value as VehicleStatus | 'all')}
                 className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
               >
                 {STATUS_FILTER_OPTIONS.map((opt) => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
+                  <option key={opt.id} value={opt.id}>{opt.label}</option>
                 ))}
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Marca
-              </span>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">Marca</span>
               <select
-                value={brandFilter}
-                onChange={(e) => setBrandFilter(e.target.value)}
+                value={filters.brand}
+                onChange={(e) => setFilter('brand', e.target.value)}
                 className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
               >
                 <option value="all">Todas</option>
-                {brands.map((brand) => (
-                  <option key={brand} value={brand}>
-                    {brand}
-                  </option>
+                {filterOptions.brands.map((brand) => (
+                  <option key={brand} value={brand}>{brand}</option>
                 ))}
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                Ubicación
-              </span>
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">Combustible</span>
               <select
-                value={locationFilter}
-                onChange={(e) => setLocationFilter(e.target.value)}
+                value={filters.fuelType}
+                onChange={(e) => setFilter('fuelType', e.target.value)}
                 className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
               >
-                <option value="all">Todas</option>
-                {locations.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
-                  </option>
+                <option value="all">Todos</option>
+                {filterOptions.fuelTypes.map((fuel) => (
+                  <option key={fuel} value={fuel}>{FUEL_FILTER_LABELS[fuel] || fuel}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">Cambio</span>
+              <select
+                value={filters.transmission}
+                onChange={(e) => setFilter('transmission', e.target.value)}
+                className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
+              >
+                <option value="all">Todos</option>
+                {filterOptions.transmissions.map((tx) => (
+                  <option key={tx} value={tx}>{TRANSMISSION_FILTER_LABELS[tx] || tx}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">Año</span>
+              <select
+                value={filters.year}
+                onChange={(e) => setFilter('year', e.target.value)}
+                className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
+              >
+                <option value="all">Todos</option>
+                {filterOptions.years.map((year) => (
+                  <option key={year} value={year}>{year}</option>
                 ))}
               </select>
             </label>
           </div>
-        ) : !isEmptyStock ? (
+        ) : !isEmptyStock && !isArchivedView ? (
           <div className="flex flex-wrap gap-1.5">
-            {(['listo', 'reservado', 'preparacion'] as VehicleStatus[]).map((status) => {
+            {QUICK_STATUS_CHIPS.map((status) => {
               const count = statusCounts[status] ?? 0;
               if (count === 0) return null;
               const token = VEHICLE_STATUS_TOKEN[status];
-              const active = statusFilter === status;
+              const active = filters.status === status;
               return (
                 <button
                   key={status}
                   type="button"
-                  onClick={() => setStatusFilter(active ? 'all' : status)}
+                  onClick={() => setFilter('status', active ? 'all' : status)}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                     active
                       ? `${token.badgeBg} ${token.badgeText} border-transparent`
@@ -275,22 +287,9 @@ export function VehiclesListPanel({
           <span className="font-semibold text-gray-900 dark:text-gray-100">
             {filteredVehicles.length}
             <span className="font-normal text-gray-500 dark:text-gray-400">
-              {' '}
-              de {safeVehicles.length} vehículos
+              {' '}de {safeVehicles.length} vehículos
             </span>
           </span>
-          {statusCounts.listo ? (
-            <>
-              <span className="text-gray-300 dark:text-gray-600">·</span>
-              <span>{statusCounts.listo} disponibles</span>
-            </>
-          ) : null}
-          {statusCounts.reservado ? (
-            <>
-              <span className="text-gray-300 dark:text-gray-600">·</span>
-              <span>{statusCounts.reservado} reservados</span>
-            </>
-          ) : null}
         </div>
       </div>
 
@@ -300,9 +299,13 @@ export function VehiclesListPanel({
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
               <Car className="h-6 w-6 text-gray-400" strokeWidth={1.5} />
             </div>
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No hay vehículos</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {isArchivedView ? 'No hay vehículos archivados' : 'No hay vehículos'}
+            </p>
             <p className="mt-1 max-w-[220px] text-xs text-gray-500">
-              Añade el primer vehículo para empezar a gestionar tu stock.
+              {isArchivedView
+                ? 'Los vehículos archivados aparecerán aquí para consulta y restauración.'
+                : 'Añade el primer vehículo para empezar a gestionar tu stock.'}
             </p>
           </div>
         ) : hasNoResults ? (

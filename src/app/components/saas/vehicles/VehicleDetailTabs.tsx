@@ -83,9 +83,11 @@ const TRANSMISSION_LABELS: Record<string, string> = {
 function ResumenTab({
   vehicle,
   onUpdateImages,
+  readOnly,
 }: {
   vehicle: VehicleListItem;
   onUpdateImages: (images: string[]) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const technicalValues: Partial<Record<(typeof TECHNICAL_FIELDS)[number], string>> = {
     Matrícula: vehicle.plate || '—',
@@ -102,7 +104,7 @@ function ResumenTab({
     <div className="space-y-5">
       <VehicleShellBlock className="p-5">
         <h3 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Fotografías</h3>
-        <VehiclePhotoGallery images={vehicle.images} onUpdate={onUpdateImages} />
+        <VehiclePhotoGallery images={vehicle.images} onUpdate={onUpdateImages} disabled={readOnly} />
       </VehicleShellBlock>
 
       <VehicleShellBlock className="p-5">
@@ -167,7 +169,10 @@ function HistorialTab({ vehicle }: { vehicle: VehicleListItem }) {
 
   return (
     <VehicleShellBlock className="p-5">
-      <h3 className="mb-4 text-sm font-semibold text-gray-900 dark:text-gray-100">Historial</h3>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Historial</h3>
+        <span className="text-[11px] text-gray-400">Solo consulta</span>
+      </div>
       <div className="space-y-4">
         {entries.map((entry) => (
           <div
@@ -175,7 +180,10 @@ function HistorialTab({ vehicle }: { vehicle: VehicleListItem }) {
             className="relative border-l-2 border-gray-200 pl-4 dark:border-gray-700"
           >
             <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.label}</p>
-            <p className="text-xs text-gray-500">{formatVehicleHistoryDate(entry.date)}</p>
+            <p className="text-xs text-gray-500">
+              {formatVehicleHistoryDate(entry.date)}
+              {entry.userName ? ` · ${entry.userName}` : ''}
+            </p>
             {entry.note ? (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{entry.note}</p>
             ) : null}
@@ -192,6 +200,7 @@ function VehicleDetailTabPanels({
   onUpdateImages,
   onAddDocument,
   onRemoveDocument,
+  readOnly,
 }: {
   activeTab: VehicleDetailTabId;
   vehicle: VehicleListItem;
@@ -205,10 +214,11 @@ function VehicleDetailTabPanels({
     fileSize: number;
   }) => Promise<void>;
   onRemoveDocument: (documentId: string) => Promise<void>;
+  readOnly?: boolean;
 }) {
   switch (activeTab) {
     case 'resumen':
-      return <ResumenTab vehicle={vehicle} onUpdateImages={onUpdateImages} />;
+      return <ResumenTab vehicle={vehicle} onUpdateImages={onUpdateImages} readOnly={readOnly} />;
     case 'informacion':
       return <InformacionTab vehicle={vehicle} />;
     case 'gastos':
@@ -235,6 +245,7 @@ function VehicleDetailTabPanels({
             documents={vehicle.documents}
             onAdd={onAddDocument}
             onRemove={onRemoveDocument}
+            disabled={readOnly}
           />
         </VehicleShellBlock>
       );
@@ -247,6 +258,7 @@ function VehicleDetailTabPanels({
 
 type VehicleDetailTabsProps = {
   vehicle: VehicleListItem;
+  readOnly?: boolean;
   onUpdateImages: (images: string[]) => Promise<void>;
   onAddDocument: (document: {
     name: string;
@@ -261,6 +273,7 @@ type VehicleDetailTabsProps = {
 
 export function VehicleDetailTabs({
   vehicle,
+  readOnly = false,
   onUpdateImages,
   onAddDocument,
   onRemoveDocument,
@@ -297,6 +310,7 @@ export function VehicleDetailTabs({
         <VehicleDetailTabPanels
           activeTab={activeTab}
           vehicle={vehicle}
+          readOnly={readOnly}
           onUpdateImages={onUpdateImages}
           onAddDocument={onAddDocument}
           onRemoveDocument={onRemoveDocument}

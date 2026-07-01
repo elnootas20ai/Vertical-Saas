@@ -83,8 +83,15 @@ async function request(path: string, init?: RequestInit): Promise<VehiclesEnvelo
   return payload;
 }
 
-export async function listVehiclesRequest(userId: string, businessId?: string | null) {
-  const qs = businessId ? `?businessId=${encodeURIComponent(businessId)}` : '';
+export async function listVehiclesRequest(
+  userId: string,
+  businessId?: string | null,
+  options?: { includeArchived?: boolean },
+) {
+  const params = new URLSearchParams();
+  if (businessId) params.set('businessId', businessId);
+  if (options?.includeArchived) params.set('includeArchived', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return request(`/api/vehicles/${encodeURIComponent(userId)}${qs}`);
 }
 
@@ -178,6 +185,13 @@ export async function archiveVehicleRequest(userId: string, vehicleId: string) {
   });
 }
 
+export async function restoreVehicleRequest(userId: string, vehicleId: string) {
+  return request(`/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}/restore`, {
+    method: 'PUT',
+    body: JSON.stringify({}),
+  });
+}
+
 export async function getVehicleRelationsRequest(userId: string, vehicleId: string): Promise<VehicleRelationsInfo> {
   const response = await authFetch(`${API_BASE}/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}/relations`, {
     headers: {
@@ -225,7 +239,7 @@ export async function deleteVehicleRequest(userId: string, vehicleId: string) {
 
   if (response.status === 409 && payload.relations) {
     throw new VehicleRelationsError(
-      payload.error || 'No se puede eliminar: existen operaciones asociadas',
+      payload.error || 'Este vehículo tiene operaciones asociadas y no puede eliminarse.',
       payload.relations,
     );
   }
@@ -303,7 +317,7 @@ export interface DuplicateCheckResult {
 
 export async function checkVehicleDuplicatesRequest(
   userId: string,
-  data: { registrationPlate?: string; vin?: string },
+  data: { registrationPlate?: string; vin?: string; excludeVehicleId?: string },
 ): Promise<DuplicateCheckResult> {
   const res = await request(`/api/vehicles/${encodeURIComponent(userId)}/check-duplicates`, {
     method: 'POST',

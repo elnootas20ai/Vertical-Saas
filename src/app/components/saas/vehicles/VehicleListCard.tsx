@@ -15,7 +15,8 @@ type VehicleListCardProps = {
   onSelect: () => void;
 };
 
-function statusBadgeClasses(status: VehicleStatus): string {
+function statusBadgeClasses(status: VehicleStatus, archived?: boolean): string {
+  if (archived) return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300';
   const token = VEHICLE_STATUS_TOKEN[status];
   if (!token) return 'bg-gray-100 text-gray-600';
   return `${token.badgeBg} ${token.badgeText} dark:bg-opacity-20`;
@@ -75,9 +76,9 @@ export function VehicleListCard({ vehicle, selected, onSelect }: VehicleListCard
               </p>
             </div>
             <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusBadgeClasses(vehicle.status)}`}
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusBadgeClasses(vehicle.status, vehicle.archived)}`}
             >
-              {vehicleListStatusLabel(vehicle.status)}
+              {vehicleListStatusLabel(vehicle.status, vehicle.archived)}
             </span>
           </div>
 

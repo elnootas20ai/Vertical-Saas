@@ -16,7 +16,7 @@ import {
   vehicleRoi,
   type VehicleListItem,
 } from './vehiclesListData';
-import { VEHICLE_STATUS_OPTIONS } from './vehicleStatusMap';
+import { VEHICLE_MODULE_STATUS_OPTIONS } from './vehicleStatusMap';
 
 type VehicleDetailHeaderProps = {
   vehicle: VehicleListItem;
@@ -53,9 +53,12 @@ function MetricCard({
 export function VehicleDetailHeader({ vehicle, onStatusChange, statusChanging = false }: VehicleDetailHeaderProps) {
   const margin = vehicleEstimatedMargin(vehicle);
   const roi = vehicleRoi(vehicle);
-  const statusToken = VEHICLE_STATUS_TOKEN[vehicle.status] ?? VEHICLE_STATUS_TOKEN.entrada;
+  const statusToken = vehicle.archived
+    ? { badgeBg: 'bg-slate-100 dark:bg-slate-800', badgeText: 'text-slate-700 dark:text-slate-300', dot: 'bg-slate-400' }
+    : (VEHICLE_STATUS_TOKEN[vehicle.status] ?? VEHICLE_STATUS_TOKEN.entrada);
   const marginPositive = margin >= 0;
   const roiPositive = roi >= 0;
+  const statusLabel = vehicleListStatusLabel(vehicle.status, vehicle.archived);
 
   return (
     <header className="shrink-0 border-b border-gray-200/80 bg-gradient-to-b from-white to-gray-50/80 px-6 py-5 dark:border-gray-800 dark:from-gray-950 dark:to-gray-950/80">
@@ -69,7 +72,7 @@ export function VehicleDetailHeader({ vehicle, onStatusChange, statusChanging = 
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${statusToken.badgeBg} ${statusToken.badgeText}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${statusToken.dot}`} />
-              {vehicleListStatusLabel(vehicle.status)}
+              {statusLabel}
             </span>
             {onStatusChange ? (
               <div className="relative">
@@ -79,7 +82,7 @@ export function VehicleDetailHeader({ vehicle, onStatusChange, statusChanging = 
                   onChange={(e) => onStatusChange(e.target.value as VehicleStatus)}
                   className="h-9 appearance-none rounded-xl border border-gray-200 bg-white py-0 pl-3 pr-8 text-xs font-semibold text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-200 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
                 >
-                  {VEHICLE_STATUS_OPTIONS.map((opt) => (
+                  {VEHICLE_MODULE_STATUS_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
@@ -149,7 +152,7 @@ export function VehicleDetailHeader({ vehicle, onStatusChange, statusChanging = 
         />
         <MetricCard
           label="Estado"
-          value={vehicleListStatusLabel(vehicle.status)}
+          value={statusLabel}
           valueClassName={`text-sm font-semibold ${statusToken.badgeText}`}
         />
       </div>

@@ -8,7 +8,6 @@ import {
   getVehiclesDbName,
   resolveVehicleDbForDoc,
   saveVehicleDocument,
-  softDeleteVehicleDocument,
   logAccountActivity,
   listVehiclesByUser,
   sanitizeVehicle,
@@ -89,6 +88,8 @@ const UI_STATUS_TO_INVENTORY = {
   reserved: 'reserved',
   vendido: 'sold',
   sold: 'sold',
+  entregado: 'delivered',
+  delivered: 'delivered',
   preparacion: 'workshop',
   workshop: 'workshop',
   entrada: 'received',
@@ -163,7 +164,8 @@ function validateVehicleImages(images) {
 function vehicleChangeDiff(before, after) {
   const TRACKED = [
     'status', 'salePrice', 'purchasePrice', 'registrationPlate', 'mileage', 'location',
-    'brand', 'model', 'year', 'color', 'assignedTo', 'assignedToName',
+    'brand', 'model', 'version', 'year', 'color', 'vin', 'fuelType', 'transmission', 'power', 'notes',
+    'assignedTo', 'assignedToName',
     'commercialStatus', 'published', 'featured', 'minimumSalePrice',
     'assignedCommercialId', 'commercialDescription',
   ];
@@ -174,6 +176,49 @@ function vehicleChangeDiff(before, after) {
     if (bVal !== aVal) diff[key] = { before: bVal ?? null, after: aVal ?? null };
   }
   return diff;
+}
+
+const VEHICLE_FIELD_LABELS = {
+  brand: 'Marca',
+  model: 'Modelo',
+  version: 'Versión',
+  year: 'Año',
+  registrationPlate: 'Matrícula',
+  vin: 'VIN',
+  mileage: 'Kilómetros',
+  color: 'Color',
+  fuelType: 'Combustible',
+  transmission: 'Cambio',
+  power: 'Potencia',
+  purchasePrice: 'Precio compra',
+  salePrice: 'Precio venta',
+  notes: 'Observaciones',
+  location: 'Ubicación',
+  status: 'Estado',
+};
+
+const STATUS_HISTORY_LABELS = {
+  available: 'Disponible',
+  reserved: 'Reservado',
+  sold: 'Vendido',
+  delivered: 'Entregado',
+  workshop: 'En preparación',
+  received: 'Entrada',
+  listo: 'Disponible',
+  reservado: 'Reservado',
+  vendido: 'Vendido',
+  entregado: 'Entregado',
+  preparacion: 'En preparación',
+  entrada: 'Entrada',
+};
+
+function formatStatusForHistory(value) {
+  const key = String(value || '').trim().toLowerCase();
+  return STATUS_HISTORY_LABELS[key] || value || '—';
+}
+
+function formatVehicleEditNote(fields) {
+  return fields.map((key) => VEHICLE_FIELD_LABELS[key] || key).join(', ');
 }
 
 // ─── Margin calculation ──────────────────────────────────────────────────────
@@ -298,13 +343,14 @@ async function findDuplicateByVin(req, userId, vin, excludeVehicleId) {
 export async function checkDuplicates(req, res) {
   try {
     const { userId } = req.params;
-    const { registrationPlate, vin } = req.body || {};
+    const { registrationPlate, vin, excludeVehicleId } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
 
     await ensureDatabase(req, getVehiclesDbName());
+    const excludeId = String(excludeVehicleId || '').trim() || undefined;
     const [plate, vinResult] = await Promise.all([
-      findDuplicateByPlate(req, userId, registrationPlate),
-      findDuplicateByVin(req, userId, vin),
+      findDuplicateByPlate(req, userId, registrationPlate, excludeId),
+      findDuplicateByVin(req, userId, vin, excludeId),
     ]);
 
     return res.json({ ok: true, plate, vin: vinResult });
@@ -676,7 +722,7 @@ export async function updateVehicle(req, res) {
       updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
         action: 'status_changed',
         label: 'Cambio de estado',
-        note: `${oldStatus} → ${effectiveNewStatus}`,
+        note: `${formatStatusForHistory(oldStatus)} → ${formatStatusForHistory(effectiveNewStatus)}`,
         userId,
         userName: account.fullName || userId,
         metadata: { from: oldStatus, to: effectiveNewStatus },
@@ -696,6 +742,18 @@ export async function updateVehicle(req, res) {
         userId,
         userName: account.fullName || userId,
       });
+    } else if (
+      vehicle.images !== undefined
+      && newImages.length === oldImages.length
+      && JSON.stringify(newImages) !== JSON.stringify(oldImages)
+    ) {
+      updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
+        action: 'photo_reordered',
+        label: 'Galería actualizada',
+        note: 'Reordenación o cambio de fotografía principal',
+        userId,
+        userName: account.fullName || userId,
+      });
     }
 
     const patchDiff = vehicleChangeDiff(existingVehicle, { ...existingVehicle, ...vehicle, status: effectiveNewStatus });
@@ -704,7 +762,7 @@ export async function updateVehicle(req, res) {
       updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
         action: 'updated',
         label: 'Datos actualizados',
-        note: editFields.join(', '),
+        note: formatVehicleEditNote(editFields),
         userId,
         userName: account.fullName || userId,
       });
@@ -712,7 +770,7 @@ export async function updateVehicle(req, res) {
       updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
         action: 'updated',
         label: 'Datos actualizados',
-        note: editFields.join(', '),
+        note: formatVehicleEditNote(editFields),
         userId,
         userName: account.fullName || userId,
       });
@@ -1082,19 +1140,31 @@ export async function archiveVehicle(req, res) {
     const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
       action: 'archived',
       label: 'Vehículo archivado',
-      note: 'Oculto del listado principal',
+      note: 'Retirado del listado principal',
       userId,
       userName: account.fullName || userId,
+      metadata: { archivedAt: now, previousStatus: existingVehicle.status || null },
     });
 
     const nextVehicle = buildVehicleDocument(userId, {
       ...existingVehicle,
       archived: true,
       archivedAt: now,
+      statusBeforeArchive: existingVehicle.status || null,
       vehicleHistory,
     }, existingVehicle);
     const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
 
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'vehicle',
+      action: `Archivó vehículo ${nextVehicle.brand} ${nextVehicle.model}`,
+      entityId: nextVehicle._id,
+      entityLabel: `${nextVehicle.brand} ${nextVehicle.model}`.trim(),
+      metadata: { registrationPlate: nextVehicle.registrationPlate, archivedAt: now },
+    });
     await writeChangelog(req, {
       entity: 'vehicle',
       entityId: nextVehicle._id,
@@ -1102,7 +1172,7 @@ export async function archiveVehicle(req, res) {
       action: 'archive',
       actorUserId: userId,
       actorName: account.fullName,
-      changes: { before: { archived: false }, after: { archived: true } },
+      changes: { before: { archived: false }, after: { archived: true, archivedAt: now } },
     });
 
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
@@ -1110,6 +1180,69 @@ export async function archiveVehicle(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al archivar el vehículo',
+    });
+  }
+}
+
+export async function restoreVehicle(req, res) {
+  try {
+    const { userId, vehicleId } = req.params;
+    const existingVehicle = await ensureVehicleOwner(req, userId, vehicleId);
+    const account = await findAccountByUserId(req, userId);
+
+    if (!existingVehicle || !account) {
+      return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
+    }
+
+    if (!existingVehicle.archived) {
+      return res.json({ ok: true, vehicle: sanitizeVehicle(existingVehicle) });
+    }
+
+    const now = new Date().toISOString();
+    const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
+      action: 'restored',
+      label: 'Vehículo restaurado',
+      note: 'Vuelve al listado principal como Disponible',
+      userId,
+      userName: account.fullName || userId,
+      metadata: { restoredAt: now },
+    });
+
+    const nextVehicle = buildVehicleDocument(userId, {
+      ...existingVehicle,
+      archived: false,
+      statusBeforeArchive: null,
+      status: 'available',
+      vehicleHistory,
+    }, existingVehicle);
+    nextVehicle.archivedAt = null;
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'vehicle',
+      action: `Restauró vehículo ${nextVehicle.brand} ${nextVehicle.model}`,
+      entityId: nextVehicle._id,
+      entityLabel: `${nextVehicle.brand} ${nextVehicle.model}`.trim(),
+      metadata: { registrationPlate: nextVehicle.registrationPlate, restoredAt: now },
+    });
+    await writeChangelog(req, {
+      entity: 'vehicle',
+      entityId: nextVehicle._id,
+      entityLabel: `${nextVehicle.brand} ${nextVehicle.model} (${nextVehicle.registrationPlate})`,
+      action: 'restore',
+      actorUserId: userId,
+      actorName: account.fullName,
+      changes: { before: { archived: true, status: existingVehicle.status }, after: { archived: false, status: 'available' } },
+    });
+
+    return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al restaurar el vehículo',
     });
   }
 }
@@ -1128,12 +1261,27 @@ export async function removeVehicle(req, res) {
     if (relations.hasRelations) {
       return res.status(409).json({
         ok: false,
-        error: 'No se puede eliminar: existen operaciones asociadas',
+        error: 'Este vehículo tiene operaciones asociadas y no puede eliminarse.',
         relations,
       });
     }
 
-    await softDeleteVehicleDocument(req, vehicleId);
+    const now = new Date().toISOString();
+    const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
+      action: 'deleted',
+      label: 'Vehículo eliminado',
+      note: 'Eliminado del inventario',
+      userId,
+      userName: account.fullName || userId,
+      metadata: { deletedAt: now },
+    });
+
+    const nextVehicle = buildVehicleDocument(userId, {
+      ...existingVehicle,
+      vehicleHistory,
+    }, existingVehicle);
+    nextVehicle.deletedAt = now;
+    await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,

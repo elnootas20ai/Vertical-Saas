@@ -18,6 +18,7 @@ import {
   removeVehicleDocument,
   getVehicleRelations,
   archiveVehicle,
+  restoreVehicle,
 } from '../controllers/vehicleController.js';
 
 const vehicleRouter = Router();
@@ -28,6 +29,7 @@ vehicleRouter.post('/:userId/bulk', bulkCreateVehicles);
 vehicleRouter.post('/:userId/check-duplicates', checkDuplicates);
 vehicleRouter.put('/:userId/:vehicleId', updateVehicle);
 vehicleRouter.put('/:userId/:vehicleId/archive', archiveVehicle);
+vehicleRouter.put('/:userId/:vehicleId/restore', restoreVehicle);
 vehicleRouter.get('/:userId/:vehicleId/relations', getVehicleRelations);
 vehicleRouter.delete('/:userId/:vehicleId', removeVehicle);
 

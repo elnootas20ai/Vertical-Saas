@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { FileText, LoaderCircle, Trash2, Upload } from 'lucide-react';
+import { Download, Eye, FileText, LoaderCircle, Trash2, Upload } from 'lucide-react';
 import type { VehicleDocumentRecord } from '../../../context/AppContext';
 import type { VehicleDocType } from '../../../lib/vehicleApi';
 import { readFileAsDataUrl } from './vehicleImageUtils';
@@ -15,6 +15,20 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   factura_compra: 'Factura compra',
   otro: 'Otro',
 };
+
+function downloadVehicleDocument(doc: VehicleDocumentRecord) {
+  if (!doc.fileUrl) return;
+  const link = document.createElement('a');
+  link.href = doc.fileUrl;
+  link.download = doc.fileName || doc.name || 'documento';
+  if (doc.fileUrl.startsWith('data:') || doc.fileUrl.startsWith('blob:')) {
+    link.click();
+    return;
+  }
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.click();
+}
 
 type VehicleDocumentsSectionProps = {
   documents: VehicleDocumentRecord[];
@@ -134,20 +148,32 @@ export function VehicleDocumentsSection({
                 </p>
               </div>
               {doc.fileUrl ? (
-                <a
-                  href={doc.fileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 text-xs font-medium text-blue-600 hover:underline"
-                >
-                  Ver
-                </a>
+                <>
+                  <a
+                    href={doc.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Ver
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => downloadVehicleDocument(doc)}
+                    className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Descargar
+                  </button>
+                </>
               ) : null}
               {!disabled ? (
                 <button
                   type="button"
                   onClick={() => setDeleteId(doc.id)}
                   className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
+                  aria-label="Eliminar documento"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

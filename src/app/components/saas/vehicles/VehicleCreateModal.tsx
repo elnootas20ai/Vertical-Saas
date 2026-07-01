@@ -190,12 +190,13 @@ export function VehicleCreateModal({ open, onClose, onCreated, onSaved, editVehi
       const result = await checkVehicleDuplicatesRequest(authUser.user_id, {
         registrationPlate: plate.trim() || undefined,
         vin: vin.trim() || undefined,
+        excludeVehicleId: editVehicle?.id,
       });
       return { plate: result.plate, vin: result.vin };
     } catch {
       return { plate: null, vin: null };
     }
-  }, [authUser?.user_id]);
+  }, [authUser?.user_id, editVehicle?.id]);
 
   useEffect(() => {
     if (!open || !authUser?.user_id) return;
@@ -288,7 +289,7 @@ export function VehicleCreateModal({ open, onClose, onCreated, onSaved, editVehi
           return;
         }
         await updateVehicle(editVehicle.id, changes);
-        toast.success('Cambios guardados correctamente');
+        toast.success('Vehículo actualizado correctamente');
         onSaved?.();
         onClose();
         return;

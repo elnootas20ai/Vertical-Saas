@@ -6,6 +6,7 @@ export type VehicleHistoryEntry = {
   date: Date;
   label: string;
   note?: string;
+  userName?: string;
 };
 
 export type VehicleListItem = {
@@ -36,15 +37,41 @@ export type VehicleListItem = {
   historyEntries?: VehicleHistoryEntry[];
 };
 
-export type VehicleSortKey = 'recent' | 'priceAsc' | 'priceDesc' | 'daysAsc' | 'daysDesc' | 'marginDesc';
+export type VehicleSortKey =
+  | 'recent'
+  | 'createdAt_desc'
+  | 'createdAt_asc'
+  | 'brand_asc'
+  | 'brand_desc'
+  | 'model_asc'
+  | 'model_desc'
+  | 'year_desc'
+  | 'year_asc'
+  | 'purchasePrice_desc'
+  | 'purchasePrice_asc'
+  | 'salePrice_desc'
+  | 'salePrice_asc'
+  | 'km_desc'
+  | 'km_asc'
+  | 'daysDesc'
+  | 'daysAsc'
+  | 'marginDesc';
 
 export const VEHICLE_SORT_OPTIONS: { id: VehicleSortKey; label: string }[] = [
-  { id: 'recent', label: 'Más recientes' },
-  { id: 'priceDesc', label: 'Precio · mayor' },
-  { id: 'priceAsc', label: 'Precio · menor' },
-  { id: 'daysDesc', label: 'Días en stock · más' },
-  { id: 'daysAsc', label: 'Días en stock · menos' },
-  { id: 'marginDesc', label: 'Margen · mayor' },
+  { id: 'createdAt_desc', label: 'Fecha creación · reciente' },
+  { id: 'createdAt_asc', label: 'Fecha creación · antigua' },
+  { id: 'brand_asc', label: 'Marca · A-Z' },
+  { id: 'brand_desc', label: 'Marca · Z-A' },
+  { id: 'model_asc', label: 'Modelo · A-Z' },
+  { id: 'model_desc', label: 'Modelo · Z-A' },
+  { id: 'year_desc', label: 'Año · mayor' },
+  { id: 'year_asc', label: 'Año · menor' },
+  { id: 'purchasePrice_desc', label: 'Precio compra · mayor' },
+  { id: 'purchasePrice_asc', label: 'Precio compra · menor' },
+  { id: 'salePrice_desc', label: 'Precio venta · mayor' },
+  { id: 'salePrice_asc', label: 'Precio venta · menor' },
+  { id: 'km_desc', label: 'Kilómetros · mayor' },
+  { id: 'km_asc', label: 'Kilómetros · menor' },
 ];
 
 export function vehicleEstimatedMargin(item: VehicleListItem): number {
@@ -57,7 +84,8 @@ export function vehicleRoi(item: VehicleListItem): number {
   return (vehicleEstimatedMargin(item) / invested) * 100;
 }
 
-export function vehicleListStatusLabel(status: VehicleListItem['status']): string {
+export function vehicleListStatusLabel(status: VehicleListItem['status'], archived?: boolean): string {
+  if (archived) return 'Archivado';
   if (status === 'listo') return 'Disponible';
   return (
     {
@@ -65,6 +93,7 @@ export function vehicleListStatusLabel(status: VehicleListItem['status']): strin
       preparacion: 'En preparación',
       reservado: 'Reservado',
       vendido: 'Vendido',
+      entregado: 'Entregado',
     } as const
   )[status];
 }
@@ -86,6 +115,7 @@ export function normalizeVehicleListStatus(status: string): VehicleStatus {
     available: 'listo',
     reserved: 'reservado',
     sold: 'vendido',
+    delivered: 'entregado',
     workshop: 'preparacion',
     received: 'entrada',
     entrada: 'entrada',
@@ -93,6 +123,7 @@ export function normalizeVehicleListStatus(status: string): VehicleStatus {
     listo: 'listo',
     reservado: 'reservado',
     vendido: 'vendido',
+    entregado: 'entregado',
   };
   return map[status] ?? 'entrada';
 }
@@ -104,7 +135,8 @@ function buildVehicleHistoryEntries(vehicle: Vehicle): VehicleHistoryEntry[] {
         id: entry.id,
         date: new Date(entry.date),
         label: entry.label,
-        note: entry.note || entry.userName || undefined,
+        note: entry.note || undefined,
+        userName: entry.userName || undefined,
       }))
       .sort((a, b) => b.date.getTime() - a.date.getTime());
   }

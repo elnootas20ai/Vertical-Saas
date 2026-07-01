@@ -24,7 +24,7 @@ export const SALE_STAGE_TOKEN: Record<SaleStage, {
 
 // ── Vehículo / Estado ─────────────────────────────────────────────────────────
 
-export type VehicleStatus = 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido';
+export type VehicleStatus = 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido' | 'entregado';
 
 export const VEHICLE_STATUS_TOKEN: Record<VehicleStatus, {
   label: string;
@@ -37,6 +37,7 @@ export const VEHICLE_STATUS_TOKEN: Record<VehicleStatus, {
   listo:       { label: 'Listo para vender', dot: 'bg-emerald-500', badgeBg: 'bg-emerald-50',  badgeText: 'text-emerald-700', accentBorder: 'border-l-emerald-500' },
   reservado:   { label: 'Reservado',         dot: 'bg-violet-500',  badgeBg: 'bg-violet-50',   badgeText: 'text-violet-700',  accentBorder: 'border-l-violet-500' },
   vendido:     { label: 'Vendido',           dot: 'bg-slate-400',   badgeBg: 'bg-slate-100',   badgeText: 'text-slate-600',   accentBorder: 'border-l-slate-400' },
+  entregado:   { label: 'Entregado',         dot: 'bg-emerald-500', badgeBg: 'bg-emerald-50',  badgeText: 'text-emerald-700', accentBorder: 'border-l-emerald-500' },
 };
 
 export const VEHICLE_IN_STOCK_STATUSES: VehicleStatus[] = ['entrada', 'preparacion', 'listo'];

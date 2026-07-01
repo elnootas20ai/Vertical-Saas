@@ -2,9 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, type Vehicle } from '../../../context/AppContext';
+import { useBusinessOptional } from '../../../context/BusinessContext';
+import { resolveVehicleListBusinessId } from '../../../lib/vehicleVertical';
 import type { VehicleStatus } from '../DesignTokens';
 import {
   addVehicleDocumentRequest,
+  getVehicleRelationsRequest,
+  listVehiclesRequest,
   removeVehicleDocumentRequest,
   VehicleRelationsError,
   type VehicleDocType,
@@ -16,20 +20,31 @@ import { VehicleConfirmDialog } from './VehicleConfirmDialog';
 import { mapAppVehicleToListItem } from './vehiclesListData';
 import { uiStatusToBackend } from './vehicleStatusMap';
 
+const VEHICLE_RELATIONS_BLOCK_MESSAGE =
+  'Este vehículo tiene operaciones asociadas y no puede eliminarse.';
+
+type ListViewMode = 'active' | 'archived';
+
 export function VehiclesModuleShell() {
   const {
     vehicles: appVehicles,
     updateVehicle,
     syncVehicle,
+    mergeVehicles,
     archiveVehicle,
+    restoreVehicle,
     deleteVehicle,
     authUser,
   } = useApp();
+  const businessContext = useBusinessOptional();
+  const currentBusiness = businessContext?.currentBusiness ?? null;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [listView, setListView] = useState<ListViewMode>('active');
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [statusChanging, setStatusChanging] = useState(false);
@@ -39,14 +54,21 @@ export function VehiclesModuleShell() {
     [appVehicles],
   );
 
+  const archivedVehicles = useMemo(
+    () => (appVehicles ?? []).filter((v) => v.archived),
+    [appVehicles],
+  );
+
+  const listSource = listView === 'archived' ? archivedVehicles : activeVehicles;
+
   const vehicles = useMemo(
-    () => activeVehicles.map(mapAppVehicleToListItem),
-    [activeVehicles],
+    () => listSource.map(mapAppVehicleToListItem),
+    [listSource],
   );
 
   const selectedAppVehicle = useMemo(
-    () => activeVehicles.find((v) => v.id === selectedId) ?? null,
-    [activeVehicles, selectedId],
+    () => listSource.find((v) => v.id === selectedId) ?? null,
+    [listSource, selectedId],
   );
 
   const selectedVehicle = useMemo(
@@ -55,10 +77,38 @@ export function VehiclesModuleShell() {
   );
 
   useEffect(() => {
+    if (!authUser?.user_id) return;
+    let cancelled = false;
+
+    listVehiclesRequest(
+      authUser.user_id,
+      resolveVehicleListBusinessId(currentBusiness),
+      { includeArchived: true },
+    )
+      .then((response) => {
+        if (cancelled) return;
+        const archived = (response.vehicles ?? []).filter((v) => v.archived);
+        if (archived.length > 0) mergeVehicles(archived as Vehicle[]);
+      })
+      .catch(() => {
+        // Los archivados en memoria siguen disponibles tras archivar en la misma sesión
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.user_id, currentBusiness?.business_id, mergeVehicles]);
+
+  useEffect(() => {
     if (selectedId && !vehicles.some((v) => v.id === selectedId)) {
       setSelectedId(null);
     }
   }, [vehicles, selectedId]);
+
+  const handleViewModeChange = useCallback((mode: ListViewMode) => {
+    setListView(mode);
+    setSelectedId(null);
+  }, []);
 
   const handleStatusChange = useCallback(async (status: VehicleStatus) => {
     if (!selectedAppVehicle || selectedVehicle?.status === status) return;
@@ -67,7 +117,7 @@ export function VehiclesModuleShell() {
       await updateVehicle(selectedAppVehicle.id, {
         status: uiStatusToBackend(status) as Vehicle['status'],
       });
-      toast.success('Estado actualizado');
+      toast.success('Estado actualizado correctamente');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo cambiar el estado');
     } finally {
@@ -78,7 +128,6 @@ export function VehiclesModuleShell() {
   const handleUpdateImages = useCallback(async (images: string[]) => {
     if (!selectedAppVehicle) return;
     await updateVehicle(selectedAppVehicle.id, { images });
-    toast.success('Galería actualizada');
   }, [selectedAppVehicle, updateVehicle]);
 
   const handleAddDocument = useCallback(async (document: {
@@ -111,7 +160,7 @@ export function VehiclesModuleShell() {
     setBusy(true);
     try {
       await archiveVehicle(selectedAppVehicle.id);
-      toast.success('Vehículo archivado correctamente');
+      toast.success('Vehículo archivado correctamente.');
       setSelectedId(null);
       setArchiveOpen(false);
     } catch (error) {
@@ -121,21 +170,42 @@ export function VehiclesModuleShell() {
     }
   };
 
-  const confirmDelete = async () => {
+  const confirmRestore = async () => {
     if (!selectedAppVehicle) return;
+    const restoredId = selectedAppVehicle.id;
     setBusy(true);
     try {
+      await restoreVehicle(restoredId);
+      toast.success('Vehículo restaurado correctamente.');
+      setRestoreOpen(false);
+      setListView('active');
+      setSelectedId(restoredId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo restaurar el vehículo');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!selectedAppVehicle || !authUser?.user_id) return;
+    setBusy(true);
+    try {
+      const relations = await getVehicleRelationsRequest(authUser.user_id, selectedAppVehicle.id);
+      if (relations.hasRelations) {
+        toast.error(VEHICLE_RELATIONS_BLOCK_MESSAGE);
+        setDeleteOpen(false);
+        return;
+      }
+
       await deleteVehicle(selectedAppVehicle.id);
-      toast.success('Vehículo eliminado correctamente');
+      toast.success('Vehículo eliminado correctamente.');
       setSelectedId(null);
       setDeleteOpen(false);
     } catch (error) {
       if (error instanceof VehicleRelationsError) {
-        const parts = [];
-        if (error.relations.compras) parts.push(`${error.relations.compras} compra(s)`);
-        if (error.relations.ventas) parts.push(`${error.relations.ventas} venta(s)`);
-        if (error.relations.entregas) parts.push(`${error.relations.entregas} entrega(s)`);
-        toast.error(`No se puede eliminar: ${parts.join(', ')} asociadas.`);
+        toast.error(VEHICLE_RELATIONS_BLOCK_MESSAGE);
+        setDeleteOpen(false);
       } else {
         toast.error(error instanceof Error ? error.message : 'No se pudo eliminar el vehículo');
       }
@@ -170,14 +240,20 @@ export function VehiclesModuleShell() {
           vehicles={vehicles}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          viewMode={listView}
+          onViewModeChange={handleViewModeChange}
+          archivedCount={archivedVehicles.length}
         />
         <VehicleDetailPanel
           vehicle={selectedVehicle}
           busy={busy}
           statusChanging={statusChanging}
-          onEdit={() => setEditOpen(true)}
+          onEdit={() => {
+            if (selectedAppVehicle) setEditOpen(true);
+          }}
           onArchive={() => setArchiveOpen(true)}
           onDelete={() => setDeleteOpen(true)}
+          onRestore={() => setRestoreOpen(true)}
           onStatusChange={handleStatusChange}
           onUpdateImages={handleUpdateImages}
           onAddDocument={handleAddDocument}
@@ -188,11 +264,14 @@ export function VehiclesModuleShell() {
       <VehicleCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={(vehicleId) => setSelectedId(vehicleId)}
+        onCreated={(vehicleId) => {
+          setListView('active');
+          setSelectedId(vehicleId);
+        }}
       />
 
       <VehicleCreateModal
-        open={editOpen}
+        open={editOpen && Boolean(selectedAppVehicle) && !selectedAppVehicle?.archived}
         editVehicle={selectedAppVehicle}
         onClose={() => setEditOpen(false)}
       />
@@ -200,7 +279,7 @@ export function VehiclesModuleShell() {
       <VehicleConfirmDialog
         open={archiveOpen}
         title="Archivar vehículo"
-        message="El vehículo se ocultará del listado principal pero conservará toda su información. ¿Continuar?"
+        message="¿Deseas archivar este vehículo? Permanecerá disponible para consulta y podrá restaurarse más adelante."
         confirmLabel="Archivar"
         loading={busy}
         onCancel={() => setArchiveOpen(false)}
@@ -208,9 +287,19 @@ export function VehiclesModuleShell() {
       />
 
       <VehicleConfirmDialog
+        open={restoreOpen}
+        title="Restaurar vehículo"
+        message="El vehículo volverá al listado principal con estado Disponible. ¿Continuar?"
+        confirmLabel="Restaurar"
+        loading={busy}
+        onCancel={() => setRestoreOpen(false)}
+        onConfirm={confirmRestore}
+      />
+
+      <VehicleConfirmDialog
         open={deleteOpen}
         title="Eliminar vehículo"
-        message="Esta acción eliminará definitivamente el vehículo si no tiene operaciones asociadas. ¿Continuar?"
+        message="Esta acción no se puede deshacer. ¿Deseas eliminar este vehículo?"
         confirmLabel="Eliminar"
         tone="danger"
         loading={busy}
