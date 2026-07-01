@@ -134,12 +134,12 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     ).toBe('biz-tablet');
   });
 
-  it('resolveTpvCatalogBusinessId respeta la empresa del selector (sin saltar a delivery)', () => {
+  it('resolveTpvCatalogBusinessId usa delivery si el selector no es delivery', () => {
     const businesses = [
       { business_id: 'clean-1', businessType: 'cleaning' },
       { business_id: 'del-1', businessType: 'delivery' },
     ];
-    expect(resolveTpvCatalogBusinessId('clean-1', businesses)).toBe('clean-1');
+    expect(resolveTpvCatalogBusinessId('clean-1', businesses)).toBe('del-1');
     expect(resolveTpvCatalogBusinessId('del-1', businesses)).toBe('del-1');
   });
 

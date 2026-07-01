@@ -64,7 +64,7 @@ import {
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
-import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness } from '../../lib/tpvRegisterScope';
+import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness, deliveryBusinessIdForTpv } from '../../lib/tpvRegisterScope';
 import {
   shouldUseDeliveryStores,
   resolveBusinessScopeId,
@@ -217,6 +217,10 @@ function TpvRapidoCeoBoard() {
   } = useActiveStoreScope();
   const navigate = useNavigate();
   const businessId = resolveBusinessScopeId(currentBusiness);
+  const tpvCatalogBusinessId = useMemo(
+    () => deliveryBusinessIdForTpv(businesses) || businessId,
+    [businesses, businessId],
+  );
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
@@ -272,13 +276,13 @@ function TpvRapidoCeoBoard() {
   }, [forceStorePicker, businessId, dataUserId, pointsOfSale, activeSalesPointId]);
 
   useEffect(() => {
-    if (!dataUserId || !businessId || businesses.length === 0) return;
+    if (!dataUserId || !tpvCatalogBusinessId || businesses.length === 0) return;
     prefetchTpvCatalog(dataUserId, {
-      scopeBusinessId: businessId,
+      scopeBusinessId: tpvCatalogBusinessId,
       businesses,
       accountBusinessCount: businesses.length,
     });
-  }, [businessId, dataUserId, businesses]);
+  }, [tpvCatalogBusinessId, dataUserId, businesses]);
 
   const storeRows = useMemo(
     () => buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId),
@@ -406,6 +410,10 @@ export function TpvRapidoOrderFlow({
   );
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
+  const tpvCatalogBusinessId = useMemo(
+    () => deliveryBusinessIdForTpv(businesses) || businessId,
+    [businesses, businessId],
+  );
   const clientSearchUserId = useMemo(
     () => userId || resolveBusinessDataUserId(user, currentBusiness),
     [userId, user, currentBusiness],
@@ -532,7 +540,7 @@ export function TpvRapidoOrderFlow({
     return register.clockedInWorkers.find((w) => w.id === effectiveOrderTakerId) || null;
   }, [register, effectiveOrderTakerId, user?.fullName]);
 
-  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, businessId, {
+  const { catalog, brands, loadingCatalog } = useTpvCatalog(userId, tpvCatalogBusinessId, {
     businesses,
     accountBusinessCount: businesses.length,
   });
@@ -571,7 +579,7 @@ export function TpvRapidoOrderFlow({
     setSelectedSectionId('');
     setSelectedCategory(null);
     setProductPickerReset((n) => n + 1);
-  }, [businessId]);
+  }, [tpvCatalogBusinessId]);
 
   useEffect(() => {
     if (brandInitRef.current || catalogSections.length === 0) return;
@@ -591,13 +599,13 @@ export function TpvRapidoOrderFlow({
   }, [selectedSectionId, loadingCatalog, catalog, catalogSections]);
 
   useEffect(() => {
-    if (!userId || !businessId || businesses.length === 0) return;
+    if (!userId || !tpvCatalogBusinessId || businesses.length === 0) return;
     prefetchTpvCatalog(userId, {
-      scopeBusinessId: businessId,
+      scopeBusinessId: tpvCatalogBusinessId,
       businesses,
       accountBusinessCount: businesses.length,
     });
-  }, [userId, businessId, businesses]);
+  }, [userId, tpvCatalogBusinessId, businesses]);
 
   useEffect(() => {
     if (!userId) return;

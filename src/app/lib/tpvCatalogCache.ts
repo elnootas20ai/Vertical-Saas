@@ -13,7 +13,7 @@ import {
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 /** Bump al cambiar forma del snapshot (p. ej. placeholders TPV). Invalida sessionStorage antiguo. */
-export const TPV_CATALOG_CACHE_SCHEMA = 'v13-lite-pizza-burger';
+export const TPV_CATALOG_CACHE_SCHEMA = 'v14-delivery-scope';
 const TPV_CATALOG_SCHEMA_KEY = 'vertial.tpvCatalog.schema';
 const SESSION_PREFIX = `vertial.tpvCatalog:${TPV_CATALOG_CACHE_SCHEMA}:`;
 

@@ -5,7 +5,7 @@ import {
   filterCatalogItemsForBusinessScope,
   type CatalogBusinessScopeOptions,
 } from './catalogBusinessScope';
-import { resolveTpvCatalogBusinessId } from './tpvRegisterScope';
+import { deliveryBusinessIdForTpv, resolveTpvCatalogBusinessId } from './tpvRegisterScope';
 
 export type TpvCatalogBusinessRef = {
   business_id?: string;
@@ -26,17 +26,21 @@ export function resolveTpvCatalogLoadScope(
   accountBusinessCount?: number,
 ): TpvCatalogLoadScope {
   const catalogBusinessId = resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
+  const deliveryId = deliveryBusinessIdForTpv(businesses);
   const match = businesses.find(
     (b) =>
       String(b.business_id || b.id || '')
         .replace(/^business:/, '')
         .trim() === catalogBusinessId,
   );
+  const activeBusinessType =
+    match?.businessType ||
+    (catalogBusinessId && catalogBusinessId === deliveryId ? 'delivery' : undefined);
   return {
     scopeBusinessId: String(scopeBusinessId || '').trim(),
     catalogBusinessId,
     accountBusinessCount,
-    activeBusinessType: match?.businessType,
+    activeBusinessType,
   };
 }
 
@@ -89,7 +93,15 @@ export function filterTpvCatalogItems(
     options,
   );
 
-  return items;
+  if (items.length > 0 || rawItems.length === 0 || brands.length === 0) {
+    return items;
+  }
+
+  // Legacy sin business_id: conservar productos cuya línea comercial pertenece a esta cuenta.
+  const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
+  return rawItems.filter((item) =>
+    (item.brandIds ?? []).some((id) => brandIds.has(String(id).trim())),
+  );
 }
 
 export function tpvCatalogCacheKey(userId: string, scope: TpvCatalogLoadScope): string {

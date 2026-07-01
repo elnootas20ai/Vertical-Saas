@@ -1488,8 +1488,15 @@ export async function bulkCreateCatalogItems(req, res) {
             costPrice: doc.costPrice ?? existing.costPrice,
             brandIds: Array.isArray(doc.brandIds) && doc.brandIds.length > 0 ? doc.brandIds : existing.brandIds,
             description: doc.description || existing.description,
-            business_id: doc.business_id || existing.business_id,
-            vertical: doc.vertical || existing.vertical,
+            business_id:
+              String(doc.business_id || doc.businessId || '').trim() ||
+              String(existing.business_id || existing.businessId || '').trim(),
+            vertical:
+              String(doc.vertical || '').trim() ||
+              String(existing.vertical || '').trim() ||
+              (String(doc.business_id || doc.businessId || existing.business_id || '').trim()
+                ? 'delivery'
+                : ''),
             itemType: doc.itemType || existing.itemType,
             customFields: {
               ...(existing.customFields && typeof existing.customFields === 'object' ? existing.customFields : {}),
