@@ -193,6 +193,10 @@ import { startBackupScheduler, runBackup, getBackupState } from './services/back
 import { runSaasBootstrapIfEnabled } from './services/saasBootstrapStartup.js';
 import {
   VEHICLES_DB,
+  getVehiclesDbName,
+  getAllVehicleDocuments,
+  resolveVehicleDbForDoc,
+  LEGACY_VEHICLES_DB,
   ACCOUNTS_DB,
   NOTIFICATIONS_DB,
   setupDatabaseIndexes,
@@ -1059,9 +1063,15 @@ app.get('/api/public/vehicle/:vehicleId', async (req, res) => {
     const vehicleId = String(req.params.vehicleId || '').trim();
     if (!vehicleId) return res.status(400).json({ ok: false, error: 'Falta vehicleId' });
 
-    const encodedDb = encodeURIComponent('vehicles');
+    const encodedDb = encodeURIComponent(getVehiclesDbName());
     const encodedId = encodeURIComponent(vehicleId);
-    const response = await couchRequest(req, `/${encodedDb}/${encodedId}`);
+    let response = await couchRequest(req, `/${encodedDb}/${encodedId}`);
+    if (response.status === 404) {
+      const legacyDb = encodeURIComponent('vehicles');
+      if (legacyDb !== encodedDb) {
+        response = await couchRequest(req, `/${legacyDb}/${encodedId}`);
+      }
+    }
     if (response.status === 404) return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
     const doc = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(response.status).json({ ok: false, error: 'Error al cargar el vehículo' });
@@ -1912,7 +1922,8 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     const salesDb = normalizeDbName(
       process.env.VITE_SALES_DB || `${process.env.VITE_COUCHDB_DB || 'vertial'}-sales`,
     );
-    const vehiclesDb = 'vehicles';
+    const vehiclesDb = getVehiclesDbName();
+    const legacyVehiclesDb = 'vehicles';
     const financeDb = getFinanceDbName();
     const clockinsDb = getClockinsDbName();
     const catalogDb = getCatalogDbName();
@@ -1935,8 +1946,9 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       );
     }
 
-    const [vehicleDocs, leadDocs, saleDocs, financeDocs, clockinDocs, catalogDocs, partsDocs, workshopDocs, deliveryDocs] = await Promise.all([
+    const [vehicleDocsPrimary, vehicleDocsLegacy, leadDocs, saleDocs, financeDocs, clockinDocs, catalogDocs, partsDocs, workshopDocs, deliveryDocs] = await Promise.all([
       fetchAllDocs(vehiclesDb).catch(() => []),
+      vehiclesDb !== legacyVehiclesDb ? fetchAllDocs(legacyVehiclesDb).catch(() => []) : Promise.resolve([]),
       fetchAllDocs(leadsDb).catch(() => []),
       fetchAllDocs(salesDb).catch(() => []),
       fetchAllDocs(financeDb).catch(() => []),
@@ -1946,6 +1958,12 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       fetchAllDocs(workshopDb).catch(() => []),
       fetchAllDocs(deliveryDb).catch(() => []),
     ]);
+
+    const vehicleDocsById = new Map();
+    for (const doc of [...vehicleDocsLegacy, ...vehicleDocsPrimary]) {
+      if (doc?._id) vehicleDocsById.set(doc._id, doc);
+    }
+    const vehicleDocs = [...vehicleDocsById.values()];
 
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
@@ -3012,7 +3030,7 @@ async function initializeCouchDB() {
     return;
   }
 
-  const dbs = [VEHICLES_DB, ACCOUNTS_DB, NOTIFICATIONS_DB];
+  const dbs = Array.from(new Set([VEHICLES_DB, LEGACY_VEHICLES_DB, ACCOUNTS_DB, NOTIFICATIONS_DB]));
   for (const db of dbs) {
     await setupDatabaseIndexes(initReq, db).catch((err) =>
       logger.error({ tag: 'INIT', db, err: err?.message }, `Índices fallaron en ${db}`),

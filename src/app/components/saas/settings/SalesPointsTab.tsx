@@ -18,6 +18,11 @@ import {
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
 } from '../../../lib/deliverySetup';
+import {
+  bootstrapCompraventaStoreAfterCreate,
+  isCompraventaBusinessType,
+  loadCompraventaStores,
+} from '../../../lib/compraventaSetup';
 import { notifyDeliveryActiveStoreChanged } from '../../../lib/deliveryOpsPdvSelection';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useModalClose } from '../../../hooks/useModalClose';
@@ -150,6 +155,13 @@ function isRetailWorkCenterType(centerType: WorkCenterType): boolean {
   return centerType === 'punto_de_venta' || centerType === 'almacen';
 }
 
+function shouldSyncRetailPdv(
+  usesRetailPdvFlow: boolean,
+  centerType: WorkCenterType,
+): boolean {
+  return usesRetailPdvFlow && isRetailWorkCenterType(centerType);
+}
+
 interface WorkCenterModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -171,6 +183,8 @@ interface WorkCenterModalProps {
   enablePdvCodeEdit?: boolean;
   /** Código PDV actual al editar (si hay caja enlazada). */
   editPdvCode?: string;
+  /** Textos del wizard compacto: delivery (restauración) o compraventa (vehículos). */
+  pdvWizardVariant?: 'delivery' | 'compraventa';
 }
 
 function WorkCenterModal({
@@ -187,6 +201,7 @@ function WorkCenterModal({
   defaultActiveOnCreate = true,
   enablePdvCodeEdit = false,
   editPdvCode = '',
+  pdvWizardVariant = 'delivery',
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
 
@@ -685,7 +700,7 @@ function WorkCenterModal({
     editItem?.name?.trim() ||
     (pdvLabelPreview && !pdvLabelPreview.needsName ? pdvLabelPreview.displayName : '') ||
     form.name.trim() ||
-    'Tu tienda';
+    (isCompraventaWizard ? 'Tu exposición' : 'Tu tienda');
 
   const shellSteps: SettingsWizardStep[] = wizardRows.map((row, index) => ({
     id: row.id,
@@ -695,8 +710,12 @@ function WorkCenterModal({
     hasError: stepHasFieldError(row.id),
   }));
 
+  const isCompraventaWizard = pdvWizardVariant === 'compraventa';
+
   const modalTitle = simplifyPdvCreate
-    ? 'Nuevo punto de venta (PDV)'
+    ? isCompraventaWizard
+      ? 'Nuevo expositor / PDV'
+      : 'Nuevo punto de venta (PDV)'
     : editItem
       ? 'Editar centro de trabajo'
       : 'Nuevo centro de trabajo';
@@ -741,7 +760,13 @@ function WorkCenterModal({
           isLastStep={isLastStep}
           saving={saving}
           saveLabel={
-            editItem ? 'Guardar cambios' : simplifyPdvCreate ? 'Crear tienda / PDV' : 'Crear centro de trabajo'
+            editItem
+              ? 'Guardar cambios'
+              : simplifyPdvCreate
+                ? isCompraventaWizard
+                  ? 'Crear exposición / PDV'
+                  : 'Crear tienda / PDV'
+                : 'Crear centro de trabajo'
           }
           nextLabel="Siguiente paso"
         />
@@ -752,7 +777,10 @@ function WorkCenterModal({
             <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
               {simplifyPdvCreate ? (
                 <p className="text-xs text-emerald-800 dark:text-emerald-200 bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2 shrink-0">
-                  Tipo: <span className="font-semibold">Punto de venta</span> — se creará el PDV de caja automáticamente.
+                  Tipo: <span className="font-semibold">Punto de venta</span> —{' '}
+                  {isCompraventaWizard
+                    ? 'se creará el PDV de venta de vehículos y TPV automáticamente.'
+                    : 'se creará el PDV de caja automáticamente.'}
                 </p>
               ) : (
               <div>
@@ -760,7 +788,7 @@ function WorkCenterModal({
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { type: 'oficina' as WorkCenterType, desc: 'Oficinas, despachos' },
-                    { type: 'punto_de_venta' as WorkCenterType, desc: 'Tiendas, locales' },
+                    { type: 'punto_de_venta' as WorkCenterType, desc: isCompraventaWizard ? 'Exposición, concesionario' : 'Tiendas, locales' },
                     { type: 'almacen' as WorkCenterType, desc: 'Naves, depósitos' },
                     { type: 'custom' as WorkCenterType, desc: 'Garajes, trasteros…' },
                   ]).map(({ type: ct, desc }) => (
@@ -810,7 +838,7 @@ function WorkCenterModal({
 
               {pdvLabelPreview && simplifyPdvCreate && (
                 <p className="text-xs text-indigo-800 dark:text-indigo-200 shrink-0">
-                  Vista en caja:{' '}
+                  Vista en {isCompraventaWizard ? 'TPV' : 'caja'}:{' '}
                   {pdvLabelPreview.needsName ? (
                     <span className="text-indigo-700/90 dark:text-indigo-300/90">
                       escribe el nombre arriba (ej. Badalona)
@@ -832,7 +860,9 @@ function WorkCenterModal({
               {pdvLabelPreview && !simplifyPdvCreate && (
                 <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50/90 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/35">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
-                    Cómo se verá en caja, delivery y menús
+                    {isCompraventaWizard
+                      ? 'Cómo se verá en TPV y ventas de vehículos'
+                      : 'Cómo se verá en caja, delivery y menús'}
                   </p>
                   <div className="mt-2 flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-gray-900">
@@ -856,7 +886,13 @@ function WorkCenterModal({
                 <label className={labelClass}>Nombre *</label>
                 <input
                   className={inputClass('name')}
-                  placeholder={simplifyPdvCreate ? 'Ej: Local Centro' : 'Ej: Oficina Central, Tienda Gran Vía...'}
+                  placeholder={
+                    simplifyPdvCreate
+                      ? isCompraventaWizard
+                        ? 'Ej: Exposición Centro, Concesionario Norte...'
+                        : 'Ej: Local Centro'
+                      : 'Ej: Oficina Central, Tienda Gran Vía...'
+                  }
                   value={form.name}
                   maxLength={PDV_RETAIL_LIMITS.storeNameMax}
                   onChange={(e) => {
@@ -1534,6 +1570,9 @@ export function SalesPointsTab() {
   });
   const hasDeliveryPdvs = Object.keys(deliveryPdvsByWorkCenter).length > 0;
   const isDelivery = isDeliveryAccount || hasDeliveryPdvs;
+  const isCompraventa = isCompraventaBusinessType(currentBusiness?.businessType);
+  const usesRetailPdvFlow = isDelivery || isCompraventa;
+  const pdvWizardVariant: 'delivery' | 'compraventa' = isCompraventa && !isDelivery ? 'compraventa' : 'delivery';
   const [regeneratingTerminal, setRegeneratingTerminal] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
   const loadSeqRef = useRef(0);
@@ -1546,6 +1585,8 @@ export function SalesPointsTab() {
   accountBusinessCountRef.current = accountBusinessCount;
   const isDeliveryAccountRef = useRef(isDeliveryAccount);
   isDeliveryAccountRef.current = isDeliveryAccount;
+  const isCompraventaRef = useRef(isCompraventa);
+  isCompraventaRef.current = isCompraventa;
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
   const activeStore = useActiveStoreScope();
 
@@ -1600,7 +1641,7 @@ export function SalesPointsTab() {
         setLoading(false);
         return;
       }
-      if (isDeliveryAccountRef.current && !bid) {
+      if ((isDeliveryAccountRef.current || isCompraventaRef.current) && !bid) {
         setWorkCenters([]);
         setLoading(false);
         return;
@@ -1611,17 +1652,30 @@ export function SalesPointsTab() {
 
       const skipPdvMerge = options?.skipPdvMerge === true;
       try {
-        const state = await loadTpvPointsOfSaleForBusiness(userNow, bizNow, {
-          skipPdvMerge,
-          includeInactivePdvs: true,
-          accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
-          knownBusinessIds: knownBusinessIdsFromList(businesses),
-        });
+        const isCompraventaOnly =
+          isCompraventaRef.current && !isDeliveryAccountRef.current;
+        const state = isCompraventaOnly
+          ? await loadCompraventaStores(userNow, bizNow, {
+              includeInactivePdvs: true,
+              ensureTabletCodes: true,
+            })
+          : await loadTpvPointsOfSaleForBusiness(userNow, bizNow, {
+              skipPdvMerge,
+              includeInactivePdvs: true,
+              accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
+              knownBusinessIds: knownBusinessIdsFromList(businesses),
+            });
         if (seq !== loadSeqRef.current) return;
         if ((businessScopeId || resolveBusinessScopeId(currentBusinessRef.current)) !== bid) return;
         applyDeliveryStoresState(state);
       } catch (err) {
         if (seq !== loadSeqRef.current) return;
+        if (isCompraventaRef.current && !isDeliveryAccountRef.current) {
+          const msg =
+            err instanceof Error ? err.message : 'Error al cargar los centros de trabajo';
+          toast.error(msg);
+          return;
+        }
         try {
           const fallback = await loadDeliveryStores(userNow, bizNow, {
             skipPdvMerge: true,
@@ -1659,13 +1713,15 @@ export function SalesPointsTab() {
 
   useEffect(() => {
     if (!businessesFetchSettled) return;
-    if (isDeliveryAccount && !businessScopeId) {
+    if ((isDeliveryAccount || isCompraventa) && !businessScopeId) {
       setWorkCenters([]);
       setLoading(false);
       return;
     }
-    void loadData().then(() => activeStore.refresh());
-  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, loadData, activeStore.refresh]);
+    void loadData().then(() => {
+      if (isDeliveryAccount && !isCompraventa) void activeStore.refresh();
+    });
+  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, isCompraventa, loadData, activeStore.refresh]);
 
   useEffect(() => {
     const onChanged = () => {
@@ -1793,7 +1849,7 @@ export function SalesPointsTab() {
         setShowProAccessModal(true);
         return;
       }
-      const needsPdvSlot = forcePdv || isDelivery;
+      const needsPdvSlot = forcePdv || usesRetailPdvFlow;
       if (needsPdvSlot && !pointOfSaleAccess.canCreatePointOfSale) {
         setProAccessReason(pointOfSaleAccess.needsPointOfSaleAddon ? 'pdv-extra' : 'pro');
         setShowProAccessModal(true);
@@ -1803,7 +1859,7 @@ export function SalesPointsTab() {
     },
     [
       canCreateWorkCenter,
-      isDelivery,
+      usesRetailPdvFlow,
       pointOfSaleAccess.canCreatePointOfSale,
       pointOfSaleAccess.needsPointOfSaleAddon,
     ],
@@ -1938,10 +1994,7 @@ export function SalesPointsTab() {
           ...wcPayload,
           businessId: businessIdForWc || editingItem.businessId,
         } as WorkCenter);
-        if (
-          isDelivery &&
-          (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
-        ) {
+        if (shouldSyncRetailPdv(usesRetailPdvFlow, updated.centerType)) {
           const displayName = sanitizeStoreDisplayName(String(wcData.name || ''));
           const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
           const linkedPdv = deliveryPdvsByWorkCenter[updated._id];
@@ -1984,8 +2037,12 @@ export function SalesPointsTab() {
         void loadData({ skipPdvMerge: true });
       } else {
         const businessIdForWc = resolveBusinessScopeId(currentBusiness ?? null);
-        if (isDelivery && !businessIdForWc) {
-          toast.error('Selecciona una empresa activa arriba antes de crear la tienda.');
+        if (usesRetailPdvFlow && !businessIdForWc) {
+          toast.error(
+            isCompraventa
+              ? 'Selecciona una empresa activa arriba antes de crear la exposición.'
+              : 'Selecciona una empresa activa arriba antes de crear la tienda.',
+          );
           throw new Error('missing business');
         }
         const newNameNorm = sanitizeStoreDisplayName(String(wcData.name || '')).toLowerCase();
@@ -2005,7 +2062,9 @@ export function SalesPointsTab() {
           });
           if (existingDup) {
             toast.error(
-              `Ya existe una tienda «${existingDup.name}» en esta empresa. Edítala en lugar de crear otra.`,
+              isCompraventa
+                ? `Ya existe un expositor «${existingDup.name}» en esta empresa. Edítalo en lugar de crear otro.`
+                : `Ya existe una tienda «${existingDup.name}» en esta empresa. Edítala en lugar de crear otra.`,
             );
             throw new Error('duplicate store name');
           }
@@ -2033,10 +2092,7 @@ export function SalesPointsTab() {
           businessId: businessIdForWc || undefined,
         });
         let createdPdv: Awaited<ReturnType<typeof ensureDeliveryPdvForWorkCenter>> = null;
-        if (
-          isDelivery &&
-          (requestedCenterType === 'punto_de_venta' || requestedCenterType === 'almacen')
-        ) {
+        if (shouldSyncRetailPdv(usesRetailPdvFlow, requestedCenterType)) {
           const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
           createdPdv = await ensureDeliveryPdvForWorkCenter(dataUserId, created, {
             business: currentBusiness ?? null,
@@ -2054,16 +2110,25 @@ export function SalesPointsTab() {
             setEditingItem(null);
             setForceCreatePdv(false);
             toast.error(
-              'La tienda se guardó, pero falta el PDV de caja (dirección completa, mín. 5 caracteres). Aparece abajo: edítala y guarda de nuevo.',
+              isCompraventa
+                ? 'El expositor se guardó, pero falta el PDV de venta (dirección completa, mín. 5 caracteres). Edítalo y guarda de nuevo.'
+                : 'La tienda se guardó, pero falta el PDV de caja (dirección completa, mín. 5 caracteres). Aparece abajo: edítala y guarda de nuevo.',
             );
             void loadData({ skipPdvMerge: true });
             return;
           }
-          await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
-            workCenter: created,
-            pointOfSale: createdPdv,
-            storeName: String(wcData.name || ''),
-          });
+          if (isDelivery) {
+            await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
+              workCenter: created,
+              pointOfSale: createdPdv,
+              storeName: String(wcData.name || ''),
+            });
+          } else {
+            await bootstrapCompraventaStoreAfterCreate(user, currentBusiness, {
+              workCenter: created,
+              pointOfSale: createdPdv,
+            });
+          }
           selectDeliveryPointOfSale(currentBusiness, dataUserId, createdPdv._id);
           persistRetailScopeAfterStorePdvSave(businessIdForWc, created, createdPdv, {
             accountBusinessCount,
@@ -2120,10 +2185,7 @@ export function SalesPointsTab() {
     try {
       const updated = await updateWorkCenter({ ...wc, active: wc.active === false });
       let linkedPdvId: string | null = null;
-      if (
-        isDelivery &&
-        (updated.centerType === 'punto_de_venta' || updated.centerType === 'almacen')
-      ) {
+      if (shouldSyncRetailPdv(usesRetailPdvFlow, updated.centerType)) {
         const pdv = await ensureDeliveryPdvForWorkCenter(dataUserId, updated, {
           business: currentBusiness ?? null,
         });
@@ -2137,7 +2199,7 @@ export function SalesPointsTab() {
       notifyDeliveryWorkCentersChanged(resolveBusinessScopeId(currentBusiness));
       notifyDeliveryActiveStoreChanged();
       await loadData();
-      if (isDelivery && updated.active !== false && linkedPdvId) {
+      if (usesRetailPdvFlow && updated.active !== false && linkedPdvId) {
         selectDeliveryPointOfSale(currentBusiness, dataUserId, linkedPdvId);
       }
       toast.success(`"${updated.name}" marcada como ${updated.active !== false ? 'activa' : 'inactiva'}`);
@@ -2315,21 +2377,41 @@ export function SalesPointsTab() {
         </div>
         <ActivationFieldWrap fieldKey="create-store" activeKey={isFocused('create-store') ? 'create-store' : activationFocus}>
           <AddButtonDropdown
-            label={isDelivery ? 'Crear Tienda/PDV' : 'Nuevo centro'}
-            onQuickAdd={() => requestCreateWorkCenter(isDelivery)}
-            quickAddLabel={isDelivery ? 'Nueva tienda / PDV' : 'Alta rápida'}
-            quickAddDesc={isDelivery ? 'Formulario compacto + TPV de caja' : 'Formulario de centro de trabajo'}
+            label={
+              isCompraventa && !isDelivery
+                ? 'Crear exposición / PDV'
+                : isDelivery
+                  ? 'Crear Tienda/PDV'
+                  : 'Nuevo centro'
+            }
+            onQuickAdd={() => requestCreateWorkCenter(usesRetailPdvFlow)}
+            quickAddLabel={
+              isCompraventa && !isDelivery
+                ? 'Nueva exposición / PDV'
+                : isDelivery
+                  ? 'Nueva tienda / PDV'
+                  : 'Alta rápida'
+            }
+            quickAddDesc={
+              isCompraventa && !isDelivery
+                ? 'Formulario compacto + TPV de vehículos'
+                : isDelivery
+                  ? 'Formulario compacto + TPV de caja'
+                  : 'Formulario de centro de trabajo'
+            }
           />
         </ActivationFieldWrap>
       </div>
 
       {/* Lista de centros */}
-      {isDelivery && !businessScopeId ? (
+      {usesRetailPdvFlow && !businessScopeId ? (
         <div className="flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border-2 border-dashed border-amber-200 dark:border-amber-800">
           <Building2 className="w-12 h-12 text-amber-300 mb-3" />
           <p className="font-semibold text-gray-900 dark:text-gray-100">Selecciona una empresa</p>
           <p className="text-sm mt-1 text-center max-w-md">
-            Las tiendas se muestran por empresa. Elige modomio, pizzas u otra en el selector superior.
+            {isCompraventa && !isDelivery
+              ? 'Los expositores y PDV se muestran por empresa. Elige tu compraventa en el selector superior.'
+              : 'Las tiendas se muestran por empresa. Elige modomio, pizzas u otra en el selector superior.'}
           </p>
         </div>
       ) : loading ? (
@@ -2345,20 +2427,28 @@ export function SalesPointsTab() {
           </p>
           <p className="text-sm mt-1 text-center max-w-md">
             {workCenters.length === 0
-              ? isDelivery
+              ? isCompraventa && !isDelivery
                 ? currentBusiness?.name
-                  ? `No hay tiendas en «${currentBusiness.name}». Si las creaste en otra empresa, cámbiala arriba en la barra.`
-                  : 'Selecciona una empresa arriba y crea la primera tienda.'
-                : 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
+                  ? `No hay expositores en «${currentBusiness.name}». Crea el primero con el botón de arriba.`
+                  : 'Selecciona una empresa arriba y crea tu primera exposición / PDV.'
+                : isDelivery
+                  ? currentBusiness?.name
+                    ? `No hay tiendas en «${currentBusiness.name}». Si las creaste en otra empresa, cámbiala arriba en la barra.`
+                    : 'Selecciona una empresa arriba y crea la primera tienda.'
+                  : 'Crea el primer centro de trabajo: oficina, punto de venta, almacén...'
               : 'Prueba con otros términos de búsqueda'}
           </p>
           {workCenters.length === 0 && (
             <ActivationFieldWrap fieldKey="create-store" activeKey={activationFocus}>
               <button
-                onClick={() => requestCreateWorkCenter(isDelivery)}
+                onClick={() => requestCreateWorkCenter(usesRetailPdvFlow)}
                 className="mt-4 px-4 py-2 bg-gray-900 dark:bg-gray-100 dark:text-gray-900 text-white rounded-xl text-sm font-medium"
               >
-                {isDelivery ? '+ Primera tienda / PDV' : '+ Nuevo centro de trabajo'}
+                {isCompraventa && !isDelivery
+                  ? '+ Primera exposición / PDV'
+                  : isDelivery
+                    ? '+ Primera tienda / PDV'
+                    : '+ Nuevo centro de trabajo'}
               </button>
             </ActivationFieldWrap>
           )}
@@ -2412,8 +2502,8 @@ export function SalesPointsTab() {
                           Principal
                         </span>
                       )}
-                      {isDelivery && deliveryPdvsByWorkCenter[wc._id] && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200" title="PDV de caja enlazado">
+                      {usesRetailPdvFlow && deliveryPdvsByWorkCenter[wc._id] && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200" title="PDV enlazado">
                           {pointOfSaleDisplayLabel(deliveryPdvsByWorkCenter[wc._id])}
                         </span>
                       )}
@@ -2457,9 +2547,11 @@ export function SalesPointsTab() {
                     <span>{wc.phone}</span>
                   </div>
                 )}
-                {wc.centerType === 'punto_de_venta' && isDelivery && !deliveryPdvsByWorkCenter[wc._id] && (
+                {wc.centerType === 'punto_de_venta' && usesRetailPdvFlow && !deliveryPdvsByWorkCenter[wc._id] && (
                   <p className="text-[10px] leading-snug text-amber-800 dark:text-amber-200 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2">
-                    Falta el PDV de caja. Edita la tienda y guarda con dirección completa (mín. 5 caracteres).
+                    {isCompraventa && !isDelivery
+                      ? 'Falta el PDV de venta. Edita el expositor y guarda con dirección completa (mín. 5 caracteres).'
+                      : 'Falta el PDV de caja. Edita la tienda y guarda con dirección completa (mín. 5 caracteres).'}
                   </p>
                 )}
                 {wc.centerType === 'punto_de_venta' && deliveryPdvsByWorkCenter[wc._id]?.terminalCode && (
@@ -2613,7 +2705,9 @@ export function SalesPointsTab() {
         }}
         onSave={handleSave}
         editItem={editingItem}
-        forcePointOfSale={forceFirstCenterAsPdv || forceCreatePdv || (isDelivery && !editingItem)}
+        forcePointOfSale={
+          forceFirstCenterAsPdv || forceCreatePdv || (usesRetailPdvFlow && !editingItem)
+        }
         includeOpeningHours={
           isDelivery &&
           (forceFirstCenterAsPdv ||
@@ -2626,8 +2720,9 @@ export function SalesPointsTab() {
         existingPdvCodes={existingPdvCodesForModal}
         existingPdvNames={existingPdvNamesForModal}
         defaultActiveOnCreate={defaultActiveOnCreate}
-        enablePdvCodeEdit={isDelivery}
+        enablePdvCodeEdit={usesRetailPdvFlow}
         editPdvCode={editingPdvCode}
+        pdvWizardVariant={pdvWizardVariant}
       />
 
       {showProAccessModal && !showModal && (

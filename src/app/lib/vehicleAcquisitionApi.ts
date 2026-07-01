@@ -1,3 +1,6 @@
+import { getAuthHeaders } from './authApi';
+import { getApiBase } from './apiBase';
+
 export type AcquisitionType = 'compra_particular' | 'compra_empresa' | 'subasta' | 'retirada' | 'grua_externa';
 export type AcquisitionStatus = 'borrador' | 'pendiente_aprobacion' | 'aprobada' | 'rechazada' | 'en_transito' | 'recibida' | 'documentada' | 'cerrada' | 'cancelada';
 export type PaymentMethod = 'efectivo' | 'transferencia' | 'cheque' | 'aplazado' | 'compensacion' | 'otro';
@@ -20,6 +23,7 @@ export interface VehicleAcquisition {
   id: string;
   _rev?: string;
   vehicleId: string;
+  tradeInId?: string;
   registrationPlate: string;
   acquisitionType: AcquisitionType;
   sellerType: string;
@@ -88,12 +92,18 @@ export interface EconomicHistorySummary {
   roi: number;
 }
 
+const API_BASE = getApiBase();
 const BASE = '/api/vehicle-acquisitions';
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+      ...(init?.headers || {}),
+    },
   });
   const json = await res.json();
   if (!res.ok || !json.ok) throw new Error(json.error || 'Error de red');

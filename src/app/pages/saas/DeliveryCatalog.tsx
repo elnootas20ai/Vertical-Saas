@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
-import { isDeliveryBusinessType, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { isDeliveryBusinessType, notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { filterCatalogItemsForBusinessScope } from '../../lib/catalogBusinessScope';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -29,7 +29,7 @@ import {
 } from '../../components/saas/SaasTabWorkspace';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
-import { listBrandsRequest, createBrandRequest, type Brand } from '../../lib/brandsApi';
+import { listBrandsRequest, createBrandRequest, deleteBrandRequest, type Brand } from '../../lib/brandsApi';
 import {
   formatUnmatchedCommercialBrandWarning,
   mapImportEntryToCatalogItem,
@@ -154,7 +154,11 @@ import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailM
 import { CatalogComboCompositionEditor } from '../../components/saas/CatalogComboCompositionEditor';
 import { COMBO_SLOT_META, DEFAULT_COMBO_STRUCTURE, comboStructureFromCustomFields, isComboStructureConfirmed, resolveComboRefSlotKind, type ComboStructureSlot } from '../../lib/catalogComboSlots';
 import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
-import { applyCatalogMoveTarget, type CatalogMoveTargetInput } from '../../lib/catalogItemMove';
+import {
+  applyCatalogMoveTarget,
+  commercialLinesWithoutCatalogItems,
+  type CatalogMoveTargetInput,
+} from '../../lib/catalogItemMove';
 
 // ─── Unit options ─────────────────────────────────────────────────────────────
 
@@ -2519,6 +2523,7 @@ export function CatalogPage() {
   const [bulkDeletingCatalog, setBulkDeletingCatalog] = useState(false);
   const [bulkMovingCatalog, setBulkMovingCatalog] = useState(false);
   const [catalogMoveItems, setCatalogMoveItems] = useState<CatalogItem[] | null>(null);
+  const [deletingOrganizerId, setDeletingOrganizerId] = useState<string | null>(null);
   type CatalogDeleteOp =
     | null
     | { mode: 'single'; item: CatalogItem }
@@ -2564,6 +2569,11 @@ export function CatalogPage() {
   const commercialLines = useMemo(
     () => sortBrandsForDisplay(commercialLineBrands(brands)),
     [brands],
+  );
+
+  const emptyCommercialLines = useMemo(
+    () => commercialLinesWithoutCatalogItems(commercialLines, catalogItems),
+    [commercialLines, catalogItems],
   );
 
   const templateOrganizerLines = useMemo(
@@ -3530,6 +3540,25 @@ export function CatalogPage() {
     setBulkDeleteConfirmStep(false);
   }, [searchCatalog]);
 
+  const startCatalogMoveMode = useCallback(() => {
+    if (filteredCatalog.length === 0) {
+      toast.error('No hay productos en el catálogo');
+      return;
+    }
+    setCatalogSelectMode(true);
+    setBulkDeleteConfirmStep(false);
+    setSelectedCatalogIds(new Set());
+    toast.info('Marca los productos y pulsa «Mover»', { duration: 6000 });
+  }, [filteredCatalog.length]);
+
+  const openEmptyOrganizersModal = useCallback(() => {
+    if (emptyCommercialLines.length === 0) {
+      toast.message('No hay organizadores vacíos');
+      return;
+    }
+    setCatalogMoveItems([]);
+  }, [emptyCommercialLines.length]);
+
   const openCatalogMoveModal = useCallback(
     (items?: CatalogItem[]) => {
       const list =
@@ -3542,6 +3571,34 @@ export function CatalogPage() {
       setCatalogMoveItems(list);
     },
     [filteredCatalog, selectedCatalogIds],
+  );
+
+  const handleDeleteEmptyOrganizer = useCallback(
+    async (brand: Brand) => {
+      if (!businessId) return;
+      if (!window.confirm(`¿Eliminar el organizador «${brand.name}»? No tiene productos asignados.`)) return;
+      setDeletingOrganizerId(brand._id);
+      try {
+        await deleteBrandRequest(businessId, brand._id);
+        setBrands((prev) => prev.filter((b) => b._id !== brand._id));
+        notifyDeliveryBrandsChanged();
+        notifyDeliveryCatalogChanged(dataUserId, businessId);
+        toast.success(`Organizador «${brand.name}» eliminado`);
+        setCatalogMoveItems((prev) => {
+          if (!prev || prev.length > 0) return prev;
+          const remaining = commercialLinesWithoutCatalogItems(
+            commercialLines.filter((line) => line._id !== brand._id),
+            catalogItems,
+          );
+          return remaining.length === 0 ? null : prev;
+        });
+      } catch {
+        toast.error('No se pudo eliminar el organizador');
+      } finally {
+        setDeletingOrganizerId(null);
+      }
+    },
+    [businessId, dataUserId, commercialLines, catalogItems],
   );
 
   const handleConfirmCatalogMove = useCallback(
@@ -3649,6 +3706,27 @@ export function CatalogPage() {
                 <Upload className="w-3.5 h-3.5" />
                 Importar
               </SaasTabSecondaryButton>
+              {!catalogSelectMode ? (
+                <SaasTabSecondaryButton
+                  onClick={startCatalogMoveMode}
+                  disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                  className="!border-indigo-300 !text-indigo-700 dark:!text-indigo-300"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  Mover producto
+                </SaasTabSecondaryButton>
+              ) : null}
+              {!catalogSelectMode && emptyCommercialLines.length > 0 ? (
+                <SaasTabSecondaryButton
+                  onClick={openEmptyOrganizersModal}
+                  disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                  className="!border-amber-300 !text-amber-800 dark:!text-amber-200"
+                  title="Eliminar líneas TPV sin productos"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Organizadores vacíos ({emptyCommercialLines.length})
+                </SaasTabSecondaryButton>
+              ) : null}
               {catalogSelectMode ? (
                 <>
                   <SaasTabSecondaryButton
@@ -3683,30 +3761,16 @@ export function CatalogPage() {
                   </SaasTabSecondaryButton>
                 </>
               ) : (
-                <>
-                  <SaasTabSecondaryButton
-                    onClick={() => {
-                      setCatalogSelectMode(true);
-                      setBulkDeleteConfirmStep(false);
-                      setSelectedCatalogIds(new Set());
-                    }}
-                    disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                    className="!border-indigo-300 !text-indigo-700"
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    Seleccionar
-                  </SaasTabSecondaryButton>
-                  <SaasTabSecondaryButton
-                    onClick={handleDeleteAllFilteredCatalog}
-                    disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                    className="!border-red-300 !text-red-700"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    {searchCatalog.trim()
-                      ? `Eliminar visibles (${filteredCatalog.length})`
-                      : `Eliminar todo (${filteredCatalog.length})`}
-                  </SaasTabSecondaryButton>
-                </>
+                <SaasTabSecondaryButton
+                  onClick={handleDeleteAllFilteredCatalog}
+                  disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                  className="!border-red-300 !text-red-700"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {searchCatalog.trim()
+                    ? `Eliminar visibles (${filteredCatalog.length})`
+                    : `Eliminar todo (${filteredCatalog.length})`}
+                </SaasTabSecondaryButton>
               )}
               <ActivationFieldWrap
                 fieldKey="catalog-import"
@@ -4535,11 +4599,14 @@ export function CatalogPage() {
         brands={brands}
         commercialLines={commercialLines}
         categoriesInUse={categories}
+        emptyOrganizers={emptyCommercialLines}
         submitting={bulkMovingCatalog}
+        deletingOrganizerId={deletingOrganizerId}
         onClose={() => {
-          if (!bulkMovingCatalog) setCatalogMoveItems(null);
+          if (!bulkMovingCatalog && !deletingOrganizerId) setCatalogMoveItems(null);
         }}
         onConfirm={handleConfirmCatalogMove}
+        onDeleteEmptyOrganizer={handleDeleteEmptyOrganizer}
       />
       <CatalogDeleteGuardModal
         open={catalogDeleteGuard !== null}

@@ -131,7 +131,10 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
 
       const linkedId = String(linkedBusinessId || '').trim();
       if (linkedId) {
-        const linkedBiz = list.find((b) => b.business_id === linkedId);
+        const linkedBiz = list.find(
+          (b) =>
+            normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(linkedId),
+        );
         if (linkedBiz) {
           setCurrentBusiness((prev) =>
             prev?.business_id === linkedBiz.business_id ? prev : linkedBiz,
@@ -142,7 +145,12 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       }
 
       const storedId = getStoredBusinessId(userId);
-      const found = storedId ? list.find((b) => b.business_id === storedId) : null;
+      const found = storedId
+        ? list.find(
+            (b) =>
+              normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(storedId),
+          )
+        : null;
       const resolved = found || list[0];
 
       setCurrentBusiness((prev) =>

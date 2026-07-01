@@ -283,6 +283,10 @@ import { ButcherTraceability } from './pages/saas/ButcherTraceability';
 import { ButcherWaste } from './pages/saas/ButcherWaste';
 import { ButcherTpvPage } from './pages/saas/ButcherTpvPage';
 import { CompraventaCrm } from './pages/saas/vertical/compraventa/CompraventaCrm';
+import { CompraventaComprasPage } from './pages/saas/vertical/compraventa/CompraventaComprasPage';
+import { CompraventaVentasPage } from './pages/saas/vertical/compraventa/CompraventaVentasPage';
+import { CompraventaTasacionesPage } from './pages/saas/vertical/compraventa/CompraventaTasacionesPage';
+import { CompraventaEntregasPage } from './pages/saas/vertical/compraventa/CompraventaEntregasPage';
 import { PreparationExpenses } from './pages/saas/PreparationExpenses';
 import { ButcherWorkerOrders } from './pages/saas/ButcherWorkerOrders';
 
@@ -821,6 +825,11 @@ export const router = createBrowserRouter([
           { path: 'vertical/compraventa/trabajadores', element: <Navigate to="/saas/dealership-workers" replace /> },
           { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/crm', element: <RequireWorkerPermission permission="clients"><CompraventaCrm /></RequireWorkerPermission> },
+          { path: 'vertical/compraventa/compras', element: <RequireBusinessOwner><CompraventaComprasPage /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/ventas', element: <RequireWorkerPermission permission="sales"><CompraventaVentasPage /></RequireWorkerPermission> },
+          { path: 'vertical/compraventa/tasaciones', element: <RequireBusinessOwner><CompraventaTasacionesPage /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/gastos', element: <Navigate to="/saas/vertical/compraventa/gastos-preparacion" replace /> },
+          { path: 'vertical/compraventa/entregas', element: <RequireBusinessOwner><CompraventaEntregasPage /></RequireBusinessOwner> },
           { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><PreparationExpenses /></RequireBusinessOwner> },
 
           { path: 'changelog', Component: ChangelogPage },

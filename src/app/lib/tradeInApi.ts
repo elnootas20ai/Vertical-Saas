@@ -7,6 +7,9 @@ interface TradeInEnvelope {
   error?: string;
   tradeIn?: TradeIn;
   tradeIns?: TradeIn[];
+  vehicle?: unknown;
+  acquisition?: unknown;
+  clientId?: string | null;
   id?: string;
 }
 
@@ -49,5 +52,27 @@ export async function updateTradeInRequest(userId: string, tradeInId: string, tr
 export async function deleteTradeInRequest(userId: string, tradeInId: string) {
   return request(`/api/tradeins/${encodeURIComponent(userId)}/${encodeURIComponent(tradeInId)}`, {
     method: 'DELETE',
+  });
+}
+
+export async function acceptTradeInRequest(
+  userId: string,
+  tradeInId: string,
+  payload?: { note?: string; acceptedValue?: number; businessId?: string | null },
+) {
+  return request(`/api/tradeins/${encodeURIComponent(userId)}/${encodeURIComponent(tradeInId)}/accept`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function rejectTradeInRequest(
+  userId: string,
+  tradeInId: string,
+  payload?: { note?: string },
+) {
+  return request(`/api/tradeins/${encodeURIComponent(userId)}/${encodeURIComponent(tradeInId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
   });
 }

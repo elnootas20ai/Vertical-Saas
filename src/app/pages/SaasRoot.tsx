@@ -8,7 +8,7 @@ import { AppProvider, useApp } from '../context/AppContext';
 
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 
-import { BusinessProvider, useBusinessOptional } from '../context/BusinessContext';
+import { useBusinessOptional } from '../context/BusinessContext';
 
 import { GroupProvider } from '../context/GroupContext';
 
@@ -449,11 +449,10 @@ function SaasContent() {
 }
 
 export function SaasRoot() {
-  return (
-    <BusinessProvider>
-      <SaasRootProviders />
-    </BusinessProvider>
-  );
+  // BusinessProvider vive en App.tsx (envuelve todo el router). Duplicarlo aquí
+  // hacía que /auth/gate y /saas/* tuvieran estados distintos: switchBusiness en
+  // Gate no aplicaba al entrar al panel.
+  return <SaasRootProviders />;
 }
 
 function SaasRootProviders() {

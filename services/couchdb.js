@@ -23,11 +23,36 @@ import {
 
 export { clientMatchesBusinessScope };
 
+function normalizeDbName(value) {
+  return String(value || 'vertial')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_$()+/-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function getDbPrefix() {
+  return normalizeDbName(process.env.COUCHDB_DB || 'vertial');
+}
+
+/** Base CouchDB histórica sin prefijo (datos antiguos). */
+export const LEGACY_VEHICLES_DB = 'vehicles';
+
+/** Base activa de inventario: p.ej. bbddsaas-vehicles (COUCHDB_DB + sufijo). */
+export function getVehiclesDbName() {
+  return normalizeDbName(
+    process.env.VITE_VEHICLES_DB
+      || process.env.COUCHDB_VEHICLES_DB
+      || `${getDbPrefix()}-vehicles`,
+  );
+}
+
+export const VEHICLES_DB = getVehiclesDbName();
+
 export const ACCOUNTS_DB = 'accounts';
 export const BUSINESSES_DB = 'businesses';
 export const CARDS_DB = 'cards';
 export const INVOICES_DB = 'invoice';
-export const VEHICLES_DB = 'vehicles';
 export const FLEET_DB = 'fleet';
 export const NOTIFICATIONS_DB = 'notifications';
 export const ACCOUNT_ACTIVITY_LIMIT = 50;
@@ -534,6 +559,63 @@ function normalizeVehicleChecklist(value) {
     }));
 }
 
+const VEHICLE_COMMERCIAL_STATUSES = ['preparation', 'ready', 'published', 'reserved', 'sold'];
+
+function normalizeVehicleCommercialStatus(value) {
+  const normalized = String(value || '').trim();
+  return VEHICLE_COMMERCIAL_STATUSES.includes(normalized) ? normalized : 'preparation';
+}
+
+const VEHICLE_PUBLICATION_CHANNEL_IDS = [
+  'coches_net',
+  'milanuncios',
+  'wallapop',
+  'facebook',
+  'instagram',
+  'autocasion',
+  'web_propia',
+  'otro',
+];
+
+function normalizePublicationChannels(incoming, existing) {
+  const raw = Array.isArray(incoming)
+    ? incoming
+    : Array.isArray(existing)
+      ? existing
+      : [];
+  return raw.filter(Boolean).map((channel) => {
+    const channelIdRaw = String(channel.channelId || channel.id || '').trim();
+    const channelId = VEHICLE_PUBLICATION_CHANNEL_IDS.includes(channelIdRaw) ? channelIdRaw : 'otro';
+    const channelName = String(channel.channelName || channel.name || channelId).trim() || channelId;
+    return {
+      channelId,
+      channelName,
+      url: String(channel.url || '').trim(),
+      publishedAt: String(channel.publishedAt || '').trim() || null,
+      unpublishedAt: channel.unpublishedAt ? String(channel.unpublishedAt).trim() : null,
+      active: channel.active !== false,
+      notes: String(channel.notes || '').trim(),
+    };
+  });
+}
+
+function normalizeCommercialStatusHistory(incoming, existing) {
+  const raw = Array.isArray(incoming)
+    ? incoming
+    : Array.isArray(existing)
+      ? existing
+      : [];
+  return raw.filter(Boolean).map((entry) => ({
+    id: String(entry.id || `csh:${uuidv4()}`),
+    date: String(entry.date || new Date().toISOString()).trim(),
+    userId: String(entry.userId || '').trim(),
+    userName: String(entry.userName || '').trim(),
+    fromStatus: normalizeVehicleCommercialStatus(entry.fromStatus),
+    toStatus: normalizeVehicleCommercialStatus(entry.toStatus),
+    reason: String(entry.reason || '').trim(),
+  }));
+}
+
 export function buildVehicleDocument(userId, data = {}, existingVehicle = null, businessId = null) {
   const now = new Date().toISOString();
 
@@ -625,7 +707,7 @@ export function buildVehicleDocument(userId, data = {}, existingVehicle = null, 
 
     // Commercial fields
     commercialDescription: normalizeOptionalText(data.commercialDescription) || existingVehicle?.commercialDescription || '',
-    commercialStatus: normalizeCommercialStatus(data.commercialStatus || existingVehicle?.commercialStatus),
+    commercialStatus: normalizeVehicleCommercialStatus(data.commercialStatus || existingVehicle?.commercialStatus),
     published: typeof data.published === 'boolean' ? data.published : (existingVehicle?.published ?? false),
     publishedAt: (function () {
       if (data.published === true && !existingVehicle?.published) return now;
@@ -675,6 +757,17 @@ export function buildVehicleDocument(userId, data = {}, existingVehicle = null, 
     validatedBy: data.validatedBy || existingVehicle?.validatedBy || null,
     validatedAt: data.validatedAt || existingVehicle?.validatedAt || null,
 
+    tradeInId: normalizeOptionalText(data.tradeInId) || existingVehicle?.tradeInId || undefined,
+    acquisitionId: normalizeOptionalText(data.acquisitionId) || existingVehicle?.acquisitionId || undefined,
+
+    archived: Boolean(data.archived ?? existingVehicle?.archived ?? false),
+    archivedAt: data.archivedAt ?? existingVehicle?.archivedAt ?? null,
+    createdByUserId: existingVehicle?.createdByUserId || data.createdByUserId || null,
+    createdByName: existingVehicle?.createdByName || data.createdByName || null,
+    vehicleHistory: Array.isArray(data.vehicleHistory)
+      ? data.vehicleHistory
+      : (Array.isArray(existingVehicle?.vehicleHistory) ? existingVehicle.vehicleHistory : []),
+
     createdAt: existingVehicle?.createdAt || now,
     updatedAt: now,
     soldAt: data.status === 'sold' ? data.soldAt || existingVehicle?.soldAt || now : existingVehicle?.soldAt,
@@ -710,6 +803,8 @@ export function sanitizeVehicle(vehicle) {
     purchaseDate: vehicle.purchaseDate,
     origin: vehicle.origin,
     supplierName: vehicle.supplierName,
+    tradeInId: vehicle.tradeInId || undefined,
+    acquisitionId: vehicle.acquisitionId || undefined,
     status: vehicle.status || 'available',
     location: vehicle.location,
     images: Array.isArray(vehicle.images) ? vehicle.images : [],
@@ -720,6 +815,25 @@ export function sanitizeVehicle(vehicle) {
     workshopRepairs: normalizeVehicleRepairs(vehicle.workshopRepairs),
     workshopChecklist: normalizeVehicleChecklist(vehicle.workshopChecklist),
     stockAlertSentAt: vehicle.stockAlertSentAt || null,
+    commercialDescription: vehicle.commercialDescription || '',
+    commercialStatus: normalizeVehicleCommercialStatus(vehicle.commercialStatus),
+    published: vehicle.published === true,
+    publishedAt: vehicle.publishedAt || null,
+    featured: vehicle.featured === true,
+    minimumSalePrice: vehicle.minimumSalePrice ?? null,
+    assignedCommercialId: vehicle.assignedCommercialId || null,
+    assignedCommercialName: vehicle.assignedCommercialName || null,
+    publicationChannels: normalizePublicationChannels(vehicle.publicationChannels),
+    commercialStatusHistory: normalizeCommercialStatusHistory(vehicle.commercialStatusHistory),
+    documents: Array.isArray(vehicle.documents) ? vehicle.documents : [],
+    archived: Boolean(vehicle.archived),
+    archivedAt: vehicle.archivedAt || null,
+    createdByUserId: vehicle.createdByUserId || null,
+    createdByName: vehicle.createdByName || null,
+    vehicleHistory: Array.isArray(vehicle.vehicleHistory) ? vehicle.vehicleHistory : [],
+    totalPreparationCost: vehicle.totalPreparationCost ?? null,
+    estimatedMargin: vehicle.estimatedMargin ?? null,
+    marginPercentage: vehicle.marginPercentage ?? null,
     createdAt: vehicle.createdAt,
     updatedAt: vehicle.updatedAt,
     soldAt: vehicle.soldAt,
@@ -728,15 +842,79 @@ export function sanitizeVehicle(vehicle) {
   };
 }
 
-export async function listVehiclesByUser(req, userId, businessId = null) {
-  await ensureDatabase(req, VEHICLES_DB);
-  const docs = await getAllDocuments(req, VEHICLES_DB);
+export async function getAllVehicleDocuments(req) {
+  const primary = getVehiclesDbName();
+  const legacy = LEGACY_VEHICLES_DB;
+
+  await ensureDatabase(req, primary);
+  const primaryDocs = await getAllDocuments(req, primary).catch(() => []);
+
+  if (legacy === primary) {
+    return primaryDocs;
+  }
+
+  await ensureDatabase(req, legacy).catch(() => null);
+  const legacyDocs = await getAllDocuments(req, legacy).catch(() => []);
+  const byId = new Map();
+  for (const doc of legacyDocs) {
+    if (doc?._id) byId.set(doc._id, doc);
+  }
+  for (const doc of primaryDocs) {
+    if (doc?._id) byId.set(doc._id, doc);
+  }
+  return [...byId.values()];
+}
+
+export async function resolveVehicleDbForDoc(req, vehicleId) {
+  const primary = getVehiclesDbName();
+  const legacy = LEGACY_VEHICLES_DB;
+
+  await ensureDatabase(req, primary);
+  const primaryDoc = await getDocument(req, primary, vehicleId).catch(() => null);
+  if (primaryDoc) {
+    return { db: primary, doc: primaryDoc };
+  }
+
+  if (legacy !== primary) {
+    await ensureDatabase(req, legacy).catch(() => null);
+    const legacyDoc = await getDocument(req, legacy, vehicleId).catch(() => null);
+    if (legacyDoc) {
+      return { db: legacy, doc: legacyDoc };
+    }
+  }
+
+  return { db: primary, doc: null };
+}
+
+export async function saveVehicleDocument(req, docId, document) {
+  const { db, doc: existing } = await resolveVehicleDbForDoc(req, docId);
+  const targetDb = existing ? db : getVehiclesDbName();
+  await ensureDatabase(req, targetDb);
+  return putDocument(req, targetDb, docId, document);
+}
+
+export async function softDeleteVehicleDocument(req, vehicleId) {
+  const { db, doc } = await resolveVehicleDbForDoc(req, vehicleId);
+  if (!doc) {
+    throw new Error(`Documento ${vehicleId} no encontrado`);
+  }
+  await ensureDatabase(req, db);
+  return softDeleteDocument(req, db, vehicleId);
+}
+
+export async function listVehiclesByUser(req, userId, businessId = null, { includeArchived = false } = {}) {
+  const docs = await getAllVehicleDocuments(req);
+  const scopedBusinessId = normalizeClientBusinessScopeId(businessId);
 
   return docs
     .filter((doc) => {
       if (!doc || doc.type !== 'car' || doc.active === false || doc.deletedAt) return false;
-      if (businessId) return doc.business_id === businessId;
-      return doc.user_id === userId && !doc.business_id;
+      if (!includeArchived && doc.archived) return false;
+      if (doc.user_id !== userId) return false;
+      if (!scopedBusinessId) return true;
+      const docBusinessId = normalizeClientBusinessScopeId(doc.business_id);
+      if (!docBusinessId) return true;
+      return docBusinessId === scopedBusinessId;
     })
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
@@ -2165,6 +2343,12 @@ export const VEHICLES_DESIGN_VIEWS = {
     map: `function(doc){if(doc.type==='car'&&doc.active!==false&&doc.assignedTo){emit([doc.user_id,doc.assignedTo],1);}}`,
     reduce: '_count',
   },
+  by_plate: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false&&!doc.deletedAt&&doc.registrationPlate){emit([doc.user_id,doc.registrationPlate.toUpperCase()],{_id:doc._id,brand:doc.brand,model:doc.model,status:doc.status});}}`,
+  },
+  by_vin: {
+    map: `function(doc){if(doc.type==='car'&&doc.active!==false&&!doc.deletedAt&&doc.vin){emit([doc.user_id,doc.vin.toUpperCase()],{_id:doc._id,brand:doc.brand,model:doc.model,registrationPlate:doc.registrationPlate,status:doc.status});}}`,
+  },
 };
 
 export const ACCOUNTS_DESIGN_VIEWS = {
@@ -2246,18 +2430,6 @@ export async function queryChangelog(req, filters = {}) {
 }
 
 // ─── DB name helpers ───────────────────────────────────────────────────────────
-
-function normalizeDbName(value) {
-  return String(value || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9_$()+/-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function getDbPrefix() {
-  return normalizeDbName(process.env.COUCHDB_DB || 'vertial');
-}
 
 export function getSalesDbName() {
   return normalizeDbName(process.env.VITE_SALES_DB || `${getDbPrefix()}-sales`);
@@ -12152,6 +12324,7 @@ export function buildVehicleAcquisitionDocument(userId, data = {}, existing = nu
     user_id: userId,
     business_id: businessId || data.business_id || existing?.business_id || undefined,
     vehicleId: normalizeText(data.vehicleId || existing?.vehicleId || ''),
+    tradeInId: normalizeOptionalText(data.tradeInId) || existing?.tradeInId || undefined,
     registrationPlate: normalizeText(data.registrationPlate || existing?.registrationPlate || '').toUpperCase(),
     acquisitionType: ACQUISITION_TYPES.includes(data.acquisitionType) ? data.acquisitionType : 'compra_particular',
     sellerType: ACQUISITION_SELLER_TYPES.includes(data.sellerType) ? data.sellerType : 'particular',
@@ -12203,6 +12376,7 @@ export function sanitizeVehicleAcquisition(doc) {
     user_id: doc.user_id,
     business_id: doc.business_id || undefined,
     vehicleId: doc.vehicleId || '',
+    tradeInId: doc.tradeInId || '',
     registrationPlate: doc.registrationPlate || '',
     acquisitionType: doc.acquisitionType || 'compra_particular',
     sellerType: doc.sellerType || 'particular',

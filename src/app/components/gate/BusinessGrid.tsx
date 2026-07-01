@@ -1,5 +1,4 @@
 import { useState, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router';
 import {
   Search,
   SlidersHorizontal,
@@ -16,6 +15,12 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import type { Business, BusinessType } from '../../lib/businessApi';
+import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import {
+  fallbackGateSnapshot,
+  resolveGateSnapshot,
+  type GateBusinessSnapshot,
+} from './gateBusinessSnapshots';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,58 +76,11 @@ const BUSINESS_TYPE_COLORS: Record<string, string> = {
 
 type SortKey = 'name' | 'employees' | 'profit' | 'alerts' | 'recent';
 
-interface BusinessAlert {
-  id: string;
-  type: 'warning' | 'info' | 'error';
-  message: string;
-}
-
-interface BusinessStats {
-  revenue: number;
-  expenses: number;
-  profit: number;
-  employeeCount: number;
-  alerts: BusinessAlert[];
-}
-
-interface RealBusinessData {
-  vehicles: Array<{ purchasePrice: number; salePrice?: number; status: string; associatedCosts?: Array<{ amount: number }> }>;
-  sales: Array<{ salePrice: number; status: string }>;
-}
-
-function getBusinessStats(business: Business, realData?: RealBusinessData): BusinessStats {
-  const employeeCount = business.members?.length || 1;
-
-  let revenue = 0;
-  let expenses = 0;
-
-  if (realData) {
-    revenue = realData.sales
-      .filter((s) => s.status === 'completed')
-      .reduce((sum, s) => sum + (s.salePrice || 0), 0);
-
-    expenses = realData.vehicles.reduce((sum, v) => {
-      const costBase = v.purchasePrice || 0;
-      const costExtra = (v.associatedCosts || []).reduce((a, c) => a + (c.amount || 0), 0);
-      return sum + costBase + costExtra;
-    }, 0);
+function formatMetricValue(label: string, value: number): string {
+  if (label === 'Pedidos' || label === 'Activos' || label === 'Empleados') {
+    return String(value);
   }
-
-  const profit = revenue - expenses;
-
-  // Solo alertas operativas del negocio (no pendientes de ficha/perfil).
-  const alerts: BusinessAlert[] = [];
-  if (realData && profit < 0) {
-    alerts.push({ id: 'negative-profit', type: 'error', message: 'Beneficio negativo este periodo' });
-  }
-  if (realData) {
-    const pendingSales = realData.sales.filter((s) => s.status === 'pending');
-    if (pendingSales.length > 0) {
-      alerts.push({ id: 'invoice-due', type: 'warning', message: `${pendingSales.length} venta(s) pendiente(s) de cobro` });
-    }
-  }
-
-  return { revenue, expenses, profit, employeeCount, alerts };
+  return formatCurrency(value);
 }
 
 function formatCurrency(amount: number): string {
@@ -134,7 +92,7 @@ function formatCurrency(amount: number): string {
 
 // ── Alert Popup ──────────────────────────────────────────────────────────────
 
-function AlertPopup({ alerts, visible }: { alerts: BusinessAlert[]; visible: boolean }) {
+function AlertPopup({ alerts, visible }: { alerts: GateBusinessSnapshot['alerts']; visible: boolean }) {
   if (!visible || alerts.length === 0) return null;
 
   const typeIcon = {
@@ -177,21 +135,27 @@ function AlertPopup({ alerts, visible }: { alerts: BusinessAlert[]; visible: boo
 
 function BusinessCard({
   business,
-  stats,
+  snapshot,
+  summariesLoading,
   isActive,
-  hasRealFinancials,
   onEnter,
 }: {
   business: Business;
-  stats: BusinessStats;
+  snapshot: GateBusinessSnapshot;
+  summariesLoading: boolean;
   isActive: boolean;
-  hasRealFinancials: boolean;
   onEnter: () => void;
 }) {
   const [hoverAlerts, setHoverAlerts] = useState(false);
   const initials = business.name.slice(0, 2).toUpperCase();
   const typeLabel = BUSINESS_TYPE_LABELS[business.businessType] || business.businessType;
   const typeColor = BUSINESS_TYPE_COLORS[business.businessType] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300';
+
+  const isDelivery = isDeliveryBusinessType(business.businessType);
+  const metric2Label = isDelivery ? snapshot.primaryLabel : snapshot.secondaryLabel;
+  const metric2Value = isDelivery ? snapshot.primaryValue : snapshot.secondaryValue;
+  const metric3Label = isDelivery ? snapshot.secondaryLabel : snapshot.tertiaryLabel;
+  const metric3Value = isDelivery ? snapshot.secondaryValue : snapshot.tertiaryValue;
 
   return (
     <div
@@ -234,67 +198,95 @@ function BusinessCard({
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-2 mb-3">
+      <div className="grid grid-cols-3 gap-2 mb-2">
         <div className="px-2.5 py-2 bg-gray-50 dark:bg-gray-800/80 rounded-lg">
           <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Empleados</p>
-          <p className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1">
-            <Users className="w-3.5 h-3.5 text-gray-400" />
-            {stats.employeeCount}
-          </p>
-        </div>
-        <div className="px-2.5 py-2 bg-gray-50 dark:bg-gray-800/80 rounded-lg">
-          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Gastos</p>
-          {hasRealFinancials ? (
-            <p className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
-              <TrendingDown className="w-3.5 h-3.5" />
-              {formatCurrency(stats.expenses)}
-            </p>
+          {summariesLoading ? (
+            <div className="mt-1 h-5 w-10 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
           ) : (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic mt-0.5">Entrar para ver</p>
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1">
+              <Users className="w-3.5 h-3.5 text-gray-400" />
+              {snapshot.employeeCount}
+            </p>
           )}
         </div>
         <div className="px-2.5 py-2 bg-gray-50 dark:bg-gray-800/80 rounded-lg">
-          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Beneficio</p>
-          {hasRealFinancials ? (
-            <p className={`text-sm font-bold flex items-center gap-1 ${stats.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              <TrendingUp className="w-3.5 h-3.5" />
-              {formatCurrency(stats.profit)}
+          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
+            {metric2Label}
+          </p>
+          {summariesLoading ? (
+            <div className="mt-1 h-5 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+          ) : metric2Label === 'Gastos' ? (
+            <p className="text-sm font-bold text-red-600 dark:text-red-400 flex items-center gap-1">
+              <TrendingDown className="w-3.5 h-3.5" />
+              {formatMetricValue(metric2Label, metric2Value)}
             </p>
           ) : (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic mt-0.5">Entrar para ver</p>
+            <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+              <TrendingUp className="w-3.5 h-3.5" />
+              {formatMetricValue(metric2Label, metric2Value)}
+            </p>
+          )}
+        </div>
+        <div className="px-2.5 py-2 bg-gray-50 dark:bg-gray-800/80 rounded-lg">
+          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide truncate">
+            {metric3Label}
+          </p>
+          {summariesLoading ? (
+            <div className="mt-1 h-5 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+          ) : metric3Label === 'Beneficio' ? (
+            <p
+              className={`text-sm font-bold flex items-center gap-1 ${
+                metric3Value >= 0
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              {formatMetricValue(metric3Label, metric3Value)}
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              {formatMetricValue(metric3Label, metric3Value)}
+            </p>
           )}
         </div>
       </div>
 
+      {snapshot.contextLine ? (
+        <p className="mb-2 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+          {snapshot.contextLine}
+        </p>
+      ) : null}
+
       {/* Alerts badge */}
-      {stats.alerts.length > 0 && (
+      {snapshot.alerts.length > 0 && (
         <div className="relative">
           <div
             onMouseEnter={() => setHoverAlerts(true)}
             onMouseLeave={() => setHoverAlerts(false)}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
-              stats.alerts.some((a) => a.type === 'error')
+              snapshot.alerts.some((a) => a.type === 'error')
                 ? 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300'
-                : stats.alerts.some((a) => a.type === 'warning')
+                : snapshot.alerts.some((a) => a.type === 'warning')
                   ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
                   : 'bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300'
             }`}
           >
             <AlertTriangle className="w-3.5 h-3.5" />
-            {stats.alerts.length} {stats.alerts.length === 1 ? 'alerta' : 'alertas'}
+            {snapshot.alerts.length} {snapshot.alerts.length === 1 ? 'alerta' : 'alertas'}
           </div>
-          <AlertPopup alerts={stats.alerts} visible={hoverAlerts} />
+          <AlertPopup alerts={snapshot.alerts} visible={hoverAlerts} />
         </div>
       )}
 
       <button
         type="button"
-        onClick={onEnter}
-        className={`mt-4 flex w-full min-h-[3rem] items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition-all active:scale-[0.98] ${
-          isActive
-            ? 'bg-gray-900 text-white shadow-lg shadow-gray-900/20 hover:bg-black dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white'
-            : 'bg-amber-500 text-white shadow-md shadow-amber-500/25 hover:bg-amber-600'
-        }`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEnter();
+        }}
+        className="relative z-10 mt-4 flex w-full min-h-[3rem] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600 px-4 py-3 text-sm font-bold text-white shadow-md shadow-teal-500/25 transition-all hover:from-emerald-600 hover:via-teal-600 hover:to-blue-700 active:scale-[0.98]"
       >
         Entrar al panel
         <ArrowRight className="h-4 w-4 shrink-0" />
@@ -310,8 +302,8 @@ interface BusinessGridProps {
   currentBusinessId: string | undefined;
   onEnterBusiness: (businessId: string) => void;
   onManageBusinesses: () => void;
-  vehicles?: Array<{ purchasePrice: number; salePrice?: number; status: string; associatedCosts?: Array<{ amount: number }> }>;
-  sales?: Array<{ salePrice: number; status: string }>;
+  businessSnapshots?: Map<string, GateBusinessSnapshot>;
+  summariesLoading?: boolean;
 }
 
 export function BusinessGrid({
@@ -319,8 +311,8 @@ export function BusinessGrid({
   currentBusinessId,
   onEnterBusiness,
   onManageBusinesses,
-  vehicles = [],
-  sales = [],
+  businessSnapshots,
+  summariesLoading = false,
 }: BusinessGridProps) {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<BusinessType | 'all'>('all');
@@ -328,17 +320,20 @@ export function BusinessGrid({
   const [showFilters, setShowFilters] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const statsMap = useMemo(() => {
-    const map = new Map<string, BusinessStats>();
+  const snapshotMap = useMemo(() => {
+    const map = new Map<string, GateBusinessSnapshot>();
     for (const b of businesses) {
-      const isActive = b.business_id === currentBusinessId;
-      const realData: RealBusinessData | undefined = isActive
-        ? { vehicles, sales }
-        : undefined;
-      map.set(b.business_id, getBusinessStats(b, realData));
+      const resolved = resolveGateSnapshot(b, businessSnapshots);
+      map.set(b.business_id, resolved ?? fallbackGateSnapshot(b));
     }
     return map;
-  }, [businesses, currentBusinessId, vehicles, sales]);
+  }, [businesses, businessSnapshots]);
+
+  const totalAlerts = useMemo(() => {
+    let count = 0;
+    for (const s of snapshotMap.values()) count += s.alerts.length;
+    return count;
+  }, [snapshotMap]);
 
   const availableTypes = useMemo(() => {
     const types = new Set<BusinessType>();
@@ -367,15 +362,15 @@ export function BusinessGrid({
     }
 
     list.sort((a, b) => {
-      const sa = statsMap.get(a.business_id)!;
-      const sb = statsMap.get(b.business_id)!;
+      const sa = snapshotMap.get(a.business_id)!;
+      const sb = snapshotMap.get(b.business_id)!;
       switch (sortBy) {
         case 'name':
           return a.name.localeCompare(b.name, 'es');
         case 'employees':
           return sb.employeeCount - sa.employeeCount;
         case 'profit':
-          return sb.profit - sa.profit;
+          return sb.profitValue - sa.profitValue;
         case 'alerts':
           return sb.alerts.length - sa.alerts.length;
         case 'recent':
@@ -386,13 +381,7 @@ export function BusinessGrid({
     });
 
     return list;
-  }, [businesses, search, filterType, sortBy, statsMap]);
-
-  const totalAlerts = useMemo(() => {
-    let count = 0;
-    for (const s of statsMap.values()) count += s.alerts.length;
-    return count;
-  }, [statsMap]);
+  }, [businesses, search, filterType, sortBy, snapshotMap]);
 
   const clearFilters = useCallback(() => {
     setSearch('');
@@ -551,9 +540,9 @@ export function BusinessGrid({
             <BusinessCard
               key={business.business_id}
               business={business}
-              stats={statsMap.get(business.business_id)!}
+              snapshot={snapshotMap.get(business.business_id)!}
+              summariesLoading={summariesLoading}
               isActive={currentBusinessId === business.business_id}
-              hasRealFinancials={currentBusinessId === business.business_id}
               onEnter={() => onEnterBusiness(business.business_id)}
             />
           ))}

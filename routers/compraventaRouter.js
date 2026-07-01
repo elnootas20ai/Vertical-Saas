@@ -414,6 +414,18 @@ compraventaRouter.get('/:userId', async (req, res) => {
       };
     }
 
+    // ── KPI: Tasaciones y compras ──
+    const userTradeIns = vehicleDocs.filter(
+      (d) => d.user_id === userId && d.type === 'tradein' && d.active !== false && !d.deletedAt,
+    );
+    const userAcquisitions = vehicleDocs.filter(
+      (d) => d.user_id === userId && d.type === 'vehicle_acquisition' && !d.deletedAt,
+    );
+    const pendingTradeIns = userTradeIns.filter((t) => ['pending', 'negotiation'].includes(t.status)).length;
+    const openAcquisitions = userAcquisitions.filter(
+      (a) => !['cerrada', 'cancelada', 'rechazada'].includes(a.status),
+    ).length;
+
     const result = {
       ok: true,
       isManager,
@@ -440,6 +452,10 @@ compraventaRouter.get('/:userId', async (req, res) => {
         oportunidadesAbiertas: openLeads.length,
         leadsSinContacto48h: staleLeads.length,
         reservasSinContrato: reservationsWithoutContract.length,
+      },
+      comercial: {
+        tasacionesPendientes: pendingTradeIns,
+        comprasAbiertas: openAcquisitions,
       },
       vehiculosStock,
       reservasActivas,

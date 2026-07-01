@@ -4,6 +4,7 @@ import { usePushNotifications } from '../hooks/usePushNotifications';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
+import { resolveVehicleListBusinessId } from '../lib/vehicleVertical';
 import type { BillingSubscription as PersistedBillingSubscription } from '../lib/authApi';
 import { isWorkerAccount, logActivityRequest } from '../lib/authApi';
 import { persistVertialJsonCache, pruneVertialStorageIfNeeded } from '../lib/clientSessionStorage';
@@ -11,6 +12,7 @@ import {
   bulkCreateVehiclesRequest,
   createVehicleRequest,
   deleteVehicleRequest,
+  archiveVehicleRequest,
   listVehiclesRequest,
   updateVehicleRequest,
 } from '../lib/vehicleApi';
@@ -204,6 +206,8 @@ export interface Vehicle {
   purchaseDate?: string;
   origin?: 'particular' | 'empresa' | 'subasta' | 'permuta' | 'otro';
   supplierName?: string;
+  tradeInId?: string;
+  acquisitionId?: string;
   status: 'entrada' | 'preparacion' | 'listo' | 'reservado' | 'vendido';
   location?: string;
   daysInStock: number;
@@ -246,10 +250,54 @@ export interface Vehicle {
   createdAt: Date;
   updatedAt?: Date;
   soldAt?: Date;
+
+  archived?: boolean;
+  archivedAt?: string;
+  createdByUserId?: string;
+  createdByName?: string;
+  vehicleHistory?: VehicleHistoryRecord[];
+  documents?: VehicleDocumentRecord[];
+}
+
+export interface VehicleHistoryRecord {
+  id: string;
+  action: string;
+  label: string;
+  note?: string;
+  date: string;
+  userId?: string;
+  userName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface VehicleDocumentRecord {
+  id: string;
+  name: string;
+  documentType: string;
+  fileUrl: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  attachmentName?: string;
+  notes?: string;
+  expiresAt?: string | null;
+  uploadedAt: string;
+  uploadedBy: string;
 }
 
 export type TradeInCondition = 'excelente' | 'bueno' | 'regular' | 'malo';
-export type TradeInStatus = 'pending' | 'accepted' | 'rejected';
+export type TradeInStatus = 'pending' | 'negotiation' | 'accepted' | 'rejected';
+
+export interface TradeInStatusHistoryEntry {
+  id?: string;
+  action?: string;
+  status?: string;
+  date?: string;
+  userId?: string;
+  note?: string;
+  linkedVehicleId?: string;
+  linkedAcquisitionId?: string;
+}
 
 export interface TradeIn {
   id: string;
@@ -258,6 +306,8 @@ export interface TradeIn {
   user_id?: string;
   business_id?: string;
   linkedVehicleId?: string;
+  linkedAcquisitionId?: string;
+  clientId?: string;
   brand: string;
   model: string;
   version?: string;
@@ -265,13 +315,19 @@ export interface TradeIn {
   mileage?: number;
   color: string;
   fuelType?: string;
+  transmission?: string;
   registrationPlate?: string;
   vin?: string;
   condition: TradeInCondition;
   estimatedValue: number;
+  recommendedPrice?: number;
   acceptedValue?: number;
+  ownerName?: string;
+  ownerPhone?: string;
+  ownerEmail?: string;
   notes?: string;
   status: TradeInStatus;
+  statusHistory?: TradeInStatusHistoryEntry[];
   appraiserUserId?: string;
   appraiserName?: string;
   createdAt: string;
@@ -590,7 +646,9 @@ export interface AppContextType {
   getAccessRestrictionMessage: () => string | null;
   addVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>) => Promise<Vehicle | void>;
   addVehiclesBulk: (vehicles: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>[]) => Promise<Vehicle[]>;
-  updateVehicle: (id: string, updates: Partial<Vehicle>, priceChangeReason?: string, priceChangeReasonCategory?: PriceChangeReasonCategory) => Promise<void>;
+  updateVehicle: (id: string, updates: Partial<Vehicle>, priceChangeReason?: string, priceChangeReasonCategory?: PriceChangeReasonCategory) => Promise<Vehicle | void>;
+  syncVehicle: (vehicle: Vehicle) => void;
+  archiveVehicle: (id: string) => Promise<Vehicle | void>;
   deleteVehicle: (id: string) => Promise<void>;
   addLead: (lead: Omit<Lead, 'id' | 'createdAt' | 'status'>) => Promise<Lead | void>;
   updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
@@ -671,6 +729,8 @@ function getOrCreateContext(): ReturnType<typeof createContext<AppContextType>> 
       addVehicle: async () => undefined,
       addVehiclesBulk: async () => [],
       updateVehicle: async () => {},
+      syncVehicle: () => {},
+      archiveVehicle: async () => {},
       deleteVehicle: async () => {},
       addLead: async () => undefined, updateLead: async () => {}, deleteLead: async () => {},
       refreshLeads: async () => {},
@@ -1342,7 +1402,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setIsLoadingVehicles(true);
 
-    listVehiclesRequest(authUser.user_id, currentBusiness?.business_id || null)
+    listVehiclesRequest(authUser.user_id, resolveVehicleListBusinessId(currentBusiness))
       .then((response) => {
         if (cancelled) return;
         setVehicles((response.vehicles || []).map(deserializeVehicle));
@@ -1784,12 +1844,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return localVehicle;
     }
 
-    const response = await createVehicleRequest(authUser.user_id, vehicle, currentBusiness?.business_id || null);
+    const response = await createVehicleRequest(
+      authUser.user_id,
+      vehicle,
+      resolveVehicleListBusinessId(currentBusiness),
+    );
     if (response.vehicle) {
       const createdVehicle = deserializeVehicle(response.vehicle);
       setVehicles(prev => [createdVehicle, ...prev]);
       return createdVehicle;
     }
+    throw new Error('No se recibió el vehículo creado');
   };
 
   const addVehiclesBulk = async (nextVehicles: Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>[]) => {
@@ -1809,7 +1874,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return createdVehicles;
     }
 
-    const response = await bulkCreateVehiclesRequest(authUser.user_id, nextVehicles, currentBusiness?.business_id || null);
+    const response = await bulkCreateVehiclesRequest(
+      authUser.user_id,
+      nextVehicles,
+      resolveVehicleListBusinessId(currentBusiness),
+    );
     const createdVehicles = (response.vehicles || []).map(deserializeVehicle);
     setVehicles(prev => [...createdVehicles, ...prev]);
     return createdVehicles;
@@ -1825,6 +1894,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (response.vehicle) {
       const nextVehicle = deserializeVehicle(response.vehicle);
       setVehicles(prev => prev.map(v => v.id === id ? nextVehicle : v));
+      return nextVehicle;
+    }
+  };
+
+  const syncVehicle = (vehicle: Vehicle) => {
+    const nextVehicle = deserializeVehicle(vehicle);
+    setVehicles((prev) => prev.map((v) => (v.id === nextVehicle.id ? nextVehicle : v)));
+  };
+
+  const archiveVehicle = async (id: string) => {
+    if (!authUser?.user_id) {
+      setVehicles(prev => prev.map(v => v.id === id ? { ...v, archived: true, archivedAt: new Date().toISOString() } : v));
+      return;
+    }
+
+    const response = await archiveVehicleRequest(authUser.user_id, id);
+    if (response.vehicle) {
+      const nextVehicle = deserializeVehicle(response.vehicle);
+      setVehicles(prev => prev.map(v => v.id === id ? nextVehicle : v));
+      return nextVehicle;
     }
   };
 
@@ -2390,7 +2479,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDevExtraBrandSlots,
     setDevExtraBusinessSlots,
     canAccessFeature, canPerformCriticalAction, getAccessRestrictionMessage,
-    addVehicle, addVehiclesBulk, updateVehicle, deleteVehicle,
+    addVehicle, addVehiclesBulk, updateVehicle, syncVehicle, archiveVehicle, deleteVehicle,
     addLead, updateLead, deleteLead, refreshLeads,
     addClient, updateClient, deleteClient, refreshClients,
     createNotification, markNotificationAsRead, markAllNotificationsAsRead,

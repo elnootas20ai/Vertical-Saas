@@ -1038,7 +1038,7 @@ export function TpvRapidoOrderFlow({
     setCart((prev) =>
       prev.map((ci) =>
         ci.lineId === lineId
-          ? { ...ci, customization: { ...ci.customization, notes: notes.trim() } }
+          ? { ...ci, customization: { ...ci.customization, notes } }
           : ci,
       ),
     );
@@ -1456,7 +1456,7 @@ export function TpvRapidoOrderFlow({
             quantity: ci.quantity,
             unitPrice,
             total: cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
-            notes: ci.customization.notes || undefined,
+            notes: ci.customization.notes?.trim() || undefined,
             catalogItemId: ci.catalogItem._id,
             category: ci.catalogItem.category,
             brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],

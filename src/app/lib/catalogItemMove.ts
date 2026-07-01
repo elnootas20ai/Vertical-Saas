@@ -1,7 +1,34 @@
+import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
+import { isDefaultCommercialBrand } from './brandUtils';
 import { normalizeImportCategory, shouldClearBrandForCategory } from './deliveryCatalogImportLogic';
 
 export type CatalogMoveBrandChoice = 'keep' | 'clear' | string;
+
+/** Cuántos productos del catálogo usan cada línea TPV (brandIds). */
+export function countCatalogItemsByBrandId(items: CatalogItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    for (const raw of item.brandIds ?? []) {
+      const id = String(raw || '').trim();
+      if (!id) continue;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Líneas comerciales / organizadores TPV sin ningún producto asignado (excepto «General»). */
+export function commercialLinesWithoutCatalogItems(
+  commercialLines: Brand[],
+  items: CatalogItem[],
+): Brand[] {
+  const counts = countCatalogItemsByBrandId(items);
+  return commercialLines.filter((line) => {
+    if (isDefaultCommercialBrand(line)) return false;
+    return (counts.get(line._id) || 0) === 0;
+  });
+}
 
 export type CatalogMoveTargetInput = {
   category: string;

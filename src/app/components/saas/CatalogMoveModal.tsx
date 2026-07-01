@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { ArrowRightLeft, X } from 'lucide-react';
+import { ArrowRightLeft, Trash2, X } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { Brand } from '../../lib/brandsApi';
 import type { CatalogItem } from '../../lib/deliveryApi';
@@ -13,9 +13,12 @@ type CatalogMoveModalProps = {
   brands: Brand[];
   commercialLines: Brand[];
   categoriesInUse: string[];
+  emptyOrganizers?: Brand[];
   submitting?: boolean;
+  deletingOrganizerId?: string | null;
   onClose: () => void;
   onConfirm: (target: CatalogMoveTargetInput) => Promise<void>;
+  onDeleteEmptyOrganizer?: (brand: Brand) => Promise<void>;
 };
 
 export function CatalogMoveModal({
@@ -24,17 +27,21 @@ export function CatalogMoveModal({
   brands,
   commercialLines,
   categoriesInUse,
+  emptyOrganizers = [],
   submitting = false,
+  deletingOrganizerId = null,
   onClose,
   onConfirm,
+  onDeleteEmptyOrganizer,
 }: CatalogMoveModalProps) {
   const single = items.length === 1 ? items[0] : null;
+  const moveMode = items.length > 0;
   const [category, setCategory] = useState('');
   const [customCategory, setCustomCategory] = useState('');
   const [brandChoice, setBrandChoice] = useState<CatalogMoveBrandChoice>('keep');
   const [useCustomCategory, setUseCustomCategory] = useState(false);
 
-  useModalClose(open && !submitting, onClose);
+  useModalClose(open && !submitting && !deletingOrganizerId, onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -80,11 +87,11 @@ export function CatalogMoveModal({
     return commercialLines.find((b) => b._id === brandChoice)?.name || 'Línea seleccionada';
   }, [sharedCategory, brandChoice, items.length, single, commercialLines]);
 
-  if (!open || items.length === 0) return null;
+  if (!open || (!moveMode && emptyOrganizers.length === 0)) return null;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!resolvedCategory) return;
+    if (!moveMode || !resolvedCategory) return;
     await onConfirm({
       category: resolvedCategory,
       brandChoice: sharedCategory ? 'clear' : brandChoice,
@@ -101,13 +108,15 @@ export function CatalogMoveModal({
           <div className="flex items-center gap-2 min-w-0">
             <ArrowRightLeft className="w-5 h-5 text-indigo-600 shrink-0" />
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
-              Mover {items.length} producto{items.length !== 1 ? 's' : ''}
+              {moveMode
+                ? `Mover ${items.length} producto${items.length !== 1 ? 's' : ''}`
+                : 'Organizadores vacíos'}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            disabled={submitting}
+            disabled={submitting || Boolean(deletingOrganizerId)}
             className="p-2 rounded-lg hover:bg-white/80 dark:hover:bg-gray-800 disabled:opacity-50"
             aria-label="Cerrar"
           >
@@ -116,6 +125,8 @@ export function CatalogMoveModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {moveMode ? (
+            <>
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
             {items.slice(0, 4).map((item) => (
               <div key={item._id} className="truncate">
@@ -218,23 +229,55 @@ export function CatalogMoveModal({
             {' · '}
             {previewLine}
           </div>
+            </>
+          ) : (
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Estos organizadores del TPV no tienen productos. Puedes eliminarlos tras mover el catálogo con el Excel o desde aquí.
+            </p>
+          )}
+
+          {emptyOrganizers.length > 0 && onDeleteEmptyOrganizer ? (
+            <div className="space-y-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 px-4 py-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Organizadores sin productos
+              </p>
+              <ul className="space-y-2">
+                {emptyOrganizers.map((line) => (
+                  <li key={line._id} className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{line.name}</span>
+                    <button
+                      type="button"
+                      disabled={Boolean(submitting || deletingOrganizerId)}
+                      onClick={() => void onDeleteEmptyOrganizer(line)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30 disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {deletingOrganizerId === line._id ? 'Eliminando…' : 'Eliminar'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="flex gap-3 pt-1">
             <button
               type="button"
               onClick={onClose}
-              disabled={submitting}
+              disabled={submitting || Boolean(deletingOrganizerId)}
               className="flex-1 px-4 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
             >
-              Cancelar
+              {moveMode ? 'Cancelar' : 'Cerrar'}
             </button>
+            {moveMode ? (
             <button
               type="submit"
-              disabled={submitting || !resolvedCategory}
+              disabled={submitting || Boolean(deletingOrganizerId) || !resolvedCategory}
               className="flex-1 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold disabled:opacity-50"
             >
               {submitting ? 'Moviendo…' : 'Mover productos'}
             </button>
+            ) : null}
           </div>
         </form>
       </div>

@@ -144,9 +144,11 @@ import {
   pointOfSaleDisplayLabel,
 } from '../../lib/deliveryApi';
 import {
+  DELIVERY_WORK_CENTERS_CHANGED,
   filterWorkCentersForBusinessScope,
   resolveBusinessScopeId,
 } from '../../lib/deliverySetup';
+import { isCompraventaBusinessType, loadCompraventaStores } from '../../lib/compraventaSetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
 import { useSidebarDeliveryStoreRows } from '../../hooks/useSidebarDeliveryStoreRows';
@@ -178,7 +180,7 @@ interface SidebarItem {
 interface SidebarGroup {
   id: string;
   label: string;
-  icon: React.ReactNode;
+  icon: React.ReactNode | null;
   itemIds: string[];
 }
 
@@ -252,17 +254,15 @@ const menuItemDefs = [
   { id: 'doc-other',         navKey: 'docOther',        icon: <FolderOpen className="w-5 h-5" />,  path: '/saas/documents?tab=other' },
 
   // ── Vertical: Comercial (concesionario) ──────────────────────────────────────
-  { id: 'compraventa-hub', navKey: 'compraventaHub', icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/compraventa', isNew: true },
-  { id: 'vehicle-entry', navKey: 'vehicleEntry', icon: <CirclePlus className="w-5 h-5" />, path: '/saas/vertical/compraventa/entrada-vehiculo', isNew: true },
-  { id: 'publicacion-venta', navKey: 'publicacionVenta', icon: <Megaphone className="w-5 h-5" />, path: '/saas/vertical/compraventa/publicacion-venta', isNew: true },
+  { id: 'compraventa-vehiculos',  navKey: 'compraventaVehiculos',  icon: <Car className="w-5 h-5" />,              path: '/saas/vehicles' },
+  { id: 'compraventa-compras',    navKey: 'compraventaCompras',    icon: <ShoppingCart className="w-5 h-5" />,       path: '/saas/vertical/compraventa/compras' },
+  { id: 'compraventa-ventas',     navKey: 'compraventaVentas',     icon: <TrendingUp className="w-5 h-5" />,         path: '/saas/vertical/compraventa/ventas' },
+  { id: 'compraventa-tasaciones', navKey: 'compraventaTasaciones', icon: <Scale className="w-5 h-5" />,              path: '/saas/vertical/compraventa/tasaciones' },
+  { id: 'compraventa-entregas',   navKey: 'compraventaEntregas',   icon: <Truck className="w-5 h-5" />,              path: '/saas/vertical/compraventa/entregas' },
   { id: 'vehicles',     navKey: 'vehicles',     icon: <Car className="w-5 h-5" />,           path: '/saas/vehicles' },
   { id: 'reservations', navKey: 'reservations', icon: <BookmarkCheck className="w-5 h-5" />, path: '/saas/reservations' },
   { id: 'sales',        navKey: 'sales',        icon: <TrendingUp className="w-5 h-5" />,    path: '/saas/sales' },
   { id: 'pipeline', navKey: 'pipeline', icon: <Kanban className="w-5 h-5" />,     path: '/saas/pipeline' },
-  { id: 'compraventa-crm', navKey: 'compraventa-crm', icon: <Kanban className="w-5 h-5" />, path: '/saas/vertical/compraventa/crm' },
-  { id: 'gastos-preparacion', navKey: 'gastosPreparacion', icon: <Wrench className="w-5 h-5" />, path: '/saas/vertical/compraventa/gastos-preparacion', isNew: true },
-  { id: 'dealership-workers', navKey: 'dealershipWorkers', icon: <BarChart3 className="w-5 h-5" />, path: '/saas/dealership-workers' },
-  { id: 'ancove',   navKey: 'ancove',   icon: <Building2 className="w-5 h-5" />,  path: '/saas/ancove' },
 
   // ── Vertical: Taller ─────────────────────────────────────────────────────────
   { id: 'workshop', navKey: 'workshop', icon: <Wrench className="w-5 h-5" />,  path: '/saas/workshop' },
@@ -443,7 +443,7 @@ const sidebarGroupDefs = [
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
-  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'vehicle-entry', 'publicacion-venta', 'vehicles', 'reservations', 'sales', 'compraventa-crm', 'gastos-preparacion', 'dealership-workers', 'ancove'] },
+  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
   { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'caja', 'web-orders', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
@@ -495,7 +495,7 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
 /** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
 const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string, readonly string[]>>> = {
   carDealership: {
-    clientesCrm: ['clients', 'compraventa-crm', 'quotes', 'promotions'],
+    clientesCrm: ['clients', 'quotes', 'promotions'],
     catalogProviders: ['suppliers'],
   },
 };
@@ -594,6 +594,8 @@ function SidebarInner({
     : isWorker
       ? null
       : 'carDealership';
+  const isCompraventa = isCompraventaBusinessType(vertical);
+  const usesDeliveryStoreSidebar = vertical === 'delivery';
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
     : new Set<string>();
@@ -638,7 +640,31 @@ function SidebarInner({
 
   const [salesPoints, setSalesPoints] = useState<SalesPoint[]>([]);
 
+  const loadCompraventaSidebarStores = useCallback(async () => {
+    const bid = resolveBusinessScopeId(currentBusiness);
+    if (!bid || !user) return;
+    try {
+      const state = await loadCompraventaStores(user, currentBusiness, {
+        includeInactivePdvs: false,
+        ensureTabletCodes: false,
+      });
+      setSalesPoints(
+        state.workCenters.filter(
+          (wc) =>
+            wc.active !== false &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        ),
+      );
+    } catch {
+      setSalesPoints([]);
+    }
+  }, [user, currentBusiness?.business_id]);
+
   const loadSalesPoints = useCallback(async () => {
+    if (isCompraventa) {
+      await loadCompraventaSidebarStores();
+      return;
+    }
     const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
     if (!dataUserId) return;
     try {
@@ -659,24 +685,42 @@ function SidebarInner({
     } catch {
       // silent
     }
-  }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount]);
+  }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount, isCompraventa, loadCompraventaSidebarStores]);
 
   const activeStore = useActiveStoreScope();
-  const sidebarDelivery = useSidebarDeliveryStoreRows(vertical === 'delivery');
+  const sidebarDelivery = useSidebarDeliveryStoreRows(usesDeliveryStoreSidebar);
 
   useEffect(() => {
-    if (vertical === 'delivery') return;
+    if (usesDeliveryStoreSidebar) return;
     void loadSalesPoints();
-  }, [loadSalesPoints, vertical]);
+  }, [loadSalesPoints, usesDeliveryStoreSidebar]);
 
   useEffect(() => {
-    if (vertical !== 'delivery') return;
+    if (!isCompraventa) return;
+    const onStoresChanged = () => {
+      void loadCompraventaSidebarStores();
+    };
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+  }, [isCompraventa, loadCompraventaSidebarStores]);
+
+  useEffect(() => {
+    if (!usesDeliveryStoreSidebar) return;
+    const onStoresChanged = () => {
+      void activeStore.refresh();
+    };
+    window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+  }, [usesDeliveryStoreSidebar, activeStore.refresh]);
+
+  useEffect(() => {
+    if (!usesDeliveryStoreSidebar) return;
     if (sidebarDelivery.rows.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
-  }, [vertical, sidebarDelivery.rows.length]);
+  }, [usesDeliveryStoreSidebar, sidebarDelivery.rows.length]);
 
   useEffect(() => {
-    if (vertical !== 'delivery') return;
+    if (!usesDeliveryStoreSidebar) return;
     if (sidebarDelivery.loading) return;
     if (sidebarDelivery.rows.length > 0) return;
     if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
@@ -686,7 +730,7 @@ function SidebarInner({
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [
-    vertical,
+    usesDeliveryStoreSidebar,
     sidebarDelivery.loading,
     sidebarDelivery.rows.length,
     activeStore.retailWorkCenters.length,
@@ -777,11 +821,16 @@ function SidebarInner({
 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => {
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
+    const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
     return {
       id: g.id,
-      icon: g.icon,
+      icon: isCompraventaCommercial ? null : g.icon,
       itemIds: override ? [...override] : [...g.itemIds],
-      label: g.id === 'equipo' ? 'RRHH' : t(`sidebar.groups.${g.id}`),
+      label: g.id === 'equipo'
+        ? 'RRHH'
+        : isCompraventaCommercial
+          ? t('sidebar.groups.compraventaCommercial')
+          : t(`sidebar.groups.${g.id}`),
     };
   });
 
@@ -841,19 +890,26 @@ function SidebarInner({
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
-        const rows = vertical === 'delivery' ? sidebarDelivery.rows : [];
+        const rows = usesDeliveryStoreSidebar ? sidebarDelivery.rows : [];
         const row = rows.find((r) => r.rowId === rawId);
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         const pdvId = row?.pdvId || pdv?._id;
-        if (pdvId && activeStore.pointsOfSale.some((p) => p._id === pdvId)) {
-          activeStore.setActiveSalesPoint(pdvId);
-        } else if (row?.workCenterId) {
-          activeStore.setActiveWorkCenterPreference(row.workCenterId);
-        } else if (activeStore.pointsOfSale.length === 1) {
-          activeStore.setActiveSalesPoint(activeStore.pointsOfSale[0]._id);
+        if (usesDeliveryStoreSidebar) {
+          if (pdvId && activeStore.pointsOfSale.some((p) => p._id === pdvId)) {
+            activeStore.setActiveSalesPoint(pdvId);
+          } else if (row?.workCenterId) {
+            activeStore.setActiveWorkCenterPreference(row.workCenterId);
+          } else if (activeStore.pointsOfSale.length === 1) {
+            activeStore.setActiveSalesPoint(activeStore.pointsOfSale[0]._id);
+          }
+          handleNavigate('/saas/delivery-ops');
+          return;
+        }
+        if (isCompraventa) {
+          handleNavigate('/saas/vehicles');
+          return;
         }
       }
-      handleNavigate('/saas/delivery-ops');
       return;
     }
     handleNavigate(item.path);
@@ -952,7 +1008,12 @@ function SidebarInner({
       || (item.id === 'client-billing' ? permissionMap.finance : undefined)
       || (tpvLike ? (permissionMap.cash_register || permissionMap.sales) : undefined)
       || (deliveryOperational ? permissionMap.delivery : undefined)
-      || (item.id.startsWith('doc-') ? permissionMap.documents : undefined);
+      || (item.id.startsWith('doc-') ? permissionMap.documents : undefined)
+      || (item.id === 'compraventa-vehiculos' ? permissionMap.vehicles : undefined)
+      || (item.id === 'compraventa-ventas' ? permissionMap.sales : undefined)
+      || (item.id === 'compraventa-compras' ? permissionMap.vehicles : undefined)
+      || (item.id === 'compraventa-tasaciones' ? permissionMap.vehicles : undefined)
+      || (item.id === 'compraventa-entregas' ? permissionMap.vehicles : undefined);
     if (!permission) {
       // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).
       return !isWorker;
@@ -979,11 +1040,11 @@ function SidebarInner({
         location.pathname.startsWith('/saas/settings/tiendas') ||
         location.pathname.startsWith('/saas/settings/centros-de-trabajo'))) ||
     (item.id === 'vehicles' && location.pathname.startsWith('/saas/locations')) ||
-    (item.id === 'vehicle-entry' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
-    (item.id === 'compraventa-hub' && location.pathname === '/saas/vertical/compraventa') ||
-    (item.id === 'compraventa-crm' && location.pathname.startsWith('/saas/vertical/compraventa/crm')) ||
-    (item.id === 'gastos-preparacion' && location.pathname.startsWith('/saas/vertical/compraventa/gastos-preparacion')) ||
-    (item.id === 'dealership-workers' && location.pathname.startsWith('/saas/dealership-workers')) ||
+    (item.id === 'compraventa-vehiculos' && (location.pathname.startsWith('/saas/vehicles') || location.pathname.startsWith('/saas/locations'))) ||
+    (item.id === 'compraventa-ventas' && location.pathname.startsWith('/saas/vertical/compraventa/ventas')) ||
+    (item.id === 'compraventa-compras' && location.pathname.startsWith('/saas/vertical/compraventa/compras')) ||
+    (item.id === 'compraventa-tasaciones' && location.pathname.startsWith('/saas/vertical/compraventa/tasaciones')) ||
+    (item.id === 'compraventa-entregas' && location.pathname.startsWith('/saas/vertical/compraventa/entregas')) ||
     (item.id === 'clients' && location.pathname.startsWith('/saas/clients')) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
@@ -1042,10 +1103,13 @@ function SidebarInner({
     (item.id.startsWith('sp-') && (() => {
       const rawId = item.id.slice('sp-'.length);
       if (!rawId) return false;
-      if (vertical === 'delivery') {
+      if (usesDeliveryStoreSidebar) {
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         if (pdv && pdv.active === false) return false;
         if (pdv) return activeStore.activeSalesPointId === pdv._id;
+      }
+      if (isCompraventa) {
+        return selectedSidebarWorkCenterId === rawId;
       }
       if (!selectedSidebarWorkCenterId) return false;
       return selectedSidebarWorkCenterId === rawId;
@@ -1065,10 +1129,10 @@ function SidebarInner({
   const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
-  const deliverySidebarRows = vertical === 'delivery' ? sidebarDelivery.rows : [];
+  const deliverySidebarRows = usesDeliveryStoreSidebar ? sidebarDelivery.rows : [];
 
   const salesPointRows: SidebarItem[] =
-    vertical === 'delivery'
+    usesDeliveryStoreSidebar
       ? deliverySidebarRows.map((row) => {
           const subParts: string[] = [];
           if (row.code) subParts.push(row.code);
@@ -1091,11 +1155,11 @@ function SidebarInner({
       }));
 
   const workCentersSidebarCount =
-    vertical === 'delivery' ? deliverySidebarRows.length : salesPoints.length;
+    usesDeliveryStoreSidebar ? deliverySidebarRows.length : salesPoints.length;
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
-    vertical === 'delivery' && sidebarDelivery.loading && deliverySidebarRows.length === 0
+    usesDeliveryStoreSidebar && sidebarDelivery.loading && deliverySidebarRows.length === 0
       ? [
           {
             id: 'salesPoints-loading',

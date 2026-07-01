@@ -1,21 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
-  VEHICLES_DB,
   buildVehicleDocument,
   buildVehicleSubPermissions,
   ensureDatabase,
   findAccountByUserId,
-  getDocument,
+  getAllVehicleDocuments,
+  getVehiclesDbName,
+  resolveVehicleDbForDoc,
+  saveVehicleDocument,
+  softDeleteVehicleDocument,
   logAccountActivity,
   listVehiclesByUser,
-  putDocument,
-  queryView,
   sanitizeVehicle,
-  softDeleteDocument,
   writeChangelog,
   normalizeVehicleDocType,
   getCouchConfig,
   buildCouchAuthHeader,
+  listSalesByUser,
+  listVehicleAcquisitionsByUser,
 } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
 
@@ -62,6 +64,73 @@ async function saveVehicleCreationAlert({ user, vehicleLabel, vehicleId, count }
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+function appendVehicleHistory(existingHistory, entry) {
+  const history = Array.isArray(existingHistory) ? [...existingHistory] : [];
+  history.push({
+    id: `vh:${uuidv4()}`,
+    action: entry.action,
+    label: entry.label,
+    note: String(entry.note || '').trim(),
+    date: entry.date || new Date().toISOString(),
+    userId: entry.userId || '',
+    userName: entry.userName || '',
+    metadata: entry.metadata || undefined,
+  });
+  return history;
+}
+
+const UI_STATUS_TO_INVENTORY = {
+  listo: 'available',
+  disponible: 'available',
+  available: 'available',
+  reservado: 'reserved',
+  reserved: 'reserved',
+  vendido: 'sold',
+  sold: 'sold',
+  preparacion: 'workshop',
+  workshop: 'workshop',
+  entrada: 'received',
+  received: 'received',
+};
+
+function normalizeIncomingStatus(value) {
+  const key = String(value || '').trim().toLowerCase();
+  return UI_STATUS_TO_INVENTORY[key] || undefined;
+}
+
+async function findVehicleRelations(req, userId, vehicleId, existingVehicle) {
+  const [sales, acquisitions] = await Promise.all([
+    listSalesByUser(req, userId),
+    listVehicleAcquisitionsByUser(req, userId),
+  ]);
+
+  const relatedSales = sales.filter((s) => s.vehicleId === vehicleId);
+  const relatedAcquisitions = acquisitions.filter((a) => a.vehicleId === vehicleId);
+  if (existingVehicle?.acquisitionId) {
+    const linked = acquisitions.find((a) => a._id === existingVehicle.acquisitionId);
+    if (linked && !relatedAcquisitions.some((a) => a._id === linked._id)) {
+      relatedAcquisitions.push(linked);
+    }
+  }
+
+  const relatedDeliveries = relatedSales.filter((s) => {
+    const status = String(s.status || '').toLowerCase();
+    return Boolean(s.deliveryDate) || status === 'delivered' || status === 'delivery' || status === 'entregado';
+  });
+
+  return {
+    compras: relatedAcquisitions.length,
+    ventas: relatedSales.length,
+    entregas: relatedDeliveries.length,
+    hasRelations: relatedAcquisitions.length > 0 || relatedSales.length > 0 || relatedDeliveries.length > 0,
+    details: {
+      acquisitions: relatedAcquisitions.map((a) => ({ id: a._id, registrationPlate: a.registrationPlate })),
+      sales: relatedSales.map((s) => ({ id: s._id || s.id, status: s.status })),
+      deliveries: relatedDeliveries.map((s) => ({ id: s._id || s.id, status: s.status })),
+    },
+  };
 }
 
 const ALLOWED_VEHICLE_IMAGE_DATA_PREFIXES = [
@@ -173,8 +242,7 @@ function validateCommercialTransition(from, to, vehicle) {
 }
 
 async function ensureVehicleOwner(req, userId, vehicleId) {
-  await ensureDatabase(req, VEHICLES_DB);
-  const vehicle = await getDocument(req, VEHICLES_DB, vehicleId);
+  const { doc: vehicle } = await resolveVehicleDbForDoc(req, vehicleId);
 
   if (!vehicle || vehicle.type !== 'car' || vehicle.active === false || vehicle.user_id !== userId) {
     return null;
@@ -187,23 +255,43 @@ async function ensureVehicleOwner(req, userId, vehicleId) {
 
 async function findDuplicateByPlate(req, userId, registrationPlate, excludeVehicleId) {
   if (!registrationPlate) return null;
-  const result = await queryView(req, VEHICLES_DB, 'vehicles', 'by_plate', {
-    key: [userId, registrationPlate.toUpperCase()],
-    reduce: false,
-  });
-  const match = result.rows?.find((r) => !excludeVehicleId || r.value._id !== excludeVehicleId);
-  return match ? { vehicleId: match.value._id, brand: match.value.brand, model: match.value.model, status: match.value.status } : null;
+  const plate = registrationPlate.toUpperCase();
+  const docs = await getAllVehicleDocuments(req);
+  const match = docs.find(
+    (doc) =>
+      doc?.type === 'car'
+      && doc.active !== false
+      && !doc.deletedAt
+      && doc.user_id === userId
+      && String(doc.registrationPlate || '').toUpperCase() === plate
+      && doc._id !== excludeVehicleId,
+  );
+  return match
+    ? { vehicleId: match._id, brand: match.brand, model: match.model, status: match.status }
+    : null;
 }
 
 async function findDuplicateByVin(req, userId, vin, excludeVehicleId) {
   if (!vin) return null;
-  const result = await queryView(req, VEHICLES_DB, 'vehicles', 'by_vin', {
-    key: [userId, vin.toUpperCase()],
-    reduce: false,
-  });
-  const match = result.rows?.find((r) => !excludeVehicleId || r.value._id !== excludeVehicleId);
+  const normalizedVin = vin.toUpperCase();
+  const docs = await getAllVehicleDocuments(req);
+  const match = docs.find(
+    (doc) =>
+      doc?.type === 'car'
+      && doc.active !== false
+      && !doc.deletedAt
+      && doc.user_id === userId
+      && String(doc.vin || '').toUpperCase() === normalizedVin
+      && doc._id !== excludeVehicleId,
+  );
   return match
-    ? { vehicleId: match.value._id, brand: match.value.brand, model: match.value.model, registrationPlate: match.value.registrationPlate, status: match.value.status }
+    ? {
+      vehicleId: match._id,
+      brand: match.brand,
+      model: match.model,
+      registrationPlate: match.registrationPlate,
+      status: match.status,
+    }
     : null;
 }
 
@@ -213,7 +301,7 @@ export async function checkDuplicates(req, res) {
     const { registrationPlate, vin } = req.body || {};
     if (!userId) return badRequest(res, 'Falta userId');
 
-    await ensureDatabase(req, VEHICLES_DB);
+    await ensureDatabase(req, getVehiclesDbName());
     const [plate, vinResult] = await Promise.all([
       findDuplicateByPlate(req, userId, registrationPlate),
       findDuplicateByVin(req, userId, vin),
@@ -248,7 +336,8 @@ export async function listVehicles(req, res) {
     const role = req.auth?.role || account.role || 'Usuario';
     const vehiclePerms = buildVehicleSubPermissions(role, account.vehicleSubPermissions);
 
-    const raw = await listVehiclesByUser(req, userId, businessId);
+    const includeArchived = String(req.query.includeArchived || '').trim() === 'true';
+    const raw = await listVehiclesByUser(req, userId, businessId, { includeArchived });
     let sanitized = raw.map(sanitizeVehicle);
 
     if (!vehiclePerms.canViewAllStock && requestingUserId !== userId) {
@@ -296,7 +385,7 @@ export async function createVehicle(req, res) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
-    await ensureDatabase(req, VEHICLES_DB);
+    await ensureDatabase(req, getVehiclesDbName());
 
     const duplicates = {};
     const [plateDup, vinDup] = await Promise.all([
@@ -334,8 +423,20 @@ export async function createVehicle(req, res) {
       vehicle.associatedCosts = [initialCost, ...(Array.isArray(vehicle.associatedCosts) ? vehicle.associatedCosts : [])];
     }
 
+    const mappedStatus = normalizeIncomingStatus(vehicle.status) || 'available';
+    vehicle.status = mappedStatus;
+    vehicle.createdByUserId = userId;
+    vehicle.createdByName = account.fullName || userId;
+    vehicle.vehicleHistory = appendVehicleHistory([], {
+      action: 'created',
+      label: 'Vehículo creado',
+      note: `${vehicle.brand} ${vehicle.model}${vehicle.registrationPlate ? ` · ${vehicle.registrationPlate}` : ''}`,
+      userId,
+      userName: account.fullName || userId,
+    });
+
     const nextVehicle = buildVehicleDocument(userId, vehicle, null, businessId || null);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
@@ -400,12 +501,12 @@ export async function bulkCreateVehicles(req, res) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
-    await ensureDatabase(req, VEHICLES_DB);
+    await ensureDatabase(req, getVehiclesDbName());
     const createdVehicles = [];
 
     for (const vehicle of vehicles) {
       const nextVehicle = buildVehicleDocument(userId, vehicle, null, businessId || null);
-      const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+      const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
       createdVehicles.push(sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }));
     }
 
@@ -562,14 +663,70 @@ export async function updateVehicle(req, res) {
       }
     }
 
+    let updatedVehicleHistory = Array.isArray(existingVehicle.vehicleHistory) ? [...existingVehicle.vehicleHistory] : [];
+
+    if (vehicle.status !== undefined) {
+      const mapped = normalizeIncomingStatus(vehicle.status);
+      if (mapped) vehicle.status = mapped;
+    }
+
+    const oldStatus = existingVehicle.status;
+    const effectiveNewStatus = vehicle.status !== undefined ? vehicle.status : oldStatus;
+    if (effectiveNewStatus !== oldStatus) {
+      updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
+        action: 'status_changed',
+        label: 'Cambio de estado',
+        note: `${oldStatus} → ${effectiveNewStatus}`,
+        userId,
+        userName: account.fullName || userId,
+        metadata: { from: oldStatus, to: effectiveNewStatus },
+      });
+    }
+
+    const oldImages = Array.isArray(existingVehicle.images) ? existingVehicle.images : [];
+    const newImages = vehicle.images !== undefined
+      ? (Array.isArray(vehicle.images) ? vehicle.images : oldImages)
+      : oldImages;
+    if (vehicle.images !== undefined && newImages.length !== oldImages.length) {
+      const delta = newImages.length - oldImages.length;
+      updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
+        action: delta > 0 ? 'photo_added' : 'photo_removed',
+        label: delta > 0 ? 'Fotografías añadidas' : 'Fotografías eliminadas',
+        note: `${Math.abs(delta)} foto(s)`,
+        userId,
+        userName: account.fullName || userId,
+      });
+    }
+
+    const patchDiff = vehicleChangeDiff(existingVehicle, { ...existingVehicle, ...vehicle, status: effectiveNewStatus });
+    const editFields = Object.keys(patchDiff).filter((k) => k !== 'status');
+    if (editFields.length > 0 && vehicle.images === undefined) {
+      updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
+        action: 'updated',
+        label: 'Datos actualizados',
+        note: editFields.join(', '),
+        userId,
+        userName: account.fullName || userId,
+      });
+    } else if (editFields.length > 0 && vehicle.images !== undefined && newImages.length === oldImages.length) {
+      updatedVehicleHistory = appendVehicleHistory(updatedVehicleHistory, {
+        action: 'updated',
+        label: 'Datos actualizados',
+        note: editFields.join(', '),
+        userId,
+        userName: account.fullName || userId,
+      });
+    }
+
     const mergedData = {
       ...existingVehicle,
       ...vehicle,
       priceHistory: updatedPriceHistory,
       commercialStatusHistory: updatedCommercialHistory,
+      vehicleHistory: updatedVehicleHistory,
     };
     const nextVehicle = buildVehicleDocument(userId, mergedData, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     const diff = vehicleChangeDiff(existingVehicle, nextVehicle);
     await logAccountActivity(req, {
       actorUserId: userId,
@@ -649,7 +806,7 @@ export async function updateCommercialStatus(req, res) {
 
     const mergedData = { ...existingVehicle, ...updates };
     const nextVehicle = buildVehicleDocument(userId, mergedData, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
 
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId, type: 'vehicle',
@@ -686,7 +843,7 @@ export async function addWarranty(req, res) {
     };
     const warranties = [...(existingVehicle.warranties || []), newWarranty];
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, warranties }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.status(201).json({ ok: true, warranty: newWarranty, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al añadir garantía' });
@@ -706,7 +863,7 @@ export async function updateWarranty(req, res) {
       w.id === warrantyId ? { ...w, ...warranty, id: warrantyId } : w,
     );
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, warranties }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al actualizar garantía' });
@@ -721,7 +878,7 @@ export async function deleteWarranty(req, res) {
 
     const warranties = (existingVehicle.warranties || []).filter((w) => w.id !== warrantyId);
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, warranties }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al eliminar garantía' });
@@ -742,7 +899,7 @@ export async function addWarrantyClaim(req, res) {
       w.id === warrantyId ? { ...w, claims: [...(w.claims || []), newClaim] } : w,
     );
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, warranties }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.status(201).json({ ok: true, claim: newClaim, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al añadir reclamación' });
@@ -770,7 +927,7 @@ export async function addAssociatedCost(req, res) {
     };
     const associatedCosts = [...(existingVehicle.associatedCosts || []), newCost];
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, associatedCosts }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.status(201).json({ ok: true, cost: newCost, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al añadir coste' });
@@ -785,7 +942,7 @@ export async function deleteAssociatedCost(req, res) {
 
     const associatedCosts = (existingVehicle.associatedCosts || []).filter((c) => c.id !== costId);
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, associatedCosts }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al eliminar coste' });
@@ -803,6 +960,8 @@ export async function addVehicleDocument(req, res) {
     const existingVehicle = await ensureVehicleOwner(req, userId, vehicleId);
     if (!existingVehicle) return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
 
+    const account = await findAccountByUserId(req, userId);
+
     const newDoc = {
       id: `vdoc:${uuidv4()}`,
       name: String(docData.name || '').trim(),
@@ -818,8 +977,15 @@ export async function addVehicleDocument(req, res) {
       uploadedBy: String(docData.uploadedBy || userId).trim(),
     };
     const documents = [...(existingVehicle.documents || []), newDoc];
-    const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, documents }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
+      action: 'document_added',
+      label: 'Documento añadido',
+      note: newDoc.name || newDoc.fileName || newDoc.documentType,
+      userId,
+      userName: account?.fullName || userId,
+    });
+    const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, documents, vehicleHistory }, existingVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.status(201).json({ ok: true, document: newDoc, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al añadir documento' });
@@ -847,7 +1013,7 @@ export async function updateVehicleDocument(req, res) {
         : d,
     );
     const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, documents }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al actualizar documento' });
@@ -860,12 +1026,91 @@ export async function removeVehicleDocument(req, res) {
     const existingVehicle = await ensureVehicleOwner(req, userId, vehicleId);
     if (!existingVehicle) return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
 
+    const account = await findAccountByUserId(req, userId);
+    const removed = (existingVehicle.documents || []).find((d) => d.id === documentId);
     const documents = (existingVehicle.documents || []).filter((d) => d.id !== documentId);
-    const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, documents }, existingVehicle);
-    const saved = await putDocument(req, VEHICLES_DB, nextVehicle._id, nextVehicle);
+    const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
+      action: 'document_removed',
+      label: 'Documento eliminado',
+      note: removed?.name || removed?.fileName || documentId,
+      userId,
+      userName: account?.fullName || userId,
+    });
+    const nextVehicle = buildVehicleDocument(userId, { ...existingVehicle, documents, vehicleHistory }, existingVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
     return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error al eliminar documento' });
+  }
+}
+
+export async function getVehicleRelations(req, res) {
+  try {
+    const { userId, vehicleId } = req.params;
+    if (!userId || !vehicleId) return badRequest(res, 'Faltan parámetros');
+
+    const existingVehicle = await ensureVehicleOwner(req, userId, vehicleId);
+    if (!existingVehicle) {
+      return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
+    }
+
+    const relations = await findVehicleRelations(req, userId, vehicleId, existingVehicle);
+    return res.json({ ok: true, ...relations });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al comprobar relaciones del vehículo',
+    });
+  }
+}
+
+export async function archiveVehicle(req, res) {
+  try {
+    const { userId, vehicleId } = req.params;
+    const existingVehicle = await ensureVehicleOwner(req, userId, vehicleId);
+    const account = await findAccountByUserId(req, userId);
+
+    if (!existingVehicle || !account) {
+      return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
+    }
+
+    if (existingVehicle.archived) {
+      return res.json({ ok: true, vehicle: sanitizeVehicle(existingVehicle) });
+    }
+
+    const now = new Date().toISOString();
+    const vehicleHistory = appendVehicleHistory(existingVehicle.vehicleHistory, {
+      action: 'archived',
+      label: 'Vehículo archivado',
+      note: 'Oculto del listado principal',
+      userId,
+      userName: account.fullName || userId,
+    });
+
+    const nextVehicle = buildVehicleDocument(userId, {
+      ...existingVehicle,
+      archived: true,
+      archivedAt: now,
+      vehicleHistory,
+    }, existingVehicle);
+    const saved = await saveVehicleDocument(req, nextVehicle._id, nextVehicle);
+
+    await writeChangelog(req, {
+      entity: 'vehicle',
+      entityId: nextVehicle._id,
+      entityLabel: `${nextVehicle.brand} ${nextVehicle.model} (${nextVehicle.registrationPlate})`,
+      action: 'archive',
+      actorUserId: userId,
+      actorName: account.fullName,
+      changes: { before: { archived: false }, after: { archived: true } },
+    });
+
+    return res.json({ ok: true, vehicle: sanitizeVehicle({ ...nextVehicle, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al archivar el vehículo',
+    });
   }
 }
 
@@ -879,7 +1124,16 @@ export async function removeVehicle(req, res) {
       return res.status(404).json({ ok: false, error: 'Vehículo no encontrado' });
     }
 
-    await softDeleteDocument(req, VEHICLES_DB, vehicleId);
+    const relations = await findVehicleRelations(req, userId, vehicleId, existingVehicle);
+    if (relations.hasRelations) {
+      return res.status(409).json({
+        ok: false,
+        error: 'No se puede eliminar: existen operaciones asociadas',
+        relations,
+      });
+    }
+
+    await softDeleteVehicleDocument(req, vehicleId);
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,

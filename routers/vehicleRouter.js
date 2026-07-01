@@ -16,6 +16,8 @@ import {
   addVehicleDocument,
   updateVehicleDocument,
   removeVehicleDocument,
+  getVehicleRelations,
+  archiveVehicle,
 } from '../controllers/vehicleController.js';
 
 const vehicleRouter = Router();
@@ -25,6 +27,8 @@ vehicleRouter.post('/:userId', createVehicle);
 vehicleRouter.post('/:userId/bulk', bulkCreateVehicles);
 vehicleRouter.post('/:userId/check-duplicates', checkDuplicates);
 vehicleRouter.put('/:userId/:vehicleId', updateVehicle);
+vehicleRouter.put('/:userId/:vehicleId/archive', archiveVehicle);
+vehicleRouter.get('/:userId/:vehicleId/relations', getVehicleRelations);
 vehicleRouter.delete('/:userId/:vehicleId', removeVehicle);
 
 // Commercial status

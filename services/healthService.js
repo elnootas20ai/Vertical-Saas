@@ -59,10 +59,14 @@ const COUCH_TIMEOUT   = Number(process.env.HEALTH_COUCH_TIMEOUT_MS ?? 5000);
 
 // ── Databases to probe ────────────────────────────────────────────────────────
 function getKeyDbs() {
-  const prefix = (process.env.VITE_COUCHDB_DB || 'vertial').replace(/\/+$/, '');
+  const prefix = (process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial').replace(/\/+$/, '');
+  const vehiclesDb = (process.env.VITE_VEHICLES_DB || process.env.COUCHDB_VEHICLES_DB || `${prefix}-vehicles`)
+    .replace(/\/+$/, '')
+    .toLowerCase();
   return [
     'accounts',
     'businesses',
+    vehiclesDb,
     'vehicles',
     'notifications',
     `${prefix}-sales`,

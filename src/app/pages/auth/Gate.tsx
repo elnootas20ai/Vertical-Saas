@@ -24,6 +24,8 @@ import { resolveWorkerSessionEntryPath } from '../../lib/workerProfileCompletion
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
 import { BusinessGrid } from '../../components/gate/BusinessGrid';
+import { buildGateSnapshotMap } from '../../components/gate/gateBusinessSnapshots';
+import { usePortfolioOverview } from '../../hooks/usePortfolioOverview';
 import { ModalProximamente } from '../../components/gate/ModalProximamente';
 import { ModalExportar } from '../../components/gate/ModalExportar';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
@@ -206,6 +208,16 @@ export function Gate() {
     [user, data],
   );
   const hasOnboardingCompany = Boolean(onboardingPayload.name);
+
+  const { rows: portfolioRows, loading: portfolioSummariesLoading } = usePortfolioOverview(
+    user,
+    businesses,
+    { live: false },
+  );
+  const gateBusinessSnapshots = useMemo(
+    () => buildGateSnapshotMap(portfolioRows),
+    [portfolioRows],
+  );
 
   useEffect(() => {
     if (!hasOnboardingCompany) return;
@@ -508,11 +520,11 @@ export function Gate() {
               currentBusinessId={currentBusiness?.business_id}
               onEnterBusiness={(businessId) => {
                 switchBusiness(businessId);
-                navigate('/saas/dashboard');
+                navigate('/saas/dashboard', { replace: true });
               }}
               onManageBusinesses={() => navigate('/saas/settings/empresas')}
-              vehicles={vehicles}
-              sales={sales}
+              businessSnapshots={gateBusinessSnapshots}
+              summariesLoading={portfolioSummariesLoading}
             />
 
             {currentBusiness ? (
@@ -524,7 +536,7 @@ export function Gate() {
                   icon="next"
                   onClick={() => {
                     switchBusiness(currentBusiness.business_id);
-                    navigate('/saas/dashboard');
+                    navigate('/saas/dashboard', { replace: true });
                   }}
                 >
                   Entrar al panel — {currentBusiness.name}

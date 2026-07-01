@@ -1,4 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
+import * as cacheService from '../services/cache.js';
+import { broadcastToUser } from '../services/sseService.js';
 import {
   VEHICLES_DB,
   buildVehicleAcquisitionDocument,
@@ -15,6 +17,7 @@ import {
   sanitizeVehicle,
   getAllDocuments,
 } from '../services/couchdb.js';
+import { syncAcquisitionToVehicle } from '../services/compraventaAcceptFlow.js';
 
 function badRequest(res, msg) {
   return res.status(400).json({ ok: false, error: msg });
@@ -91,7 +94,9 @@ export async function createAcquisition(req, res) {
 
     await putDocument(req, VEHICLES_DB, doc._id, doc);
 
-    await syncCostsToVehicle(req, doc, vehicle);
+    await syncAcquisitionToVehicle(req, doc, vehicle);
+
+    cacheService.invalidateByPrefix('compraventa');
 
     await logAccountActivity(req, userId, {
       action: 'create_acquisition',
@@ -124,8 +129,13 @@ export async function updateAcquisition(req, res) {
 
     const vehicle = await getDocument(req, VEHICLES_DB, doc.vehicleId);
     if (vehicle && !vehicle.deletedAt) {
-      await syncCostsToVehicle(req, doc, vehicle);
+      await syncAcquisitionToVehicle(req, doc, vehicle);
     }
+
+    cacheService.invalidateByPrefix('compraventa');
+
+    broadcastToUser(userId, 'vehicle_updated', { vehicleId: doc.vehicleId, action: 'acquisition_updated' });
+    broadcastToUser(userId, 'vehicle_update', { vehicleId: doc.vehicleId });
 
     return res.json({ ok: true, item: sanitizeVehicleAcquisition(doc) });
   } catch (error) {
@@ -367,58 +377,5 @@ export async function getEconomicHistory(req, res) {
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message });
-  }
-}
-
-// ── Sync costs to vehicle (CR-07) ───────────────────────────────────────────────
-
-async function syncCostsToVehicle(req, acquisition, vehicle) {
-  try {
-    const acqId = acquisition._id;
-    const existingCosts = Array.isArray(vehicle.associatedCosts) ? vehicle.associatedCosts : [];
-    const otherCosts = existingCosts.filter((c) => !c.id?.startsWith(`acq:${acqId}:`));
-
-    const newCosts = [];
-    const costMap = [
-      ['transporte', acquisition.costTransporte, 'Transporte'],
-      ['gestoria', acquisition.costGestoria, 'Gestoría'],
-      ['documentacion', acquisition.costDocumentacion, 'Documentación'],
-      ['descontaminacion', acquisition.costDescontaminacion, 'Descontaminación'],
-      ['otro', acquisition.costOtros, acquisition.costOtrosDetalle || 'Otros costes'],
-    ];
-
-    for (const [cat, amount, desc] of costMap) {
-      if (amount > 0) {
-        newCosts.push({
-          id: `acq:${acqId}:${cat}`,
-          category: cat,
-          description: desc,
-          amount,
-          date: acquisition.acquisitionDate || new Date().toISOString().slice(0, 10),
-        });
-      }
-    }
-
-    const originMap = {
-      compra_particular: 'particular',
-      compra_empresa: 'empresa',
-      subasta: 'subasta',
-      retirada: 'otro',
-      grua_externa: 'otro',
-    };
-
-    const updatedVehicle = {
-      ...vehicle,
-      purchasePrice: acquisition.costCompra || vehicle.purchasePrice,
-      purchaseDate: acquisition.acquisitionDate || vehicle.purchaseDate,
-      origin: originMap[acquisition.acquisitionType] || vehicle.origin,
-      supplierName: acquisition.sellerName || vehicle.supplierName,
-      associatedCosts: [...otherCosts, ...newCosts],
-      updatedAt: new Date().toISOString(),
-    };
-
-    await putDocument(req, VEHICLES_DB, vehicle._id, updatedVehicle);
-  } catch (_err) {
-    // non-critical
   }
 }

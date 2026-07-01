@@ -72,6 +72,8 @@ export function useCompraventaHub(filters: CompraventaFilters): UseCompraventaHu
 
   const sseHandlers = useMemo(() => ({
     vehicle_update: () => debouncedRefresh(),
+    vehicle_updated: () => debouncedRefresh(),
+    tradein_accepted: () => debouncedRefresh(),
     sale_update: () => debouncedRefresh(),
     lead_update: () => debouncedRefresh(),
     alert: () => debouncedRefresh(),

@@ -2,6 +2,14 @@ import type { Vehicle, Warranty, AssociatedCost, CommercialStatus, PriceChangeRe
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 
+export interface DuplicateInfo {
+  vehicleId: string;
+  brand: string;
+  model: string;
+  status: string;
+  registrationPlate?: string;
+}
+
 interface VehiclesEnvelope {
   ok: boolean;
   error?: string;
@@ -10,6 +18,40 @@ interface VehiclesEnvelope {
   warranty?: Warranty;
   cost?: AssociatedCost;
   id?: string;
+  duplicates?: {
+    plate?: DuplicateInfo;
+    vin?: DuplicateInfo;
+  };
+}
+
+export class VehicleDuplicateError extends Error {
+  duplicates: { plate?: DuplicateInfo; vin?: DuplicateInfo };
+
+  constructor(
+    message: string,
+    duplicates: { plate?: DuplicateInfo; vin?: DuplicateInfo },
+  ) {
+    super(message);
+    this.name = 'VehicleDuplicateError';
+    this.duplicates = duplicates;
+  }
+}
+
+export interface VehicleRelationsInfo {
+  compras: number;
+  ventas: number;
+  entregas: number;
+  hasRelations: boolean;
+}
+
+export class VehicleRelationsError extends Error {
+  relations: VehicleRelationsInfo;
+
+  constructor(message: string, relations: VehicleRelationsInfo) {
+    super(message);
+    this.name = 'VehicleRelationsError';
+    this.relations = relations;
+  }
 }
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
@@ -51,10 +93,34 @@ export async function createVehicleRequest(
   vehicle: Partial<Vehicle>,
   businessId?: string | null,
 ) {
-  return request(`/api/vehicles/${encodeURIComponent(userId)}`, {
+  const response = await authFetch(`${API_BASE}/api/vehicles/${encodeURIComponent(userId)}`, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    credentials: 'include',
     body: JSON.stringify({ vehicle, businessId: businessId || undefined }),
   });
+
+  const payload = (await response.json().catch(() => ({}))) as VehiclesEnvelope;
+
+  if (response.status === 401) {
+    throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
+  }
+
+  if (response.status === 409 && payload.duplicates) {
+    throw new VehicleDuplicateError(
+      payload.error || 'Vehículo duplicado detectado',
+      payload.duplicates,
+    );
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || 'Error inesperado en la API de vehículos');
+  }
+
+  return payload;
 }
 
 export async function bulkCreateVehiclesRequest(
@@ -75,10 +141,100 @@ export async function updateVehicleRequest(
   priceChangeReason?: string,
   priceChangeReasonCategory?: PriceChangeReasonCategory,
 ) {
-  return request(`/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}`, {
+  const response = await authFetch(`${API_BASE}/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}`, {
     method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    credentials: 'include',
     body: JSON.stringify({ vehicle, priceChangeReason, priceChangeReasonCategory }),
   });
+
+  const payload = (await response.json().catch(() => ({}))) as VehiclesEnvelope;
+
+  if (response.status === 401) {
+    throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
+  }
+
+  if (response.status === 409 && payload.duplicates) {
+    throw new VehicleDuplicateError(
+      payload.error || 'Vehículo duplicado detectado',
+      payload.duplicates,
+    );
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || 'Error inesperado en la API de vehículos');
+  }
+
+  return payload;
+}
+
+export async function archiveVehicleRequest(userId: string, vehicleId: string) {
+  return request(`/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}/archive`, {
+    method: 'PUT',
+    body: JSON.stringify({}),
+  });
+}
+
+export async function getVehicleRelationsRequest(userId: string, vehicleId: string): Promise<VehicleRelationsInfo> {
+  const response = await authFetch(`${API_BASE}/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}/relations`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    credentials: 'include',
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as VehicleRelationsInfo & { ok?: boolean; error?: string };
+
+  if (response.status === 401) {
+    throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || 'Error al comprobar relaciones del vehículo');
+  }
+
+  return {
+    compras: payload.compras ?? 0,
+    ventas: payload.ventas ?? 0,
+    entregas: payload.entregas ?? 0,
+    hasRelations: Boolean(payload.hasRelations),
+  };
+}
+
+export async function deleteVehicleRequest(userId: string, vehicleId: string) {
+  const response = await authFetch(`${API_BASE}/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+    },
+    credentials: 'include',
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as VehiclesEnvelope & {
+    relations?: VehicleRelationsInfo;
+  };
+
+  if (response.status === 401) {
+    throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
+  }
+
+  if (response.status === 409 && payload.relations) {
+    throw new VehicleRelationsError(
+      payload.error || 'No se puede eliminar: existen operaciones asociadas',
+      payload.relations,
+    );
+  }
+
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || 'Error inesperado en la API de vehículos');
+  }
+
+  return payload;
 }
 
 export async function updateCommercialStatusRequest(
@@ -90,12 +246,6 @@ export async function updateCommercialStatusRequest(
   return request(`/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}/commercial-status`, {
     method: 'PUT',
     body: JSON.stringify({ newStatus, reason }),
-  });
-}
-
-export async function deleteVehicleRequest(userId: string, vehicleId: string) {
-  return request(`/api/vehicles/${encodeURIComponent(userId)}/${encodeURIComponent(vehicleId)}`, {
-    method: 'DELETE',
   });
 }
 
@@ -144,14 +294,6 @@ export async function deleteAssociatedCostRequest(userId: string, vehicleId: str
 }
 
 // ─── Duplicate check ──────────────────────────────────────────────────────────
-
-export interface DuplicateInfo {
-  vehicleId: string;
-  brand: string;
-  model: string;
-  status: string;
-  registrationPlate?: string;
-}
 
 export interface DuplicateCheckResult {
   ok: boolean;
