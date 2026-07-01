@@ -5,6 +5,7 @@ import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBra
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { isDeliveryBusinessType, notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
+import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { catalogItemOperatesAtWorkCenter } from '../../lib/pdvScope';
@@ -3285,18 +3286,20 @@ export function CatalogPage() {
     const list = op.items;
     const categoryLabel = op.categoryLabel;
     setBulkDeletingCatalog(true);
-    let deleted = 0;
-    let failed = 0;
+    const toastId = toast.loading(`Eliminando ${list.length} artículo(s)…`, { duration: Infinity });
     try {
-      for (const item of list) {
-        try {
-          await deleteCatalogItemRequest(dataUserId, item._id);
-          deleted += 1;
-        } catch {
-          failed += 1;
-        }
-      }
-      if (categoryLabel && businessId && deleted > 0) {
+      const result = await deleteCatalogItemsRelentlessly(
+        dataUserId,
+        list.map((item) => item._id),
+        {
+          maxRounds: 6,
+          onProgress: ({ pending, deleted }) => {
+            toast.loading(`Eliminando… ${pending} pendiente(s) · ${deleted} ok`, { id: toastId });
+          },
+        },
+      );
+
+      if (categoryLabel && businessId && result.deleted > 0) {
         try {
           const updatedBrands = await removeCatalogCategoryFromBrands(businessId, categoryLabel);
           if (updatedBrands > 0) {
@@ -3307,16 +3310,26 @@ export function CatalogPage() {
           /* productos ya borrados; fallo al limpiar pestaña TPV no bloquea */
         }
       }
+
       await loadCatalog();
       notifyDeliveryCatalogChanged(dataUserId, businessId);
-      if (deleted > 0) {
+      toast.dismiss(toastId);
+
+      if (result.failed === 0) {
         toast.success(
           categoryLabel
-            ? `Organizador «${categoryLabel}» eliminado (${deleted} producto${deleted !== 1 ? 's' : ''})`
-            : `${deleted} artículo(s) eliminado(s)`,
+            ? `Organizador «${categoryLabel}» eliminado (${result.deleted} producto${result.deleted !== 1 ? 's' : ''})`
+            : `${result.deleted} artículo(s) eliminado(s)`,
+        );
+      } else {
+        toast.error(
+          `Quedan ${result.failed} artículo(s) sin eliminar. Vuelve a pulsar «Eliminar todo» o recarga la página.`,
+          { duration: 12000 },
         );
       }
-      if (failed > 0) toast.error(`${failed} artículo(s) no se pudieron eliminar`);
+    } catch {
+      toast.dismiss(toastId);
+      toast.error('Error al eliminar el catálogo. Inténtalo de nuevo.');
     } finally {
       setBulkDeletingCatalog(false);
       exitCatalogSelectMode();

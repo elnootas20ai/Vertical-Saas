@@ -1713,13 +1713,105 @@ export async function updateCatalogItem(req, res) {
 export async function removeCatalogItem(req, res) {
   try {
     const { userId, itemId } = req.params;
-    const existing = await ensureCatalogItemOwner(req, userId, itemId);
-    if (!existing) return res.status(404).json({ ok: false, error: 'Artículo no encontrado' });
-    const db = getCatalogDbName();
-    await softDeleteDocument(req, db, itemId);
-    return res.json({ ok: true, id: itemId });
+    const result = await removeCatalogItemIdWithRetry(req, userId, itemId);
+    if (!result.ok) {
+      return res.status(500).json({ ok: false, error: result.error || 'Error al eliminar artículo' });
+    }
+    return res.json({ ok: true, id: itemId, status: result.status });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar artículo' });
+  }
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function removeCatalogItemIdWithRetry(req, userId, itemId, maxAttempts = 4) {
+  const id = String(itemId || '').trim();
+  if (!id) return { ok: false, error: 'Id vacío', status: 'error' };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const existing = await ensureCatalogItemOwner(req, userId, id);
+      if (!existing || existing.deletedAt) {
+        return { ok: true, status: 'gone' };
+      }
+      await softDeleteDocument(req, getCatalogDbName(), id);
+      return { ok: true, status: 'deleted' };
+    } catch (error) {
+      const message = String(error?.message || error || '').toLowerCase();
+      if (message.includes('no encontrado') || message.includes('not found')) {
+        return { ok: true, status: 'gone' };
+      }
+      if (attempt >= maxAttempts - 1) {
+        return { ok: false, error: error.message || 'Error al eliminar artículo', status: 'error' };
+      }
+      await sleepMs(120 * (attempt + 1));
+    }
+  }
+
+  return { ok: false, error: 'Error al eliminar artículo', status: 'error' };
+}
+
+export async function bulkRemoveCatalogItems(req, res) {
+  try {
+    const { userId } = req.params;
+    const { itemIds } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      return badRequest(res, 'Falta el array itemIds en el body');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const uniqueIds = [...new Set(itemIds.map((id) => String(id || '').trim()).filter(Boolean))];
+    let pending = uniqueIds;
+    const removed = new Set();
+    const errors = [];
+
+    for (let pass = 0; pass < 6 && pending.length > 0; pass += 1) {
+      const nextPending = [];
+      for (const itemId of pending) {
+        const result = await removeCatalogItemIdWithRetry(req, userId, itemId, 3);
+        if (result.ok) {
+          removed.add(itemId);
+        } else {
+          nextPending.push(itemId);
+        }
+      }
+      pending = nextPending;
+      if (pending.length > 0 && pass < 5) {
+        await sleepMs(200 * (pass + 1));
+      }
+    }
+
+    for (const itemId of pending) {
+      errors.push({ itemId, error: 'No se pudo eliminar tras varios intentos' });
+    }
+
+    if (removed.size > 0) {
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'catalog_item',
+        action: `Borrado masivo: ${removed.size} artículo(s)`,
+        entityId: [...removed][0],
+        entityLabel: `Borrado de ${removed.size} artículos`,
+        metadata: { count: removed.size },
+      });
+    }
+
+    return res.json({
+      ok: pending.length === 0,
+      deleted: removed.size,
+      failed: pending.length,
+      errorDetails: errors.length > 0 ? errors : undefined,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error en borrado masivo' });
   }
 }
 
