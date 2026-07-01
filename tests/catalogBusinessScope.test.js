@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   catalogItemBelongsToBusinessScope,
+  dedupeCatalogItemsForDisplay,
   filterCatalogItemsForBusinessScope,
 } from '../src/app/lib/catalogBusinessScope.ts';
 
@@ -63,5 +64,41 @@ describe('catalogBusinessScope', () => {
       accountBusinessCount: 1,
     });
     expect(single).toHaveLength(1);
+  });
+
+  it('dedupeCatalogItemsForDisplay keeps one row per sku or name', () => {
+    const items = [
+      {
+        _id: 'old',
+        name: 'Napolitana',
+        category: 'Pizzas',
+        sku: 'PIZ-001',
+        business_id: '',
+        customFields: { costingType: 'fixed' },
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      },
+      {
+        _id: 'new',
+        name: 'Napolitana',
+        category: 'Pizzas',
+        sku: 'PIZ-001',
+        business_id: 'biz-a',
+        customFields: {
+          costingType: 'recipe',
+          costingRecipe: [{ storeIngredientId: 'a', name: 'Masa', quantity: 1, unit: 'ud' }],
+        },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        _id: 'other',
+        name: 'Cheese Burger',
+        category: 'Burgers',
+        sku: 'BRG-01',
+        business_id: 'biz-a',
+      },
+    ];
+    const deduped = dedupeCatalogItemsForDisplay(items, 'biz-a');
+    expect(deduped).toHaveLength(2);
+    expect(deduped.find((i) => i.name === 'Napolitana')?._id).toBe('new');
   });
 });

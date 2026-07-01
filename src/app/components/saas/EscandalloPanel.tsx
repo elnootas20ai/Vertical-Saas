@@ -11,7 +11,11 @@ import {
 } from './SaasTabWorkspace';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
-import { listBrandsRequest } from '../../lib/brandsApi';
+import {
+  dedupeCatalogItemsForDisplay,
+  filterCatalogItemsForBusinessScope,
+} from '../../lib/catalogBusinessScope';
+import { listBrandsRequest, type Brand } from '../../lib/brandsApi';
 import { commercialLineBrands } from '../../lib/deliveryCatalogImportLogic';
 import { repairVertialFoodEscandallo } from '../../lib/deliveryCatalogImport';
 import { needsVertialFoodEscandalloRepair } from '../../lib/catalogImportCosting';
@@ -424,7 +428,7 @@ function ProductCostingModal({
 
 export function EscandalloPanel() {
   const { user } = useAuth();
-  const { businessId } = useActiveBusinessScope();
+  const { businessId, dataUserId, accountBusinessCount, businessType } = useActiveBusinessScope();
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [storeIngredients, setStoreIngredients] = useState<StoreIngredient[]>([]);
   const [brands, setBrands] = useState<Array<{ _id: string; deliveryLineKind?: string }>>([]);
@@ -439,28 +443,36 @@ export function EscandalloPanel() {
   const ingredientsById = useMemo(() => storeIngredientsById(storeIngredients), [storeIngredients]);
 
   const load = useCallback(async () => {
-    if (!user?.id) {
+    const uid = dataUserId || user?.id;
+    if (!uid) {
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
       let [items, config] = await Promise.all([
-        listCatalogItemsRequest(user.id),
-        getDeliveryConfigRequest(user.id),
+        listCatalogItemsRequest(uid),
+        getDeliveryConfigRequest(uid),
       ]);
-      const lineBrands = businessId
+      const lineBrands: Brand[] = businessId
         ? sortBrandsForDisplay(
             commercialLineBrands(await listBrandsRequest(businessId).catch(() => [])),
           )
         : [];
 
+      const scopedItems = businessId
+        ? filterCatalogItemsForBusinessScope(items, businessId, lineBrands, {
+            accountBusinessCount,
+            activeBusinessType: businessType,
+          })
+        : items;
+
       const needsFoodEscandalloRepair =
         Boolean(businessId) &&
-        items.some((item) => needsVertialFoodEscandalloRepair(item, lineBrands));
+        scopedItems.some((item) => needsVertialFoodEscandalloRepair(item, lineBrands));
 
       if (needsFoodEscandalloRepair && businessId) {
-        const repair = await repairVertialFoodEscandallo(user.id, businessId);
+        const repair = await repairVertialFoodEscandallo(uid, businessId);
         if (repair.updated > 0 || repair.basesAdded > 0) {
           if (repair.updated > 0) {
             toast.success(
@@ -468,14 +480,23 @@ export function EscandalloPanel() {
             );
           }
           [items, config] = await Promise.all([
-            listCatalogItemsRequest(user.id),
-            getDeliveryConfigRequest(user.id),
+            listCatalogItemsRequest(uid),
+            getDeliveryConfigRequest(uid),
           ]);
         }
       }
 
+      const visibleItems = businessId
+        ? filterCatalogItemsForBusinessScope(items, businessId, lineBrands, {
+            accountBusinessCount,
+            activeBusinessType: businessType,
+          })
+        : items;
+
       setBrands(lineBrands);
-      setCatalogItems(items.filter(isCatalogCostingProduct));
+      setCatalogItems(
+        dedupeCatalogItemsForDisplay(visibleItems.filter(isCatalogCostingProduct), businessId),
+      );
       const brandIds = lineBrands.map((b) => b._id);
       const normalized = normalizeStoreIngredients(unifyStoreIngredientsFromConfig(config, brandIds));
       const { items: withDefaults } = applyVertialDefaultsToStoreIngredients(normalized, lineBrands);
@@ -485,7 +506,7 @@ export function EscandalloPanel() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, businessId]);
+  }, [user?.id, dataUserId, businessId, accountBusinessCount, businessType]);
 
   useEffect(() => {
     void load();
