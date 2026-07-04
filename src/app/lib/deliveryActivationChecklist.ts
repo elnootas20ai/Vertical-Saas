@@ -130,3 +130,46 @@ export function buildDeliveryActivationStepDefs(
   return applyDeliveryStepLocks(DELIVERY_ACTIVATION_STEP_DEFS(flags), flags);
 }
 
+const RESTAURANT_ACTIVATION_STEP_DEFS = (
+  flags: DeliveryActivationFlags,
+): DeliveryActivationStepDef[] => {
+  const steps = DELIVERY_ACTIVATION_STEP_DEFS(flags);
+  return steps.map((step) => {
+    if (step.id === 'delivery_store') {
+      return {
+        ...step,
+        label: 'Bar/restaurante y PDV',
+        description: 'Crea el bar/restaurante; la caja TPV y el código tablet se preparan solos',
+        subSteps: [
+          { id: 'retail_store', label: 'Primer bar/restaurante creado', completed: flags.hasActiveRetailStore },
+          { id: 'pdv_active', label: 'PDV de caja activo', completed: flags.hasActivePdv },
+        ],
+      };
+    }
+    if (step.id === 'delivery_operate') {
+      return {
+        ...step,
+        description: 'Horario en el bar/restaurante y acceso al TPV rápido',
+        subSteps: [
+          { id: 'business_hours', label: 'Horario de apertura', completed: flags.hasBusinessHours },
+          {
+            id: 'tpv_ready',
+            label: 'Bar/restaurante, marca y carta listos',
+            completed:
+              flags.hasActivePdv &&
+              flags.brandSetupComplete &&
+              flags.hasPricedProduct,
+          },
+        ],
+      };
+    }
+    return step;
+  });
+};
+
+export function buildRestaurantActivationStepDefs(
+  flags: DeliveryActivationFlags,
+): DeliveryActivationStepDef[] {
+  return applyDeliveryStepLocks(RESTAURANT_ACTIVATION_STEP_DEFS(flags), flags);
+}
+

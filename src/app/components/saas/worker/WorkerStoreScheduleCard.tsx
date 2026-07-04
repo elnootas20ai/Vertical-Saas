@@ -6,6 +6,8 @@ import {
   listStoreHoursWeek,
 } from '../../../lib/workerStoreHours';
 import { SCHEDULE_DAY_LABELS_ES } from '../../../lib/businessHoursUtils';
+import { useBusiness } from '../../../context/BusinessContext';
+import { getHrLocationCopy } from '../../../lib/retailLocationCopy';
 
 interface WorkerStoreScheduleCardProps {
   workCenter: WorkCenter | null;
@@ -18,10 +20,12 @@ export function WorkerStoreScheduleCard({
   storeLabel,
   compact = false,
 }: WorkerStoreScheduleCardProps) {
+  const { currentBusiness } = useBusiness();
+  const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
   const todayKey = getScheduleDayKeyForDate();
   const today = formatStoreHoursToday(workCenter);
   const week = listStoreHoursWeek(workCenter);
-  const title = storeLabel || workCenter?.name || 'Tu tienda';
+  const title = storeLabel || workCenter?.name || hrCopy.workerStoreFallback;
 
   if (!workCenter) {
     return (
@@ -29,9 +33,9 @@ export function WorkerStoreScheduleCard({
         <div className="flex items-start gap-3">
           <Store className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div>
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Sin tienda asignada</p>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{hrCopy.workerNoStoreTitle}</p>
             <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-              Pide a tu gerente que te asigne una tienda en Equipo para ver el horario y fichar en el local correcto.
+              {hrCopy.workerNoStoreHint}
             </p>
           </div>
         </div>
@@ -69,7 +73,7 @@ export function WorkerStoreScheduleCard({
         </div>
         <div>
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Horario de la tienda</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{hrCopy.scheduleCardSubtitle}</p>
         </div>
       </div>
       <div className="px-5 py-3 bg-orange-50/60 dark:bg-orange-950/20 border-b border-orange-100 dark:border-orange-900/40">

@@ -80,6 +80,7 @@ export function Login() {
           businessId: terminalBinding.businessId,
           dataUserId: terminalBinding.dataUserId,
           tpvVertical: terminalBinding.tpvVertical || 'delivery',
+          salaTerminalId: terminalBinding.salaTerminalId,
           pdvName: pdv?.name,
           businessName: business?.name,
         });

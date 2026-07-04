@@ -4,6 +4,7 @@ import {
   createTable,
   updateTable,
   bulkUpdateTables,
+  bulkCreateTables,
   removeTable,
   changeTableStatus,
   listWalls,
@@ -34,6 +35,7 @@ const salaRouter = Router();
 // Tables
 salaRouter.get('/tables/:userId', listTables);
 salaRouter.post('/tables/:userId', createTable);
+salaRouter.post('/tables/:userId/bulk-create', bulkCreateTables);
 salaRouter.put('/tables/:userId/bulk', bulkUpdateTables);
 salaRouter.put('/tables/:userId/:tableId', updateTable);
 salaRouter.patch('/tables/:userId/:tableId/status', changeTableStatus);

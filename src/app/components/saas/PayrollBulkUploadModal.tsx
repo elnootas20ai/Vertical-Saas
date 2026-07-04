@@ -29,6 +29,7 @@ type Step = 'setup' | 'review' | 'uploading' | 'done';
 interface PayrollBulkUploadModalProps {
   members: AuthUser[];
   currentUser: AuthUser;
+  businessId: string;
   onClose: () => void;
   onComplete: (docs: PayrollDocument[]) => void;
 }
@@ -46,6 +47,7 @@ function isZipFile(file: File): boolean {
 export function PayrollBulkUploadModal({
   members,
   currentUser,
+  businessId,
   onClose,
   onComplete,
 }: PayrollBulkUploadModalProps) {
@@ -93,6 +95,7 @@ export function PayrollBulkUploadModal({
     setUploadProgress({ done: 0, total: eligible.length, current: '' });
 
     const result = await uploadPayrollDocumentsBatch({
+      businessId,
       rows: reviewRows,
       documentType: 'nomina',
       period: effectivePeriod || undefined,

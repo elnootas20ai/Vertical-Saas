@@ -65,7 +65,7 @@ export const SETUP_STEP_DEFINITIONS = {
     required: false,
     appliesTo: {
       verticals: [
-        'delivery', 'gym', 'clinic', 'vet', 'hotel', 'workshop',
+        'delivery', 'restaurant', 'gym', 'clinic', 'vet', 'hotel', 'workshop',
         'carDealership', 'cleaning', 'nightclub', 'pharmacy',
         'carWash', 'scrapyard', 'spareParts', 'construction',
         'tobaccoShop', 'butcherShop',
@@ -84,7 +84,7 @@ export const SETUP_STEP_DEFINITIONS = {
     required: false,
     appliesTo: {
       verticals: [
-        'delivery', 'gym', 'clinic', 'vet', 'hotel', 'workshop',
+        'delivery', 'restaurant', 'gym', 'clinic', 'vet', 'hotel', 'workshop',
         'carDealership', 'nightclub', 'pharmacy', 'carWash',
         'scrapyard', 'spareParts', 'construction', 'cleaning',
         'tobaccoShop', 'butcherShop',
@@ -102,7 +102,7 @@ export const SETUP_STEP_DEFINITIONS = {
     category: 'tpv',
     required: false,
     appliesTo: {
-      verticals: ['delivery', 'hotel', 'nightclub'],
+      verticals: ['delivery', 'restaurant', 'hotel', 'nightclub'],
       modules: ['sales'],
     },
     order: 7,

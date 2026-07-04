@@ -2,6 +2,7 @@ import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
 import { isDeliveryBusinessType, normalizeBusinessScopeId } from './deliverySetup';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
 import {
   catalogImportIdentityKey,
   catalogLooseIdentityKey,
@@ -10,7 +11,7 @@ import {
 export type CatalogBusinessScopeOptions = {
   /** Número de empresas en la cuenta (evita mezclar legacy sin business_id). */
   accountBusinessCount?: number;
-  /** Tipo de la empresa activa (p. ej. delivery) — desbloquea bebidas/complementos sin línea. */
+  /** Tipo de la empresa activa — desbloquea bebidas/complementos/postres sin línea (delivery + restaurante). */
   activeBusinessType?: string;
 };
 
@@ -44,7 +45,13 @@ export function catalogItemBelongsToBusinessScope(
   if (itemVertical === 'delivery' && !isDeliveryBusinessType(activeType)) {
     return false;
   }
+  if (itemVertical === 'restaurant' && !isRestaurantBusinessType(activeType)) {
+    return false;
+  }
   if (isDeliveryBusinessType(activeType) && itemVertical && itemVertical !== 'delivery') {
+    return false;
+  }
+  if (isRestaurantBusinessType(activeType) && itemVertical && itemVertical !== 'restaurant') {
     return false;
   }
 
@@ -65,8 +72,8 @@ export function catalogItemBelongsToBusinessScope(
 
   const universalCategory = shouldClearBrandForCategory(String(item.category || ''));
   if (universalCategory) {
-    if (activeType && !isDeliveryBusinessType(activeType)) return false;
-    if (multiAccount) return isDeliveryBusinessType(activeType);
+    if (activeType && !isDeliveryOpsBusinessType(activeType)) return false;
+    if (multiAccount) return isDeliveryOpsBusinessType(activeType);
     return brandIds.size > 0;
   }
 

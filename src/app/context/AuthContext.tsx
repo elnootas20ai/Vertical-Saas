@@ -197,6 +197,7 @@ export interface AuthContextType {
       workCenterId: string;
       businessId: string;
       dataUserId: string;
+      salaTerminalId?: string;
       tpvVertical?: 'delivery';
     };
     needsClockIn?: boolean;
@@ -1023,6 +1024,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       workCenterId: string;
       businessId: string;
       dataUserId: string;
+      salaTerminalId?: string;
       tpvVertical?: 'delivery';
     };
     needsClockIn?: boolean;

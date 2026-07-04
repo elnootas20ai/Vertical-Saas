@@ -6,6 +6,7 @@ import {
   buildClientDocument,
   buildDeliveryOrderDocument,
   listDeliveryOrdersByUser,
+  listScopedPointsOfSaleForBusiness,
   searchClientsByPhone,
   ensureDatabase,
 } from './couchdb.js';
@@ -14,6 +15,28 @@ import {
   deliveryOrderRevenue,
   isCancelledDeliveryOrder,
 } from '../shared/clients/deliveryClientMatch.js';
+import { orderMatchesBusinessPdvs } from '../controllers/deliveryController.js';
+
+function normalizeClientBusinessId(client) {
+  return String(client?.businessId || client?.business_id || '').replace(/^business:/, '').trim();
+}
+
+/** Pedidos de la misma empresa que el cliente (evita mezclar demo/otras verticales). */
+export async function scopeDeliveryOrdersToClientBusiness(req, userId, client, orders) {
+  const bid = normalizeClientBusinessId(client);
+  if (!bid) return orders;
+  const businessPdvs = await listScopedPointsOfSaleForBusiness(req, userId, bid, { includeInactive: true });
+  if (!businessPdvs.length) return [];
+  return orders.filter((o) => orderMatchesBusinessPdvs(o, businessPdvs));
+}
+
+export async function scopeDeliveryOrdersToBusinessId(req, userId, businessId, orders) {
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
+  if (!bid) return orders;
+  const businessPdvs = await listScopedPointsOfSaleForBusiness(req, userId, bid, { includeInactive: true });
+  if (!businessPdvs.length) return [];
+  return orders.filter((o) => orderMatchesBusinessPdvs(o, businessPdvs));
+}
 
 const LOYALTY_THRESHOLDS = { silver: 100, gold: 300, platinum: 600 };
 
@@ -33,10 +56,10 @@ function computeOrderFrequencyDays(dates) {
   return Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length);
 }
 
-export async function linkOrphanOrdersToClient(req, userId, clientId, clientPhone) {
+export async function linkOrphanOrdersToClient(req, userId, clientId, clientPhone, ordersOpt) {
   const deliveryDb = getDeliveryDbName();
   await ensureDatabase(req, deliveryDb);
-  const orders = await listDeliveryOrdersByUser(req, userId);
+  const orders = ordersOpt ?? await listDeliveryOrdersByUser(req, userId);
   let linked = 0;
   for (const order of orders) {
     if (String(order?.clientId || '').trim() || isCancelledDeliveryOrder(order)) continue;
@@ -126,10 +149,14 @@ export async function syncClientFromDeliveryOrders(req, userId, clientId) {
     return null;
   }
 
-  await linkOrphanOrdersToClient(req, userId, clientId, client.phone);
+  const allOrders = await listDeliveryOrdersByUser(req, userId);
+  const scopedOrders = await scopeDeliveryOrdersToClientBusiness(req, userId, client, allOrders);
 
-  const orders = (await listDeliveryOrdersByUser(req, userId))
-    .filter((o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o));
+  await linkOrphanOrdersToClient(req, userId, clientId, client.phone, scopedOrders);
+
+  const orders = scopedOrders.filter(
+    (o) => deliveryOrderMatchesClient(o, clientId, client.phone) && !isCancelledDeliveryOrder(o),
+  );
 
   const { stats, loyalty } = computeClientDeliveryMetrics(client, orders);
 

@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { AppProvider, useApp } from '../context/AppContext';
 
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
+import { BusinessScopeUrlSync } from '../components/saas/BusinessScopeUrlSync';
 
 import { useBusinessOptional } from '../context/BusinessContext';
 
@@ -269,6 +270,12 @@ function SaasContent() {
 
         businessType: bt || 'carDealership',
 
+        restaurantFormat:
+          bt === 'restaurant'
+            ? (onboarding?.restaurantFormat as import('../lib/businessApi').RestaurantFormat | undefined) ||
+              'restaurant'
+            : undefined,
+
       })
 
         .then(async (result) => {
@@ -480,7 +487,8 @@ function SaasRootProviders() {
           <AppProvider>
             <ScrapyardProvider>
               <ActivationChecklistProvider>
-                  <SaasContent />
+                <BusinessScopeUrlSync />
+                <SaasContent />
               </ActivationChecklistProvider>
             </ScrapyardProvider>
           </AppProvider>

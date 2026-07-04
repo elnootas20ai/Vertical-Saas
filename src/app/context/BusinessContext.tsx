@@ -22,7 +22,10 @@ import {
   updateBusinessMemberRequest,
   updateBusinessRequest,
 } from '../lib/businessApi';
+import { notifyBusinessesChanged, VERTIAL_BUSINESSES_CHANGED } from '../lib/businessChangeEvents';
 import { notifyDeliveryWorkCentersChanged, normalizeBusinessScopeId } from '../lib/deliverySetup';
+import { notifyDeliveryActiveStoreChanged } from '../lib/deliveryOpsPdvSelection';
+import { clearAllRetailScopeCaches } from '../verticals/retailScopeRegistry';
 import { readTpvTabletBinding } from '../lib/tpvTabletSession';
 
 export type { BusinessContextType } from './businessContextRef';
@@ -337,12 +340,14 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   // (o el fallback 'carDealership') hasta el siguiente refresh manual.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onInvitationAccepted = () => {
+    const onBusinessesChanged = () => {
       void reloadBusinesses();
     };
-    window.addEventListener('vertial:invitation-accepted', onInvitationAccepted);
+    window.addEventListener('vertial:invitation-accepted', onBusinessesChanged);
+    window.addEventListener(VERTIAL_BUSINESSES_CHANGED, onBusinessesChanged);
     return () => {
-      window.removeEventListener('vertial:invitation-accepted', onInvitationAccepted);
+      window.removeEventListener('vertial:invitation-accepted', onBusinessesChanged);
+      window.removeEventListener(VERTIAL_BUSINESSES_CHANGED, onBusinessesChanged);
     };
   }, [reloadBusinesses]);
 
@@ -363,12 +368,17 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         (b) => normalizeBusinessScopeId(b.business_id) === norm,
       );
       if (!found) return;
+      const prevId = normalizeBusinessScopeId(currentBusiness?.business_id);
+      if (prevId && prevId !== norm) {
+        clearAllRetailScopeCaches(prevId);
+      }
       setCurrentBusiness(found);
       if (user?.user_id) {
         storeBusinessId(user.user_id, found.business_id);
       }
+      notifyDeliveryActiveStoreChanged();
     },
-    [businesses, user?.user_id],
+    [businesses, user?.user_id, currentBusiness?.business_id],
   );
 
   const createBusiness = useCallback(
@@ -378,14 +388,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         const response = await createBusinessRequest(user.user_id, data);
         if (!response.business) return { success: false, error: 'No se recibió empresa desde el servidor' };
 
-        const newList = [...businesses, response.business];
-        setBusinesses(newList);
-        if (user?.user_id) writeBusinessesCache(user.user_id, newList);
+        setBusinesses((prev) => {
+          const exists = prev.some((b) => b.business_id === response.business!.business_id);
+          const newList = exists ? prev : [...prev, response.business!];
+          if (user?.user_id) writeBusinessesCache(user.user_id, newList);
+          return newList;
+        });
 
         setCurrentBusiness(response.business);
         storeBusinessId(user.user_id, response.business.business_id);
         const newBusinessId = String(response.business.business_id || '').trim();
         notifyDeliveryWorkCentersChanged(newBusinessId);
+        notifyBusinessesChanged();
         if (newBusinessId) {
           void import('../lib/onboardingLocalKeys').then(
             ({ armOnboardingTourForBusiness, resetActivationGuidesForBusiness }) => {
@@ -403,7 +417,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         };
       }
     },
-    [businesses, currentBusiness, user?.user_id],
+    [user?.user_id],
   );
 
   const updateBusiness = useCallback(
@@ -412,15 +426,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         const response = await updateBusinessRequest(businessId, data);
         if (!response.business) return { success: false, error: 'No se recibió empresa actualizada' };
 
-        const updatedList = businesses.map((b) =>
-          b.business_id === businessId ? response.business! : b,
-        );
-        setBusinesses(updatedList);
-        if (user?.user_id) writeBusinessesCache(user.user_id, updatedList);
+        setBusinesses((prev) => {
+          const updatedList = prev.map((b) =>
+            b.business_id === businessId ? response.business! : b,
+          );
+          if (user?.user_id) writeBusinessesCache(user.user_id, updatedList);
+          return updatedList;
+        });
 
         if (currentBusiness?.business_id === businessId) {
           setCurrentBusiness(response.business);
         }
+        notifyBusinessesChanged();
 
         return { success: true, business: response.business };
       } catch (error) {
@@ -456,6 +473,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        notifyBusinessesChanged();
         await refreshCurrentUser?.();
 
         return { success: true };

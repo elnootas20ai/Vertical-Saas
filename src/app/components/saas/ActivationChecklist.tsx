@@ -7,7 +7,11 @@ import {
 } from 'lucide-react';
 import { useActivationChecklist, type OnboardingStep } from '../../context/ActivationChecklistContext';
 import { useBusiness } from '../../context/BusinessContext';
-import { isDeliveryBusinessType, resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import {
+  getGuidedActivationChecklistTitle,
+  isGuidedActivationBusinessType,
+} from '../../lib/deliveryOpsTypes';
 import { buildActivationTargetUrl, getSubStepGuide } from '../../lib/activationGuide';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -63,9 +67,9 @@ export function ActivationChecklist({ collapsed }: Props) {
     useActivationChecklist();
   const allStepsDone = totalSteps > 0 && completedSteps >= totalSteps;
   const [expanded, setExpanded] = useState(readExpandedPreference);
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
-  const canDismissChecklist = !isDelivery || allStepsDone;
-  const checklistTitle = isDelivery ? 'Alta delivery' : 'Arranque rápido';
+  const usesGuidedChecklist = isGuidedActivationBusinessType(currentBusiness?.businessType);
+  const canDismissChecklist = !usesGuidedChecklist || allStepsDone;
+  const checklistTitle = getGuidedActivationChecklistTitle(currentBusiness?.businessType);
 
   useEffect(() => {
     try {
@@ -169,7 +173,7 @@ export function ActivationChecklist({ collapsed }: Props) {
             <StepRow
               key={step.id}
               step={step}
-              isDelivery={isDelivery}
+              isDelivery={usesGuidedChecklist}
               onNavigate={(url) => navigate(url)}
             />
           ))}
@@ -178,7 +182,7 @@ export function ActivationChecklist({ collapsed }: Props) {
               onClick={dismiss}
               className="w-full mt-1 py-1.5 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 transition-colors text-center"
             >
-              {isDelivery ? 'Ocultar guía del menú' : 'Saltar por ahora'}
+              {usesGuidedChecklist ? 'Ocultar guía del menú' : 'Saltar por ahora'}
             </button>
           )}
         </div>
@@ -290,7 +294,7 @@ function StepRow({
       {(isActive || isCompleted) && !isLocked && step.subSteps.length > 0 && (
         <ul className="px-2 pb-2 pl-8 space-y-1" aria-label={`Detalle: ${step.label}`}>
           {step.subSteps.map((sub) => {
-            const guide = getSubStepGuide(sub.id);
+            const guide = getSubStepGuide(sub.id, currentBusiness?.businessType);
             const canDeepLink = Boolean(guide?.fieldKey);
             return (
               <li key={sub.id}>
@@ -327,7 +331,7 @@ function StepRow({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        navigateForActivation(buildActivationTargetUrl(route, sub.id), step.id);
+                        navigateForActivation(buildActivationTargetUrl(route, sub.id, currentBusiness?.businessType), step.id);
                       }}
                       className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-500 hover:bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold text-white"
                       title={canDeepLink ? 'Ir y resaltar el campo' : 'Ir a la pantalla'}

@@ -1,0 +1,44 @@
+import type { VerticalModuleDefinition } from '../types';
+
+/**
+ * Módulo Restauración — vertical propio (bar, restaurante, sala).
+ * Reutiliza el motor operativo de pedidos/TPV/cocina vía rutas compartidas,
+ * pero con frontera de código y datos separada de delivery puro.
+ */
+export const RESTAURANT_MODULE: VerticalModuleDefinition = {
+  id: 'restaurant',
+  businessType: 'restaurant',
+  routePrefixes: [
+    '/saas/delivery-ops',
+    '/saas/delivery-kitchen',
+    '/saas/delivery-montaje',
+    '/saas/tpv',
+    '/saas/tpv-rapido',
+    '/saas/sala',
+    '/saas/sala/setup',
+    '/saas/reservations',
+    '/saas/lista-espera',
+    '/saas/caja',
+    '/saas/worker/tpv/delivery',
+  ],
+  codeRoots: [
+    'src/app/verticals/restaurant',
+  ],
+  legacySharedImports: [
+    'deliverySetup',
+    'deliveryApi',
+    'deliveryOpsPdvSelection',
+    'workCentersApi',
+    'brandsApi',
+    'pdvScope',
+    'retailScopeCache',
+    'retailScopeRegistry',
+  ],
+};
+
+export function isRestaurantModuleRoute(pathname: string): boolean {
+  const path = String(pathname || '').trim();
+  return RESTAURANT_MODULE.routePrefixes.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}

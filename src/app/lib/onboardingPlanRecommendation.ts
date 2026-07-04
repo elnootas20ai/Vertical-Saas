@@ -7,6 +7,11 @@ import {
   getAddonMonthlyPriceEur,
   PLAN_ADDON_ANNUAL_DISCOUNT,
 } from './planAddonCatalog';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  emptyRestaurantNeedsForFormat,
+  type RestaurantFormat,
+} from '../verticals/restaurant/restaurantFormat';
 
 export type OnboardingPlanId = 'basic' | 'normal' | 'pro';
 
@@ -129,6 +134,30 @@ export const DELIVERY_NEED_OPTIONS: DeliveryNeedOption[] = [
 
 export type DeliveryNeedsSelection = Record<DeliveryNeedKey, boolean>;
 
+export const RESTAURANT_NEED_OPTIONS: DeliveryNeedOption[] = [
+  { key: 'tpv', title: 'TPV y caja', description: 'Cobros en barra, sala o terraza' },
+  { key: 'catalogStock', title: 'Carta y stock', description: 'Platos, bebidas y existencias' },
+  { key: 'deliveryOrders', title: 'Comandas sala', description: 'Pedidos en mesa, barra o para llevar' },
+  { key: 'autoShipping', title: 'Reparto a domicilio', description: 'Opcional: entrega fuera del local' },
+  { key: 'clients', title: 'Clientes', description: 'Base de clientes y reservas' },
+  { key: 'team', title: 'Equipo', description: 'Roles, turnos y permisos' },
+  { key: 'invoicing', title: 'Facturación', description: 'Facturas y documentos' },
+  { key: 'reports', title: 'Informes', description: 'Ventas y métricas del local' },
+];
+
+export function emptyRestaurantNeeds(format?: RestaurantFormat | null): DeliveryNeedsSelection {
+  return emptyRestaurantNeedsForFormat(format);
+}
+
+export function getDeliveryNeedOptionsForBusinessType(businessType: string): DeliveryNeedOption[] {
+  if (isRestaurantBusinessType(businessType)) return RESTAURANT_NEED_OPTIONS;
+  return DELIVERY_NEED_OPTIONS;
+}
+
+export function usesDeliveryNeedsOnboarding(businessType: string): boolean {
+  return isDeliveryOpsBusinessType(businessType);
+}
+
 export function emptyDeliveryNeeds(): DeliveryNeedsSelection {
   return {
     tpv: false,
@@ -197,6 +226,7 @@ const NEEDS_GENERIC: NeedsOptionDefinition[] = [
 
 const VERTICAL_LABELS: Record<string, string> = {
   delivery: 'Delivery',
+  restaurant: 'Bar/restaurante',
   carDealership: 'Compraventa',
   workshop: 'Taller',
   events: 'Eventos',
@@ -211,7 +241,7 @@ export function getPlansForBusinessType(_businessType: string): OnboardingPlanDe
 }
 
 export function isDeliveryBusinessType(businessType: string): boolean {
-  return businessType === 'delivery';
+  return isDeliveryOpsBusinessType(businessType);
 }
 
 export function getNeedsOptionsForBusinessType(businessType: string): NeedsOptionDefinition[] {
@@ -228,7 +258,7 @@ export function getSelectedModuleLabels(
   businessType: string,
   modules: Partial<RequestedModules>,
 ): string[] {
-  if (businessType === 'delivery') {
+  if (isDeliveryOpsBusinessType(businessType)) {
     return getSelectedDeliveryNeedLabels(modulesToDeliveryNeeds(modules));
   }
   return getNeedsOptionsForBusinessType(businessType)
@@ -422,7 +452,11 @@ export function buildRecommendationReason(params: {
     return `Con marcas extra necesitas al menos el plan PRO. Tu operativa: ${parts.join(' · ')}.`;
   }
 
-  if (isDeliveryBusinessType(businessType)) {
+  if (isRestaurantBusinessType(params.businessType)) {
+    return `Precio orientativo para tu restaurante: ${parts.join(' · ')}. Plan recomendado: ${plan.name}.`;
+  }
+
+  if (isStrictDeliveryBusinessType(params.businessType)) {
     if (exceedsPlanLimits) {
       return `Para ${parts.join(' · ')}, recomendamos ${plan.name}. Puedes ampliar cupos en Facturación si creces.`;
     }

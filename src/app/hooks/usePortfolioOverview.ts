@@ -18,6 +18,8 @@ import {
   isDeliveryBusinessType,
   loadDeliveryStores,
 } from '../lib/deliverySetup';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../lib/deliveryOpsTypes';
+import { loadRestaurantStores } from '../verticals/restaurant/loadRestaurantStores';
 import { listClientsPageRequest } from '../lib/crmApi';
 import {
   applyTpvCashMetrics,
@@ -51,6 +53,7 @@ import {
   usePortfolioDashboardLive,
   type PortfolioReloadOptions,
 } from './usePortfolioDashboardLive';
+import { VERTIAL_BUSINESSES_CHANGED } from '../lib/businessChangeEvents';
 
 export type { PortfolioReloadOptions };
 
@@ -107,6 +110,7 @@ export type PortfolioBusiness = {
   clients: PortfolioClientMetrics;
   billing: CompanyBillingBreakdown | null;
   isDelivery: boolean;
+  isRestaurant: boolean;
   team: TeamDashboardSnapshot;
 };
 
@@ -152,6 +156,27 @@ const EMPTY_STORE_DELIVERY: StoreDeliveryMetrics = {
   revenueMonth: 0,
   activeOrders: 0,
 };
+
+function buildPlaceholderRow(business: Business): PortfolioBusiness {
+  return {
+    businessId: business.business_id,
+    business,
+    brands: [],
+    stores: [],
+    memberCount: business.members?.length ?? 0,
+    brandCount: 0,
+    storeCount: 0,
+    pdvCount: 0,
+    pdvIds: [],
+    metrics: emptyPortfolioMetrics(),
+    finance: { ...EMPTY_FINANCE },
+    clients: emptyPortfolioClientMetrics(),
+    billing: null,
+    isDelivery: isDeliveryBusinessType(business.businessType),
+    isRestaurant: isRestaurantBusinessType(business.businessType),
+    team: { ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: business.members?.length ?? 0 },
+  };
+}
 
 function mapStores(
   workCenters: WorkCenter[],
@@ -381,14 +406,22 @@ export function usePortfolioOverview(
         businesses.map(async (business) => {
           const dataUserId = resolveBusinessDataUserId(user, business);
           const isDelivery = isDeliveryBusinessType(business.businessType);
+          const isRestaurant = isRestaurantBusinessType(business.businessType);
+          const isOps = isDeliveryOpsBusinessType(business.businessType);
           const [brandsRaw, deliveryState] = await Promise.all([
             listBrandsRequest(business.business_id).catch(() => [] as Brand[]),
-            dataUserId && isDelivery
-              ? loadDeliveryStores(user, business, { accountBusinessCount: businesses.length }).catch(() => ({
-                  dataUserId: '',
-                  workCenters: [] as WorkCenter[],
-                  pointsOfSale: [] as PointOfSale[],
-                }))
+            dataUserId && isOps
+              ? (isRestaurant
+                ? loadRestaurantStores(user, business, businesses, { accountBusinessCount: businesses.length }).catch(() => ({
+                    dataUserId: '',
+                    workCenters: [] as WorkCenter[],
+                    pointsOfSale: [] as PointOfSale[],
+                  }))
+                : loadDeliveryStores(user, business, { accountBusinessCount: businesses.length }).catch(() => ({
+                    dataUserId: '',
+                    workCenters: [] as WorkCenter[],
+                    pointsOfSale: [] as PointOfSale[],
+                  })))
               : Promise.resolve({
                   dataUserId: '',
                   workCenters: [] as WorkCenter[],
@@ -413,6 +446,8 @@ export function usePortfolioOverview(
             business,
             dataUserId,
             isDelivery,
+            isRestaurant,
+            isOps,
             workCenters: deliveryState.workCenters,
             pdvWcIds,
             pdvByWorkCenterId,
@@ -467,7 +502,14 @@ export function usePortfolioOverview(
         Awaited<ReturnType<typeof listTpvRegisterSessionsRequest>>
       >();
 
-      const uniqueDataUsers = [
+      const uniqueOpsUsers = [
+        ...new Set(
+          structures
+            .filter((s) => s.isOps && s.dataUserId)
+            .map((s) => s.dataUserId),
+        ),
+      ];
+      const uniqueDeliveryUsers = [
         ...new Set(
           structures
             .filter((s) => s.isDelivery && s.dataUserId)
@@ -476,17 +518,19 @@ export function usePortfolioOverview(
       ];
 
       await Promise.all(
-        uniqueDataUsers.map(async (dataUserId) => {
-          const [orderResult, sessions] = await Promise.all([
-            filterDeliveryOrdersRequest(dataUserId, {
-              dateFrom: orderFetchFrom,
-              dateTo: monthEnd,
-              limit: 3000,
-            }).catch(() => ({ orders: [], total: 0 })),
-            listTpvRegisterSessionsRequest(dataUserId).catch(() => []),
-          ]);
-          ordersByUser.set(dataUserId, orderResult.orders);
+        uniqueOpsUsers.map(async (dataUserId) => {
+          const sessions = await listTpvRegisterSessionsRequest(dataUserId).catch(() => []);
           sessionsByUser.set(dataUserId, sessions);
+        }),
+      );
+      await Promise.all(
+        uniqueDeliveryUsers.map(async (dataUserId) => {
+          const orderResult = await filterDeliveryOrdersRequest(dataUserId, {
+            dateFrom: orderFetchFrom,
+            dateTo: monthEnd,
+            limit: 3000,
+          }).catch(() => ({ orders: [], total: 0 }));
+          ordersByUser.set(dataUserId, orderResult.orders);
         }),
       );
 
@@ -505,7 +549,7 @@ export function usePortfolioOverview(
           let metrics = emptyPortfolioMetrics();
           let billing: CompanyBillingBreakdown | null = null;
 
-          if (s.isDelivery && s.dataUserId && (s.pdvIds.length > 0 || stores.length > 0)) {
+          if (s.isOps && s.dataUserId && (s.pdvIds.length > 0 || stores.length > 0)) {
             const sessions = sessionsByUser.get(s.dataUserId) || [];
             const createdMap = pdvCreatedAtMap(s.pointsOfSale);
             const primaryPdv = pickPrimaryPdvIdFromList(s.pdvIds, createdMap);
@@ -517,20 +561,21 @@ export function usePortfolioOverview(
             const wcScope = stores.length > 0
               ? new Set(stores.map((st) => st.id))
               : wcIdsForPdvs(s.pdvIds, pdvToWc);
-            metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey, wcScope);
+            if (s.isDelivery) {
+              metrics = computePortfolioMetrics(orders, s.pdvIds, primaryPdv, todayKey, wcScope);
+              const activeByStore = new Map(stores.map((st) => [st.id, st.delivery.activeOrders]));
+              billing = computeCompanyBillingBreakdown(
+                orders,
+                brandsBase.map((b) => b.id),
+                stores.map((st) => ({ id: st.id, pdvId: st.pdvId })),
+                s.pdvIds,
+                primaryPdv,
+                pdvToWc,
+                todayKey,
+                activeByStore,
+              );
+            }
             metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
-
-            const activeByStore = new Map(stores.map((st) => [st.id, st.delivery.activeOrders]));
-            billing = computeCompanyBillingBreakdown(
-              orders,
-              brandsBase.map((b) => b.id),
-              stores.map((st) => ({ id: st.id, pdvId: st.pdvId })),
-              s.pdvIds,
-              primaryPdv,
-              pdvToWc,
-              todayKey,
-              activeByStore,
-            );
           }
 
           const storeNameById = new Map(stores.map((st) => [st.id, st.name]));
@@ -570,6 +615,7 @@ export function usePortfolioOverview(
             clients,
             billing,
             isDelivery: s.isDelivery,
+            isRestaurant: s.isRestaurant,
             team,
           };
         }),
@@ -603,19 +649,45 @@ export function usePortfolioOverview(
     void reload();
   }, [reload]);
 
+  // Incluir de inmediato empresas nuevas en el portfolio (métricas en 0 hasta que termine reload).
+  useEffect(() => {
+    if (businesses.length === 0) return;
+    const businessIds = new Set(businesses.map((b) => b.business_id).filter(Boolean));
+    setRows((prev) => {
+      const byId = new Map(prev.map((r) => [r.businessId, r]));
+      let changed = false;
+      for (const business of businesses) {
+        const id = business.business_id;
+        if (!id || byId.has(id)) continue;
+        byId.set(id, buildPlaceholderRow(business));
+        changed = true;
+      }
+      const next = [...byId.values()].filter((r) => businessIds.has(r.businessId));
+      if (!changed && next.length === prev.length) return prev;
+      return next.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es'));
+    });
+  }, [businessIdsKey, businesses]);
+
   useEffect(() => {
     if (!options?.live) return;
     const onChange = () => scheduleSilentRefresh();
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChange);
     window.addEventListener(DELIVERY_BRANDS_CHANGED, onChange);
+    window.addEventListener(VERTIAL_BUSINESSES_CHANGED, onChange);
     return () => {
       window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChange);
       window.removeEventListener(DELIVERY_BRANDS_CHANGED, onChange);
+      window.removeEventListener(VERTIAL_BUSINESSES_CHANGED, onChange);
     };
   }, [options?.live, scheduleSilentRefresh]);
 
+  useEffect(() => {
+    if (businesses.length <= rows.length) return;
+    void reload({ silent: true });
+  }, [businesses.length, rows.length, reload]);
+
   const totals: PortfolioTotals = {
-    businesses: rows.length,
+    businesses: Math.max(rows.length, businesses.length),
     brands: rows.reduce((s, r) => s + r.brandCount, 0),
     stores: rows.reduce((s, r) => s + r.storeCount, 0),
     pdv: rows.reduce((s, r) => s + r.pdvCount, 0),

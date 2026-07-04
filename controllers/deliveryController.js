@@ -2091,7 +2091,23 @@ export async function createPurchaseInvoice(req, res) {
     await ensureDatabase(req, db);
     const doc = buildPurchaseInvoiceDocument(userId, invoice);
     const saved = await putDocument(req, db, doc._id, doc);
-    return res.status(201).json({ ok: true, invoice: sanitizePurchaseInvoice({ ...doc, _rev: saved.rev }) });
+    let reconciled = null;
+    try {
+      const { reconcilePurchaseInvoiceFromOcr } = await import('../services/ocrPurchasePipeline.js');
+      reconciled = await reconcilePurchaseInvoiceFromOcr(req, userId, { ...doc, _rev: saved.rev }, {
+        performedBy: account.fullName || userId,
+        financeSource: 'invoice',
+        entryMethod: doc.entryMethod || 'manual',
+      });
+    } catch (reconcileErr) {
+      console.error('[createPurchaseInvoice] reconcile stock/finance:', reconcileErr?.message || reconcileErr);
+    }
+    const fresh = await getDocument(req, db, doc._id).catch(() => ({ ...doc, _rev: saved.rev }));
+    return res.status(201).json({
+      ok: true,
+      invoice: sanitizePurchaseInvoice({ ...fresh, _rev: fresh._rev || saved.rev }),
+      reconcile: reconciled,
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear factura' });
   }

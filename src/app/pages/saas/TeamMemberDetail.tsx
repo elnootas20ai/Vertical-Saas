@@ -258,11 +258,12 @@ function InfoField({
 interface PayrollUploadModalProps {
   member: AuthUser;
   currentUser: AuthUser;
+  businessId: string;
   onClose: () => void;
   onUploaded: (doc: PayrollDocument) => void;
 }
 
-function PayrollUploadModal({ member, currentUser, onClose, onUploaded }: PayrollUploadModalProps) {
+function PayrollUploadModal({ member, currentUser, businessId, onClose, onUploaded }: PayrollUploadModalProps) {
   const [documentType, setDocumentType] = useState<PayrollDocumentType>('nomina');
   const [name, setName] = useState('');
   const [period, setPeriod] = useState('');
@@ -302,6 +303,7 @@ function PayrollUploadModal({ member, currentUser, onClose, onUploaded }: Payrol
       });
 
       const doc = await createPayrollDocumentRequest({
+        business_id: businessId,
         worker_id: member.user_id,
         worker_name: member.fullName,
         documentType,
@@ -640,14 +642,17 @@ export function TeamMemberDetail() {
     if (!userId) return;
     setPayrollLoading(true);
     try {
-      const docs = await listPayrollDocumentsRequest(userId);
+      const docs = await listPayrollDocumentsRequest({
+        businessId,
+        workerId: userId,
+      });
       setPayrollDocs(docs);
     } catch {
       setPayrollDocs([]);
     } finally {
       setPayrollLoading(false);
     }
-  }, [userId]);
+  }, [businessId, userId]);
 
   // Load all data on mount for summary cards, then reload on tab switch
   useEffect(() => {
@@ -2070,10 +2075,11 @@ export function TeamMemberDetail() {
         )}
       </div>
 
-      {showPayrollUpload && member && (
+      {showPayrollUpload && member && businessId && (
         <PayrollUploadModal
           member={member}
           currentUser={user!}
+          businessId={businessId}
           onClose={() => setShowPayrollUpload(false)}
           onUploaded={(doc) => {
             setPayrollDocs((prev) => [doc, ...prev]);

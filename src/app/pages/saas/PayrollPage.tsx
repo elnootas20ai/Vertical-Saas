@@ -75,11 +75,12 @@ function formatDate(iso: string): string {
 interface UploadModalProps {
   members: AuthUser[];
   currentUser: AuthUser;
+  businessId: string;
   onClose: () => void;
   onUploaded: (doc: PayrollDocument) => void;
 }
 
-function PayrollUploadModal({ members, currentUser, onClose, onUploaded }: UploadModalProps) {
+function PayrollUploadModal({ members, currentUser, businessId, onClose, onUploaded }: UploadModalProps) {
   const [workerId, setWorkerId] = useState('');
   const [documentType, setDocumentType] = useState<PayrollDocumentType>('nomina');
   const [name, setName] = useState('');
@@ -133,6 +134,7 @@ function PayrollUploadModal({ members, currentUser, onClose, onUploaded }: Uploa
       });
 
       const doc = await createPayrollDocumentRequest({
+        business_id: businessId,
         worker_id: workerId,
         worker_name: selectedMember?.fullName || '',
         documentType,
@@ -416,12 +418,18 @@ export function PayrollPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
+    const businessId = currentBusiness?.business_id || '';
+    if (!businessId) {
+      setDocuments([]);
+      setMembers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const [docs, users] = await Promise.all([
-        listPayrollDocumentsRequest(),
-        listUsers(currentBusiness?.business_id),
-      ]);
+      const users = await listUsers(businessId);
+      const memberIds = users.map((u) => u.user_id).filter(Boolean);
+      const docs = await listPayrollDocumentsRequest({ businessId, memberIds });
       setDocuments(docs);
       setMembers(users);
     } catch {
@@ -429,7 +437,7 @@ export function PayrollPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentBusiness?.business_id]);
+  }, [currentBusiness?.business_id, listUsers]);
 
   useEffect(() => {
     loadData();
@@ -774,10 +782,11 @@ export function PayrollPage() {
         )}
       </div>
 
-      {showBulkUpload && user && (
+      {showBulkUpload && user && currentBusiness?.business_id && (
         <PayrollBulkUploadModal
           members={members}
           currentUser={user}
+          businessId={currentBusiness.business_id}
           onClose={() => setShowBulkUpload(false)}
           onComplete={handleBulkComplete}
         />

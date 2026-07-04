@@ -1,3 +1,5 @@
+import { isRestaurantBusinessType } from './deliveryOpsTypes';
+
 /** Query param: resalta un control o campo (?activar=catalog-import) */
 export const ACTIVATION_FOCUS_PARAM = 'activar';
 
@@ -138,6 +140,60 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
   },
 };
 
+const RESTAURANT_ACTIVATION_FIELD_GUIDES: Partial<Record<string, ActivationFieldGuide>> = {
+  'create-store': {
+    fieldKey: 'create-store',
+    label: 'Crear bar/restaurante',
+    bannerTitle: 'Crea tu primer bar/restaurante',
+    bannerDetail:
+      'Pulsa «Nuevo bar/restaurante / PDV» (arriba a la derecha) o el botón de abajo si la lista está vacía.',
+  },
+  'pdv-list': {
+    fieldKey: 'pdv-list',
+    label: 'Locales y cajas',
+    bannerTitle: 'Revisa tus locales',
+    bannerDetail: 'En Ajustes → Bar/restaurante verás cada local con su PDV y código tablet si aplica.',
+  },
+  'pdv-link': {
+    fieldKey: 'pdv-list',
+    label: 'Local y caja',
+    bannerTitle: 'Completa el local',
+    bannerDetail:
+      'Si falta el PDV, edita el bar/restaurante y guarda con dirección completa (mín. 5 caracteres).',
+  },
+  'store-hours': {
+    fieldKey: 'store-hours',
+    label: 'Horario de apertura',
+    bannerTitle: 'Define el horario',
+    bannerDetail:
+      'Se abrirá el local en el paso «Horarios» del asistente. Guarda al terminar.',
+  },
+};
+
+const RESTAURANT_ACTIVATION_SUBSTEP_GUIDES: Partial<Record<string, ActivationSubStepGuide>> = {
+  retail_store: {
+    fieldKey: 'create-store',
+    route: '/saas/settings/tienda',
+    clickHint: 'Ajustes → Bar/restaurante → «Nuevo bar/restaurante / PDV»',
+  },
+  active_pdv: {
+    fieldKey: 'create-store',
+    route: '/saas/settings/tienda',
+    clickHint:
+      'Ajustes → Bar/restaurante → crea o edita el local (el PDV y TPV se preparan solos)',
+  },
+  business_hours: {
+    fieldKey: 'store-hours',
+    route: '/saas/settings/tienda',
+    clickHint: 'Ajustes → Bar/restaurante → editar local → paso Horarios',
+  },
+  branches: {
+    fieldKey: 'create-store',
+    route: '/saas/settings/tienda',
+    clickHint: 'Ajustes → Bar/restaurante o centros de trabajo',
+  },
+};
+
 /** Sub-pasos del checklist → acción concreta */
 export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> = {
   // Delivery — tienda
@@ -261,16 +317,36 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
   },
 };
 
-export function getActivationFieldGuide(fieldKey: string): ActivationFieldGuide | null {
-  return ACTIVATION_FIELD_GUIDES[fieldKey] ?? null;
+export function getActivationFieldGuide(
+  fieldKey: string,
+  businessType?: string | null,
+): ActivationFieldGuide | null {
+  const base = ACTIVATION_FIELD_GUIDES[fieldKey] ?? null;
+  if (!base) return null;
+  if (isRestaurantBusinessType(businessType)) {
+    return RESTAURANT_ACTIVATION_FIELD_GUIDES[fieldKey] ?? base;
+  }
+  return base;
 }
 
-export function getSubStepGuide(subStepId: string): ActivationSubStepGuide | null {
-  return ACTIVATION_SUBSTEP_GUIDES[subStepId] ?? null;
+export function getSubStepGuide(
+  subStepId: string,
+  businessType?: string | null,
+): ActivationSubStepGuide | null {
+  const base = ACTIVATION_SUBSTEP_GUIDES[subStepId] ?? null;
+  if (!base) return null;
+  if (isRestaurantBusinessType(businessType)) {
+    return RESTAURANT_ACTIVATION_SUBSTEP_GUIDES[subStepId] ?? base;
+  }
+  return base;
 }
 
-export function buildActivationTargetUrl(stepRoute: string, subStepId?: string): string {
-  const guide = subStepId ? getSubStepGuide(subStepId) : null;
+export function buildActivationTargetUrl(
+  stepRoute: string,
+  subStepId?: string,
+  businessType?: string | null,
+): string {
+  const guide = subStepId ? getSubStepGuide(subStepId, businessType) : null;
   const base = String(guide?.route || stepRoute || '').trim() || '/saas/dashboard';
   if (!guide?.fieldKey) return base;
   const sep = base.includes('?') ? '&' : '?';

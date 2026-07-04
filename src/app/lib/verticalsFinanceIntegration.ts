@@ -36,7 +36,7 @@ const VERTICAL_CATEGORY_MAP: Record<string, string> = {
 function resolveVertical(movement: FinanceMovementRecord): string {
   const src = (movement.source || '').toLowerCase();
   if (src === 'sale' || src === 'invoice') return 'Facturación';
-  if (src === 'tpv_session') return 'Delivery / TPV';
+  if (src === 'tpv_session') return 'TPV / Caja';
 
   const cat = (movement.category || '').toLowerCase();
   for (const [key, label] of Object.entries(VERTICAL_CATEGORY_MAP)) {

@@ -215,6 +215,7 @@ async function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 export async function uploadPayrollDocumentsBatch(params: {
+  businessId: string;
   rows: PayrollBulkReviewRow[];
   documentType: PayrollDocumentType;
   period?: string;
@@ -233,6 +234,7 @@ export async function uploadPayrollDocumentsBatch(params: {
     try {
       const fileData = await readFileAsDataUrl(row.file);
       const doc = await createPayrollDocumentRequest({
+        business_id: params.businessId,
         worker_id: row.workerId,
         worker_name: row.workerName,
         documentType: params.documentType,

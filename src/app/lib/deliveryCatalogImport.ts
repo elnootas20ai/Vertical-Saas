@@ -473,6 +473,8 @@ export async function activateCommercialLinesAfterCatalogImport(
 export type MapImportEntryOptions = {
   businessId: string;
   brandCache: Brand[];
+  /** Vertical del negocio activo (delivery | restaurant). */
+  vertical?: string;
 };
 
 export type MapImportEntryResult = {
@@ -540,7 +542,10 @@ export async function mapImportEntryToCatalogItem(
     webVisible: true,
     module: 'catalog',
     ...(options.businessId
-      ? { business_id: options.businessId, vertical: 'delivery' }
+      ? {
+          business_id: options.businessId,
+          vertical: String(options.vertical || 'delivery').trim() || 'delivery',
+        }
       : {}),
   };
 

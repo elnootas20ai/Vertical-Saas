@@ -3,7 +3,7 @@ import {
   ArrowRight, Award, BarChart3, Bell, Building2, Car, Check, ChevronDown, Clock, Code,
   DollarSign, FileText, Handshake, Layers, Lock, Mail, MapPin, Monitor,
   Package, PhoneCall, Quote, Shield, ShoppingCart, Sparkles, Star, Target, TrendingUp,
-  Truck, Users, Webhook, Wrench, Zap,
+  Truck, Users, Webhook, Wrench, Zap, UtensilsCrossed,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Header } from '../components/Header';
@@ -20,7 +20,8 @@ const MARQUEE_ITEMS = [
 
 const VERTICALS = [
   { icon: Car, name: 'Compraventa', desc: 'Stock, operaciones, documentos y márgenes en tiempo real.', live: true },
-  { icon: Truck, name: 'Delivery', desc: 'Pedidos, cocina, reparto, TPV y fidelización de clientes.', live: true },
+  { icon: UtensilsCrossed, name: 'Restauración', desc: 'Bar, restaurante, TPV en tablet, cocina y comandas en sala.', live: true },
+  { icon: Truck, name: 'Delivery', desc: 'Pedidos a domicilio, reparto, cocina y fidelización de clientes.', live: true },
   { icon: Wrench, name: 'Taller', desc: 'Órdenes de trabajo, recambios y seguimiento de reparaciones.', live: true },
   { icon: ShoppingCart, name: 'Retail', desc: 'Puntos de venta y catálogo para comercio minorista.', live: false },
 ];

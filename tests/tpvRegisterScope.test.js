@@ -134,7 +134,7 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     ).toBe('biz-tablet');
   });
 
-  it('resolveTpvCatalogBusinessId usa delivery si el selector no es delivery', () => {
+  it('resolveTpvCatalogBusinessId usa delivery si el selector no es delivery ops', () => {
     const businesses = [
       { business_id: 'clean-1', businessType: 'cleaning' },
       { business_id: 'del-1', businessType: 'delivery' },
@@ -143,7 +143,25 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(resolveTpvCatalogBusinessId('del-1', businesses)).toBe('del-1');
   });
 
-  it('shouldAutoSwitchToDeliveryBusiness pide cambio si el selector no es delivery', () => {
+  it('resolveTpvCatalogBusinessId mantiene restaurante activo (no redirige a delivery)', () => {
+    const businesses = [
+      { business_id: 'rest-1', businessType: 'restaurant' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(resolveTpvCatalogBusinessId('rest-1', businesses)).toBe('rest-1');
+  });
+
+  it('shouldAutoSwitchToDeliveryBusiness no cambia si el selector es restaurante', () => {
+    const businesses = [
+      { business_id: 'rest-1', businessType: 'restaurant' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(
+      shouldAutoSwitchToDeliveryBusiness({ business_id: 'rest-1', businessType: 'restaurant' }, businesses),
+    ).toBe(null);
+  });
+
+  it('shouldAutoSwitchToDeliveryBusiness pide cambio si el selector no es delivery ops', () => {
     const businesses = [
       { business_id: 'clean-1', businessType: 'cleaning' },
       { business_id: 'del-1', businessType: 'delivery' },

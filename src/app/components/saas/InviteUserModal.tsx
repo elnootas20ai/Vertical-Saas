@@ -13,6 +13,7 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
 import { getHrOwnedLabels, getWorkerOwnedLabels } from '../../lib/workerProfileCompletion';
+import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 
 // --- Types ---
 
@@ -397,6 +398,8 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     ?? ctxBusiness
     ?? businessList[0]
     ?? null;
+
+  const hrCopy = getHrLocationCopy(inviteBusiness?.businessType ?? ctxBusiness?.businessType);
 
   const { options: loadedWorkCenterOptions, loading: workCentersLoading } = useInviteWorkCenters(
     inviteBusiness,
@@ -948,29 +951,29 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     </div>
                   )}
 
-                  {/* Centro de trabajo / PDV */}
+                  {/* Centro de trabajo / local */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Centro de trabajo / PDV
+                      {hrCopy.inviteWorkCenterLabel}
                     </label>
                     {workCentersLoading ? (
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Cargando tiendas y centros…</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{hrCopy.inviteWorkCentersLoading}</p>
                       </div>
                     ) : wcOptions.length > 0 ? (
                       <SelectDropdown
                         value={workCenterId}
                         onChange={setWorkCenterId}
                         options={wcOptions}
-                        placeholder="Selecciona centro de trabajo"
+                        placeholder={hrCopy.inviteWorkCenterPlaceholder}
                         icon={<MapPin className="w-4 h-4" />}
                       />
                     ) : (
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
                         <MapPin className="h-4 w-4 shrink-0 text-gray-300" />
                         <p className="text-xs text-gray-400 dark:text-gray-500">
-                          No hay tiendas en este negocio. Créalas en Ajustes → Tiendas y vuelve aquí (se actualizan solas).
+                          {hrCopy.inviteNoWorkCenters}
                         </p>
                       </div>
                     )}

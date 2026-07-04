@@ -14,6 +14,8 @@ export interface TpvTabletBinding {
   workCenterId: string;
   businessId: string;
   dataUserId: string;
+  /** Terminal TPV de sala (login con código SALA-*). */
+  salaTerminalId?: string;
   /** Vertical del TPV; lo fija el backend al validar el código (no el businessType). */
   tpvVertical: TpvTabletVertical;
   pdvName?: string;

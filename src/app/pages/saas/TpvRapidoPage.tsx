@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { useAuth } from '../../context/AuthContext';
@@ -64,7 +64,8 @@ import {
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { isTpvTabletBound, readTpvTabletBinding, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
-import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness, deliveryBusinessIdForTpv } from '../../lib/tpvRegisterScope';
+import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness, resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   shouldUseDeliveryStores,
   resolveBusinessScopeId,
@@ -205,6 +206,15 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
   return !all.some((a) => a.isPrimary) && all[0]?.id === addr.id;
 }
 
+function resolveTpvExitPath(
+  pathname: string,
+  businessType?: string | null,
+): string {
+  if (pathname.startsWith('/saas/caja')) return '/saas/caja';
+  if (isRestaurantBusinessType(businessType)) return '/saas/caja';
+  return '/saas/delivery-ops';
+}
+
 function TpvRapidoCeoBoard() {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
@@ -216,9 +226,11 @@ function TpvRapidoCeoBoard() {
     loading: storesLoading,
   } = useActiveStoreScope();
   const navigate = useNavigate();
+  const location = useLocation();
+  const tpvExitPath = resolveTpvExitPath(location.pathname, currentBusiness?.businessType);
   const businessId = resolveBusinessScopeId(currentBusiness);
   const tpvCatalogBusinessId = useMemo(
-    () => deliveryBusinessIdForTpv(businesses) || businessId,
+    () => resolveTpvCatalogBusinessId(businessId, businesses),
     [businesses, businessId],
   );
   const dataUserId = useMemo(
@@ -230,7 +242,7 @@ function TpvRapidoCeoBoard() {
   const [forceStorePicker, setForceStorePicker] = useState(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
 
-  /** TPV delivery siempre opera sobre la empresa delivery (catálogo + tiendas). */
+  /** TPV ops: no cambiar de empresa si ya estás en delivery o restaurante. */
   useEffect(() => {
     if (!businessesFetchSettled) return;
     const targetId = shouldAutoSwitchToDeliveryBusiness(currentBusiness, businesses);
@@ -327,7 +339,7 @@ function TpvRapidoCeoBoard() {
         pointsOfSale={pointsOfSale.filter((p) => p.active !== false)}
         loading={storesLoading}
         onSelect={handleSelectStore}
-        onBack={() => navigate('/saas/delivery-ops')}
+        onBack={() => navigate(tpvExitPath)}
       />
     );
   }
@@ -393,7 +405,9 @@ export function TpvRapidoOrderFlow({
   const { addClient, clients, clientsTotalCount } = useApp();
   const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
-  const goBack = onBack ?? (() => navigate('/saas/delivery-ops'));
+  const location = useLocation();
+  const tpvExitPath = resolveTpvExitPath(location.pathname, currentBusiness?.businessType);
+  const goBack = onBack ?? (() => navigate(tpvExitPath));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
@@ -411,7 +425,7 @@ export function TpvRapidoOrderFlow({
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
   const tpvCatalogBusinessId = useMemo(
-    () => deliveryBusinessIdForTpv(businesses) || businessId,
+    () => resolveTpvCatalogBusinessId(businessId, businesses),
     [businesses, businessId],
   );
   const clientSearchUserId = useMemo(
@@ -1631,7 +1645,7 @@ export function TpvRapidoOrderFlow({
                 />
               )}
               <button
-                onClick={() => (tabletMode ? goBack() : navigate('/saas/delivery-ops'))}
+                onClick={() => (tabletMode ? goBack() : navigate(tpvExitPath))}
                 className="px-6 min-h-[48px] py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation"
               >
                 {tabletMode ? 'Volver al tablero' : 'Ver pedido'}

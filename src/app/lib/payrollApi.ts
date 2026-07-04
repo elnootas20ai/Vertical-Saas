@@ -77,6 +77,8 @@ export interface PayrollDocument {
   _rev?: string;
   type: 'payroll';
   id: string;
+  /** Empresa a la que pertenece el documento (aislamiento multi-negocio). */
+  business_id?: string;
   worker_id: string;
   worker_name: string;
   documentType: PayrollDocumentType;
@@ -189,17 +191,56 @@ async function ensurePayrollDatabase() {
   await ensureCouchDb(PAYROLL_DB_NAME, () => request(`/api/couch/db/${encodeURIComponent(PAYROLL_DB_NAME)}`, { method: 'PUT' }));
 }
 
-export async function listPayrollDocumentsRequest(workerId?: string): Promise<PayrollDocument[]> {
+export type ListPayrollDocumentsOptions = {
+  workerId?: string;
+  memberIds?: string[];
+  businessId?: string;
+};
+
+function parseListPayrollOptions(
+  options?: string | ListPayrollDocumentsOptions,
+): ListPayrollDocumentsOptions {
+  if (typeof options === 'string') return { workerId: options };
+  return options ?? {};
+}
+
+export function filterPayrollDocumentsForBusiness(
+  docs: PayrollDocument[],
+  options: ListPayrollDocumentsOptions,
+): PayrollDocument[] {
+  const memberSet =
+    options.memberIds && options.memberIds.length > 0
+      ? new Set(options.memberIds.filter(Boolean))
+      : null;
+  const businessId = String(options.businessId || '').trim();
+
+  return docs.filter((doc) => {
+    if (doc.type !== 'payroll') return false;
+    if (options.workerId && doc.worker_id !== options.workerId) return false;
+    if (memberSet && !memberSet.has(doc.worker_id)) return false;
+    if (businessId) {
+      const docBiz = String(doc.business_id || '').trim();
+      if (!docBiz || docBiz !== businessId) return false;
+    }
+    return true;
+  });
+}
+
+export async function listPayrollDocumentsRequest(
+  options?: string | ListPayrollDocumentsOptions,
+): Promise<PayrollDocument[]> {
+  const opts = parseListPayrollOptions(options);
   await ensurePayrollDatabase();
   const payload = await request<{ docs: unknown[] }>(
     `/api/couch/docs/${encodeURIComponent(PAYROLL_DB_NAME)}`,
   );
-  return (payload.docs || [])
+  const all = (payload.docs || [])
     .filter((d): d is PayrollDocument => {
       const doc = d as Partial<PayrollDocument>;
-      return doc.type === 'payroll' && (!workerId || doc.worker_id === workerId);
+      return doc.type === 'payroll';
     })
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  return filterPayrollDocumentsForBusiness(all, opts);
 }
 
 export async function createPayrollDocumentRequest(

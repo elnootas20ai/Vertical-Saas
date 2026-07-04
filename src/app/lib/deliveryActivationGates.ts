@@ -87,7 +87,6 @@ export const DELIVERY_SIDEBAR_REQUIRES_PDV = new Set([
   'delivery-clients',
   'delivery',
   'sala',
-  'web-orders',
   'web-config',
   'delivery-integrations',
 ]);

@@ -137,6 +137,28 @@ export async function bulkUpdateTables(req, res) {
   }
 }
 
+export async function bulkCreateTables(req, res) {
+  try {
+    const { userId } = req.params;
+    const { tables } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(tables) || tables.length === 0) return badRequest(res, 'Se espera un array de mesas');
+
+    const db = getSalaDbName();
+    await ensureDatabase(req, db);
+
+    const docs = tables.map((table) => buildDiningTableDocument(userId, table));
+    await bulkPutDocuments(req, db, docs);
+    const sanitized = docs.map((doc) => sanitizeDiningTable(doc));
+
+    broadcastToUser(userId, 'sala:tables_bulk_created', { count: sanitized.length });
+
+    return res.status(201).json({ ok: true, created: sanitized.length, tables: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear mesas' });
+  }
+}
+
 export async function removeTable(req, res) {
   try {
     const { userId, tableId } = req.params;

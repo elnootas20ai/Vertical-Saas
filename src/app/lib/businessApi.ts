@@ -24,7 +24,11 @@ export interface Branch {
   createdAt: string;
 }
 
-export type BusinessType = 'events' | 'carDealership' | 'workshop' | 'delivery' | 'cleaning' | 'hairSalon' | 'gym' | 'clinic' | 'hotel' | 'construction' | 'academy' | 'realEstate' | 'lawyer' | 'nightclub' | 'scrapyard' | 'spareParts' | 'taxi' | 'pharmacy' | 'carWash' | 'vet' | 'tobaccoShop' | 'butcherShop';
+import type { RestaurantFormat } from '../verticals/restaurant/restaurantFormat';
+
+export type { RestaurantFormat };
+
+export type BusinessType = 'events' | 'carDealership' | 'workshop' | 'delivery' | 'restaurant' | 'cleaning' | 'hairSalon' | 'gym' | 'clinic' | 'hotel' | 'construction' | 'academy' | 'realEstate' | 'lawyer' | 'nightclub' | 'scrapyard' | 'spareParts' | 'taxi' | 'pharmacy' | 'carWash' | 'vet' | 'tobaccoShop' | 'butcherShop';
 
 export type ImportItemStatus = 'pending' | 'completed' | 'skipped';
 
@@ -49,6 +53,8 @@ export interface Business {
   /** Grupo empresarial al que pertenece (null = independiente) */
   group_id: string | null;
   businessType: BusinessType;
+  /** Solo vertical restaurant: bar | restaurant | bar_restaurant */
+  restaurantFormat?: RestaurantFormat | null;
   name: string;
   legalName: string;
   taxId: string;
@@ -80,6 +86,7 @@ export interface CreateBusinessPayload {
   email?: string;
   logo?: string;
   businessType?: BusinessType;
+  restaurantFormat?: RestaurantFormat | null;
 }
 
 export interface UpdateBusinessPayload extends Partial<CreateBusinessPayload> {}

@@ -103,6 +103,9 @@ import { Commissions } from './pages/saas/Commissions';
 import { PayrollPage } from './pages/saas/PayrollPage';
 import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery';
 import { SalaPage } from './pages/saas/SalaPage';
+import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
+import { RestaurantReservationsRouteEntry } from './verticals/restaurant/RestaurantReservationsRouteEntry';
+import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaRouteEntry';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
@@ -116,6 +119,7 @@ import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
+import { RequireWebOrderingVertical } from './components/saas/RequireWebOrderingVertical';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
 import { ChangelogPage } from './pages/saas/ChangelogPage';
@@ -532,7 +536,7 @@ export const router = createBrowserRouter([
           { path: 'sales', element: <RequireWorkerPermission permission="sales"><Sales /></RequireWorkerPermission> },
           { path: 'sales/:id', element: <RequireWorkerPermission permission="sales"><SaleDetail /></RequireWorkerPermission> },
           { path: 'sales-metrics', element: <RequireBusinessOwner><SalesMetrics /></RequireBusinessOwner> },
-          { path: 'reservations', element: <RequireWorkerPermission permission="reservations"><HotelReservations /></RequireWorkerPermission> },
+          { path: 'reservations', element: <RequireWorkerPermission permission="reservations"><RestaurantReservationsRouteEntry /></RequireWorkerPermission> },
           { path: 'calls', element: <RequireBusinessOwner><Calls /></RequireBusinessOwner> },
           { path: 'calls/:id', element: <RequireBusinessOwner><CallDetail /></RequireBusinessOwner> },
           { path: 'ancove', element: <RequireWorkerPermission permission="ancove"><Ancove /></RequireWorkerPermission> },
@@ -558,7 +562,9 @@ export const router = createBrowserRouter([
           { path: 'tech', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
+          { path: 'sala/setup', Component: SalaPage },
           { path: 'sala', Component: SalaPage },
+          { path: 'lista-espera', Component: RestaurantWaitlistPage },
           { path: 'tpv/locales', element: <RedirectLegacyDeliveryTpv /> },
           { path: 'tpv', element: <RedirectLegacyDeliveryTpv /> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
@@ -599,8 +605,10 @@ export const router = createBrowserRouter([
           { path: 'delivery-montaje', element: <RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission> },
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
           { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'caja', element: <RequireBusinessOwner><RequirePdvTerminal><RestaurantCajaRouteEntry /></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'caja/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
           { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><DeliveryIntegrations /></RequireBusinessOwner> },
+          { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><DeliveryReports /></RequireBusinessOwner> },
           { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
@@ -613,8 +621,8 @@ export const router = createBrowserRouter([
           { path: 'settings/:tab', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'billing', element: <RequireBusinessOwner><Billing /></RequireBusinessOwner> },
           { path: 'help', Component: HelpCenter },
-          { path: 'web-config', element: <RequireBusinessOwner><WebConfig /></RequireBusinessOwner> },
-          { path: 'web-orders', element: <RequireBusinessOwner><WebOrders /></RequireBusinessOwner> },
+          { path: 'web-config', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebConfig /></RequireWebOrderingVertical></RequireBusinessOwner> },
+          { path: 'web-orders', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebOrders /></RequireWebOrderingVertical></RequireBusinessOwner> },
           { path: 'cleaning-hub', element: <RequireBusinessOwner><CleaningHub /></RequireBusinessOwner> },
           { path: 'vertical/limpieza/servicios', Component: ServiceContractsPage },
           { path: 'vertical/limpieza/clientes', element: <Navigate to="/saas/clients" replace /> },

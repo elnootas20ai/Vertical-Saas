@@ -110,6 +110,8 @@ export async function provisionBusinessFromOnboarding(req, account) {
     phone: profile.companyPhone || account.phone || '',
     email: profile.companyEmail || account.email || '',
     businessType: onboarding.businessType || 'delivery',
+    restaurantFormat:
+      onboarding.businessType === 'restaurant' ? onboarding.restaurantFormat || 'restaurant' : null,
   });
 
   if (Array.isArray(business.members) && business.members[0]) {

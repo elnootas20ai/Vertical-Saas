@@ -22,7 +22,7 @@ function badRequest(res, error) {
 
 export async function createBusiness(req, res) {
   try {
-    const { name, legalName, taxId, address, city, phone, email, logo, businessType } = req.body || {};
+    const { name, legalName, taxId, address, city, phone, email, logo, businessType, restaurantFormat } = req.body || {};
     const { userId } = req.params;
 
     if (!userId) return badRequest(res, 'Falta userId');
@@ -56,6 +56,7 @@ export async function createBusiness(req, res) {
       email,
       logo,
       businessType,
+      restaurantFormat: businessType === 'restaurant' ? restaurantFormat : null,
     });
 
     const saved = await saveBusiness(req, business);
@@ -129,6 +130,18 @@ export async function updateBusiness(req, res) {
     const nextBusiness = {
       ...business,
       businessType: updates.businessType !== undefined ? String(updates.businessType || 'carDealership').trim() : (business.businessType || 'carDealership'),
+      restaurantFormat: (() => {
+        const bt =
+          updates.businessType !== undefined
+            ? String(updates.businessType || 'carDealership').trim()
+            : (business.businessType || 'carDealership');
+        if (bt !== 'restaurant') return null;
+        if (updates.restaurantFormat !== undefined) {
+          const rf = String(updates.restaurantFormat || '').trim();
+          return rf || null;
+        }
+        return business.restaurantFormat || null;
+      })(),
       name: updates.name !== undefined ? String(updates.name || '').trim() : business.name,
       legalName: updates.legalName !== undefined ? String(updates.legalName || '').trim() : business.legalName,
       taxId: updates.taxId !== undefined ? String(updates.taxId || '').trim() : business.taxId,

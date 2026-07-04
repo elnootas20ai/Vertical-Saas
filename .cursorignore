@@ -1,0 +1,46 @@
+﻿# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Build (versionado para deploy al VPS; no aporta al agente)
+dist/
+build/
+.vite/
+
+# Secretos y entorno
+.env
+.env.*
+!.env.example
+.gateway-keys.json
+deploy/local-values.env
+
+# Logs y runtime
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Cobertura, cache e IDE
+coverage/
+.nyc_output/
+.eslintcache
+.cache/
+.parcel-cache/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Datos locales / borradores
+.plugin-data/
+src/app/components/saved/
+backups/

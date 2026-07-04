@@ -958,6 +958,8 @@ export interface TerminalConfig {
   scaleDeviceId: string;
   scaleName: string;
   active: boolean;
+  /** Sala enlazada (terminal TPV por sala). */
+  salaRoomId?: string;
   assignedWorkerId?: string;
   assignedWorkerName?: string;
   allowReturnsByWorker?: boolean;

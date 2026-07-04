@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
-import { isDeliveryBusinessType, notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
@@ -2451,7 +2452,12 @@ export function CatalogPage() {
   const catalogDataReady = pageReady && Boolean(businessId);
   const { config: verticalConfig, businessType } = useVerticalCatalog();
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const isDeliveryOps = isDeliveryOpsBusinessType(currentBusiness?.businessType);
+  const isRestaurantCatalog = isRestaurantBusinessType(currentBusiness?.businessType);
+  const catalogVertical = isRestaurantCatalog ? 'restaurant' : 'delivery';
+  const catalogImportTemplateFilename = isRestaurantCatalog
+    ? 'plantilla_catalogo_restaurante_tpv.xlsx'
+    : 'plantilla_catalogo_delivery_tpv.xlsx';
   const retailStoreCount = useMemo(
     () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
     [activeStore.retailWorkCenters],
@@ -2512,6 +2518,11 @@ export function CatalogPage() {
     const pdv = activeStore.pointsOfSale.find((p) => p._id === activeStore.activeSalesPointId);
     return String(pdv?.workCenterId || activeStore.activeSalesPointId || '').trim();
   }, [activeStore.pointsOfSale, activeStore.activeSalesPointId]);
+
+  const activeWorkCenterName = useMemo(() => {
+    const wc = activeStore.retailWorkCenters.find((w) => w._id === activeWorkCenterId);
+    return wc?.name || storeLabel;
+  }, [activeStore.retailWorkCenters, activeWorkCenterId, storeLabel]);
 
   const catalogForActiveStore = useMemo(() => {
     if (!activeWorkCenterId) return catalogItems;
@@ -2597,9 +2608,9 @@ export function CatalogPage() {
   );
 
   const handleDownloadCatalogTemplate = useCallback(() => {
-    downloadDeliveryCatalogImportTemplate(templateOrganizerLines);
+    downloadDeliveryCatalogImportTemplate(templateOrganizerLines, catalogImportTemplateFilename);
     toast.success('Plantilla catálogo');
-  }, [templateOrganizerLines]);
+  }, [templateOrganizerLines, catalogImportTemplateFilename]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!dataUserId) return;
@@ -2732,6 +2743,7 @@ export function CatalogPage() {
       const mapped = await mapImportEntryToCatalogItem(entry, {
         businessId: businessId || '',
         brandCache,
+        vertical: catalogVertical,
       });
       if (!mapped) continue;
       brandCache = mapped.brandCache;
@@ -3070,17 +3082,17 @@ export function CatalogPage() {
   const loadInvoiceFinanceLinks = useCallback(async () => {
     if (!dataUserId) return;
     try {
-      const movements = await listFinanceMovements(dataUserId);
+      const movements = await listFinanceMovements(dataUserId, businessId || undefined);
       const linked = new Set(
         movements
-          .filter((m) => m.source === 'invoice' && m.sourceRef)
+          .filter((m) => m.type === 'pago' && m.sourceRef)
           .map((m) => String(m.sourceRef)),
       );
       setInvoiceFinanceLinks(linked);
     } catch {
       // no bloquea la pestaña de facturas
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId]);
 
   useEffect(() => {
     if (activeTab === 'invoices' && dataUserId) {
@@ -3184,8 +3196,8 @@ export function CatalogPage() {
     const payload: Partial<CatalogItem> = {
       ...data,
       module: 'catalog',
-      ...(isDelivery
-        ? { vertical: 'delivery', business_id: businessId || undefined }
+      ...(isDeliveryOps
+        ? { vertical: catalogVertical, business_id: businessId || undefined }
         : {}),
     };
     try {
@@ -3203,7 +3215,7 @@ export function CatalogPage() {
         if (!options?.keepOpen) {
           toast.success('Artículo creado');
         }
-        if (isDelivery && businessId) {
+        if (isDeliveryOps && businessId) {
           const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
           const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
           if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
@@ -3460,18 +3472,28 @@ export function CatalogPage() {
 
   const handleCreateInvoice = async (data: Partial<PurchaseInvoice>) => {
     if (!dataUserId) { toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.'); return; }
+    const scope = {
+      businessId: businessId || '',
+      businessName: currentBusiness?.name || '',
+      workCenterId: activeWorkCenterId,
+      workCenterName: activeWorkCenterName,
+      costCenterId: activeWorkCenterId,
+      costCenterName: activeWorkCenterName,
+    };
     try {
       if (editingInvoice) {
-        const updated = await updatePurchaseInvoiceRequest(dataUserId, { ...editingInvoice, ...data } as PurchaseInvoice);
+        const updated = await updatePurchaseInvoiceRequest(dataUserId, { ...editingInvoice, ...data, ...scope } as PurchaseInvoice);
         setInvoices(prev => prev.map(i => i._id === updated._id ? updated : i));
         toast.success('Factura actualizada');
       } else {
-        const created = await createPurchaseInvoiceRequest(dataUserId, data);
+        const created = await createPurchaseInvoiceRequest(dataUserId, { ...data, ...scope });
         setInvoices(prev => [created, ...prev]);
-        toast.success('Factura creada');
+        setInvoiceFinanceLinks((prev) => new Set(prev).add(created._id));
+        toast.success('Factura creada · gasto registrado en finanzas');
       }
       setShowCreateInvoice(false);
       setEditingInvoice(null);
+      void loadInvoiceFinanceLinks();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar la factura');
     }
@@ -3499,6 +3521,14 @@ export function CatalogPage() {
         paidAt: newStatus === 'paid' ? new Date().toISOString() : '',
       });
       setInvoices(prev => prev.map(i => i._id === updated._id ? updated : i));
+      if (newStatus === 'paid' && !invoiceFinanceLinks.has(invoice._id)) {
+        try {
+          await createMovementFromInvoice(dataUserId, invoice._id, 'purchase_invoice');
+          setInvoiceFinanceLinks((prev) => new Set(prev).add(invoice._id));
+        } catch {
+          // puede existir por reconcile al crear
+        }
+      }
       toast.success(`Factura marcada como ${INVOICE_STATUS_CONFIG[newStatus].label.toLowerCase()}`);
     } catch {
       toast.error('Error al actualizar la factura');
@@ -4511,24 +4541,24 @@ export function CatalogPage() {
 
   const brandSetupCtx = useMemo(
     () =>
-      resolveBrandSetupContext(isDelivery, activeStore.retailWorkCenters, {
+      resolveBrandSetupContext(isDeliveryOps, activeStore.retailWorkCenters, {
         storesConfirmed:
           retailStoreCount > 0 ||
           activeStore.allPointsOfSale.length > 0,
       }),
-    [isDelivery, activeStore.retailWorkCenters, activeStore.allPointsOfSale.length, retailStoreCount],
+    [isDeliveryOps, activeStore.retailWorkCenters, activeStore.allPointsOfSale.length, retailStoreCount],
   );
 
   const brandReady = useMemo(() => {
-    if (!isDelivery) return true;
+    if (!isDeliveryOps) return true;
     if (brands.length === 0) return false;
     return isDeliveryBrandActivationComplete(brands, brandSetupCtx);
-  }, [isDelivery, brands, brandSetupCtx]);
+  }, [isDeliveryOps, brands, brandSetupCtx]);
 
   /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
   const brandCheckReady =
     pageReady && Boolean(businessId) && !brandsLoading && !activeStore.loading;
-  const showBrandIncompleteBanner = isDelivery && brandCheckReady && !brandReady;
+  const showBrandIncompleteBanner = isDeliveryOps && brandCheckReady && !brandReady;
 
   const catalogBusy = loading && catalogItems.length === 0;
 
@@ -4720,7 +4750,7 @@ export function CatalogPage() {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         moduleLabel="Catálogo"
-        templateFileName="plantilla_catalogo_delivery_tpv.xlsx"
+        templateFileName={catalogImportTemplateFilename}
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
         onDownloadTemplate={handleDownloadCatalogTemplate}

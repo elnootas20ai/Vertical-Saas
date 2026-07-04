@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { listBrandsRequest } from '../lib/brandApi';
 import {
   buildDeliveryActivationStepDefs,
+  buildRestaurantActivationStepDefs,
   EMPTY_DELIVERY_ACTIVATION_FLAGS,
   type DeliveryActivationFlags,
 } from '../lib/deliveryActivationChecklist';
@@ -12,9 +13,29 @@ import {
   DELIVERY_CATALOG_CHANGED,
   loadTpvPointsOfSaleForBusiness,
   snapshotDeliveryStoreActivation,
-  isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../lib/deliverySetup';
+import {
+  buildCompraventaActivationStepDefs,
+  EMPTY_COMPRAVENTA_ACTIVATION_FLAGS,
+  type CompraventaActivationFlags,
+} from '../lib/compraventaActivationChecklist';
+import {
+  buildCleaningActivationStepDefs,
+  EMPTY_CLEANING_ACTIVATION_FLAGS,
+  type CleaningActivationFlags,
+} from '../lib/cleaningActivationChecklist';
+import { listClientsRequest } from '../lib/crmApi';
+import { loadCompraventaStores } from '../lib/compraventaSetup';
+import { listCleaningServicesRequest } from '../lib/cleaningApi';
+import { listUsersRequest } from '../lib/authApi';
+import { listVehiclesRequest } from '../lib/vehicleApi';
+import { resolveVehicleListBusinessId } from '../lib/vehicleVertical';
+import {
+  isDeliveryOpsBusinessType,
+  isGuidedActivationBusinessType,
+  isRestaurantBusinessType,
+} from '../lib/deliveryOpsTypes';
 import { isDeliveryBrandActivationComplete } from '../lib/brandUtils';
 import { anyActiveRetailStoreHasOpeningHours } from '../lib/businessHoursUtils';
 import {
@@ -30,7 +51,6 @@ import {
   setOnboardingTourActive,
 } from '../lib/onboardingLocalKeys';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
-import { useApp } from './AppContext';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
 
@@ -126,17 +146,58 @@ function finalizeStepDefs(
   });
 }
 
+type ActivationFlagsBundle =
+  | { kind: 'delivery'; flags: DeliveryActivationFlags }
+  | { kind: 'compraventa'; flags: CompraventaActivationFlags }
+  | { kind: 'cleaning'; flags: CleaningActivationFlags };
+
+function buildStepDefsForBusiness(
+  businessType: string | null | undefined,
+  bundle: ActivationFlagsBundle | null,
+): StepDef[] {
+  const kind = bundle?.kind
+    ?? (isDeliveryOpsBusinessType(businessType)
+      ? 'delivery'
+      : businessType === 'carDealership'
+        ? 'compraventa'
+        : businessType === 'cleaning'
+          ? 'cleaning'
+          : null);
+
+  if (kind === 'delivery') {
+    const flags = bundle?.kind === 'delivery'
+      ? bundle.flags
+      : EMPTY_DELIVERY_ACTIVATION_FLAGS;
+    if (businessType === 'restaurant' || isRestaurantBusinessType(businessType)) {
+      return buildRestaurantActivationStepDefs(flags);
+    }
+    return buildDeliveryActivationStepDefs(flags);
+  }
+  if (kind === 'compraventa') {
+    const flags = bundle?.kind === 'compraventa'
+      ? bundle.flags
+      : EMPTY_COMPRAVENTA_ACTIVATION_FLAGS;
+    return buildCompraventaActivationStepDefs(flags);
+  }
+  if (kind === 'cleaning') {
+    const flags = bundle?.kind === 'cleaning'
+      ? bundle.flags
+      : EMPTY_CLEANING_ACTIVATION_FLAGS;
+    return buildCleaningActivationStepDefs(flags);
+  }
+  return [];
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function ActivationChecklistProvider({ children }: { children: ReactNode }) {
-  const { vehicles, clients, clientsTotalCount, leads, sales, documents } = useApp();
-  const { user, listUsers } = useAuth();
+  const { user } = useAuth();
   const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const businessesCount = useBusinessOptional()?.businesses?.length ?? 0;
-  const [teamCount, setTeamCount] = useState(0);
   const [isLoadingSample, setIsLoadingSample] = useState(false);
-  const [deliveryFlags, setDeliveryFlags] = useState<DeliveryActivationFlags | null>(null);
-  const deliveryFlagsRef = useRef<DeliveryActivationFlags | null>(null);
+  const [activationFlags, setActivationFlags] = useState<ActivationFlagsBundle | null>(null);
+  const activationFlagsRef = useRef<ActivationFlagsBundle | null>(null);
+  const businessType = currentBusiness?.businessType ?? '';
   const accountUserId = resolveAccountUserId(user);
   const businessId = resolveBusinessScopeId(currentBusiness);
   const bizName = currentBusiness?.name ?? '';
@@ -176,72 +237,145 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     return () => window.removeEventListener(ACTIVATION_IN_PROGRESS_CHANGED, onStepChanged);
   }, [accountUserId, businessId]);
 
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const usesGuidedActivation = isGuidedActivationBusinessType(businessType);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
 
   useEffect(() => {
-    listUsers()
-      .then(members => setTeamCount(members.length))
-      .catch(() => setTeamCount(0));
-  }, [listUsers]);
-
-  useEffect(() => {
-    setDeliveryFlags(null);
-    deliveryFlagsRef.current = null;
+    setActivationFlags(null);
+    activationFlagsRef.current = null;
   }, [businessId]);
 
   useEffect(() => {
-    if (!isDelivery || !dataUserId) {
-      setDeliveryFlags(null);
+    if (!usesGuidedActivation || !dataUserId) {
+      setActivationFlags(null);
       return;
     }
 
     let cancelled = false;
 
+    const companyFlags = {
+      hasCompanyName: Boolean(bizName.trim()),
+      hasTaxData: Boolean(bizTaxId.trim()),
+      hasAddress: Boolean(bizAddress.trim()),
+      hasPhone: Boolean(bizPhone.trim()),
+    };
+
     const load = async () => {
       try {
-        const [storeState, brands, catalog] = await Promise.all([
-          loadTpvPointsOfSaleForBusiness(user, currentBusiness, {
-            includeInactivePdvs: true,
-            accountBusinessCount: businessesCount,
-          }),
-          businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
-          listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
-        ]);
+        if (isDeliveryOpsBusinessType(businessType)) {
+          const [storeState, brands, catalog] = await Promise.all([
+            loadTpvPointsOfSaleForBusiness(user, currentBusiness, {
+              includeInactivePdvs: true,
+              accountBusinessCount: businessesCount,
+            }),
+            businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
+            listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
+          ]);
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        const { hasActiveRetailStore, hasActivePdv, retailStores } =
-          snapshotDeliveryStoreActivation(storeState);
+          const { hasActiveRetailStore, hasActivePdv, retailStores } =
+            snapshotDeliveryStoreActivation(storeState);
 
-        const catalogForBusiness = filterCatalogItemsForBusinessScope(
-          catalog,
-          businessId,
-          brands,
-          { accountBusinessCount: businessesCount, activeBusinessType: 'delivery' },
-        );
-        const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
+          const catalogForBusiness = filterCatalogItemsForBusinessScope(
+            catalog,
+            businessId,
+            brands,
+            { accountBusinessCount: businessesCount, activeBusinessType: 'delivery' },
+          );
+          const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
-        const setupCtx = { isDelivery: true, retailStoreCount: retailStores.length };
-        const brandReady = isDeliveryBrandActivationComplete(brands, setupCtx);
+          const setupCtx = { isDelivery: true, retailStoreCount: retailStores.length };
+          const brandReady = isDeliveryBrandActivationComplete(brands, setupCtx);
 
-        const nextFlags: DeliveryActivationFlags = {
-          hasCompanyName: Boolean(bizName.trim()),
-          hasTaxData: Boolean(bizTaxId.trim()),
-          hasAddress: Boolean(bizAddress.trim()),
-          hasPhone: Boolean(bizPhone.trim()),
-          hasActiveRetailStore,
-          hasActivePdv,
-          brandSetupComplete: brandReady,
-          hasCatalogProduct: catalogForBusiness.length > 0,
-          hasPricedProduct: priced.length > 0,
-          hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailStores),
-        };
-        deliveryFlagsRef.current = nextFlags;
-        setDeliveryFlags(nextFlags);
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'delivery',
+            flags: {
+              ...companyFlags,
+              hasActiveRetailStore,
+              hasActivePdv,
+              brandSetupComplete: brandReady,
+              hasCatalogProduct: catalogForBusiness.length > 0,
+              hasPricedProduct: priced.length > 0,
+              hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailStores),
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'carDealership') {
+          const [storeState, clients, vehiclesRes] = await Promise.all([
+            loadCompraventaStores(user, currentBusiness, { includeInactivePdvs: true }),
+            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            listVehiclesRequest(dataUserId, resolveVehicleListBusinessId(currentBusiness)).catch(
+              () => ({ vehicles: [] as Array<{ salePrice?: number }> }),
+            ),
+          ]);
+
+          if (cancelled) return;
+
+          const { hasActiveRetailStore, hasActivePdv } = snapshotDeliveryStoreActivation(storeState);
+          const vehicles = vehiclesRes.vehicles || [];
+          const pricedVehicles = vehicles.filter((v) => Number(v.salePrice ?? 0) > 0);
+
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'compraventa',
+            flags: {
+              ...companyFlags,
+              hasActiveRetailStore,
+              hasActivePdv,
+              hasClient: clients.length > 0,
+              hasVehicle: vehicles.length > 0,
+              hasPricedVehicle: pricedVehicles.length > 0,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'cleaning') {
+          const [services, clients, usersRes] = await Promise.all([
+            listCleaningServicesRequest(dataUserId).catch(() => []),
+            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+          ]);
+
+          if (cancelled) return;
+
+          const activeServices = services.filter((svc) => !svc.deletedAt);
+          const pricedServices = activeServices.filter((svc) => Number(svc.price ?? 0) > 0);
+          const teamUsers = usersRes.users || [];
+
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'cleaning',
+            flags: {
+              ...companyFlags,
+              hasService: activeServices.length > 0,
+              hasPricedService: pricedServices.length > 0,
+              hasClient: clients.length > 0,
+              hasTeamMember: teamUsers.length >= 2,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
+        }
       } catch {
-        if (!cancelled && !deliveryFlagsRef.current) {
-          setDeliveryFlags(EMPTY_DELIVERY_ACTIVATION_FLAGS);
+        if (cancelled || activationFlagsRef.current) return;
+        if (isDeliveryOpsBusinessType(businessType)) {
+          const fallback: ActivationFlagsBundle = { kind: 'delivery', flags: EMPTY_DELIVERY_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
+        } else if (businessType === 'carDealership') {
+          const fallback: ActivationFlagsBundle = { kind: 'compraventa', flags: EMPTY_COMPRAVENTA_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
+        } else if (businessType === 'cleaning') {
+          const fallback: ActivationFlagsBundle = { kind: 'cleaning', flags: EMPTY_CLEANING_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
         }
       }
     };
@@ -250,102 +384,37 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const scheduleLoad = () => {
       void load();
     };
-    const onBrandsChanged = () => {
-      void load();
-    };
     window.addEventListener('work-centers:changed', scheduleLoad);
     window.addEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
-    window.addEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
+    window.addEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
+    window.addEventListener('focus', scheduleLoad);
     return () => {
       cancelled = true;
       window.removeEventListener('work-centers:changed', scheduleLoad);
       window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
-      window.removeEventListener(DELIVERY_BRANDS_CHANGED, onBrandsChanged);
+      window.removeEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
+      window.removeEventListener('focus', scheduleLoad);
     };
-  }, [isDelivery, dataUserId, businessId, bizName, bizTaxId, bizAddress, bizPhone, user, currentBusiness, businessesCount]);
-
-  const biz = currentBusiness;
-
-  // Primitive flags for stable useMemo dependencies
-  const hasCompanyName = Boolean(biz?.name && biz.name.trim().length > 0);
-  const hasTaxData = Boolean(biz?.taxId && biz.taxId.trim().length > 0);
-  const hasAddress = Boolean(biz?.address && biz.address.trim().length > 0);
-  const hasBranches = Boolean(biz?.branches && biz.branches.length > 0);
-  const hasPhone = Boolean(biz?.phone && biz.phone.trim().length > 0);
-  const hasClients = clientsTotalCount > 0 || clients.length > 0;
-  const hasLeads = leads.length > 0;
-  const hasMultipleClients = clientsTotalCount >= 3 || clients.length >= 3;
-  const hasProducts = vehicles.length > 0;
-  const hasMultipleProducts = vehicles.length >= 3;
-  const hasProductWithPrice = vehicles.some(v => (v.salePrice ?? 0) > 0);
-  const hasStockWithCost = vehicles.some(v => v.purchasePrice > 0);
-  const hasStockWithLocation = vehicles.some(v => Boolean(v.location || v.workCenterId));
-  const hasTeam = teamCount > 1;
-  const hasDocuments = documents.length > 0;
-  const hasSales = sales.length > 0;
+  }, [
+    usesGuidedActivation,
+    businessType,
+    dataUserId,
+    businessId,
+    bizName,
+    bizTaxId,
+    bizAddress,
+    bizPhone,
+    user,
+    currentBusiness,
+    businessesCount,
+  ]);
 
   const steps: OnboardingStep[] = useMemo(() => {
-    if (isDelivery) {
-      const flags = deliveryFlags ?? deliveryFlagsRef.current ?? EMPTY_DELIVERY_ACTIVATION_FLAGS;
-      return finalizeStepDefs(buildDeliveryActivationStepDefs(flags), activeStepKey);
-    }
-
-    const defs: StepDef[] = [
-      { id: 'configure_business', number: 1, label: 'Configura tu negocio', description: 'Completa la información básica de tu empresa para poder operar', route: '/saas/configuracion', icon: 'building', subSteps: [
-        { id: 'company_name', label: 'Nombre comercial', completed: hasCompanyName },
-        { id: 'tax_data', label: 'Datos fiscales (CIF/NIF)', completed: hasTaxData },
-        { id: 'address', label: 'Dirección / ubicación', completed: hasAddress },
-        { id: 'contact', label: 'Teléfono de contacto', completed: hasPhone },
-        { id: 'branches', label: 'Sedes o centros de trabajo', completed: hasBranches },
-      ] },
-      { id: 'upload_clients', number: 2, label: 'Sube tus clientes', description: 'Importa o crea tus clientes para empezar a trabajar', route: '/saas/clients', icon: 'users', subSteps: [
-        { id: 'first_client', label: 'Crear o importar primer cliente', completed: hasClients || hasLeads },
-        { id: 'multiple_clients', label: 'Tener al menos 3 clientes', completed: hasMultipleClients },
-      ] },
-      { id: 'create_catalog', number: 3, label: 'Crea tu catálogo', description: 'Da de alta tus productos o servicios con precios', route: '/saas/catalog', icon: 'package', subSteps: [
-        { id: 'first_product', label: 'Crear primer producto o servicio', completed: hasProducts },
-        { id: 'product_price', label: 'Asignar precio de venta', completed: hasProductWithPrice },
-        { id: 'multiple_products', label: 'Tener al menos 3 artículos', completed: hasMultipleProducts },
-      ] },
-      { id: 'load_stock', number: 4, label: 'Carga tu stock inicial', description: 'Registra tus existencias actuales con costes y ubicación', route: '/saas/catalog', icon: 'warehouse', subSteps: [
-        { id: 'stock_items', label: 'Registrar existencias iniciales', completed: hasProducts },
-        { id: 'stock_cost', label: 'Indicar coste de compra', completed: hasStockWithCost },
-        { id: 'stock_location', label: 'Asignar ubicación / almacén', completed: hasStockWithLocation },
-      ] },
-      { id: 'configure_operations', number: 5, label: 'Configura tu operativa', description: 'Define equipo, plantillas y numeración de documentos', route: '/saas/settings/numeracion', icon: 'settings', subSteps: [
-        { id: 'team', label: 'Invitar a un miembro del equipo', completed: hasTeam },
-        { id: 'documents', label: 'Crear una plantilla de documento', completed: hasDocuments },
-      ] },
-      { id: 'first_operation', number: 6, label: 'Realiza tu primera operación', description: 'Crea tu primera venta para validar que todo funciona', route: '/saas/sales', icon: 'rocket', subSteps: [
-        { id: 'first_client_sel', label: 'Crear o seleccionar un cliente', completed: hasClients || hasLeads },
-        { id: 'first_sale', label: 'Registrar primera venta u operación', completed: hasSales },
-      ] },
-    ];
-
+    if (!usesGuidedActivation) return [];
+    const bundle = activationFlags ?? activationFlagsRef.current;
+    const defs = buildStepDefsForBusiness(businessType, bundle);
     return finalizeStepDefs(defs, activeStepKey);
-  }, [
-    accountUserId,
-    businessId,
-    activeStepKey,
-    isDelivery,
-    deliveryFlags,
-    hasCompanyName,
-    hasTaxData,
-    hasAddress,
-    hasBranches,
-    hasPhone,
-    hasClients,
-    hasLeads,
-    hasMultipleClients,
-    hasProducts,
-    hasMultipleProducts,
-    hasProductWithPrice,
-    hasStockWithCost,
-    hasStockWithLocation,
-    hasTeam,
-    hasDocuments,
-    hasSales,
-  ]);
+  }, [activeStepKey, usesGuidedActivation, activationFlags, businessType]);
 
   const stableStepsRef = useRef<OnboardingStep[]>([]);
   useEffect(() => {
@@ -368,7 +437,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     return idx === -1 ? Math.max(displaySteps.length - 1, 0) : idx;
   }, [displaySteps]);
 
-  const deliveryActivationIncomplete = isDelivery && totalSteps > 0 && completionPct < 100;
+  const guidedActivationIncomplete = usesGuidedActivation && totalSteps > 0 && completionPct < 100;
 
   useEffect(() => {
     if (!accountUserId || !businessId || completionPct < 100) return;
@@ -378,31 +447,27 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, [completionPct, accountUserId, businessId]);
 
   useEffect(() => {
-    if (!deliveryActivationIncomplete || !accountUserId || !businessId) return;
+    if (!guidedActivationIncomplete || !accountUserId || !businessId) return;
     setIsDismissed(false);
     setActivationChecklistDismissed(accountUserId, businessId, false);
-  }, [deliveryActivationIncomplete, accountUserId, businessId]);
+  }, [guidedActivationIncomplete, accountUserId, businessId]);
 
   useEffect(() => {
-    if (completionPct !== 100 || !accountUserId || !businessId) return;
+    if (completionPct !== 100 || !accountUserId || !businessId || !usesGuidedActivation) return;
     if (isOnboardingTourActive(accountUserId, businessId)) return;
     markOnboardingTourCompleted(accountUserId, businessId);
     setOnboardingTourActive(accountUserId, businessId, false);
     if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
-    if (!isDelivery) {
-      setIsDismissed(true);
-      setActivationChecklistDismissed(accountUserId, businessId, true);
-    }
-  }, [completionPct, accountUserId, businessId, isDelivery]);
+  }, [completionPct, accountUserId, businessId, usesGuidedActivation]);
 
   const dismiss = useCallback(() => {
-    if (isDelivery && completionPct < 100) return;
+    if (usesGuidedActivation && completionPct < 100) return;
     setIsDismissed(true);
     if (accountUserId && businessId) {
       setActivationChecklistDismissed(accountUserId, businessId, true);
-      if (isDelivery) setActivationChecklistForceVisible(accountUserId, businessId, false);
+      if (usesGuidedActivation) setActivationChecklistForceVisible(accountUserId, businessId, false);
     }
-  }, [accountUserId, businessId, isDelivery, completionPct]);
+  }, [accountUserId, businessId, usesGuidedActivation, completionPct]);
 
   const restore = useCallback(() => {
     setIsDismissed(false);

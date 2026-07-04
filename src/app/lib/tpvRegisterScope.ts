@@ -1,4 +1,5 @@
 import type { Business } from './businessApi';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
 import { resolveBusinessDataUserId } from './tenantUserId';
 
 export interface TpvTabletBindingRef {
@@ -32,8 +33,8 @@ function isDeliveryBusinessType(businessType?: string | null): boolean {
 }
 
 /**
- * Catálogo TPV delivery: si el selector apunta a otra vertical (p. ej. limpieza),
- * usar la empresa delivery de la cuenta donde viven marcas y productos.
+ * Catálogo TPV: la empresa activa si es delivery ops (delivery/restaurante) usa su propio catálogo.
+ * Solo redirige al negocio delivery si el selector apunta a otra vertical (p. ej. limpieza).
  */
 export function resolveTpvCatalogBusinessId(
   scopeBusinessId: string,
@@ -43,7 +44,7 @@ export function resolveTpvCatalogBusinessId(
   const match = businesses.find(
     (b) => businessScopeIdFromRawId(b.business_id || b.id) === bid,
   );
-  if (match && isDeliveryBusinessType(match.businessType)) return bid;
+  if (match && isDeliveryOpsBusinessType(match.businessType)) return bid;
 
   const deliveryId = deliveryBusinessIdForTpv(businesses);
   return deliveryId || bid;
@@ -63,6 +64,8 @@ export function shouldAutoSwitchToDeliveryBusiness(
   if (!deliveryId) return null;
   const currentId = businessScopeIdFromRawId(currentBusiness?.business_id || currentBusiness?.id);
   if (!currentId || currentId === deliveryId) return null;
+  if (isDeliveryOpsBusinessType(currentBusiness?.businessType)) return null;
+  if (isRestaurantBusinessType(currentBusiness?.businessType)) return null;
   if (isDeliveryBusinessType(currentBusiness?.businessType)) return null;
   return deliveryId;
 }

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { getOnboardingProgressRequest, saveOnboardingProgressRequest } from '../lib/authApi';
 import type { OnboardingVerificationDocument } from '../lib/onboardingCompanyVerification';
 import type { DeliveryNeedsSelection } from '../lib/onboardingPlanRecommendation';
+import type { RestaurantFormat } from '../verticals/restaurant/restaurantFormat';
 import {
   ONBOARDING_DATA_LEGACY_KEY,
   ONBOARDING_RESET_EVENT,
@@ -29,6 +30,8 @@ export const ONBOARDING_ROUTES = [
 export interface OnboardingData {
   completedStep: number;
   businessType: string;
+  /** bar | restaurant | bar_restaurant — solo si businessType === 'restaurant' */
+  restaurantFormat?: RestaurantFormat;
   companyProfile: {
     tradeName: string;
     legalName: string;
@@ -100,6 +103,7 @@ interface OnboardingContextType {
 export const initialOnboardingData: OnboardingData = {
   completedStep: -1,
   businessType: 'events',
+  restaurantFormat: undefined,
   companyProfile: {
     tradeName: '',
     legalName: '',
@@ -182,6 +186,7 @@ function mergeOnboardingData(partial?: Partial<OnboardingData> | null): Onboardi
     },
     requestedModules: { ...initialOnboardingData.requestedModules, ...(p.requestedModules ?? {}) },
     deliveryNeeds: p.deliveryNeeds,
+    restaurantFormat: p.restaurantFormat,
     subscriptionSelection: {
       ...initialOnboardingData.subscriptionSelection,
       ...(p.subscriptionSelection ?? {}),

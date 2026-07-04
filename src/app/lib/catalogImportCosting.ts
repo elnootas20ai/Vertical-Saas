@@ -292,9 +292,11 @@ function pickBestIngredientNameMatch(
   const exact = candidates.filter((ing) => foldName(ing.name) === folded);
   if (exact.length === 1) return exact[0];
   if (exact.length > 1) {
+    const byBrand = exact.filter((ing) => brandScopeMatch(ing, brandIds));
+    const pool = byBrand.length > 0 ? byBrand : exact;
     return (
-      exact.find((ing) => brandScopeMatch(ing, brandIds)) ??
-      exact.sort((a, b) => foldName(a.name).length - foldName(b.name).length)[0]
+      pool.find((ing) => String(ing.role || '').trim() !== 'extra') ??
+      pool.sort((a, b) => foldName(a.name).length - foldName(b.name).length)[0]
     );
   }
 
@@ -314,6 +316,9 @@ function pickBestIngredientNameMatch(
     const aExactish = aFold === folded ? 0 : 1;
     const bExactish = bFold === folded ? 0 : 1;
     if (aExactish !== bExactish) return aExactish - bExactish;
+    const aExtra = String(a.role || '').trim() === 'extra' ? 1 : 0;
+    const bExtra = String(b.role || '').trim() === 'extra' ? 1 : 0;
+    if (aExtra !== bExtra) return aExtra - bExtra;
     return aFold.length - bFold.length;
   });
   return ranked[0];
@@ -328,16 +333,12 @@ export function findStoreIngredientForCosting(
   if (!folded) return undefined;
 
   const scoped = ingredients.filter((ing) => brandScopeMatch(ing, brandIds));
-  const preferNonExtra = (list: CostingStoreIngredient[]) => {
-    const base = list.filter((ing) => String(ing.role || '').trim() !== 'extra');
-    return base.length > 0 ? base : list;
-  };
-  const hit = pickBestIngredientNameMatch(name, preferNonExtra(scoped), brandIds);
+  const hit = pickBestIngredientNameMatch(name, scoped, brandIds);
   if (hit) return hit;
   if (brandIds.length === 0) return undefined;
   return pickBestIngredientNameMatch(
     name,
-    preferNonExtra(ingredients.filter((ing) => brandScopeMatch(ing, []))),
+    ingredients.filter((ing) => brandScopeMatch(ing, [])),
     [],
   );
 }

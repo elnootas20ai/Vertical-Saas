@@ -6,6 +6,7 @@ import {
   type CatalogBusinessScopeOptions,
 } from './catalogBusinessScope';
 import { deliveryBusinessIdForTpv, resolveTpvCatalogBusinessId } from './tpvRegisterScope';
+import { isRestaurantBusinessType } from './deliveryOpsTypes';
 
 export type TpvCatalogBusinessRef = {
   business_id?: string;
@@ -65,6 +66,16 @@ export async function loadTpvCatalogBrands(
 ): Promise<Brand[]> {
   const primary = await tryLoadBrands(scope.catalogBusinessId);
   if (primary.length > 0) return primary;
+
+  const catalogMatch = businesses.find(
+    (b) =>
+      String(b.business_id || b.id || '')
+        .replace(/^business:/, '')
+        .trim() === scope.catalogBusinessId,
+  );
+  if (isRestaurantBusinessType(catalogMatch?.businessType)) {
+    return tryLoadBrands(scope.catalogBusinessId);
+  }
 
   const delivery = businesses.find((b) => String(b.businessType || '').trim() === 'delivery');
   const deliveryId = String(delivery?.business_id || delivery?.id || '').replace(/^business:/, '').trim();

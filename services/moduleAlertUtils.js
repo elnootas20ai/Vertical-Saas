@@ -9,9 +9,10 @@ function activeDocs(docs) {
   return (Array.isArray(docs) ? docs : []).filter((d) => d && !d.deletedAt);
 }
 
-/** Motor delivery por fases activo (vertical delivery o config en cuenta). */
+/** Motor delivery por fases activo (vertical delivery/restaurant o config en cuenta). */
 export function usesDeliveryAlertMotor(account, business = null) {
-  if (business?.businessType === 'delivery') return true;
+  const bt = String(business?.businessType || '').trim();
+  if (bt === 'delivery' || bt === 'restaurant') return true;
   const cfg = account?.alertConfig?.delivery;
   if (cfg && typeof cfg === 'object' && cfg.enabled !== false) return true;
   return false;

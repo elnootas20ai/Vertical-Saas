@@ -168,7 +168,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                     toast.success('Tour reanudado donde lo dejaste');
                   } else {
                     toast.error(
-                      'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
+                      'El tour solo está disponible en delivery, restauración, compraventa o limpieza.',
                     );
                   }
                 }}
@@ -193,7 +193,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
                     toast.success('Tour desde el paso 1');
                   } else {
                     toast.error(
-                      'No se pudo abrir el tour. Comprueba que tienes una empresa seleccionada arriba.',
+                      'El tour solo está disponible en delivery, restauración, compraventa o limpieza.',
                     );
                   }
                 }}

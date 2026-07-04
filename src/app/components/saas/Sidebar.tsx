@@ -1,8 +1,8 @@
-import { useNavigate, useLocation } from 'react-router';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   LayoutDashboard,
@@ -146,16 +146,24 @@ import {
 import {
   DELIVERY_WORK_CENTERS_CHANGED,
   filterWorkCentersForBusinessScope,
+  isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../lib/deliverySetup';
 import { isCompraventaBusinessType, loadCompraventaStores } from '../../lib/compraventaSetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import {
+  isDeliveryOpsBusinessType,
+  isRestaurantBusinessType,
+  isStrictDeliveryBusinessType,
+} from '../../lib/deliveryOpsTypes';
 import { useSidebarDeliveryStoreRows } from '../../hooks/useSidebarDeliveryStoreRows';
+import { useRestaurantStoreRows } from '../../hooks/useRestaurantStoreRows';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
 import { isMenuItemVisibleForVertical } from '../../lib/verticalModuleVisibility';
+import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
 const CALENDAR_V2_VISUAL = true;
@@ -273,6 +281,8 @@ const menuItemDefs = [
   { id: 'delivery-ops',     navKey: 'deliveryOps',     icon: <Activity className="w-5 h-5" />, path: '/saas/delivery-ops' },
   { id: 'tpv',              navKey: 'tpv',             icon: <Receipt className="w-5 h-5" />,  path: '/saas/tpv' },
   { id: 'sala',             navKey: 'sala',             icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/sala' },
+  { id: 'reservas',         navKey: 'reservations',     icon: <BookmarkCheck className="w-5 h-5" />, path: '/saas/reservations' },
+  { id: 'lista-espera',     navKey: 'listaEspera',      icon: <ListChecks className="w-5 h-5" />, path: '/saas/lista-espera' },
   { id: 'tpv-locales',      navKey: 'tpvLocales',      icon: <Store className="w-5 h-5" />,    path: '/saas/tpv/locales' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
@@ -445,7 +455,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'caja', 'web-orders', 'web-config', 'delivery-integrations'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -471,6 +481,7 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   carDealership: new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'commercial']),
   workshop:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'workshop']),
   delivery:      new Set(['equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
+  restaurant:    new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
   cleaning:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'cleaning']),
   gym:           new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'gym']),
   clinic:        new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'clinic']),
@@ -498,12 +509,30 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     clientesCrm: ['clients', 'quotes', 'promotions'],
     catalogProviders: ['suppliers'],
   },
+  restaurant: {
+    clientesCrm: ['clients'],
+    delivery: ['sala', 'reservas', 'lista-espera', 'caja'],
+  },
 };
+
+/** Rutas del sidebar distintas para bar/restaurante (sin pasar por delivery). */
+const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
+  caja: '/saas/caja',
+  'tpv-rapido': '/saas/caja/tpv',
+};
+
+function resolveSidebarItemPath(item: SidebarItem, isRestaurantVertical: boolean): string {
+  if (isRestaurantVertical && RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id]) {
+    return RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id];
+  }
+  return item.path;
+}
 
 const VERTICAL_BOTTOM_ITEMS: Record<BusinessType, Set<string>> = {
   carDealership: new Set(['configuracion', 'settings']),
   workshop:      new Set(['configuracion', 'settings']),
   delivery:      new Set(['configuracion', 'settings']),
+  restaurant:    new Set(['configuracion', 'settings']),
   cleaning:      new Set(['configuracion', 'settings']),
   gym:           new Set(['configuracion', 'settings']),
   clinic:        new Set(['configuracion', 'settings']),
@@ -595,7 +624,9 @@ function SidebarInner({
       ? null
       : 'carDealership';
   const isCompraventa = isCompraventaBusinessType(vertical);
-  const usesDeliveryStoreSidebar = vertical === 'delivery';
+  const isRestaurantVertical = isRestaurantBusinessType(vertical);
+  const isStrictDeliveryVertical = isDeliveryBusinessType(vertical);
+  const usesOpsStoreSidebar = isDeliveryOpsBusinessType(vertical);
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
     : new Set<string>();
@@ -603,7 +634,14 @@ function SidebarInner({
     ? (VERTICAL_BOTTOM_ITEMS[vertical] || VERTICAL_BOTTOM_ITEMS.carDealership)
     : new Set<string>();
   const [showCompanyDropdown, setShowCompanyDropdown] = useState(false);
-  const companySelectorRef = useRef<HTMLDivElement>(null);
+  const desktopCompanySelectorRef = useRef<HTMLDivElement>(null);
+  const mobileCompanySelectorRef = useRef<HTMLDivElement>(null);
+  const companyDropdownPanelRef = useRef<HTMLDivElement>(null);
+  const [companyDropdownStyle, setCompanyDropdownStyle] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -677,7 +715,7 @@ function SidebarInner({
         scoped.filter(
           (sp) =>
             sp.active !== false &&
-            (vertical !== 'delivery' ||
+            ( !isDeliveryBusinessType(vertical) ||
               sp.centerType === 'punto_de_venta' ||
               sp.centerType === 'almacen'),
         ),
@@ -688,12 +726,15 @@ function SidebarInner({
   }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount, isCompraventa, loadCompraventaSidebarStores]);
 
   const activeStore = useActiveStoreScope();
-  const sidebarDelivery = useSidebarDeliveryStoreRows(usesDeliveryStoreSidebar);
+  const sidebarDelivery = useSidebarDeliveryStoreRows(isStrictDeliveryVertical);
+  const sidebarRestaurant = useRestaurantStoreRows(isRestaurantVertical);
+  const opsStoreRows = isRestaurantVertical ? sidebarRestaurant.rows : sidebarDelivery.rows;
+  const opsStoreLoading = isRestaurantVertical ? sidebarRestaurant.loading : sidebarDelivery.loading;
 
   useEffect(() => {
-    if (usesDeliveryStoreSidebar) return;
+    if (usesOpsStoreSidebar) return;
     void loadSalesPoints();
-  }, [loadSalesPoints, usesDeliveryStoreSidebar]);
+  }, [loadSalesPoints, usesOpsStoreSidebar]);
 
   useEffect(() => {
     if (!isCompraventa) return;
@@ -705,24 +746,24 @@ function SidebarInner({
   }, [isCompraventa, loadCompraventaSidebarStores]);
 
   useEffect(() => {
-    if (!usesDeliveryStoreSidebar) return;
+    if (!usesOpsStoreSidebar) return;
     const onStoresChanged = () => {
       void activeStore.refresh();
     };
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
     return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
-  }, [usesDeliveryStoreSidebar, activeStore.refresh]);
+  }, [usesOpsStoreSidebar, activeStore.refresh]);
 
   useEffect(() => {
-    if (!usesDeliveryStoreSidebar) return;
-    if (sidebarDelivery.rows.length === 0) return;
+    if (!usesOpsStoreSidebar) return;
+    if (opsStoreRows.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
-  }, [usesDeliveryStoreSidebar, sidebarDelivery.rows.length]);
+  }, [usesOpsStoreSidebar, opsStoreRows.length]);
 
   useEffect(() => {
-    if (!usesDeliveryStoreSidebar) return;
-    if (sidebarDelivery.loading) return;
-    if (sidebarDelivery.rows.length > 0) return;
+    if (!usesOpsStoreSidebar) return;
+    if (opsStoreLoading) return;
+    if (opsStoreRows.length > 0) return;
     if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
     const onFocus = () => {
       void activeStore.refresh();
@@ -730,9 +771,9 @@ function SidebarInner({
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [
-    usesDeliveryStoreSidebar,
-    sidebarDelivery.loading,
-    sidebarDelivery.rows.length,
+    usesOpsStoreSidebar,
+    opsStoreLoading,
+    opsStoreRows.length,
     activeStore.retailWorkCenters.length,
     activeStore.allPointsOfSale.length,
     activeStore.refresh,
@@ -778,15 +819,59 @@ function SidebarInner({
     ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
   }));
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (companySelectorRef.current && !companySelectorRef.current.contains(event.target as Node)) {
-        setShowCompanyDropdown(false);
-      }
+  const getActiveCompanySelector = useCallback(() => {
+    if (typeof window === 'undefined') return null;
+    if (window.innerWidth < 768 && mobileOpen) {
+      return mobileCompanySelectorRef.current;
+    }
+    return desktopCompanySelectorRef.current;
+  }, [mobileOpen]);
+
+  const updateCompanyDropdownPosition = useCallback(() => {
+    const anchor = getActiveCompanySelector();
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const narrow = typeof window !== 'undefined' && window.innerWidth >= 768 && collapsed;
+    if (narrow) {
+      setCompanyDropdownStyle({ top: rect.top, left: rect.right + 8, width: 256 });
+    } else {
+      setCompanyDropdownStyle({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    }
+  }, [collapsed, getActiveCompanySelector]);
+
+  useLayoutEffect(() => {
+    if (!showCompanyDropdown) {
+      setCompanyDropdownStyle(null);
+      return;
+    }
+    updateCompanyDropdownPosition();
+    window.addEventListener('resize', updateCompanyDropdownPosition);
+    window.addEventListener('scroll', updateCompanyDropdownPosition, true);
+    return () => {
+      window.removeEventListener('resize', updateCompanyDropdownPosition);
+      window.removeEventListener('scroll', updateCompanyDropdownPosition, true);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [showCompanyDropdown, updateCompanyDropdownPosition]);
+
+  useEffect(() => {
+    if (!showCompanyDropdown) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (desktopCompanySelectorRef.current?.contains(target)) return;
+      if (mobileCompanySelectorRef.current?.contains(target)) return;
+      if (companyDropdownPanelRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-company-dropdown-root]')) return;
+      setShowCompanyDropdown(false);
+    };
+    const timer = window.setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [showCompanyDropdown]);
 
   const navScrollDesktopRef = useRef<HTMLElement>(null);
   const navScrollMobileRef = useRef<HTMLElement>(null);
@@ -823,7 +908,7 @@ function SidebarInner({
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
     const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
     let itemIds = override ? [...override] : [...g.itemIds];
-    if (g.id === 'catalogProviders' && vertical !== 'delivery') {
+    if (g.id === 'catalogProviders' && !isDeliveryBusinessType(vertical)) {
       itemIds = itemIds.filter((id) => id !== 'costing');
     }
     return {
@@ -834,7 +919,9 @@ function SidebarInner({
         ? 'RRHH'
         : isCompraventaCommercial
           ? t('sidebar.groups.compraventaCommercial')
-          : t(`sidebar.groups.${g.id}`),
+          : g.id === 'delivery' && isRestaurantVertical
+            ? t('sidebar.groups.restaurant')
+            : t(`sidebar.groups.${g.id}`),
     };
   });
 
@@ -872,9 +959,97 @@ function SidebarInner({
     if (typeof window !== 'undefined') {
       window.sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(scrollTop));
     }
-    navigate(path, { preventScrollReset: true });
+    navigate(saasPathWithBusinessScope(path, currentBusiness?.business_id), {
+      preventScrollReset: true,
+    });
     onMobileClose();
   };
+
+  const openManageCompanies = () => {
+    setShowCompanyDropdown(false);
+    window.requestAnimationFrame(() => {
+      handleNavigate('/saas/settings/empresas');
+    });
+  };
+
+  const companyDropdownPanel = companyDropdownStyle ? (
+    <div
+      ref={companyDropdownPanelRef}
+      data-company-dropdown-root
+      className="fixed z-[9999] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl"
+      style={{
+        top: companyDropdownStyle.top,
+        left: companyDropdownStyle.left,
+        width: companyDropdownStyle.width,
+      }}
+    >
+      <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{t('topbar.myCompanies')}</p>
+      </div>
+      <div className="max-h-52 overflow-y-auto py-1">
+        {businesses.length === 0 ? (
+          <div className="px-3 py-4 text-center">
+            <Building2 className="w-6 h-6 text-gray-300 dark:text-gray-600 mx-auto mb-1" />
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t('topbar.noCompanies')}</p>
+          </div>
+        ) : (
+          businesses.map((business) => {
+            const isActiveBiz = currentBusiness?.business_id === business.business_id;
+            const bizInitials = business.name.slice(0, 2).toUpperCase();
+            return (
+              <button
+                key={business.business_id}
+                type="button"
+                onClick={() => {
+                  switchBusiness(business.business_id);
+                  setShowCompanyDropdown(false);
+                  navigate(
+                    saasPathWithBusinessScope(
+                      `${location.pathname}${location.search}`,
+                      business.business_id,
+                    ),
+                    { replace: true, preventScrollReset: true },
+                  );
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${isActiveBiz ? 'bg-blue-50 dark:bg-blue-950' : ''}`}
+              >
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-blue-900 overflow-hidden">
+                  {business.logo ? (
+                    <img src={business.logo} alt={business.name} className="w-8 h-8 object-cover rounded-lg" />
+                  ) : (
+                    <span className="text-xs font-bold text-blue-700 dark:text-blue-300">{bizInitials}</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-semibold truncate ${isActiveBiz ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                    {business.name}
+                  </p>
+                  {business.city && (
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{business.city}</p>
+                  )}
+                </div>
+                {isActiveBiz && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
+              </button>
+            );
+          })
+        )}
+      </div>
+      <div className="border-t border-gray-100 dark:border-gray-800 p-1.5">
+        <button
+          type="button"
+          data-company-dropdown-manage
+          onClick={(event) => {
+            event.stopPropagation();
+            openManageCompanies();
+          }}
+          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>{t('topbar.manageCompanies')}</span>
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   const handleMenuItemClick = (item: SidebarItem) => {
     if (item.disabled) {
@@ -894,11 +1069,11 @@ function SidebarInner({
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
-        const rows = usesDeliveryStoreSidebar ? sidebarDelivery.rows : [];
+        const rows = usesOpsStoreSidebar ? opsStoreRows : [];
         const row = rows.find((r) => r.rowId === rawId);
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         const pdvId = row?.pdvId || pdv?._id;
-        if (usesDeliveryStoreSidebar) {
+        if (usesOpsStoreSidebar) {
           if (pdvId && activeStore.pointsOfSale.some((p) => p._id === pdvId)) {
             activeStore.setActiveSalesPoint(pdvId);
           } else if (row?.workCenterId) {
@@ -906,7 +1081,7 @@ function SidebarInner({
           } else if (activeStore.pointsOfSale.length === 1) {
             activeStore.setActiveSalesPoint(activeStore.pointsOfSale[0]._id);
           }
-          handleNavigate('/saas/delivery-ops');
+          handleNavigate(isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops');
           return;
         }
         if (isCompraventa) {
@@ -916,7 +1091,7 @@ function SidebarInner({
       }
       return;
     }
-    handleNavigate(item.path);
+    handleNavigate(resolveSidebarItemPath(item, isRestaurantVertical));
   };
 
   useLayoutEffect(() => {
@@ -1004,7 +1179,7 @@ function SidebarInner({
       item.id === 'tpv-locales' ||
       item.id === 'caja';
     const deliveryOperational =
-      item.id === 'sala' || item.id === 'delivery-clients';
+      item.id === 'sala' || item.id === 'reservas' || item.id === 'lista-espera' || item.id === 'delivery-clients';
     const permission = permissionMap[item.id]
       || (item.id === 'catalog-stock' ? permissionMap.catalog : undefined)
       || (item.id === 'leads' ? permissionMap.clients : undefined)
@@ -1053,6 +1228,9 @@ function SidebarInner({
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
     (item.id === 'tpv' && location.pathname === '/saas/tpv') ||
+    (item.id === 'tpv-rapido'
+      && (location.pathname.startsWith('/saas/vertical/delivery/tpv')
+        || location.pathname.startsWith('/saas/caja/tpv'))) ||
     (item.id === 'tpv-locales' && location.pathname === '/saas/tpv/locales') ||
     (item.id === 'delivery-ops'
       && location.pathname.startsWith('/saas/delivery-ops')
@@ -1060,7 +1238,10 @@ function SidebarInner({
     (item.id === 'delivery-clients'
       && (location.pathname.startsWith('/saas/clients')
         || (location.pathname.startsWith('/saas/delivery-ops') && new URLSearchParams(location.search).get('panel') === 'clients'))) ||
-    (item.id === 'caja' && location.pathname.startsWith('/saas/vertical/delivery/caja')) ||
+    (item.id === 'caja' && (location.pathname.startsWith('/saas/caja') || location.pathname.startsWith('/saas/vertical/delivery/caja'))) ||
+    (item.id === 'sala' && location.pathname.startsWith('/saas/sala')) ||
+    (item.id === 'reservas' && location.pathname.startsWith('/saas/reservations')) ||
+    (item.id === 'lista-espera' && location.pathname.startsWith('/saas/lista-espera')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||
     (item.id === 'delivery-integrations' && location.pathname.startsWith('/saas/vertical/delivery/integraciones')) ||
@@ -1107,7 +1288,7 @@ function SidebarInner({
     (item.id.startsWith('sp-') && (() => {
       const rawId = item.id.slice('sp-'.length);
       if (!rawId) return false;
-      if (usesDeliveryStoreSidebar) {
+      if (usesOpsStoreSidebar) {
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         if (pdv && pdv.active === false) return false;
         if (pdv) return activeStore.activeSalesPointId === pdv._id;
@@ -1124,7 +1305,7 @@ function SidebarInner({
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
   const COMMON_SIDEBAR_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
   const allowedGroupsList = sidebarGroups.filter((g) => allowedGroups.has(g.id));
-  const shouldHideCrmGroup = vertical === 'delivery';
+  const shouldHideCrmGroup = isDeliveryBusinessType(vertical);
   const filteredGroups: SidebarGroup[] = [
     HOME_GROUP,
     ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
@@ -1133,11 +1314,9 @@ function SidebarInner({
   const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;
 
-  const deliverySidebarRows = usesDeliveryStoreSidebar ? sidebarDelivery.rows : [];
-
   const salesPointRows: SidebarItem[] =
-    usesDeliveryStoreSidebar
-      ? deliverySidebarRows.map((row) => {
+    usesOpsStoreSidebar
+      ? opsStoreRows.map((row) => {
           const subParts: string[] = [];
           if (row.code) subParts.push(row.code);
           if (row.needsPdv) subParts.push('Sin PDV');
@@ -1159,11 +1338,11 @@ function SidebarInner({
       }));
 
   const workCentersSidebarCount =
-    usesDeliveryStoreSidebar ? deliverySidebarRows.length : salesPoints.length;
+    usesOpsStoreSidebar ? opsStoreRows.length : salesPoints.length;
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
-    usesDeliveryStoreSidebar && sidebarDelivery.loading && deliverySidebarRows.length === 0
+    usesOpsStoreSidebar && opsStoreLoading && opsStoreRows.length === 0
       ? [
           {
             id: 'salesPoints-loading',
@@ -1305,7 +1484,10 @@ function SidebarInner({
     return { matched, unmatched };
   };
 
-  const sidebarContent = (isMobile: boolean) => {
+  const sidebarContent = (
+    isMobile: boolean,
+    selectorRef: React.RefObject<HTMLDivElement | null>,
+  ) => {
     const narrow = !isMobile && collapsed;
     return (
     <aside
@@ -1329,7 +1511,7 @@ function SidebarInner({
         )}
 
         {/* Company selector dropdown */}
-        <div ref={companySelectorRef} className={`relative ${narrow ? 'px-1 pb-1' : 'px-3 pb-1'}`}>
+        <div ref={selectorRef} className={`relative ${narrow ? 'px-1 pb-1' : 'px-3 pb-1'}`}>
           <div className="flex items-center gap-1.5 min-w-0">
             <button
               type="button"
@@ -1368,70 +1550,6 @@ function SidebarInner({
             </button>
 
           </div>
-
-          {showCompanyDropdown && (
-            <div className={`absolute z-50 mt-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl overflow-hidden ${
-              narrow ? 'left-full top-0 ml-2 w-64' : 'left-0 right-0 w-full'
-            }`}>
-              <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">{t('topbar.myCompanies')}</p>
-              </div>
-              <div className="max-h-52 overflow-y-auto py-1">
-                {businesses.length === 0 ? (
-                  <div className="px-3 py-4 text-center">
-                    <Building2 className="w-6 h-6 text-gray-300 dark:text-gray-600 mx-auto mb-1" />
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{t('topbar.noCompanies')}</p>
-                  </div>
-                ) : (
-                  businesses.map((business) => {
-                    const isActiveBiz = currentBusiness?.business_id === business.business_id;
-                    const bizInitials = business.name.slice(0, 2).toUpperCase();
-                    return (
-                      <button
-                        key={business.business_id}
-                        type="button"
-                        onClick={() => {
-                          switchBusiness(business.business_id);
-                          setShowCompanyDropdown(false);
-                        }}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${isActiveBiz ? 'bg-blue-50 dark:bg-blue-950' : ''}`}
-                      >
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-blue-900 overflow-hidden">
-                          {business.logo ? (
-                            <img src={business.logo} alt={business.name} className="w-8 h-8 object-cover rounded-lg" />
-                          ) : (
-                            <span className="text-xs font-bold text-blue-700 dark:text-blue-300">{bizInitials}</span>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-semibold truncate ${isActiveBiz ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
-                            {business.name}
-                          </p>
-                          {business.city && (
-                            <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{business.city}</p>
-                          )}
-                        </div>
-                        {isActiveBiz && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-              <div className="border-t border-gray-100 dark:border-gray-800 p-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCompanyDropdown(false);
-                    navigate('/saas/settings/empresa');
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>{t('topbar.manageCompanies')}</span>
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Sidebar search */}
@@ -1959,7 +2077,7 @@ function SidebarInner({
     <>
       {/* Desktop sidebar */}
       <div className="hidden md:block">
-        {sidebarContent(false)}
+        {sidebarContent(false, desktopCompanySelectorRef)}
       </div>
 
       {/* Mobile overlay sidebar */}
@@ -1972,10 +2090,14 @@ function SidebarInner({
           />
           {/* Drawer */}
           <div className="relative z-10 flex flex-col">
-            {sidebarContent(true)}
+            {sidebarContent(true, mobileCompanySelectorRef)}
           </div>
         </div>
       )}
+
+      {showCompanyDropdown && companyDropdownPanel && typeof document !== 'undefined'
+        ? createPortal(companyDropdownPanel, document.body)
+        : null}
 
       <SAAS__HelpModal
         isOpen={showHelpModal}

@@ -9,6 +9,9 @@ import { OnboardingHeroPanel } from '../../../components/auth/onboarding/Onboard
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import { useAuth } from '../../../context/AuthContext';
 import { isDeliveryBusinessType } from '../../../lib/onboardingPlanRecommendation';
+import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
+
+const RESTAURANT_BRAND = 'Vertial Bar/restaurante';
 
 const stepKeys = [
   { id: 1, key: 'workspace', duration: 1000 },
@@ -41,6 +44,7 @@ export function Confirmation() {
 
   const tradeName = data.companyProfile.tradeName?.trim() || '';
   const isDelivery = isDeliveryBusinessType(data.businessType);
+  const isRestaurant = isRestaurantBusinessType(data.businessType);
 
   const { headingTitle, headingSubtitle } = useMemo(() => {
     if (isDelivery) {
@@ -53,11 +57,21 @@ export function Confirmation() {
           : 'Estamos activando tu plan, la prueba gratuita y el acceso a locales, caja y pedidos.',
       };
     }
+    if (isRestaurant) {
+      return {
+        headingTitle: tradeName
+          ? `¡${tradeName} ya está en ${RESTAURANT_BRAND}!`
+          : `¡Tu espacio en ${RESTAURANT_BRAND} está listo!`,
+        headingSubtitle: tradeName
+          ? `Estamos activando bar/restaurante para ${tradeName}: plan, prueba gratuita, TPV y operativa de sala.`
+          : 'Estamos activando tu bar/restaurante: plan, prueba gratuita, TPV y operativa de sala.',
+      };
+    }
     return {
       headingTitle: t('onboarding.confirmation.title'),
       headingSubtitle: t('onboarding.confirmation.subtitle'),
     };
-  }, [isDelivery, tradeName, t]);
+  }, [isDelivery, isRestaurant, tradeName, t]);
 
   useEffect(() => {
     if (currentStep >= steps.length) return;

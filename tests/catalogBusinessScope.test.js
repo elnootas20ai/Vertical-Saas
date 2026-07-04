@@ -48,6 +48,19 @@ describe('catalogBusinessScope', () => {
     expect(scoped.map((i) => i._id).sort()).toEqual(['b1', 'c1', 'p1']);
   });
 
+  it('bebidas y complementos sin línea visibles en empresa restaurante (multi-cuenta)', () => {
+    const items = [
+      { _id: 'p1', name: 'Bravas', category: 'Tapas', brandIds: ['brand-a'] },
+      { _id: 'b1', name: 'Caña', category: 'Bebidas', brandIds: [] },
+      { _id: 'c1', name: 'Patatas', category: 'Complementos', brandIds: [] },
+    ];
+    const scoped = filterCatalogItemsForBusinessScope(items, 'biz-rest', [brandA], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'restaurant',
+    });
+    expect(scoped.map((i) => i._id).sort()).toEqual(['b1', 'c1', 'p1']);
+  });
+
   it('oculta catálogo delivery en empresa events', () => {
     const items = [
       { _id: 'p1', name: 'Napolitana', category: 'Pizzas', vertical: 'delivery', brandIds: ['brand-a'] },
@@ -58,6 +71,24 @@ describe('catalogBusinessScope', () => {
       activeBusinessType: 'events',
     });
     expect(scoped.map((i) => i._id)).toEqual(['e1']);
+  });
+
+  it('aisla carta restaurante de delivery en multi-cuenta', () => {
+    const items = [
+      { _id: 'r1', name: 'Caña', category: 'Bebidas', vertical: 'restaurant', business_id: 'biz-rest' },
+      { _id: 'd1', name: 'Pizza', category: 'Pizzas', vertical: 'delivery', business_id: 'biz-del' },
+    ];
+    const scopedRest = filterCatalogItemsForBusinessScope(items, 'biz-rest', [brandA], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'restaurant',
+    });
+    expect(scopedRest.map((i) => i._id)).toEqual(['r1']);
+
+    const scopedDel = filterCatalogItemsForBusinessScope(items, 'biz-del', [brandB], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'delivery',
+    });
+    expect(scopedDel.map((i) => i._id)).toEqual(['d1']);
   });
 
   it('no mezcla legacy sin business_id entre varias empresas', () => {
@@ -72,6 +103,12 @@ describe('catalogBusinessScope', () => {
       activeBusinessType: 'delivery',
     });
     expect(delivery).toHaveLength(1);
+
+    const restaurant = filterCatalogItemsForBusinessScope(items, 'biz-rest', [brandA], {
+      accountBusinessCount: 2,
+      activeBusinessType: 'restaurant',
+    });
+    expect(restaurant).toHaveLength(1);
 
     const single = filterCatalogItemsForBusinessScope(items, 'biz-a', [brandA], {
       accountBusinessCount: 1,

@@ -114,6 +114,13 @@ const MARTE_SECTOR_TERMS: Partial<Record<BusinessType, SectorTerms>> = {
     namePlaceholder: 'Ej: Pedido catering 50 pax',
   },
 
+  restaurant: {
+    MARTE: 'Comanda',
+    MARTEPlural: 'Comandas',
+    plateLabel: 'Nº Comanda',
+    namePlaceholder: 'Ej: Mesa 4 · terraza',
+  },
+
   // Limpieza profesional
   cleaning: {
     MARTE: 'Servicio',

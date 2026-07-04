@@ -24,6 +24,7 @@ import {
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
+import { useBusiness } from '../../context/BusinessContext';
 import { payrollBulkSummaryMessage } from '../../lib/payrollBulkUpload';
 import { PayrollBulkUploadModal } from './PayrollBulkUploadModal';
 
@@ -56,11 +57,12 @@ const DOC_TYPE_COLORS: Record<PayrollDocumentType, string> = {
 interface UploadModalProps {
   members: AuthUser[];
   currentUser: AuthUser;
+  businessId: string;
   onClose: () => void;
   onUploaded: (doc: PayrollDocument) => void;
 }
 
-function UploadModal({ members, currentUser, onClose, onUploaded }: UploadModalProps) {
+function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: UploadModalProps) {
   useModalClose(true, onClose);
   const [workerId, setWorkerId] = useState('');
   const [documentType, setDocumentType] = useState<PayrollDocumentType>('nomina');
@@ -109,6 +111,7 @@ function UploadModal({ members, currentUser, onClose, onUploaded }: UploadModalP
       });
 
       const doc = await createPayrollDocumentRequest({
+        business_id: businessId,
         worker_id: workerId,
         worker_name: worker?.fullName || workerId,
         documentType,
@@ -340,6 +343,8 @@ interface PayrollTabProps {
 }
 
 export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
+  const { currentBusiness } = useBusiness();
+  const businessId = currentBusiness?.business_id || '';
   const [documents, setDocuments] = useState<PayrollDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
@@ -351,17 +356,27 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
   const [message, setMessage] = useState<string | null>(null);
 
   const loadDocuments = useCallback(async () => {
+    if (!businessId) {
+      setDocuments([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
-      const workerFilter = !isAdmin ? currentUser.user_id : undefined;
-      const docs = await listPayrollDocumentsRequest(workerFilter);
+      const memberIds = members.map((m) => m.user_id).filter(Boolean);
+      const opts = {
+        businessId,
+        memberIds,
+        ...( !isAdmin ? { workerId: currentUser.user_id } : {}),
+      };
+      const docs = await listPayrollDocumentsRequest(opts);
       setDocuments(docs);
     } catch {
       // silently fail — show empty state
     } finally {
       setIsLoading(false);
     }
-  }, [isAdmin, currentUser.user_id]);
+  }, [businessId, isAdmin, currentUser.user_id, members]);
 
   useEffect(() => {
     void loadDocuments();
@@ -662,10 +677,11 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
         )}
       </div>
 
-      {showBulkUpload && (
+      {showBulkUpload && businessId && (
         <PayrollBulkUploadModal
           members={members}
           currentUser={currentUser}
+          businessId={businessId}
           onClose={() => setShowBulkUpload(false)}
           onComplete={(docs) => {
             if (docs.length === 0) return;

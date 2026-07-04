@@ -1,3 +1,4 @@
+import { canManageBusinessTeam, assertBusinessTeamManage } from '../services/businessAccess.js';
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
@@ -31,6 +32,7 @@ import {
   generatePosPin,
   isValidPosPin,
   findPointOfSaleByTerminalCode,
+  resolveTerminalLoginCode,
   findWorkCenterById,
   resolveBusinessDocumentForPointOfSale,
   workerCanAccessPdvForTablet,
@@ -38,6 +40,7 @@ import {
   incrementFailedLoginAttempts,
   isAccountLocked,
   listAllBusinesses,
+  listBusinessesByUser,
   listInvitationsByBusiness,
   listJoinRequestsByBusiness,
   listJoinRequestsByUser,
@@ -821,6 +824,13 @@ export async function listUsers(req, res) {
     if (businessId) {
       const business = await findBusinessById(req, businessId);
       if (business) {
+        const actorUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+        const isOwner = business.owner_user_id === actorUserId;
+        const isMember = Array.isArray(business.members)
+          && business.members.some((m) => m.user_id === actorUserId);
+        if (!isOwner && !isMember) {
+          return res.status(403).json({ ok: false, error: 'No autorizado para ver este equipo' });
+        }
         const members = Array.isArray(business.members) ? business.members : [];
         for (const member of members) {
           const uid = String(member?.user_id || '').trim();
@@ -831,6 +841,24 @@ export async function listUsers(req, res) {
           ...memberById.keys(),
         ].filter(Boolean));
         accounts = accounts.filter((a) => memberIds.has(a.user_id));
+      } else {
+        accounts = [];
+      }
+    } else {
+      const actorUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+      if (actorUserId) {
+        const businesses = await listBusinessesByUser(req, actorUserId);
+        const memberIds = new Set();
+        for (const business of businesses) {
+          if (business.owner_user_id) memberIds.add(business.owner_user_id);
+          for (const member of business.members || []) {
+            const uid = String(member?.user_id || '').trim();
+            if (uid) memberIds.add(uid);
+          }
+        }
+        accounts = accounts.filter((a) => memberIds.has(a.user_id));
+      } else {
+        accounts = [];
       }
     }
 
@@ -1375,6 +1403,12 @@ export async function inviteUser(req, res) {
       if (!business) {
         return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
       }
+      if (actorUserId && !canManageBusinessTeam(business, actorUserId)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'No tienes permiso para invitar trabajadores a esta empresa',
+        });
+      }
     }
 
     const existingAccount = await findAccountByEmail(req, email);
@@ -1793,7 +1827,7 @@ export async function acceptInvitation(req, res) {
       ...account,
       fullName: resolvedFullName,
       phone: resolvedPhone,
-      linkedBusinessId: account.linkedBusinessId || business.business_id,
+      linkedBusinessId: business.business_id,
       invitedBy: profileDraft.invitedBy,
       role: account.role && account.role !== 'Usuario' ? account.role : (invitation.role || 'Usuario'),
       permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
@@ -1889,6 +1923,10 @@ export async function listBusinessInvitations(req, res) {
   try {
     const businessId = req.params.businessId;
     if (!businessId) return badRequest(res, 'Falta businessId');
+    const access = await assertBusinessTeamManage(req, businessId);
+    if (!access.ok) {
+      return res.status(access.status).json({ ok: false, error: access.error });
+    }
     const includeAll = String(req.query.includeAll || '').toLowerCase() === 'true';
     const invitations = await listInvitationsByBusiness(req, businessId, { includeAll });
     return res.json({ ok: true, invitations: invitations.map(sanitizeInvitation) });
@@ -1909,6 +1947,13 @@ export async function revokeInvitation(req, res) {
     }
     if (invitation.status !== 'pending') {
       return res.status(409).json({ ok: false, error: 'Solo se pueden revocar invitaciones pendientes.' });
+    }
+
+    if (invitation.business_id) {
+      const access = await assertBusinessTeamManage(req, invitation.business_id);
+      if (!access.ok) {
+        return res.status(access.status).json({ ok: false, error: access.error });
+      }
     }
 
     const now = new Date().toISOString();
@@ -3418,10 +3463,12 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     return badRequest(res, 'El código de tienda es obligatorio');
   }
 
-  const pdv = await findPointOfSaleByTerminalCode(req, terminalCode);
-  if (!pdv) {
+  const resolved = await resolveTerminalLoginCode(req, terminalCode);
+  if (!resolved?.pdv) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
+
+  const pdv = resolved.pdv;
 
   const business = await resolveBusinessForPointOfSale(req, pdv);
   if (!business) {
@@ -3494,12 +3541,13 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     },
     pointOfSale: sanitizePointOfSale(pdv),
     terminalBinding: {
-      terminalCode: String(pdv.terminalCode || terminalCode).trim().toUpperCase(),
+      terminalCode: String(terminalCode).trim().toUpperCase(),
       pdvId: pdv._id,
       workCenterId: pdv.workCenterId || '',
       businessId: business.business_id,
       dataUserId: pdv.user_id,
       tpvVertical: 'delivery',
+      ...(resolved.salaTerminalId ? { salaTerminalId: resolved.salaTerminalId } : {}),
     },
     accessToken,
     refreshToken,

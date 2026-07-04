@@ -9,12 +9,16 @@ export function normalizeClientBusinessScopeId(value) {
  * Con una sola empresa activa en la cuenta → todos los clientes del titular.
  */
 export function clientMatchesBusinessScope(doc, businessId, options = {}) {
-  if (options.legacySingleBusiness) return true;
   const bid = normalizeClientBusinessScopeId(businessId);
   if (!bid) return true;
   const docBid = normalizeClientBusinessScopeId(doc?.businessId || doc?.business_id);
-  if (!docBid) return true;
-  return docBid === bid;
+  if (!docBid) {
+    if (options.excludeUnscopedLegacy) return false;
+    return true;
+  }
+  if (docBid === bid) return true;
+  if (options.legacySingleBusiness) return true;
+  return false;
 }
 
 function foldSearchText(s) {

@@ -34,7 +34,12 @@ import {
   deliveryOrderRevenue,
   isCancelledDeliveryOrder,
 } from '../shared/clients/deliveryClientMatch.js';
-import { syncClientFromDeliveryOrders, enrichClientRowWithLiveDeliveryStats } from '../services/deliveryClientSync.js';
+import {
+  syncClientFromDeliveryOrders,
+  enrichClientRowWithLiveDeliveryStats,
+  scopeDeliveryOrdersToBusinessId,
+  scopeDeliveryOrdersToClientBusiness,
+} from '../services/deliveryClientSync.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -57,7 +62,12 @@ async function resolveClientListOptions(req, userId, businessId) {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return {};
   const count = await countActiveBusinesses(req, userId);
-  return { businessId: bid, legacySingleBusiness: count <= 1 };
+  return {
+    businessId: bid,
+    legacySingleBusiness: count <= 1,
+    /** Oculta clientes antiguos sin business_id cuando se filtra por empresa activa. */
+    excludeUnscopedLegacy: true,
+  };
 }
 
 async function resolveCreateBusinessId(req, userId, client = {}) {
@@ -107,7 +117,10 @@ export async function listClients(req, res) {
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
     let clients = items;
     if (enrichLiveStats && items.length > 0) {
-      const deliveryOrders = await listDeliveryOrdersByUser(req, userId);
+      const allOrders = await listDeliveryOrdersByUser(req, userId);
+      const deliveryOrders = businessId
+        ? await scopeDeliveryOrdersToBusinessId(req, userId, businessId, allOrders)
+        : allOrders;
       clients = items.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
     }
     return res.json({ ok: true, clients, meta });
@@ -255,11 +268,12 @@ export async function getClientDetail(req, res) {
     await syncClientFromDeliveryOrders(req, userId, clientId).catch(() => null);
     client = (await ensureClientOwner(req, userId, clientId)) || client;
 
-    const [salesDocs, invoiceDocs, deliveryOrders] = await Promise.all([
+    const [salesDocs, invoiceDocs, deliveryOrdersAll] = await Promise.all([
       ensureDatabase(req, getSalesDbName()).then(() => getAllDocuments(req, getSalesDbName())),
       ensureDatabase(req, getInvoicesDbName()).then(() => getAllDocuments(req, getInvoicesDbName())),
       listDeliveryOrdersByUser(req, userId),
     ]);
+    const deliveryOrders = await scopeDeliveryOrdersToClientBusiness(req, userId, client, deliveryOrdersAll);
 
     const clientSales = salesDocs.filter(
       (s) => s?.type === 'sale' && !s?.deletedAt && s?.user_id === userId && s?.clientId === clientId,
@@ -716,12 +730,13 @@ export async function getClientActivity(req, res) {
 
     await syncClientFromDeliveryOrders(req, userId, clientId).catch(() => null);
 
-    const [salesDocs, invoiceDocs, notesDocs, deliveryOrders] = await Promise.all([
+    const [salesDocs, invoiceDocs, notesDocs, deliveryOrdersAll] = await Promise.all([
       ensureDatabase(req, getSalesDbName()).then(() => getAllDocuments(req, getSalesDbName())),
       ensureDatabase(req, getInvoicesDbName()).then(() => getAllDocuments(req, getInvoicesDbName())),
       listClientNotesByClient(req, userId, clientId),
       listDeliveryOrdersByUser(req, userId),
     ]);
+    const deliveryOrders = await scopeDeliveryOrdersToClientBusiness(req, userId, client, deliveryOrdersAll);
 
     const clientSales = salesDocs.filter(
       (s) => s?.type === 'sale' && !s?.deletedAt && s?.user_id === userId && s?.clientId === clientId,

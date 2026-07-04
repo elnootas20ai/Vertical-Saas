@@ -278,13 +278,13 @@ function SubStepRow({ sub, stepRoute }: { sub: OnboardingSubStep; stepRoute: str
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const guide = getSubStepGuide(sub.id);
+  const guide = getSubStepGuide(sub.id, currentBusiness?.businessType);
 
   const goToActivation = () => {
     const uid = String(user?.user_id || user?.id || '').trim();
     const bid = resolveBusinessScopeId(currentBusiness);
     dismissOnboardingWelcomeTourForActivation(uid, bid);
-    navigate(buildActivationTargetUrl(stepRoute, sub.id));
+    navigate(buildActivationTargetUrl(stepRoute, sub.id, currentBusiness?.businessType));
   };
 
   return (

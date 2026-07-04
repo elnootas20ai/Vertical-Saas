@@ -6,8 +6,14 @@ import {
 } from '../shared/clients/clientSearchMatch.js';
 
 describe('clientMatchesBusinessScope', () => {
-  it('incluye clientes legacy sin business_id', () => {
+  it('incluye clientes legacy sin business_id si no hay filtro estricto', () => {
     expect(clientMatchesBusinessScope({ name: 'Ana' }, 'biz-a')).toBe(true);
+  });
+
+  it('oculta legacy sin business_id al filtrar por empresa activa', () => {
+    expect(
+      clientMatchesBusinessScope({ name: 'Ana' }, 'biz-a', { excludeUnscopedLegacy: true }),
+    ).toBe(false);
   });
 
   it('filtra por empresa cuando hay varias activas', () => {
@@ -16,7 +22,7 @@ describe('clientMatchesBusinessScope', () => {
     expect(clientMatchesBusinessScope(doc, 'biz-b', { legacySingleBusiness: false })).toBe(false);
   });
 
-  it('con una sola empresa activa no excluye por business_id', () => {
+  it('con una sola empresa activa no excluye por business_id distinto', () => {
     const doc = { business_id: 'biz-old', name: 'Ana' };
     expect(clientMatchesBusinessScope(doc, 'biz-a', { legacySingleBusiness: true })).toBe(true);
   });

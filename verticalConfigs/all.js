@@ -208,9 +208,31 @@ export const butcherOpsConfig = {
   },
 };
 
+export const restaurantConfig = {
+  name: 'restaurant', dbSuffix: 'restaurant',
+  entities: {
+    waitlist: {
+      type: 'rst_waitlist',
+      idPrefix: 'rsw',
+      fields: ['guestName', 'partySize', 'phone', 'estimatedWait', 'status', 'notes', 'zone', 'clientId'],
+      required: ['guestName'],
+    },
+    reservations: {
+      type: 'rst_reservation',
+      idPrefix: 'rsr',
+      fields: [
+        'guestName', 'phone', 'email', 'date', 'time', 'partySize',
+        'preferredZone', 'tableId', 'tableName', 'tableNumber', 'notes',
+        'status', 'history', 'orderId',
+      ],
+      required: ['guestName', 'date', 'time'],
+    },
+  },
+};
+
 export const allVerticalConfigs = [
   taxiConfig, pharmacyConfig, carWashConfig, vetConfig, nightclubConfig,
   academyConfig, realEstateConfig, lawyerConfig, hotelConfig, gymConfig,
   clinicConfig, eventsConfig, hairSalonConfig, sparePartsConfig, tobaccoConfig,
-  scrapyardOpsConfig, butcherOpsConfig,
+  scrapyardOpsConfig, butcherOpsConfig, restaurantConfig,
 ];

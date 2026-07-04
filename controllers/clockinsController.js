@@ -28,6 +28,7 @@ import {
   isMemberAssignedToSalesPoint,
   memberEmploymentSalesPointRef,
 } from '../services/clockinsAccess.js';
+import { isBusinessTeamMember } from '../services/businessAccess.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -834,6 +835,12 @@ export async function checkInMember(req, res) {
 
     const targetMemberId = normalizeClockinUserId(memberId);
     if (!targetMemberId) return badRequest(res, 'Falta memberId');
+    if (!isBusinessTeamMember(business, targetMemberId)) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Este trabajador no pertenece al equipo de esta empresa',
+      });
+    }
 
     const sp = String(salesPointId || '').trim();
     const isStoreTeamClockin = storeTeamClockin === true || storeTeamClockin === 'true';

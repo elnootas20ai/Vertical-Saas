@@ -3,6 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
 import { listCatalogItemsRequest, type CatalogItem } from '../lib/deliveryApi';
+import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope';
+import { listBrandsRequest } from '../lib/brandsApi';
+import { resolveBusinessScopeId } from '../lib/deliverySetup';
 import { filterStockInventoryItems } from '../lib/stockInventoryScope';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import { listWarehousesRequest, type Warehouse } from '../lib/warehouseApi';
@@ -15,10 +18,11 @@ export type StockWorkspaceScopeInput = {
 
 export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
   const { user } = useAuth();
-  const { currentBusiness, businessesFetchSettled } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
 
   const dataUserId = scopeInput?.dataUserId || resolveBusinessDataUserId(user, currentBusiness);
+  const businessId = resolveBusinessScopeId(currentBusiness);
   const businessType = (currentBusiness?.businessType || '') as BusinessType;
   const ready = businessesFetchSettled && Boolean(dataUserId);
 
@@ -66,11 +70,18 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     }
     setLoading(true);
     try {
-      const [catalogItems, wh] = await Promise.all([
+      const [catalogItems, wh, brands] = await Promise.all([
         listCatalogItemsRequest(dataUserId),
         listWarehousesRequest(dataUserId).catch(() => [] as Warehouse[]),
+        businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
       ]);
-      setItems(catalogItems);
+      const scoped = businessId
+        ? filterCatalogItemsForBusinessScope(catalogItems, businessId, brands, {
+            accountBusinessCount: businesses.length,
+            activeBusinessType: currentBusiness?.businessType,
+          })
+        : catalogItems;
+      setItems(scoped);
       setWarehouses(wh);
     } catch {
       setItems([]);
@@ -78,7 +89,7 @@ export function useStockWorkspace(scopeInput?: StockWorkspaceScopeInput) {
     } finally {
       setLoading(false);
     }
-  }, [dataUserId]);
+  }, [businessId, businesses.length, currentBusiness?.businessType, dataUserId]);
 
   useEffect(() => {
     if (!ready) return;

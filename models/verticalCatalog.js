@@ -758,6 +758,12 @@ const VERTICAL_CATALOG_CONFIGS = {
   },
 };
 
+VERTICAL_CATALOG_CONFIGS.restaurant = {
+  ...VERTICAL_CATALOG_CONFIGS.delivery,
+  itemLabel: 'Plato',
+  itemLabelPlural: 'Platos',
+};
+
 // ─── API pública ─────────────────────────────────────────────────────────────
 
 /**

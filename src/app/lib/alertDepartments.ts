@@ -71,6 +71,7 @@ const DELIVERY_DEPARTMENTS: BusinessAlertDepartment[] = [
 
 const VERTICAL_DEPARTMENT_IDS: Record<string, string[]> = {
   delivery: ['pdvs', 'delivery', 'rrhh', 'catalogProviders', 'finanzas', 'documentacion'],
+  restaurant: ['pdvs', 'delivery', 'rrhh', 'catalogProviders', 'finanzas', 'documentacion'],
   carDealership: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'operaciones'],
   workshop: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'operaciones'],
   cleaning: ['rrhh', 'catalogProviders', 'finanzas', 'documentacion', 'limpieza'],

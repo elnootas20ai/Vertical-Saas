@@ -1,12 +1,13 @@
-import { couchRequest } from '../services/couchdb.js';
+import { couchRequest, findBusinessById, getPayrollDbName } from '../services/couchdb.js';
 import { computeProfileCompletionAlerts } from '../services/workerProfileCompletion.js';
+import { assertBusinessTeamAccess, businessMemberUserIds } from '../services/businessAccess.js';
 
 const DAYS_30 = 30 * 24 * 60 * 60 * 1000;
 
 function computeDocAlerts(payrollDocs, members) {
   const alerts = [];
   const now = new Date();
-  const memberMap = new Map(members.map(m => [m.user_id, m]));
+  const memberMap = new Map(members.map((m) => [m.user_id, m]));
 
   for (const doc of payrollDocs) {
     if (!doc.expiryDate) continue;
@@ -50,7 +51,7 @@ function computeAssignmentAlerts(members) {
   for (const member of members) {
     if (member.status === 'inactive') continue;
     const assignments = member.employment?.assignments || [];
-    const hasActive = assignments.some(a => a.status === 'active');
+    const hasActive = assignments.some((a) => a.status === 'active');
     if (!hasActive) {
       alerts.push({
         id: `no-assignment-${member.user_id}`,
@@ -91,83 +92,57 @@ function computeCostReviewAlerts(members) {
   return alerts;
 }
 
-export async function getTeamAlerts(req, res) {
-  try {
-    const { businessId } = req.params;
-
-    const authRes = await couchRequest('GET', `/auth-users/_all_docs?include_docs=true`);
-    const allUsers = (authRes.rows || []).map(r => r.doc).filter(Boolean);
-    const members = allUsers.filter(u =>
-      u.linkedBusinessId === businessId ||
-      u.onboardingData?.businessId === businessId
-    );
-
-    let payrollDocs = [];
-    try {
-      const payrollDbName = `${businessId}-payroll`;
-      const payrollRes = await couchRequest('GET', `/${encodeURIComponent(payrollDbName)}/_all_docs?include_docs=true`);
-      payrollDocs = (payrollRes.rows || []).map(r => r.doc).filter(d => d && d.type === 'payroll');
-    } catch {
-      // DB might not exist yet
-    }
-
-    const docAlerts = computeDocAlerts(payrollDocs, members);
-    const assignmentAlerts = computeAssignmentAlerts(members);
-    const costAlerts = computeCostReviewAlerts(members);
-    const profileAlerts = computeProfileCompletionAlerts(members);
-    const allAlerts = [...docAlerts, ...assignmentAlerts, ...costAlerts, ...profileAlerts];
-
-    allAlerts.sort((a, b) => {
-      const severityOrder = { critical: 0, warning: 1, info: 2 };
-      return (severityOrder[a.severity] || 3) - (severityOrder[b.severity] || 3);
-    });
-
-    res.json({ alerts: allAlerts, total: allAlerts.length });
-  } catch (err) {
-    console.error('[teamAlerts] Error:', err.message);
-    res.status(500).json({ error: 'Error al obtener alertas de equipo' });
-  }
+function normalizeBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
 }
 
-export async function getTeamAlertsSummary(req, res) {
-  try {
-    const result = await getTeamAlertsInternal(req.params.businessId);
-    const { alerts } = result;
-    res.json({
-      total: alerts.length,
-      critical: alerts.filter(a => a.severity === 'critical').length,
-      warning: alerts.filter(a => a.severity === 'warning').length,
-      info: alerts.filter(a => a.severity === 'info').length,
-      byType: {
-        document_expired: alerts.filter(a => a.type === 'document_expired').length,
-        document_expiring: alerts.filter(a => a.type === 'document_expiring').length,
-        no_assignment: alerts.filter(a => a.type === 'no_assignment').length,
-        cost_review_pending: alerts.filter(a => a.type === 'cost_review_pending').length,
-        profile_incomplete: alerts.filter(a => a.type === 'profile_incomplete').length,
-      },
-    });
-  } catch (err) {
-    console.error('[teamAlertsSummary] Error:', err.message);
-    res.status(500).json({ error: 'Error al obtener resumen de alertas' });
-  }
-}
+async function loadBusinessMembers(req, businessId) {
+  const business = await findBusinessById(req, businessId);
+  if (!business) return { business: null, members: [] };
 
-async function getTeamAlertsInternal(businessId) {
+  const memberIds = businessMemberUserIds(business);
+  if (memberIds.size === 0) {
+    return { business, members: [] };
+  }
+
   const authRes = await couchRequest('GET', `/auth-users/_all_docs?include_docs=true`);
-  const allUsers = (authRes.rows || []).map(r => r.doc).filter(Boolean);
-  const members = allUsers.filter(u =>
-    u.linkedBusinessId === businessId ||
-    u.onboardingData?.businessId === businessId
-  );
+  const allUsers = (authRes.rows || []).map((r) => r.doc).filter(Boolean);
+  const members = allUsers.filter((u) => memberIds.has(u.user_id));
+  return { business, members };
+}
 
-  let payrollDocs = [];
+async function loadPayrollDocsForBusiness(businessId) {
+  const bid = normalizeBusinessId(businessId);
+  if (!bid) return [];
   try {
-    const payrollDbName = `${businessId}-payroll`;
-    const payrollRes = await couchRequest('GET', `/${encodeURIComponent(payrollDbName)}/_all_docs?include_docs=true`);
-    payrollDocs = (payrollRes.rows || []).map(r => r.doc).filter(d => d && d.type === 'payroll');
+    const payrollDbName = getPayrollDbName();
+    const payrollRes = await couchRequest(
+      'GET',
+      `/${encodeURIComponent(payrollDbName)}/_all_docs?include_docs=true`,
+    );
+    return (payrollRes.rows || [])
+      .map((r) => r.doc)
+      .filter(
+        (d) =>
+          d &&
+          d.type === 'payroll' &&
+          normalizeBusinessId(d.business_id) === bid,
+      );
   } catch {
-    // DB might not exist
+    return [];
   }
+}
+
+async function getTeamAlertsInternal(req, businessId) {
+  const access = await assertBusinessTeamAccess(req, businessId);
+  if (!access.ok) {
+    const err = new Error(access.error);
+    err.status = access.status;
+    throw err;
+  }
+
+  const { members } = await loadBusinessMembers(req, businessId);
+  const payrollDocs = await loadPayrollDocsForBusiness(businessId);
 
   const alerts = [
     ...computeDocAlerts(payrollDocs, members),
@@ -177,4 +152,46 @@ async function getTeamAlertsInternal(businessId) {
   ];
 
   return { alerts };
+}
+
+export async function getTeamAlerts(req, res) {
+  try {
+    const { businessId } = req.params;
+    const { alerts } = await getTeamAlertsInternal(req, businessId);
+
+    alerts.sort((a, b) => {
+      const severityOrder = { critical: 0, warning: 1, info: 2 };
+      return (severityOrder[a.severity] || 3) - (severityOrder[b.severity] || 3);
+    });
+
+    res.json({ alerts, total: alerts.length });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error('[teamAlerts] Error:', err.message);
+    res.status(status).json({ error: err.message || 'Error al obtener alertas de equipo' });
+  }
+}
+
+export async function getTeamAlertsSummary(req, res) {
+  try {
+    const result = await getTeamAlertsInternal(req, req.params.businessId);
+    const { alerts } = result;
+    res.json({
+      total: alerts.length,
+      critical: alerts.filter((a) => a.severity === 'critical').length,
+      warning: alerts.filter((a) => a.severity === 'warning').length,
+      info: alerts.filter((a) => a.severity === 'info').length,
+      byType: {
+        document_expired: alerts.filter((a) => a.type === 'document_expired').length,
+        document_expiring: alerts.filter((a) => a.type === 'document_expiring').length,
+        no_assignment: alerts.filter((a) => a.type === 'no_assignment').length,
+        cost_review_pending: alerts.filter((a) => a.type === 'cost_review_pending').length,
+        profile_incomplete: alerts.filter((a) => a.type === 'profile_incomplete').length,
+      },
+    });
+  } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error('[teamAlertsSummary] Error:', err.message);
+    res.status(status).json({ error: err.message || 'Error al obtener resumen de alertas' });
+  }
 }

@@ -20,6 +20,7 @@ import {
   normalizeClientBusinessScopeId,
   scoreClientSearchMatch,
 } from '../shared/clients/clientSearchMatch.js';
+import { resolveTerminalLoginFromDocs } from './terminalLoginResolve.js';
 
 export { clientMatchesBusinessScope };
 
@@ -5015,16 +5016,17 @@ export function verifyPosPin(pin, hash) {
   return verifyPassword(normalizePosPin(pin), hash);
 }
 
-export function buildBusinessDocument({ ownerUserId, name, legalName = '', taxId = '', address = '', city = '', phone = '', email = '', logo = '', groupId = null, businessType = 'carDealership', companyCode = '' }) {
+export function buildBusinessDocument({ ownerUserId, name, legalName = '', taxId = '', address = '', city = '', phone = '', email = '', logo = '', groupId = null, businessType = 'carDealership', companyCode = '', restaurantFormat = null }) {
   const businessId = uuidv4();
   const now = new Date().toISOString();
-  return {
+  const bt = String(businessType || 'carDealership').trim();
+  const doc = {
     _id: `business:${businessId}`,
     type: 'business',
     business_id: businessId,
     owner_user_id: String(ownerUserId || '').trim(),
     group_id: groupId || null,
-    businessType: String(businessType || 'carDealership').trim(),
+    businessType: bt,
     name: String(name || '').trim(),
     legalName: String(legalName || '').trim(),
     taxId: String(taxId || '').trim(),
@@ -5049,6 +5051,10 @@ export function buildBusinessDocument({ ownerUserId, name, legalName = '', taxId
     createdAt: now,
     updatedAt: now,
   };
+  if (bt === 'restaurant' && restaurantFormat) {
+    doc.restaurantFormat = String(restaurantFormat).trim();
+  }
+  return doc;
 }
 
 export function sanitizeBusiness(business) {
@@ -5060,6 +5066,7 @@ export function sanitizeBusiness(business) {
     owner_user_id: business.owner_user_id || '',
     group_id: business.group_id || null,
     businessType: business.businessType || 'carDealership',
+    restaurantFormat: business.restaurantFormat || null,
     name: business.name || '',
     legalName: business.legalName || '',
     taxId: business.taxId || '',
@@ -6597,27 +6604,16 @@ export async function findWorkCenterById(req, workCenterId) {
 }
 
 export async function findPointOfSaleByTerminalCode(req, terminalCode, excludePdvId = '') {
-  const code = String(terminalCode || '').trim().toUpperCase();
-  if (!code) return null;
+  const resolved = await resolveTerminalLoginCode(req, terminalCode, excludePdvId);
+  return resolved?.pdv || null;
+}
+
+/** Resuelve código tablet (PDV) o código de terminal sala (SALA-*). */
+export async function resolveTerminalLoginCode(req, terminalCode, excludePdvId = '') {
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
-  const exclude = String(excludePdvId || '').trim();
-  const isOpenPdv = (d) =>
-    d?.type === 'point_of_sale' &&
-    !d?.deletedAt &&
-    d.active !== false &&
-    (!exclude || d._id !== exclude);
-
-  const byTerminal = docs.find(
-    (d) => isOpenPdv(d) && String(d.terminalCode || '').toUpperCase() === code,
-  );
-  if (byTerminal) return byTerminal;
-
-  // Fallback: algunos usuarios copian el código PDV (Ajustes) en lugar del código tablet.
-  return docs.find(
-    (d) => isOpenPdv(d) && String(d.code || '').trim().toUpperCase() === code,
-  ) || null;
+  return resolveTerminalLoginFromDocs(docs, terminalCode, excludePdvId);
 }
 
 export async function findTeamMemberByPosPin(req, businessId, pin) {
@@ -9891,8 +9887,12 @@ export function buildPurchaseInvoiceDocument(userId, data = {}, existing = null)
     paidAt: String(data.paidAt || existing?.paidAt || ''),
     linkedPurchaseOrderId: data.linkedPurchaseOrderId || existing?.linkedPurchaseOrderId || '',
     linkedPurchaseOrderNumber: data.linkedPurchaseOrderNumber || existing?.linkedPurchaseOrderNumber || '',
-    costCenterId: data.costCenterId || existing?.costCenterId || '',
-    costCenterName: data.costCenterName || existing?.costCenterName || '',
+    costCenterId: data.costCenterId || data.workCenterId || existing?.costCenterId || existing?.workCenterId || '',
+    costCenterName: data.costCenterName || data.workCenterName || existing?.costCenterName || existing?.workCenterName || '',
+    businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '').trim(),
+    businessName: String(data.businessName || data.business_name || existing?.businessName || existing?.business_name || '').trim(),
+    workCenterId: String(data.workCenterId || data.costCenterId || existing?.workCenterId || existing?.costCenterId || '').trim(),
+    workCenterName: String(data.workCenterName || data.costCenterName || existing?.workCenterName || existing?.costCenterName || '').trim(),
     entryMethod: data.entryMethod || existing?.entryMethod || 'manual',
     ocrData: data.ocrData || existing?.ocrData || null,
     ocrImageBase64: data.ocrImageBase64 || existing?.ocrImageBase64 || '',
@@ -9934,6 +9934,10 @@ export function sanitizePurchaseInvoice(doc) {
     linkedFinanceId: doc.linkedFinanceId || '',
     costCenterId: doc.costCenterId || '',
     costCenterName: doc.costCenterName || '',
+    businessId: doc.businessId || doc.business_id || '',
+    businessName: doc.businessName || doc.business_name || '',
+    workCenterId: doc.workCenterId || doc.costCenterId || '',
+    workCenterName: doc.workCenterName || doc.costCenterName || '',
     entryMethod: doc.entryMethod || 'manual',
     source: doc.source || 'manual',
     sourceEmailId: doc.sourceEmailId || '',

@@ -14,6 +14,7 @@ import {
   getDocument,
   putDocument,
   softDeleteDocument,
+  findBusinessById,
 } from '../services/couchdb.js';
 import { computeVolumeDiscount } from '../shared/volumeDiscount.js';
 import { calculateShippingRates } from '../services/shippingService.js';
@@ -32,6 +33,30 @@ function errorMsg(error) {
   try { return JSON.stringify(error); } catch { return 'Error interno'; }
 }
 
+function normalizeBusinessScopeId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+async function isWebOrderingAllowedForBusiness(req, businessId) {
+  const bid = normalizeBusinessScopeId(businessId);
+  if (!bid) return false;
+  const business = await findBusinessById(req, bid);
+  return String(business?.businessType || '').trim() !== 'restaurant';
+}
+
+async function loadEnabledStorefrontConfig(req, res, slug) {
+  const config = await getWebConfigBySlug(req, slug);
+  if (!config || !config.enabled) {
+    res.status(404).json({ ok: false, error: 'Tienda no encontrada' });
+    return null;
+  }
+  if (!(await isWebOrderingAllowedForBusiness(req, config.business_id))) {
+    res.status(404).json({ ok: false, error: 'Tienda no encontrada' });
+    return null;
+  }
+  return config;
+}
+
 // ─── PUBLIC ENDPOINTS (no auth) ──────────────────────────────────────────────
 
 export async function getPublicStorefront(req, res) {
@@ -39,10 +64,8 @@ export async function getPublicStorefront(req, res) {
     const { slug } = req.params;
     if (!slug) return badRequest(res, 'Falta slug');
 
-    const config = await getWebConfigBySlug(req, slug);
-    if (!config || !config.enabled) {
-      return res.status(404).json({ ok: false, error: 'Tienda no encontrada' });
-    }
+    const config = await loadEnabledStorefrontConfig(req, res, slug);
+    if (!config) return;
 
     const catalogItems = await listCatalogItemsByUser(req, config.business_id);
     const activeItems = catalogItems
@@ -77,10 +100,8 @@ export async function getPublicShippingRates(req, res) {
     const { postalCode } = req.body || {};
     if (!slug) return badRequest(res, 'Falta slug');
 
-    const config = await getWebConfigBySlug(req, slug);
-    if (!config || !config.enabled) {
-      return res.status(404).json({ ok: false, error: 'Tienda no encontrada' });
-    }
+    const config = await loadEnabledStorefrontConfig(req, res, slug);
+    if (!config) return;
 
     if (!config.deliveryEnabled) {
       return res.json({ ok: true, options: [], error: 'El envío a domicilio no está disponible' });
@@ -100,10 +121,8 @@ export async function createPublicOrder(req, res) {
     if (!slug) return badRequest(res, 'Falta slug');
     if (!order || typeof order !== 'object') return badRequest(res, 'Falta el objeto order');
 
-    const config = await getWebConfigBySlug(req, slug);
-    if (!config || !config.enabled) {
-      return res.status(404).json({ ok: false, error: 'Tienda no encontrada' });
-    }
+    const config = await loadEnabledStorefrontConfig(req, res, slug);
+    if (!config) return;
 
     if (!config.isOpen) {
       return res.status(400).json({ ok: false, error: config.closedMessage || 'Tienda cerrada' });
@@ -214,6 +233,9 @@ export async function saveWebConfig(req, res) {
     const { config } = req.body || {};
     if (!businessId) return badRequest(res, 'Falta businessId');
     if (!config || typeof config !== 'object') return badRequest(res, 'Falta el objeto config');
+    if (!(await isWebOrderingAllowedForBusiness(req, businessId))) {
+      return res.status(403).json({ ok: false, error: 'La tienda web no está disponible para bar/restaurante' });
+    }
 
     if (config.slug) {
       const existing = await getWebConfigBySlug(req, config.slug);

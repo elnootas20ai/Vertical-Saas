@@ -22,15 +22,17 @@ import {
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import {
-  DELIVERY_NEED_OPTIONS,
   deliveryNeedsToModules,
+  emptyRestaurantNeeds,
+  getDeliveryNeedOptionsForBusinessType,
   getNeedsOptionsForBusinessType,
-  isDeliveryBusinessType,
   modulesToDeliveryNeeds,
+  usesDeliveryNeedsOnboarding,
   type DeliveryNeedKey,
   type DeliveryNeedsSelection,
   type RequestedModuleKey,
 } from '../../../lib/onboardingPlanRecommendation';
+import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 
 const STEP_INDEX = 3;
 
@@ -66,7 +68,7 @@ const DELIVERY_ICONS: Record<DeliveryNeedKey, LucideIcon> = {
 export function Needs() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
-  const isDelivery = isDeliveryBusinessType(data.businessType);
+  const isDeliveryOps = usesDeliveryNeedsOnboarding(data.businessType);
 
   useEffect(() => {
     if (data.completedStep < STEP_INDEX - 1) {
@@ -83,12 +85,25 @@ export function Needs() {
     workshop: data.requestedModules.workshop,
   });
 
-  const [deliveryNeeds, setDeliveryNeeds] = useState<DeliveryNeedsSelection>(() =>
-    data.deliveryNeeds ?? modulesToDeliveryNeeds(data.requestedModules),
-  );
+  const [deliveryNeeds, setDeliveryNeeds] = useState<DeliveryNeedsSelection>(() => {
+    if (data.deliveryNeeds) return data.deliveryNeeds;
+    if (isRestaurantBusinessType(data.businessType)) return emptyRestaurantNeeds(data.restaurantFormat);
+    return modulesToDeliveryNeeds(data.requestedModules);
+  });
+
+  useEffect(() => {
+    if (isRestaurantBusinessType(data.businessType) && !data.deliveryNeeds) {
+      setDeliveryNeeds(emptyRestaurantNeeds(data.restaurantFormat));
+    }
+  }, [data.businessType, data.deliveryNeeds, data.restaurantFormat]);
 
   const needsOptions = useMemo(
     () => getNeedsOptionsForBusinessType(data.businessType),
+    [data.businessType],
+  );
+
+  const deliveryNeedOptions = useMemo(
+    () => getDeliveryNeedOptionsForBusinessType(data.businessType),
     [data.businessType],
   );
 
@@ -106,7 +121,7 @@ export function Needs() {
   };
 
   const handleContinue = () => {
-    if (isDelivery) {
+    if (isDeliveryOps) {
       updateData('deliveryNeeds', deliveryNeeds);
       updateData('requestedModules', deliveryNeedsToModules(deliveryNeeds));
     } else {
@@ -132,17 +147,19 @@ export function Needs() {
     >
       <OnboardingStepHeading
         stepLabel="Paso 4 · Operativa"
-        title={isDelivery ? '¿Qué quieres usar?' : '¿Qué vas a usar en Vertial?'}
+        title={isDeliveryOps ? '¿Qué quieres usar?' : '¿Qué vas a usar en Vertial?'}
         subtitle={
-          isDelivery
-            ? 'Marca lo que necesitas. Con esto calculamos el plan y el precio mensual recomendado.'
+          isDeliveryOps
+            ? isRestaurantBusinessType(data.businessType)
+              ? 'Marca lo que necesitas en tu local. El reparto a domicilio es opcional.'
+              : 'Marca lo que necesitas. Con esto calculamos el plan y el precio mensual recomendado.'
             : 'Indica tu operativa. Con esto calculamos el plan y el precio mensual recomendado.'
         }
       />
 
       <div className="flex-1 min-h-0 grid grid-cols-2 lg:grid-cols-4 gap-2 auto-rows-fr">
-        {isDelivery
-          ? DELIVERY_NEED_OPTIONS.map((option) => {
+        {isDeliveryOps
+          ? deliveryNeedOptions.map((option) => {
               const Icon = DELIVERY_ICONS[option.key];
               return (
                 <ACCESO__SelectableCard
@@ -173,7 +190,7 @@ export function Needs() {
       </div>
 
       <p className="shrink-0 mt-2 text-xs text-blue-800 dark:text-blue-200 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2 leading-snug">
-        {isDelivery
+        {isDeliveryOps
           ? 'Puedes elegir varias. En el siguiente paso verás el precio según usuarios, locales y lo que marques aquí.'
           : 'En el siguiente paso verás el plan sugerido. Podrás cambiar módulos después en Configuración.'}
       </p>

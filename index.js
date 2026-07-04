@@ -159,6 +159,12 @@ import {
   assertClockinDocReadAccess,
   validateClockinDocWrite,
 } from './middleware/couchClockinsGuard.js';
+import {
+  isRrhhScopedDb,
+  filterRrhhDocsForRequester,
+  assertRrhhDocReadAccess,
+  validateRrhhDocWrite,
+} from './middleware/couchRrhhGuard.js';
 import { validateWorkCenterEntitlementWrite } from './services/entitlementEnforcement.js';
 
 const _5xxTimes = [];
@@ -1374,6 +1380,7 @@ Clasifica el documento en uno de estos tipos:
 - "certificado_laboral": certificado de empresa, vida laboral
 - "baja_it": parte de baja, incapacidad temporal
 - "contrato_comercial": contrato mercantil, acuerdo comercial
+- "contrato_alquiler": contrato de arrendamiento, alquiler de local o vivienda
 - "presupuesto": presupuesto o cotización
 - "documento_cliente": documento genérico de/para un cliente
 - "documento_vertical": documento específico de un sector (obra, clínica, legal, etc.)
@@ -1448,7 +1455,7 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
     logger.info({ tag: 'OCR', processingTimeMs, documentType: parsed.documentType, confidence: parsed.confidenceScore, sourceHash }, 'OCR completed');
 
     const INCOME_DOC_TYPES = ['factura_cliente', 'recibo'];
-    const EXPENSE_DOC_TYPES = ['factura_proveedor', 'ticket_gasto', 'nomina'];
+    const EXPENSE_DOC_TYPES = ['factura_proveedor', 'ticket_gasto', 'nomina', 'contrato_alquiler'];
     const docType = String(parsed.documentType || '');
     let suggestedMovement = null;
     if (INCOME_DOC_TYPES.includes(docType) || EXPENSE_DOC_TYPES.includes(docType)) {
@@ -1456,6 +1463,7 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
       const categoryMap = {
         factura_proveedor: 'materiales', ticket_gasto: 'otros_gastos', nomina: 'personal',
         factura_cliente: 'ventas', recibo: 'otros_ingresos',
+        contrato_alquiler: 'alquiler',
       };
       suggestedMovement = {
         type: isIncome ? 'cobro' : 'pago',
@@ -1540,7 +1548,13 @@ app.put('/api/couch/db/:dbName', async (req, res) => {
   }
 });
 
-app.get('/api/couch/docs/:dbName', requireCouchDbAccess, cacheResponse({ ttl: cacheService.TTL_PRESETS.DOCS_LIST, keyFn: (req) => `db:${req.params.dbName}:all_docs` }), async (req, res) => {
+app.get('/api/couch/docs/:dbName', requireCouchDbAccess, cacheResponse({ ttl: cacheService.TTL_PRESETS.DOCS_LIST, keyFn: (req) => {
+  if (isRrhhScopedDb(req.params.dbName) || isClockinsDb(req.params.dbName)) {
+    const uid = req.authUser?.userId || req.authUser?.user_id || 'anon';
+    return `db:${req.params.dbName}:all_docs:${uid}`;
+  }
+  return `db:${req.params.dbName}:all_docs`;
+} }), async (req, res) => {
   try {
     const dbName = encodeURIComponent(req.params.dbName);
     const response = await couchRequest(req, `/${dbName}/_all_docs?include_docs=true`);
@@ -1554,6 +1568,10 @@ app.get('/api/couch/docs/:dbName', requireCouchDbAccess, cacheResponse({ ttl: ca
     const docs = (payload.rows || []).map((row) => row.doc).filter(Boolean);
     if (isClockinsDb(req.params.dbName)) {
       const filtered = await filterClockinsDocsForRequester(req, docs);
+      return res.json({ docs: filtered });
+    }
+    if (isRrhhScopedDb(req.params.dbName)) {
+      const filtered = await filterRrhhDocsForRequester(req, docs);
       return res.json({ docs: filtered });
     }
     return res.json({ docs });
@@ -1580,6 +1598,12 @@ app.get('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, cacheResponse({ t
       const allowed = await assertClockinDocReadAccess(req, payload);
       if (!allowed) {
         return res.status(403).json({ error: 'No autorizado para ver este fichaje' });
+      }
+    }
+    if (isRrhhScopedDb(req.params.dbName)) {
+      const allowed = await assertRrhhDocReadAccess(req, payload);
+      if (!allowed) {
+        return res.status(403).json({ error: 'No autorizado para ver este documento RRHH' });
       }
     }
 
@@ -1674,6 +1698,15 @@ app.delete('/api/couch/attachment/:dbName/:docId/:attachmentName', requireCouchD
 
 app.post('/api/couch/doc/:dbName', requireCouchDbAccess, async (req, res) => {
   try {
+    if (isRrhhScopedDb(req.params.dbName)) {
+      const validation = await validateRrhhDocWrite(req, req.body, req.body?._id || null, req.params.dbName);
+      if (!validation.ok) {
+        return res.status(validation.status).json({ error: validation.error });
+      }
+      if (!req.body.business_id && validation.businessId) {
+        req.body.business_id = validation.businessId;
+      }
+    }
     const actorEmail = req.authUser?.email || '';
     const wcCheck = await validateWorkCenterEntitlementWrite(
       req,
@@ -1710,6 +1743,15 @@ app.put('/api/couch/doc/:dbName/:docId', requireCouchDbAccess, async (req, res) 
       const validation = await validateClockinDocWrite(req, req.body, req.params.docId);
       if (!validation.ok) {
         return res.status(validation.status).json({ error: validation.error });
+      }
+    }
+    if (isRrhhScopedDb(req.params.dbName)) {
+      const validation = await validateRrhhDocWrite(req, req.body, req.params.docId, req.params.dbName);
+      if (!validation.ok) {
+        return res.status(validation.status).json({ error: validation.error });
+      }
+      if (!req.body.business_id && validation.businessId) {
+        req.body.business_id = validation.businessId;
       }
     }
     const actorEmail = req.authUser?.email || '';

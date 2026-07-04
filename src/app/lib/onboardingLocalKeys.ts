@@ -303,6 +303,8 @@ export function resolveOnboardingTourStepIndex(
     if (id) {
       const byId = steps.findIndex((s) => s.id === id);
       if (byId >= 0) return byId;
+      // ID de otro tour (p. ej. genérico 6 pasos vs ops 5) → no reutilizar índice numérico
+      return 0;
     }
     if (typeof parsed.i === 'number' && Number.isFinite(parsed.i)) {
       return clampOnboardingTourStepIndex(parsed.i, steps.length);

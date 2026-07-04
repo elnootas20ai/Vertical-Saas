@@ -69,7 +69,13 @@ export interface ChangelogEntry {
   tag: 'nuevo' | 'mejora' | 'fix' | 'deprecado';
   title: string;
   description: string;
-  items: string[];
+  /** disponible = ya en producción; avance = en desarrollo; proximamente = anunciado */
+  status?: 'disponible' | 'avance' | 'proximamente';
+  /** Qué gana el cliente con esta novedad */
+  improvements?: string[];
+  /** Qué viene después o en qué estamos trabajando */
+  advances?: string[];
+  items?: string[];
 }
 
 // ─── API base ─────────────────────────────────────────────────────────────────

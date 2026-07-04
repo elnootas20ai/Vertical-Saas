@@ -331,10 +331,13 @@ export function buildDeliveryCatalogImportWorkbook(commercialLines: ImportBrandL
   return wb;
 }
 
-export function downloadDeliveryCatalogImportTemplate(commercialLines: ImportBrandLike[] = []) {
+export function downloadDeliveryCatalogImportTemplate(
+  commercialLines: ImportBrandLike[] = [],
+  filename = DELIVERY_CATALOG_TEMPLATE_FILENAME,
+) {
   const organizers = organizerBrandsForCatalogTemplate(commercialLines);
   const wb = buildDeliveryCatalogImportWorkbook(organizers);
-  XLSX.writeFile(wb, DELIVERY_CATALOG_TEMPLATE_FILENAME);
+  XLSX.writeFile(wb, filename || DELIVERY_CATALOG_TEMPLATE_FILENAME);
 }
 
 export function parseImportPrice(raw: string): number {

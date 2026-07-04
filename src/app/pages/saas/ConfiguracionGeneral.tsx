@@ -46,6 +46,9 @@ import {
   DELIVERY_WORK_CENTERS_CHANGED,
   loadDeliveryStores,
 } from '../../lib/deliverySetup';
+import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
   getModulesConfig,
   saveModulesConfig,
@@ -87,7 +90,7 @@ import {
   formatDeliveryStockImportValidationToast,
   validateDeliveryStockImportEntries,
 } from '../../lib/deliveryStockExcelTemplate';
-import { notifyDeliveryCatalogChanged } from '../../lib/deliverySetup';
+import { notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
@@ -326,7 +329,7 @@ const CONNECTIONS = [
 
 export function ConfiguracionGeneral() {
   const navigate = useNavigate();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const { user } = useAuth();
   const { subscription } = useApp();
 
@@ -345,21 +348,27 @@ export function ConfiguracionGeneral() {
   const bizId = biz?.business_id;
   const dataUserId = resolveBusinessDataUserId(user, biz);
   const isDeliveryBiz = biz?.businessType === 'delivery';
+  const isRestaurantBiz = isRestaurantBusinessType(biz?.businessType);
+  const isDeliveryOpsBiz = isDeliveryOpsBusinessType(biz?.businessType);
+  const businessScopeId = resolveBusinessScopeId(biz);
+  const catalogImportTemplateFilename = isRestaurantBiz
+    ? 'plantilla_catalogo_restaurante_tpv.xlsx'
+    : 'plantilla_catalogo_delivery_tpv.xlsx';
   const isCarDealershipBiz = biz?.businessType === 'carDealership';
   const visibleConnections = useMemo(
     () => CONNECTIONS.filter((conn) => {
-      if (conn.id === 'tpv') return isDeliveryBiz;
+      if (conn.id === 'tpv') return isDeliveryOpsBiz;
       if (conn.id === 'stock' && isCarDealershipBiz) return false;
       return true;
     }),
-    [isDeliveryBiz, isCarDealershipBiz],
+    [isDeliveryOpsBiz, isCarDealershipBiz],
   );
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
   const catalogImportDone =
     (resolvedImportStatus?.catalog ?? biz?.initialImportStatus?.catalog) === 'completed';
 
   const catalogImportFields: ImportFieldDef[] = useMemo(() => {
-    if (biz?.businessType === 'delivery') return DELIVERY_CATALOG_IMPORT_FIELDS;
+    if (isDeliveryOpsBiz) return DELIVERY_CATALOG_IMPORT_FIELDS;
     return [
       { key: 'name', label: 'Nombre', required: true, example: 'Artículo ejemplo' },
       { key: 'sku', label: 'SKU', example: 'SKU-001' },
@@ -373,24 +382,25 @@ export function ConfiguracionGeneral() {
       { key: 'minStock', label: 'Stock mínimo', example: '20' },
       { key: 'notes', label: 'Notas', example: '' },
     ];
-  }, [biz?.businessType]);
+  }, [isDeliveryOpsBiz]);
 
   const handleDownloadCatalogTemplate = useCallback(async () => {
     if (!bizId) return;
     const brandList = await listBrandsRequest(bizId).catch(() => []);
     const lines = organizerBrandsForCatalogTemplate(brandList);
-    downloadDeliveryCatalogImportTemplate(lines);
+    downloadDeliveryCatalogImportTemplate(lines, catalogImportTemplateFilename);
     toast.success('Plantilla catálogo');
-  }, [bizId]);
+  }, [bizId, catalogImportTemplateFilename]);
 
   const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
     if (!dataUserId) return 0;
     const businessType = biz?.businessType || 'delivery';
-    const isDelivery = businessType === 'delivery';
+    const usesTpvCatalogImport = isDeliveryOpsBusinessType(businessType);
+    const catalogVertical = isRestaurantBusinessType(businessType) ? 'restaurant' : businessType;
     let brandCache = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
 
     let importRows = entries;
-    if (isDelivery) {
+    if (usesTpvCatalogImport) {
       const { validEntries, issues } = partitionDeliveryCatalogImportEntries(entries, brandCache);
       importRows = validEntries;
       const blocked = issues.filter((i) => i.severity === 'error');
@@ -413,14 +423,18 @@ export function ConfiguracionGeneral() {
     const items: Record<string, unknown>[] = [];
 
     for (const entry of importRows) {
-      if (isDelivery && bizId) {
-        const mapped = await mapImportEntryToCatalogItem(entry, { businessId: bizId, brandCache });
+      if (usesTpvCatalogImport && bizId) {
+        const mapped = await mapImportEntryToCatalogItem(entry, {
+          businessId: bizId,
+          brandCache,
+          vertical: catalogVertical,
+        });
         if (!mapped) continue;
         brandCache = mapped.brandCache;
         unmatchedCommercialBrands.push(...mapped.unmatchedLineNames);
         items.push({
           ...mapped.item,
-          vertical: businessType,
+          vertical: catalogVertical,
           notes: entry.notes || '',
         });
         continue;
@@ -462,7 +476,7 @@ export function ConfiguracionGeneral() {
 
     // Marcar como completado si se creó al menos 1.
     if (bizId && result.created > 0) {
-      if (isDelivery) {
+      if (usesTpvCatalogImport) {
         await syncTpvOrganizersAfterCatalogImport(
           bizId,
           items as Array<{ brandIds?: string[]; category?: string }>,
@@ -536,7 +550,12 @@ export function ConfiguracionGeneral() {
     }
     setLoadingCenters(true);
     try {
-      const state = await loadDeliveryStores(user, biz);
+      const state = isDeliveryOpsBusinessType(biz?.businessType)
+        ? await loadRetailStoresForBusiness(user, biz, businesses, {
+            accountBusinessCount: businesses.length,
+            knownBusinessIds: businesses.map((b) => b.business_id).filter(Boolean),
+          })
+        : await loadDeliveryStores(user, biz);
       setWorkCenters(state.workCenters);
       setPdvCount(state.pointsOfSale.length);
     } catch {
@@ -545,7 +564,7 @@ export function ConfiguracionGeneral() {
     } finally {
       setLoadingCenters(false);
     }
-  }, [user, bizId, biz]);
+  }, [user, bizId, biz, businesses]);
 
   useEffect(() => {
     void loadWorkCenters();
@@ -617,13 +636,19 @@ export function ConfiguracionGeneral() {
     (c) => c.centerType === 'punto_de_venta' || c.centerType === 'almacen',
   );
 
+  const hrCopy = getHrLocationCopy(biz?.businessType);
+
   const sedesDescription = loadingCenters
-    ? 'Cargando locales…'
+    ? hrCopy.inviteWorkCentersLoading
     : activeCenters.length > 0
       ? pdvCount > 0
-        ? `${retailCenters.length} local(es) · ${pdvCount} PDV`
+        ? isRestaurantBiz
+          ? `${retailCenters.length} local(es) · ${pdvCount} caja(s)`
+          : isDeliveryBiz
+            ? `${retailCenters.length} tienda(s) · ${pdvCount} PDV`
+            : `${retailCenters.length} local(es) · ${pdvCount} PDV`
         : `${activeCenters.length} centro(s) activo(s)`
-      : 'Configura tus centros de trabajo en Ajustes → Tienda';
+      : hrCopy.sedesEmptyHint;
 
   const sedesStats = loadingCenters
     ? '…'
@@ -987,14 +1012,16 @@ export function ConfiguracionGeneral() {
             <div>
               <h2 className="font-bold text-gray-900 dark:text-gray-100">Importación inicial</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {isDeliveryBiz
-                  ? 'Delivery: primero catálogo (carta + precios), luego stock (unidades). El coste de compra se calcula al recibir pedidos a proveedores.'
+                {isDeliveryOpsBiz
+                  ? isRestaurantBiz
+                    ? 'Bar/restaurante: primero catálogo (carta + precios TPV), luego stock (unidades) y clientes.'
+                    : 'Delivery: primero catálogo (carta + precios), luego stock (unidades). El coste de compra se calcula al recibir pedidos a proveedores.'
                   : 'Sube tus datos iniciales para empezar a trabajar con información real'}
               </p>
             </div>
           </div>
 
-          {isDeliveryBiz ? (
+          {isDeliveryOpsBiz ? (
             <div className="mb-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-950/20 px-4 py-3 text-xs text-blue-900 dark:text-blue-200">
               <strong className="font-semibold">Orden recomendado:</strong>{' '}
               1) Catálogo (productos y precio TPV) → 2) Stock (recuento de unidades) → 3) Clientes.
@@ -1003,7 +1030,7 @@ export function ConfiguracionGeneral() {
           ) : null}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(isDeliveryBiz
+            {(isDeliveryOpsBiz
               ? [
                   { key: 'catalog' as const, step: 1, label: 'Catálogo', desc: 'Productos y precios de venta (TPV)', icon: LayoutGrid },
                   { key: 'stock' as const, step: 2, label: 'Stock', desc: 'Unidades en almacén (tras el catálogo)', icon: Truck, needsCatalog: true },
@@ -1017,7 +1044,7 @@ export function ConfiguracionGeneral() {
             ).map((item) => {
               const importStatus = importData?.[item.key] ?? biz?.initialImportStatus?.[item.key] ?? 'pending';
               const Icon = item.icon;
-              const stockBlocked = isDeliveryBiz && item.key === 'stock' && !catalogImportDone && importStatus !== 'completed';
+              const stockBlocked = isDeliveryOpsBiz && item.key === 'stock' && !catalogImportDone && importStatus !== 'completed';
               return (
                 <div key={item.key}
                   className={`p-4 rounded-xl border transition-all ${
@@ -1050,7 +1077,7 @@ export function ConfiguracionGeneral() {
                   ) : (
                     <button
                       onClick={() => {
-                        if (isDeliveryBiz && item.key === 'stock' && !catalogImportDone) {
+                        if (isDeliveryOpsBiz && item.key === 'stock' && !catalogImportDone) {
                           toast.error('Importa primero el catálogo (paso 1)');
                           return;
                         }
@@ -1073,8 +1100,12 @@ export function ConfiguracionGeneral() {
           isOpen={importPopup === 'clients'}
           onClose={() => setImportPopup(null)}
           initialMode="clients"
+          exportUserId={dataUserId || undefined}
+          exportBusinessId={isDeliveryOpsBiz ? businessScopeId || undefined : undefined}
+          importBusinessId={isDeliveryOpsBiz ? businessScopeId || undefined : undefined}
+          includeResponsible={!isDeliveryBiz}
         />
-        {importPopup === 'stock' && biz?.businessType === 'delivery' ? (
+        {importPopup === 'stock' && isDeliveryOpsBiz ? (
           <GenericImportModal
             isOpen
             onClose={() => setImportPopup(null)}
@@ -1099,17 +1130,17 @@ export function ConfiguracionGeneral() {
           onClose={() => setImportPopup(null)}
           moduleLabel="Catálogo"
           importLabel="Catálogo"
-          templateFileName={biz?.businessType === 'delivery' ? 'plantilla_catalogo_delivery_tpv.xlsx' : 'plantilla_catalogo.xlsx'}
+          templateFileName={isDeliveryOpsBiz ? catalogImportTemplateFilename : 'plantilla_catalogo.xlsx'}
           fields={catalogImportFields}
           onImport={handleCatalogImport}
-          onDownloadTemplate={biz?.businessType === 'delivery' ? () => void handleDownloadCatalogTemplate() : undefined}
-          headerAliases={biz?.businessType === 'delivery' ? DELIVERY_CATALOG_HEADER_ALIASES : undefined}
-          skipMappingWhenComplete={biz?.businessType === 'delivery'}
+          onDownloadTemplate={isDeliveryOpsBiz ? () => void handleDownloadCatalogTemplate() : undefined}
+          headerAliases={isDeliveryOpsBiz ? DELIVERY_CATALOG_HEADER_ALIASES : undefined}
+          skipMappingWhenComplete={isDeliveryOpsBiz}
           importSheetName="catalogo"
         />
 
         {/* ── Configuracion TPV (condicional) ─────────────────────────────── */}
-        {activeModulesSet.has('tpv') && isDeliveryBiz && (
+        {activeModulesSet.has('tpv') && isDeliveryOpsBiz && (
           <section id="tpv-config" className="rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
             <div className="flex items-center gap-3 mb-5">
               <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center">

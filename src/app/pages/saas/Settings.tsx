@@ -74,6 +74,7 @@ import {
   Cigarette,
   Beef,
   Layers,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { WysiwygTemplateEditor } from '../../components/saas/WysiwygTemplateEditor';
 import { CreateRoleModal } from '../../components/saas/CreateRoleModal';
@@ -102,12 +103,17 @@ import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
   DELIVERY_WORK_CENTERS_CHANGED,
-  loadDeliveryStores,
+  knownBusinessIdsFromList,
 } from '../../lib/deliverySetup';
+import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import {
+  resolveRestaurantFormat,
+} from '../../verticals/restaurant/restaurantFormat';
 import {
   ACTIVATION_FOCUS_PARAM,
   clearActivationFocusFromSearch,
 } from '../../lib/activationGuide';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap, ActivationFocusBanner } from '../../components/saas/ActivationGuideUi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
@@ -1462,13 +1468,14 @@ function TabBilling() {
 const BUSINESS_INPUT_CLASS =
   'w-full rounded-xl border-2 border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-900 dark:text-gray-100 outline-none transition-colors focus:border-blue-500 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100 dark:focus:border-blue-400';
 
-const ENABLED_BUSINESS_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
+const ENABLED_BUSINESS_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
 
 const ALL_BUSINESS_TYPES: { value: string; label: string; description: string; icon: React.ReactNode; keywords: string; disabled?: boolean }[] = [
   { value: 'events',        label: 'Eventos',               description: 'Organización de eventos',        icon: <PartyPopper className="w-6 h-6" />,    keywords: 'boda fiesta conferencia feria organización catering' },
   { value: 'carDealership', label: 'Compraventa de coches', description: 'Venta y compra de vehículos',   icon: <Car className="w-6 h-6" />,            keywords: 'coche vehículo concesionario automóvil motor' },
   { value: 'workshop',      label: 'Taller',                description: 'Taller mecánico',               icon: <Wrench className="w-6 h-6" />,         keywords: 'mecánico reparación motor vehículo' },
-  { value: 'delivery',      label: 'Delivery',              description: 'Logística y entregas',          icon: <Truck className="w-6 h-6" />,          keywords: 'envío transporte reparto logística comida' },
+  { value: 'delivery',      label: 'Delivery',              description: 'Reparto y pedidos a domicilio', icon: <Truck className="w-6 h-6" />,          keywords: 'envío transporte reparto logística comida domicilio' },
+  { value: 'restaurant',    label: 'Bar/restaurante',       description: 'TPV, comandas, cocina y sala', icon: <UtensilsCrossed className="w-6 h-6" />, keywords: 'bar restaurante tapas carta cocina sala terraza hostelería' },
   { value: 'cleaning',      label: 'Limpieza',              description: 'Empresa de limpieza',           icon: <SprayCan className="w-6 h-6" />,       keywords: 'limpiar hogar oficina mantenimiento' },
   { value: 'hairSalon',     label: 'Peluquería',            description: 'Salón de belleza',               icon: <Scissors className="w-6 h-6" />,       keywords: 'pelo corte color estilista barbería belleza estética' },
   { value: 'gym',           label: 'Gimnasio',              description: 'Gimnasio y fitness',             icon: <Dumbbell className="w-6 h-6" />,       keywords: 'deporte fitness entrenamiento crossfit yoga' },
@@ -1515,6 +1522,7 @@ function BusinessFormModal({
     email: initial.email || '',
     logo: initial.logo || '',
     businessType: (initial as Business).businessType || 'carDealership',
+    restaurantFormat: resolveRestaurantFormat((initial as Business).restaurantFormat),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1626,7 +1634,12 @@ function BusinessFormModal({
                         key={opt.value}
                         type="button"
                         disabled={isDisabled}
-                        onClick={() => !isDisabled && setForm((prev) => ({ ...prev, businessType: opt.value }))}
+                        onClick={() => !isDisabled && setForm((prev) => ({
+                          ...prev,
+                          businessType: opt.value,
+                          restaurantFormat:
+                            opt.value === 'restaurant' ? prev.restaurantFormat || 'restaurant' : prev.restaurantFormat,
+                        }))}
                         className={`group relative flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
                           isDisabled
                             ? 'opacity-50 cursor-not-allowed border-gray-200 dark:border-gray-700'
@@ -1923,13 +1936,18 @@ function TabBusinesses() {
       return next;
     });
 
+    const scopeOpts = {
+      accountBusinessCount: businesses.length,
+      knownBusinessIds: knownBusinessIdsFromList(businesses),
+    };
+
     const results = await Promise.all(
       businesses.map(async (business) => {
         const dataUserId = resolveBusinessDataUserId(user, business);
         const [brands, deliveryState] = await Promise.all([
           listBrandsRequest(business.business_id).catch(() => []),
           dataUserId
-            ? loadDeliveryStores(user, business).catch(() => ({
+            ? loadRetailStoresForBusiness(user, business, businesses, scopeOpts).catch(() => ({
                 workCenters: [],
                 pointsOfSale: [],
               }))
@@ -2022,6 +2040,7 @@ function TabBusinesses() {
   };
 
   const handleCreate = async (data: Partial<Business>) => {
+    const businessType = (data as Business).businessType || 'carDealership';
     const result = await createBusiness({
       name: data.name || '',
       legalName: data.legalName,
@@ -2031,7 +2050,8 @@ function TabBusinesses() {
       phone: data.phone,
       email: data.email,
       logo: data.logo,
-      businessType: (data as Business).businessType || 'carDealership',
+      businessType,
+      restaurantFormat: businessType === 'restaurant' ? (data as Business).restaurantFormat : undefined,
     });
     if (result.success) {
       setShowForm(false);
@@ -2043,6 +2063,7 @@ function TabBusinesses() {
 
   const handleUpdate = async (data: Partial<Business>) => {
     if (!editingBusiness) return;
+    const businessType = (data as Business).businessType;
     const result = await updateBusiness(editingBusiness.business_id, {
       name: data.name,
       legalName: data.legalName,
@@ -2052,7 +2073,8 @@ function TabBusinesses() {
       phone: data.phone,
       email: data.email,
       logo: data.logo,
-      businessType: (data as Business).businessType,
+      businessType,
+      restaurantFormat: businessType === 'restaurant' ? (data as Business).restaurantFormat : null,
     });
     if (result.success) {
       setEditingBusiness(null);
@@ -2912,6 +2934,8 @@ function TabBusinesses() {
                     {deleteTarget.members.length} miembro{deleteTarget.members.length !== 1 ? 's' : ''} ·{' '}
                     {deleteTarget.businessType === 'workshop'
                       ? 'Taller'
+                      : deleteTarget.businessType === 'restaurant'
+                        ? 'Bar/restaurante'
                       : deleteTarget.businessType === 'delivery'
                         ? 'Delivery'
                         : 'Compraventa'}
@@ -3961,7 +3985,10 @@ export function Settings() {
   const loadDirectory = async () => {
     setIsLoadingDirectory(true);
     try {
-      const [nextUsers, nextRoles] = await Promise.all([listUsers(), listRoles()]);
+      const [nextUsers, nextRoles] = await Promise.all([
+        listUsers(currentBusiness?.business_id),
+        listRoles(),
+      ]);
       setUsers(nextUsers);
       setBaseRoles(nextRoles);
     } catch (error) {
@@ -3977,7 +4004,7 @@ export function Settings() {
 
   useEffect(() => {
     void loadDirectory();
-  }, []);
+  }, [currentBusiness?.business_id]);
 
   const currentRoleStyles = useMemo(() => roleStyles(user?.role || 'Admin'), [user?.role]);
   const roles = useMemo(() => mergeRoleCatalog(baseRoles, customRoles, users), [baseRoles, customRoles, users]);
@@ -4165,6 +4192,10 @@ export function Settings() {
                       const tab = TAB_KEYS.find((tk) => tk.id === tabId);
                       if (!tab) return null;
                       const defaultLabel = tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id);
+                      const tabLabel =
+                        tab.id === 'salesPoints' && isRestaurantBusinessType(currentBusiness?.businessType)
+                          ? 'Bar/restaurante'
+                          : defaultLabel;
                       const usersTabMeta =
                         tab.id === 'users' && currentBusiness
                           ? `${teamStats.total} ${teamStats.total === 1 ? 'miembro' : 'miembros'} en el equipo${
@@ -4192,7 +4223,7 @@ export function Settings() {
                               </span>
                             </span>
                           ) : (
-                            defaultLabel
+                            tabLabel
                           )}
                         </button>
                       );

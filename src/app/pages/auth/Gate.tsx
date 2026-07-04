@@ -35,12 +35,18 @@ import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import {
   readStoredOnboardingBusinessType,
 } from '../../lib/deliverySetup';
+import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
 import type { BusinessType } from '../../lib/businessApi';
+import {
+  resolveRestaurantFormat,
+  type RestaurantFormat,
+} from '../../verticals/restaurant/restaurantFormat';
 
 const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'carDealership', label: 'Compraventa' },
   { value: 'workshop', label: 'Taller' },
   { value: 'delivery', label: 'Delivery' },
+  { value: 'restaurant', label: 'Bar/restaurante' },
   { value: 'events', label: 'Eventos' },
   { value: 'cleaning', label: 'Limpieza' },
   { value: 'hairSalon', label: 'Peluqueria' },
@@ -126,6 +132,13 @@ function buildCreatePayloadFromOnboarding(
     'delivery'
   ) as BusinessType;
 
+  const restaurantFormat =
+    businessType === 'restaurant'
+      ? ((user?.onboardingData as { restaurantFormat?: string } | undefined)?.restaurantFormat ||
+          localOnboarding.restaurantFormat ||
+          'restaurant')
+      : undefined;
+
   return {
     name: profile?.tradeName?.trim() || user?.companyName?.trim() || '',
     legalName: profile?.legalName,
@@ -135,6 +148,7 @@ function buildCreatePayloadFromOnboarding(
     phone: profile?.companyPhone || user?.phone,
     email: profile?.companyEmail || user?.email,
     businessType,
+    restaurantFormat,
   };
 }
 
@@ -188,6 +202,7 @@ export function Gate() {
     phone: string;
     email: string;
     businessType: BusinessType | '';
+    restaurantFormat: RestaurantFormat;
   }>(() => ({
     name: '',
     taxId: '',
@@ -196,6 +211,7 @@ export function Gate() {
     phone: '',
     email: '',
     businessType: (data.businessType as BusinessType) || '',
+    restaurantFormat: resolveRestaurantFormat(data.restaurantFormat),
   }));
   const [isCreatingBusiness, setIsCreatingBusiness] = useState(false);
   const [createBusinessStep, setCreateBusinessStep] = useState<1 | 2 | 3>(1);
@@ -229,8 +245,9 @@ export function Gate() {
       phone: onboardingPayload.phone || prev.phone,
       email: onboardingPayload.email || prev.email,
       businessType: onboardingPayload.businessType || prev.businessType,
+      restaurantFormat: resolveRestaurantFormat(onboardingPayload.restaurantFormat || prev.restaurantFormat),
     }));
-  }, [hasOnboardingCompany, onboardingPayload.name, onboardingPayload.taxId, onboardingPayload.address, onboardingPayload.city, onboardingPayload.phone, onboardingPayload.email, onboardingPayload.businessType]);
+  }, [hasOnboardingCompany, onboardingPayload.name, onboardingPayload.taxId, onboardingPayload.address, onboardingPayload.city, onboardingPayload.phone, onboardingPayload.email, onboardingPayload.businessType, onboardingPayload.restaurantFormat]);
 
   const [showModuloVehiculos, setShowModuloVehiculos] = useState(false);
   const [showModuloClientes, setShowModuloClientes] = useState(false);
@@ -269,7 +286,7 @@ export function Gate() {
     if (currentBusiness?.business_id !== only.business_id) {
       switchBusiness(only.business_id);
     }
-    navigate('/saas/dashboard', { replace: true });
+    navigate(saasPathWithBusinessScope('/saas/dashboard', only.business_id), { replace: true });
   }, [
     location.pathname,
     isBusinessesPending,
@@ -304,7 +321,7 @@ export function Gate() {
         if (!result.success || !result.business?.business_id) return;
         await reloadBusinesses();
         switchBusiness(result.business.business_id);
-        navigate('/saas/dashboard', { replace: true });
+        navigate(saasPathWithBusinessScope('/saas/dashboard', result.business.business_id), { replace: true });
       })
       .finally(() => setIsAutoProvisioning(false));
   }, [
@@ -343,6 +360,8 @@ export function Gate() {
     setCreateBusinessError('');
     setIsCreatingBusiness(true);
     try {
+      const businessType =
+        createBusinessData.businessType || (data.businessType as BusinessType) || undefined;
       const result = await createBusiness({
         name: createBusinessData.name.trim(),
         taxId: createBusinessData.taxId.trim() || undefined,
@@ -350,7 +369,9 @@ export function Gate() {
         city: createBusinessData.city.trim() || undefined,
         phone: createBusinessData.phone.trim() || undefined,
         email: createBusinessData.email.trim() || undefined,
-        businessType: createBusinessData.businessType || (data.businessType as BusinessType) || undefined,
+        businessType,
+        restaurantFormat:
+          businessType === 'restaurant' ? createBusinessData.restaurantFormat : undefined,
       });
       if (result.success) {
         setShowCreateBusiness(false);
@@ -362,6 +383,7 @@ export function Gate() {
           phone: '',
           email: '',
           businessType: (data.businessType as BusinessType) || '',
+          restaurantFormat: resolveRestaurantFormat(data.restaurantFormat),
         });
         setCreateBusinessStep(1);
         setCreateBusinessError('');
@@ -457,7 +479,7 @@ export function Gate() {
                   variant="outline"
                   onClick={() => {
                     switchBusiness(currentBusiness.business_id);
-                    navigate('/saas/dashboard');
+                    navigate(saasPathWithBusinessScope('/saas/dashboard', currentBusiness.business_id));
                   }}
                 >
                   Entrar con datos en caché
@@ -520,9 +542,16 @@ export function Gate() {
               currentBusinessId={currentBusiness?.business_id}
               onEnterBusiness={(businessId) => {
                 switchBusiness(businessId);
-                navigate('/saas/dashboard', { replace: true });
+                navigate(saasPathWithBusinessScope('/saas/dashboard', businessId), { replace: true });
               }}
-              onManageBusinesses={() => navigate('/saas/settings/empresas')}
+              onManageBusinesses={() =>
+                navigate(
+                  saasPathWithBusinessScope(
+                    '/saas/settings/empresas',
+                    currentBusiness?.business_id,
+                  ),
+                )
+              }
               businessSnapshots={gateBusinessSnapshots}
               summariesLoading={portfolioSummariesLoading}
             />
@@ -536,7 +565,10 @@ export function Gate() {
                   icon="next"
                   onClick={() => {
                     switchBusiness(currentBusiness.business_id);
-                    navigate('/saas/dashboard', { replace: true });
+                    navigate(
+                      saasPathWithBusinessScope('/saas/dashboard', currentBusiness.business_id),
+                      { replace: true },
+                    );
                   }}
                 >
                   Entrar al panel — {currentBusiness.name}
@@ -730,6 +762,8 @@ export function Gate() {
                           setCreateBusinessData({
                             ...createBusinessData,
                             businessType: option.value,
+                            restaurantFormat:
+                              option.value === 'restaurant' ? 'restaurant' : createBusinessData.restaurantFormat,
                           })
                         }
                         className={`min-h-[3rem] rounded-xl border px-3 py-3 text-left transition-all sm:min-h-[3.25rem] sm:px-3.5 sm:py-3.5 ${

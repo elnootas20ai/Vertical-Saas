@@ -36,7 +36,10 @@ export async function fetchTeamDashboardSnapshot(
     listVacations(businessId).catch(() => []),
     listSchedules(businessId).catch(() => []),
     listBlocks(businessId).catch(() => []),
-    listPayrollDocumentsRequest().catch(() => []),
+    listPayrollDocumentsRequest({
+      businessId,
+      memberIds: members.map((m) => m.user_id).filter(Boolean),
+    }).catch(() => []),
     listCompanyHolidays(businessId).catch(() => []),
     fetchActiveNow(businessId).catch(() => []),
   ]);

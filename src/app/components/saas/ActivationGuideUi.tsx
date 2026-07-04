@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { MousePointerClick, X } from 'lucide-react';
+import { useBusiness } from '../../context/BusinessContext';
 import { getActivationFieldGuide } from '../../lib/activationGuide';
 
 const HIGHLIGHT_CLASS = 'activation-field-highlight';
@@ -47,7 +48,8 @@ export function ActivationFocusBanner({
   fieldKey: string;
   onDismiss?: () => void;
 }) {
-  const guide = getActivationFieldGuide(fieldKey);
+  const { currentBusiness } = useBusiness();
+  const guide = getActivationFieldGuide(fieldKey, currentBusiness?.businessType);
   if (!guide) return null;
 
   return (

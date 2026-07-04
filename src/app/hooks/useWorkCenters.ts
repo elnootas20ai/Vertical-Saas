@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { listWorkCentersForDelivery, type WorkCenter } from '../lib/workCentersApi';
+import { loadInviteWorkCenters } from '../lib/inviteWorkCenters';
+import { isDeliveryOpsBusinessType } from '../lib/deliveryOpsTypes';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
@@ -15,7 +17,7 @@ function buildCacheKey(dataUserId: string, businessId: string | undefined): stri
 
 export function useWorkCenters() {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = currentBusiness?.business_id;
   const cacheId = buildCacheKey(dataUserId, businessId);
@@ -50,7 +52,12 @@ export function useWorkCenters() {
       try {
         if (pendingPromiseKey !== cacheId || !pendingPromise) {
           pendingPromiseKey = cacheId;
-          pendingPromise = listWorkCentersForDelivery(dataUserId, currentBusiness);
+          pendingPromise = isDeliveryOpsBusinessType(currentBusiness?.businessType)
+            ? loadInviteWorkCenters(user, currentBusiness, {
+                allBusinesses: businesses,
+                accountBusinessCount: businesses.length,
+              })
+            : listWorkCentersForDelivery(dataUserId, currentBusiness);
         }
         const result = await pendingPromise;
         cachedCenters = result;
@@ -66,7 +73,7 @@ export function useWorkCenters() {
     }
 
     void load();
-  }, [dataUserId, cacheId, currentBusiness]);
+  }, [dataUserId, cacheId, currentBusiness, businesses, user]);
 
   const activeWorkCenters = workCenters.filter((wc) => wc.active);
 

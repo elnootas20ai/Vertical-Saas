@@ -225,7 +225,7 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
     return names[k] || k;
   });
   const verticalNames = {
-    delivery: 'Delivery', carDealership: 'Concesionario', workshop: 'Taller', hairSalon: 'Peluquer\u00eda',
+    delivery: 'Delivery', restaurant: 'Restauración', carDealership: 'Concesionario', workshop: 'Taller', hairSalon: 'Peluquer\u00eda',
     gym: 'Gimnasio', clinic: 'Cl\u00ednica', hotel: 'Hotel', construction: 'Constructora', academy: 'Academia',
     realEstate: 'Inmobiliaria', lawyer: 'Abogados', nightclub: 'Discoteca', events: 'Eventos',
     cleaning: 'Limpieza', scrapyard: 'Desguace', spareParts: 'Recambios', taxi: 'Taxi',

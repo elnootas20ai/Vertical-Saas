@@ -27,6 +27,7 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import { localCalendarDayKey, registerSessionSpansMultipleDays, tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
 import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
@@ -44,12 +45,11 @@ import {
   isInvitedWorkerUser,
 } from '../../lib/pdvScope';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
-import {
-  loadDeliveryStores,
-  loadTpvPointsOfSaleForBusiness,
-  resolveBusinessScopeId,
-} from '../../lib/deliverySetup';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { readRetailScopeCache, writeRetailScopeCache } from '../../lib/retailScopeCache';
+import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
 import type { Business } from '../../lib/businessApi';
 import {
   evaluateTpvRegisterLoadGate,
@@ -340,6 +340,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : ''
   ));
   const [tabletStep, setTabletStep] = useState<1 | 2>(1);
+  const salaLaunchRef = useRef<string | null>(consumeSalaTpvLaunch());
+  const lastRestrictedPdvRef = useRef('');
+  const onOpeningPdvChangeRef = useRef(onOpeningPdvChange);
+  onOpeningPdvChangeRef.current = onOpeningPdvChange;
   const total = calcDenominationTotal(counts);
   /** 0 € de fondo inicial es válido; en tablet basta con llegar al paso 2. */
   const cashCountReady = isTabletMode ? tabletStep === 2 : true;
@@ -423,39 +427,44 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     && hasResolvedPdv
     && (Boolean(selectedTerminal) || isTabletMode);
 
+  const workerOptionsKey = useMemo(
+    () => workerOptions.map((w) => `${w.id}:${w.name}`).join('|'),
+    [workerOptions],
+  );
+
   useEffect(() => {
     if (isTabletMode || workerOptions.length === 0) return;
     if (selectedWorkerId) return;
-    // 1) Si solo hay un trabajador (típico cuenta nueva: el propio gerente), lo seleccionamos.
     if (workerOptions.length === 1) {
       setSelectedWorkerId(workerOptions[0].id);
       return;
     }
-    // 2) Si hay varios, intentamos por nombre cacheado.
     const cached = (() => {
       try { return localStorage.getItem('vertial.tpvRapido.cashierName') || ''; } catch { return ''; }
     })().trim().toLowerCase();
     if (!cached) return;
     const match = workerOptions.find((w) => w.name.trim().toLowerCase() === cached);
     if (match) setSelectedWorkerId(match.id);
-  }, [workerOptions, selectedWorkerId]);
+  }, [workerOptionsKey, isTabletMode, selectedWorkerId, workerOptions]);
 
   useEffect(() => {
     if (!restrictedToPdvId) return;
+    const pdvChanged = lastRestrictedPdvRef.current !== restrictedToPdvId;
+    lastRestrictedPdvRef.current = restrictedToPdvId;
     setSelectedPdvId(restrictedToPdvId);
-    setSelectedTerminalId('');
-    onOpeningPdvChange?.(restrictedToPdvId);
-  }, [restrictedToPdvId, onOpeningPdvChange]);
+    if (pdvChanged && !isTabletMode) setSelectedTerminalId('');
+    if (pdvChanged) onOpeningPdvChangeRef.current?.(restrictedToPdvId);
+  }, [restrictedToPdvId, isTabletMode]);
 
   // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
   useEffect(() => {
-    if (selectedPdvId) return;
+    if (restrictedToPdvId || selectedPdvId) return;
     if (displayPdvs.length === 1) {
       const onlyId = displayPdvs[0]._id;
       setSelectedPdvId(onlyId);
-      onOpeningPdvChange?.(onlyId);
+      onOpeningPdvChangeRef.current?.(onlyId);
     }
-  }, [displayPdvs, selectedPdvId, onOpeningPdvChange]);
+  }, [displayPdvs, selectedPdvId, restrictedToPdvId]);
 
   // Autoseleccionar el único terminal activo del PDV elegido.
   useEffect(() => {
@@ -466,9 +475,31 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     }
   }, [selectedPdv, selectedTerminalId, availableTerminals]);
 
-  // Tablet: terminal y trabajador fijos al activar la tienda.
+  // Autoseleccionar terminal TPV lanzado desde Sala.
+  useEffect(() => {
+    const terminalId = salaLaunchRef.current;
+    if (!terminalId || !selectedPdv) return;
+    const match = availableTerminals.find((t) => t.id === terminalId);
+    if (match) {
+      setSelectedTerminalId(match.id);
+      salaLaunchRef.current = null;
+    }
+  }, [selectedPdv, availableTerminals]);
+
+  // Tablet: terminal fijo al activar (código sala SALA-* o primer terminal del PDV).
   useEffect(() => {
     if (!isTabletMode || !selectedPdv || selectedTerminalId) return;
+
+    const binding = readTpvTabletBinding();
+    const salaTerminalId = String(binding?.salaTerminalId || '').trim();
+    if (salaTerminalId) {
+      const match = availableTerminals.find((t) => t.id === salaTerminalId);
+      if (match) {
+        setSelectedTerminalId(match.id);
+        return;
+      }
+    }
+
     if (availableTerminals.length > 0) {
       setSelectedTerminalId(availableTerminals[0].id);
     }
@@ -2169,7 +2200,9 @@ export function TpvRegisterGate({
         business_id: scopeBusinessId,
         id: scopeBusinessId,
         name: tabletBinding.businessName || tabletBinding.pdvName || 'Tienda',
-        businessType: 'delivery',
+        businessType: businesses.find(
+          (b) => resolveBusinessScopeId(b) === scopeBusinessId,
+        )?.businessType || 'delivery',
         owner_user_id: tabletBinding.dataUserId || '',
         logo: '',
         members: [],
@@ -2214,6 +2247,8 @@ export function TpvRegisterGate({
   isTabletSessionRef.current = isTabletSession;
   const accountBusinessCountRef = useRef(accountBusinessCount);
   accountBusinessCountRef.current = accountBusinessCount;
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
   const businessId = scopeBusinessId;
   const tpvFrameClass = fillParent ? 'flex flex-col h-full min-h-0' : 'flex flex-col min-h-screen';
 
@@ -2236,6 +2271,42 @@ export function TpvRegisterGate({
   }, [isTabletSession, tabletRestrictedPdvId, scopeBusinessId, tabletBinding?.dataUserId]);
 
   const isWorkerUser = useMemo(() => isInvitedWorkerUser(user), [user]);
+
+  const openingWorkerOptions = useMemo(() => {
+    if (isTabletSession || !isWorkerUser) {
+      const members = (currentBusiness?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
+        id: String(m.user_id || m.id || '').trim(),
+        name: String(m.fullName || m.email || 'Trabajador').trim(),
+      })).filter((m) => m.id && m.name);
+      const uniq = new Map<string, { id: string; name: string }>();
+      for (const m of members) uniq.set(m.id, m);
+      if (user?.user_id || user?.id) {
+        const uid = String(user.user_id || user.id || '').trim();
+        if (uid) {
+          uniq.set(uid, {
+            id: uid,
+            name: String(user.fullName || user.email || 'Gerente').trim(),
+          });
+        }
+      }
+      return Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }
+    if (user) {
+      return [{
+        id: String(user.user_id || user.id || '').trim(),
+        name: String(user.fullName || user.email || 'Trabajador').trim(),
+      }].filter((w) => w.id && w.name);
+    }
+    return [];
+  }, [
+    isTabletSession,
+    isWorkerUser,
+    currentBusiness?.members,
+    user?.user_id,
+    user?.id,
+    user?.fullName,
+    user?.email,
+  ]);
 
   const workerAssignedPdvId = useMemo(() => {
     if (!isWorkerUser) return null;
@@ -2373,12 +2444,12 @@ export function TpvRegisterGate({
   const handleOpeningPdvChange = useCallback((pdvId: string) => {
     const id = String(pdvId || '').trim();
     if (!id) return;
-    setManagerPdvPickId(id);
+    setManagerPdvPickId((prev) => (prev === id ? prev : id));
     const bid = resolveBusinessScopeId(currentBusiness);
     if (bid && dataUserId) {
       writeDeliveryOpsSelectedPdvId(bid, dataUserId, id);
     }
-  }, [currentBusiness, dataUserId]);
+  }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
 
   const refreshClockedInWorkers = useCallback(async (options?: { silent?: boolean }) => {
     if (!businessId) {
@@ -2537,7 +2608,7 @@ export function TpvRegisterGate({
           isTabletSessionRef.current && hasDisplayedStoresRef.current && Boolean(tabletPdvId);
 
         let sessData: TpvRegisterSession[];
-        let storeState: Awaited<ReturnType<typeof loadDeliveryStores>>;
+        let storeState: Awaited<ReturnType<typeof loadRetailStoresForBusiness>>;
 
         if (tabletCacheReady) {
           sessData = await listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined });
@@ -2547,15 +2618,15 @@ export function TpvRegisterGate({
             pointsOfSale: [],
           };
         } else {
+          const bizList = businessesRef.current;
+          const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
           [sessData, storeState] = await Promise.all([
             listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined }),
-            workerUser
-              ? loadTpvPointsOfSaleForBusiness(authUser, biz ?? null, {
-                  ...loadOpts,
-                  priorityWorkCenterId:
-                    String(authUser?.employment?.salesPointId || '').trim() || undefined,
-                })
-              : loadDeliveryStores(authUser, biz ?? null, loadOpts),
+            loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
+              ...loadOpts,
+              knownBusinessIds,
+              tpvBootstrap: workerUser,
+            }),
           ]);
         }
 
@@ -2949,6 +3020,28 @@ export function TpvRegisterGate({
     [activeSession, clockedInWorkers],
   );
 
+  const currentUserId = useMemo(
+    () => normalizeClockinUserId(user?.user_id || user?.id) || '',
+    [user?.user_id, user?.id],
+  );
+
+  const clockInGate = useMemo(
+    () => evaluateTpvClockInGate({
+      loading: clockedInWorkersLoading,
+      clockedInWorkers: activeStaff,
+      selectedOrderTakerId,
+      currentUserId,
+      isWorkerUser,
+    }),
+    [clockedInWorkersLoading, activeStaff, selectedOrderTakerId, currentUserId, isWorkerUser],
+  );
+
+  const isRestaurantVertical = isRestaurantBusinessType(
+    scopeBusiness?.businessType || currentBusiness?.businessType,
+  );
+  const cajaHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/vertical/delivery/caja';
+  const opsHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/delivery-ops';
+
   const registerContextValue = useMemo((): TpvRegisterContextType | null => {
     if (!isTpvRegisterSessionOpen(activeSession)) return null;
     return {
@@ -3081,7 +3174,7 @@ export function TpvRegisterGate({
                 // Salir sin forzar apertura; volvemos a la vista anterior.
                 try {
                   if (window.history.length > 1) window.history.back();
-                  else navigate('/saas/delivery-ops');
+                  else navigate(opsHomePath);
                 } catch {
                   // ignore
                 }
@@ -3133,7 +3226,7 @@ export function TpvRegisterGate({
               Abrir otra caja
             </button>
             <button
-              onClick={() => navigate('/saas/vertical/delivery/caja')}
+              onClick={() => navigate(cajaHomePath)}
               className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
             >
               Ir a Caja
@@ -3142,7 +3235,7 @@ export function TpvRegisterGate({
               onClick={() => {
                 try {
                   if (window.history.length > 1) window.history.back();
-                  else navigate('/saas/delivery-ops');
+                  else navigate(opsHomePath);
                 } catch { /* ignore */ }
               }}
               className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
@@ -3209,32 +3302,6 @@ export function TpvRegisterGate({
       );
     }
 
-    const workerOptions = (isTabletSession || (!isWorkerUser && !isTabletSession))
-      ? (() => {
-          const members = (currentBusiness?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
-            id: String(m.user_id || m.id || '').trim(),
-            name: String(m.fullName || m.email || 'Trabajador').trim(),
-          })).filter((m) => m.id && m.name);
-          const uniq = new Map<string, { id: string; name: string }>();
-          for (const m of members) uniq.set(m.id, m);
-          if (user?.user_id || user?.id) {
-            const uid = String(user.user_id || user.id || '').trim();
-            if (uid) {
-              uniq.set(uid, {
-                id: uid,
-                name: String(user.fullName || user.email || 'Gerente').trim(),
-              });
-            }
-          }
-          return Array.from(uniq.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
-        })()
-      : isWorkerUser && user
-      ? [{
-          id: String(user.user_id || user.id || '').trim(),
-          name: String(user.fullName || user.email || 'Trabajador').trim(),
-        }].filter((w) => w.id && w.name)
-      : [];
-
     const openingRestrictedPdvId = tabletRestrictedPdvId
       || (isWorkerUser ? workerAssignedPdvId : managerPdvPickId);
 
@@ -3244,7 +3311,7 @@ export function TpvRegisterGate({
         loading={loading}
         pointsOfSale={pointsOfSale}
         workCenters={workCenters}
-        workerOptions={workerOptions}
+        workerOptions={openingWorkerOptions}
         registerSessions={sessions}
         isManagerView={!isWorkerUser && !isTabletSession}
         isTabletMode={isTabletSession}
@@ -3304,7 +3371,34 @@ export function TpvRegisterGate({
           </div>
         )}
         {!compactRegisterChrome && <RegisterCashOpsStrip session={activeSession} />}
-        <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
+          {!clockInGate.allowed && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">
+              <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
+                <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center mx-auto">
+                  <LogIn className="w-6 h-6 text-violet-600 dark:text-violet-400" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Fichaje requerido</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser)}
+                  </p>
+                  {clockInStoreScope?.storeLabel && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      Local: <span className="font-semibold text-gray-600 dark:text-gray-300">{clockInStoreScope.storeLabel}</span>
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowClockIn(true)}
+                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold text-sm"
+                >
+                  Fichar equipo en este local
+                </button>
+              </div>
+            </div>
+          )}
           {children}
         </div>
       </div>

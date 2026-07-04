@@ -18,7 +18,11 @@ import {
   setOnboardingTourStep,
 } from '../../lib/onboardingLocalKeys';
 import { getOnboardingTourSteps } from '../../lib/onboardingTourSteps';
-import { resolveBusinessScopeId, isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import {
+  getGuidedActivationFirstStepId,
+  isGuidedActivationBusinessType,
+} from '../../lib/deliveryOpsTypes';
 
 function resolveAccountUserId(user: { user_id?: string; id?: string } | null | undefined): string {
   return String(user?.user_id || user?.id || '').trim();
@@ -51,13 +55,16 @@ export function OnboardingTour({ onComplete }: Props) {
   const checklistComplete =
     checklistTotalSteps > 0 && checklistCompletionPct >= 100;
 
+  const businessType = currentBusiness?.businessType;
   const steps = useMemo(
     () =>
-      getOnboardingTourSteps(currentBusiness?.businessType, {
-        firstName: user?.firstName,
-        businessName: currentBusiness?.name,
-      }),
-    [currentBusiness?.businessType, currentBusiness?.name, user?.firstName],
+      businessType
+        ? getOnboardingTourSteps(businessType, {
+            firstName: user?.firstName,
+            businessName: currentBusiness?.name,
+          })
+        : [],
+    [businessType, currentBusiness?.name, user?.firstName],
   );
 
   const accountUserId = resolveAccountUserId(user);
@@ -111,8 +118,13 @@ export function OnboardingTour({ onComplete }: Props) {
       return;
     }
 
-    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) {
+    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness?.businessType) {
       if (!showLockRef.current) setTourGate('loading');
+      return;
+    }
+
+    if (steps.length === 0) {
+      setTourGate('hide');
       return;
     }
 
@@ -194,9 +206,10 @@ export function OnboardingTour({ onComplete }: Props) {
   ]);
 
   useEffect(() => {
-    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness) return;
+    if (!accountUserId || !businessId || !businessesFetchSettled || !currentBusiness?.businessType) return;
+    if (steps.length === 0) return;
     setStepIndex(resolveOnboardingTourStepIndex(steps, accountUserId, businessId));
-  }, [accountUserId, businessId, businessesFetchSettled, currentBusiness, steps]);
+  }, [accountUserId, businessId, businessesFetchSettled, currentBusiness?.businessType, steps]);
 
   const hideTourUi = useCallback(
     (options?: { markCompleted?: boolean; pauseForSession?: boolean }) => {
@@ -410,15 +423,14 @@ export function useRestartTour() {
     (options?: { fromBeginning?: boolean }) => {
       const accountUserId = resolveAccountUserId(user);
       const businessId = resolveBusinessScopeId(currentBusiness);
-      if (!accountUserId) return false;
-      if (!businessId) return false;
+      if (!accountUserId || !businessId) return false;
+      if (!isGuidedActivationBusinessType(currentBusiness?.businessType)) return false;
       const fromBeginning = options?.fromBeginning !== false;
-      const firstActivationStep = isDeliveryBusinessType(currentBusiness?.businessType)
-        ? 'delivery_store'
-        : 'configure_business';
       armOnboardingTourForBusiness(accountUserId, businessId, {
         fromBeginning,
-        activationStepId: fromBeginning ? firstActivationStep : undefined,
+        activationStepId: fromBeginning
+          ? getGuidedActivationFirstStepId(currentBusiness?.businessType)
+          : undefined,
       });
       return true;
     },

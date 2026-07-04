@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
+import { useBusiness } from '../../context/BusinessContext';
 import { getActivationFieldGuide } from '../../lib/activationGuide';
 import { ActivationFocusBanner, scrollToActivationField } from './ActivationGuideUi';
 
@@ -9,10 +10,11 @@ const HIGHLIGHT_CLASS = 'activation-field-highlight';
 export function ActivationPageCoach() {
   const location = useLocation();
   const { focus, clearFocus } = useActivationFocus();
+  const { currentBusiness } = useBusiness();
 
   const guide = useMemo(
-    () => (focus ? getActivationFieldGuide(focus) : null),
-    [focus],
+    () => (focus ? getActivationFieldGuide(focus, currentBusiness?.businessType) : null),
+    [focus, currentBusiness?.businessType],
   );
 
   useEffect(() => {

@@ -94,6 +94,7 @@ import { listVacations, type VacationRequest } from '../../lib/vacationsApi';
 import { ClockinsManagerTeamView } from '../../components/saas/clockins/ClockinsManagerTeamView';
 import { ClockinHistoryPanel } from '../../components/saas/clockins/ClockinHistoryPanel';
 import { resolveClockinMemberName } from '../../lib/clockinsDisplay';
+import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 
 // ── Pestañas (3 nivel superior) + sub-pestañas dentro de Análisis ───────────
 type Tab = 'team' | 'analysis' | 'alerts';
@@ -188,6 +189,7 @@ export function Clockins() {
   const { requestLocation } = useGeolocation();
 
   const lang = i18n.language?.slice(0, 2) || 'es';
+  const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
 
   /* ── Data loaders ── */
 
@@ -804,6 +806,7 @@ export function Clockins() {
             onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
             onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
             businessMembers={currentBusiness?.members}
+            workCentersFilterAllLabel={hrCopy.clockinsFilterAllCenters}
           />
         ) : null}
 
@@ -1138,6 +1141,7 @@ interface TeamPanelProps {
   onEditSchedule: (memberId: string) => void;
   onViewMemberHistory: (memberId: string) => void;
   businessMembers?: { user_id: string; fullName?: string; email?: string }[];
+  workCentersFilterAllLabel?: string;
 }
 
 function TeamPanel({
@@ -1147,6 +1151,7 @@ function TeamPanel({
   filterWorkCenter, onFilterWorkCenterChange, activeWorkCenters, hasWorkCenters, availableRoles,
   todayView, onTodayViewChange, orgNodes, orgEdges, orgLoading, onOrgRefresh,
   onOpenManualClockin, onEditSchedule, onViewMemberHistory, businessMembers = [],
+  workCentersFilterAllLabel = 'Todos los centros',
 }: TeamPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editEntryIdx, setEditEntryIdx] = useState<number>(-1);
@@ -1267,7 +1272,7 @@ function TeamPanel({
               onChange={(e) => onFilterWorkCenterChange(e.target.value)}
               className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
             >
-              <option value="all">Todos los centros</option>
+              <option value="all">{workCentersFilterAllLabel}</option>
               {activeWorkCenters.map((wc) => <option key={wc.id} value={wc.id}>{wc.name}</option>)}
             </select>
           )}

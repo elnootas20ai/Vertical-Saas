@@ -60,14 +60,17 @@ export function WorkerDocs() {
     if (!user?.user_id) return;
     setIsLoading(true);
     try {
-      const docs = await listPayrollDocumentsRequest(user.user_id);
+      const docs = await listPayrollDocumentsRequest({
+        workerId: user.user_id,
+        businessId: user.linkedBusinessId || undefined,
+      });
       setDocuments(docs);
     } catch {
       // show empty state on error
     } finally {
       setIsLoading(false);
     }
-  }, [user?.user_id]);
+  }, [user?.user_id, user?.linkedBusinessId]);
 
   useEffect(() => {
     void loadDocuments();

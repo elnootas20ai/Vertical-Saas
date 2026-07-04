@@ -12,6 +12,7 @@ import {
   filterCatalogItemsForBusinessScope,
 } from '../../lib/catalogBusinessScope';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
@@ -65,6 +66,13 @@ const DEFAULT_SALES_CHANNELS = [
   { id: 'justeat', name: 'Just Eat' },
   { id: 'deliveroo', name: 'Deliveroo' },
 ];
+
+function salesChannelsForBusinessType(businessType: string) {
+  if (isRestaurantBusinessType(businessType)) {
+    return DEFAULT_SALES_CHANNELS.filter((ch) => ch.id !== 'web');
+  }
+  return DEFAULT_SALES_CHANNELS;
+}
 
 const normalizeDuplicateValue = (value?: string | null): string =>
   String(value || '').trim().toLowerCase();
@@ -587,7 +595,7 @@ function CreateItemModal({
           <div>
             <label className={labelClass}>Canales de venta</label>
             <div className="space-y-2">
-              {DEFAULT_SALES_CHANNELS.map(ch => {
+              {salesChannelsForBusinessType(businessType).map(ch => {
                 const active = salesChannels.some(c => c.channelId === ch.id);
                 const channel = salesChannels.find(c => c.channelId === ch.id);
                 return (

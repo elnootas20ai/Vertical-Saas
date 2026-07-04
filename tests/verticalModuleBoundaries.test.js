@@ -109,11 +109,14 @@ function scanCrossVerticalViolations(ownerModule, forbiddenPatterns, isLegacySha
 }
 
 describe('vertical module boundaries', () => {
-  it('registro delivery y compraventa tienen ids distintos', async () => {
+  it('registro delivery, restaurant y compraventa tienen ids distintos', async () => {
     const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
+    const { RESTAURANT_MODULE } = await import('../src/app/verticals/restaurant/module.ts');
     const { COMPRAVENTA_MODULE } = await import('../src/app/verticals/compraventa/module.ts');
     expect(DELIVERY_MODULE.id).toBe('delivery');
+    expect(RESTAURANT_MODULE.id).toBe('restaurant');
     expect(COMPRAVENTA_MODULE.id).toBe('compraventa');
+    expect(DELIVERY_MODULE.businessType).not.toBe(RESTAURANT_MODULE.businessType);
     expect(DELIVERY_MODULE.businessType).not.toBe(COMPRAVENTA_MODULE.businessType);
   });
 

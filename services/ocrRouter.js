@@ -23,6 +23,7 @@ import { classifyDocument, shouldAutoApprove } from './ocrClassifier.js';
 import { matchEntities } from './ocrEntityMatcher.js';
 import { validateOcrData, generateOcrFingerprint } from './ocrValidator.js';
 import { enrichOcrLinesForUser, reconcilePurchaseInvoiceFromOcr, createFinanceCobroFromClientInvoice } from './ocrPurchasePipeline.js';
+import { ensureFinanceFromDocumentOcr, isRentalOcrDocument } from './rentFinanceSync.js';
 import { summarizeCatalogMatches } from './ocrCatalogLineMatcher.js';
 import logger from './logger.js';
 
@@ -124,7 +125,8 @@ async function buildProposalFieldsAsync(ocrData, destination, entityMatch, userI
       f('taxRate', ocrData.taxRate || 0);
       f('totalAmount', ocrData.total);
       if (destination.expenseCategory) {
-        f('category', destination.expenseCategory.category, 70, 'auto');
+        const slug = destination.expenseCategory.category === 'Alquiler' ? 'alquiler' : destination.expenseCategory.category;
+        f('category', slug, 70, 'auto');
         f('categoryIcon', destination.expenseCategory.categoryIcon, 70, 'auto');
         f('categoryColor', destination.expenseCategory.categoryColor, 70, 'auto');
       }
@@ -203,9 +205,12 @@ export async function executeProposal(proposal, userId) {
     }
     case 'create_expense':
     case 'create_receipt': {
+      const rawCategory = String(fields.category || '').trim();
+      const categorySlug = rawCategory === 'Alquiler' ? 'alquiler' : rawCategory || 'otros_gastos';
       createdDoc = buildFinanceDocument(userId, {
         ...fields,
         type: dest.financeType || 'pago',
+        category: categorySlug,
         entryMethod: 'ocr',
         ocrData: proposal.ocrData,
         ocrProcessedAt: now,
@@ -272,6 +277,31 @@ export async function executeProposal(proposal, userId) {
         sideEffects = { financeMovementId: financeResult.movementId, financeSkipped: financeResult.skipped };
       } catch (err) {
         logger.warn({ tag: 'OCR-FINANCE', err: err?.message }, 'Client invoice finance cobro failed');
+      }
+    }
+
+    if (
+      dest.action === 'create_commercial_contract'
+      || dest.action === 'create_rental_contract'
+      || (dest.action === 'archive_document' && proposal.ocrData?.total > 0)
+    ) {
+      const ocrData = proposal.ocrData || {};
+      const shouldSyncFinance = isRentalOcrDocument(ocrData)
+        || Number(ocrData.total || ocrData.subtotal || 0) > 0;
+      if (shouldSyncFinance) {
+        try {
+          const financeResult = await ensureFinanceFromDocumentOcr(fakeReq, userId, ocrData, {
+            documentId: createdDoc._id,
+            documentCategory: fields.category || dest.documentCategory || '',
+            workCenterId: fields.workCenterId || fields.costCenterId || '',
+            workCenterName: fields.workCenterName || fields.costCenterName || '',
+            businessId: fields.businessId || '',
+            businessName: fields.businessName || '',
+          });
+          sideEffects = { ...(sideEffects || {}), ...financeResult };
+        } catch (err) {
+          logger.warn({ tag: 'OCR-RENT-FINANCE', err: err?.message }, 'Document finance sync failed');
+        }
       }
     }
 

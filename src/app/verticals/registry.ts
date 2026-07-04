@@ -1,17 +1,21 @@
 import type { BusinessType } from '../lib/businessApi';
 import { COMPRAVENTA_MODULE } from './compraventa/module';
 import { DELIVERY_MODULE } from './delivery/module';
+import { RESTAURANT_MODULE } from './restaurant/module';
 import type { VerticalModuleDefinition, VerticalModuleId } from './types';
 
-/** Registro único de verticales — no mezclar lógica entre entradas. */
+/** Registro único de verticales — no mezclar lógica entre entradas.
+ *  Scope de tiendas/PDV: src/app/verticals/retailScopeRegistry.ts */
 export const VERTICAL_MODULES: Record<VerticalModuleId, VerticalModuleDefinition> = {
   delivery: DELIVERY_MODULE,
+  restaurant: RESTAURANT_MODULE,
   compraventa: COMPRAVENTA_MODULE,
 };
 
-const BY_BUSINESS_TYPE = new Map<BusinessType, VerticalModuleDefinition>(
-  Object.values(VERTICAL_MODULES).map((m) => [m.businessType, m]),
-);
+const BY_BUSINESS_TYPE = new Map<BusinessType, VerticalModuleDefinition>();
+for (const mod of Object.values(VERTICAL_MODULES)) {
+  BY_BUSINESS_TYPE.set(mod.businessType, mod);
+}
 
 export function getVerticalModule(id: VerticalModuleId): VerticalModuleDefinition {
   return VERTICAL_MODULES[id];

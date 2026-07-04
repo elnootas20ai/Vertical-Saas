@@ -67,6 +67,14 @@ export interface DiningTable {
   sortOrder: number;
   active: boolean;
   tags: string[];
+  roomId?: string;
+  shape?: 'square' | 'round' | 'rect' | 'high';
+  rotation?: number;
+  locked?: boolean;
+  notes?: string;
+  qrCode?: string;
+  visible?: boolean;
+  sizePreset?: 'small' | 'medium' | 'large' | 'bar';
   createdAt: string;
   updatedAt: string;
 }
@@ -84,6 +92,9 @@ export interface DiningWall {
   y2: number;
   thickness: number;
   label: string;
+  roomId?: string;
+  color?: string;
+  rotation?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,13 +104,39 @@ export interface DiningZone {
   name: string;
   color: string;
   responsible?: string;
+  zoneType?: 'sala' | 'terraza' | 'barra' | 'salon' | 'patio';
+  bounds?: { x: number; y: number; w: number; h: number };
+  barRect?: { x: number; y: number; w: number; h: number };
 }
+
+export type LayoutDecorItem = {
+  id: string;
+  type: 'plant' | 'planter' | 'divider' | 'column' | 'decor';
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label?: string;
+};
 
 export interface DiningSection {
   id: string;
   name: string;
   icon: string;
   active: boolean;
+}
+
+export interface SalaRoomConfig {
+  id: string;
+  name: string;
+  color: string;
+  roomType: 'salon' | 'terraza' | 'patio' | 'barra' | 'vip' | 'privado';
+  sortOrder: number;
+  pdvId?: string;
+  workCenterId?: string;
+  terminalId?: string;
+  terminalLabel?: string;
+  terminalCode?: string;
 }
 
 export interface DiningFloorConfig {
@@ -114,6 +151,11 @@ export interface DiningFloorConfig {
   gridSize: number;
   zones: DiningZone[];
   sections: DiningSection[];
+  rooms?: SalaRoomConfig[];
+  layoutDecor?: LayoutDecorItem[];
+  salaSetupVersion?: number;
+  /** true tras el asistente rápido de salas + mesas */
+  salaQuickSetupComplete?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -234,6 +276,15 @@ export async function bulkUpdateDiningTablesRequest(userId: string, tables: Part
     body: JSON.stringify({ tables }),
   });
   return data.updated;
+}
+
+export async function bulkCreateDiningTablesRequest(userId: string, tables: Partial<DiningTable>[]) {
+  const uid = normalizeUserId(userId);
+  const data = await request<{ created: number; tables: DiningTable[] }>(`/api/sala/tables/${uid}/bulk-create`, {
+    method: 'POST',
+    body: JSON.stringify({ tables }),
+  });
+  return data.tables;
 }
 
 export async function deleteDiningTableRequest(userId: string, tableId: string) {

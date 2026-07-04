@@ -58,10 +58,14 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    if (rows.length > 0 && expandedIds.size === 0) {
-      setExpandedIds(new Set(rows.map((r) => r.businessId)));
+    const ids = new Set([
+      ...rows.map((r) => r.businessId),
+      ...businesses.map((b) => b.business_id).filter(Boolean),
+    ]);
+    if (ids.size > 0 && expandedIds.size === 0) {
+      setExpandedIds(ids);
     }
-  }, [rows, expandedIds.size]);
+  }, [rows, businesses, expandedIds.size]);
 
   const filteredRows = useMemo(() => {
     let list = rows;
@@ -113,8 +117,11 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   }, [filteredRows, finance.cashBalance]);
 
   const filteredTotals = useMemo((): PortfolioTotals => {
+    const showAllUnfiltered = businessFilter === 'all' && !search.trim();
     return {
-      businesses: filteredRows.length,
+      businesses: showAllUnfiltered
+        ? Math.max(filteredRows.length, businesses.length)
+        : filteredRows.length,
       brands: filteredRows.reduce((s, r) => s + r.brandCount, 0),
       stores: filteredRows.reduce((s, r) => s + r.storeCount, 0),
       pdv: filteredRows.reduce((s, r) => s + r.pdvCount, 0),
@@ -136,7 +143,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       newClientsMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsMonth, 0),
       newClientsPrevMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsPrevMonth, 0),
     };
-  }, [filteredRows]);
+  }, [filteredRows, businessFilter, search, businesses.length]);
 
   const revenueMomPct = monthOverMonthPct(filteredTotals.revenueMonth, filteredTotals.revenuePrevMonth);
 
@@ -391,18 +398,18 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                 className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-indigo-500 dark:focus:border-indigo-400"
               />
             </div>
-            {rows.length > 1 && (
+            {businesses.length > 1 && (
               <div className="flex flex-wrap gap-1.5 items-center sm:max-w-[50%]">
                 <FilterChip active={businessFilter === 'all'} onClick={() => setBusinessFilter('all')}>
                   Todas
                 </FilterChip>
-                {rows.map((r) => (
+                {businesses.map((b) => (
                   <FilterChip
-                    key={r.businessId}
-                    active={businessFilter === r.businessId}
-                    onClick={() => setBusinessFilter((prev) => (prev === r.businessId ? 'all' : r.businessId))}
+                    key={b.business_id}
+                    active={businessFilter === b.business_id}
+                    onClick={() => setBusinessFilter((prev) => (prev === b.business_id ? 'all' : b.business_id))}
                   >
-                    {r.business.name}
+                    {b.name}
                   </FilterChip>
                 ))}
               </div>
@@ -445,7 +452,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                 }}
                 onOpenCaja={() => {
                   switchBusiness(row.businessId);
-                  navigate('/saas/vertical/delivery/caja');
+                  navigate(row.isRestaurant ? '/saas/caja' : '/saas/vertical/delivery/caja');
                 }}
                 onOpenTeam={() => openTeam(row.businessId)}
                 onOpenPayroll={() => openPayroll(row.businessId)}
@@ -726,11 +733,17 @@ function BusinessCard({
                 <MetricPill label="Cancelados" value={String(m.cancelledMonth)} />
                 <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} />
               </div>
+            ) : row.isRestaurant ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} highlight />
+                <MetricPill label="Efectivo en caja" value={fmtEuro(m.cashInRegisters)} />
+                <MetricPill label="Ingresos finanzas" value={fmtEuro(f.incomeMonth)} />
+              </div>
             ) : (
               <p className="text-xs text-gray-500 italic">Métricas de pedidos disponibles para negocios tipo delivery con tiendas configuradas.</p>
             )}
 
-            {row.isDelivery && (m.openCashRegisters > 0 || m.cashInRegisters > 0) ? (
+            {(row.isDelivery || row.isRestaurant) && (m.openCashRegisters > 0 || m.cashInRegisters > 0) ? (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onOpenCaja(); }}

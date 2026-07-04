@@ -94,6 +94,13 @@ const ROUTE_TABLE = {
     action: 'create_commercial_contract',
     documentCategory: 'contracts',
   },
+  contrato_alquiler: {
+    module: 'documentacion',
+    database: () => getDocumentsDbName(),
+    builder: 'buildDocumentRecord',
+    action: 'create_rental_contract',
+    documentCategory: 'contracts',
+  },
   presupuesto: {
     module: 'finanzas',
     database: () => getInvoicesDbName(),

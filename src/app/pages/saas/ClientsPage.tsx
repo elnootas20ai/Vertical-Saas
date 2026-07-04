@@ -32,6 +32,7 @@ import { SegmentBuilder, applySegmentFilters, type FilterCondition } from '../..
 import { useColumnPreferences, type ColumnDef } from '../../hooks/useColumnPreferences';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { usesBusinessScopedClients } from '../../lib/clientSearchScope';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import type { Client as AppContextClient } from '../../context/AppContext';
 import { ColumnCustomizer } from '../../components/saas/ColumnCustomizer';
@@ -153,7 +154,7 @@ function mapContextClientToPage(c: AppContextClient, i: number): Client {
   return {
     id: c.id,
     name: c.name,
-    dni: c.dni || `${12000000 + i}X`,
+    dni: c.dni || '',
     phone: c.phone,
     email: c.email,
     address: location.address,
@@ -1573,6 +1574,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const isBusinessScopedClients = usesBusinessScopedClients(currentBusiness?.businessType);
+  const scopedClientsBusinessId = isBusinessScopedClients && businessScopeId ? businessScopeId : undefined;
   const listPlan = useClientsListPlanAccess();
   const clientColDefsForUi = useMemo(
     () => (isDeliveryBusiness ? DELIVERY_CLIENT_COL_DEFS : CLIENT_COL_DEFS),
@@ -1656,7 +1659,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     fetchAllClientsForExport(
       clientsDataUserId,
       undefined,
-      isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+      scopedClientsBusinessId,
       { liveStats: isDeliveryBusiness },
     )
       .then((all) => {
@@ -1690,7 +1693,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     refresh: refreshPaginatedClients,
   } = usePaginatedClients({
     userId: clientsDataUserId,
-    businessId: isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+    businessId: scopedClientsBusinessId,
     enabled: useServerClients && activeTab === 'clients' && !useSegmentMode,
     search: debouncedSearch,
     sort: cSort,
@@ -1713,7 +1716,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       limit: 200,
       skip: 0,
       lite: true,
-      businessId: isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+      businessId: scopedClientsBusinessId,
     })
       .then(({ clients }) => {
         if (!cancelled) {
@@ -1726,10 +1729,10 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const withBusinessScope = useCallback(
     <T extends Record<string, unknown>>(payload: T): T => {
-      if (!isDeliveryBusiness || !businessScopeId) return payload;
+      if (!isBusinessScopedClients || !businessScopeId) return payload;
       return { ...payload, businessId: businessScopeId, business_id: businessScopeId };
     },
-    [isDeliveryBusiness, businessScopeId],
+    [isBusinessScopedClients, businessScopeId],
   );
 
   const handleImportClientsFromBusiness = useCallback(async () => {
@@ -2006,7 +2009,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       const all = await fetchAllClientsForExport(
         clientsDataUserId,
         undefined,
-        isDeliveryBusiness && businessScopeId ? businessScopeId : undefined,
+        scopedClientsBusinessId,
         { liveStats: isDeliveryBusiness },
       );
       downloadClientsExport(
@@ -4220,8 +4223,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         onClose={() => setCrmImportMode(null)}
         initialMode={crmImportMode ?? undefined}
         exportUserId={authUser?.user_id}
-        exportBusinessId={isDeliveryBusiness && businessScopeId ? businessScopeId : undefined}
-        importBusinessId={isDeliveryBusiness && businessScopeId ? businessScopeId : undefined}
+        exportBusinessId={scopedClientsBusinessId}
+        importBusinessId={scopedClientsBusinessId}
         includeResponsible={!isDeliveryBusiness}
       />
       {showImportFromBusiness && (

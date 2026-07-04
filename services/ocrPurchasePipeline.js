@@ -57,7 +57,16 @@ async function updateWeightedCatalogCost(req, userId, catalogItemId, receivedQty
   });
 }
 
-export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice) {
+function financeScopeFromInvoice(entity = {}) {
+  return {
+    businessId: String(entity.businessId || entity.business_id || '').trim(),
+    businessName: String(entity.businessName || entity.business_name || '').trim(),
+    workCenterId: String(entity.workCenterId || entity.costCenterId || '').trim(),
+    workCenterName: String(entity.workCenterName || entity.costCenterName || '').trim(),
+  };
+}
+
+export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice, options = {}) {
   const financeDb = getFinanceDbName();
   await ensureDatabase(req, financeDb);
   const allMvs = await getAllDocuments(req, financeDb);
@@ -83,15 +92,16 @@ export async function createFinancePagoFromPurchaseInvoice(req, userId, invoice)
     status: invStatus === 'paid' ? 'paid' : 'pending',
     dueDate: invoice.dueDate || '',
     paidAt: invStatus === 'paid' ? (invoice.paidAt || new Date().toISOString()) : '',
-    source: 'ocr',
+    source: options.financeSource || 'ocr',
     sourceRef: invoice._id,
-    entryMethod: 'ocr',
+    entryMethod: options.entryMethod || invoice.entryMethod || 'ocr',
     linkedDocuments: [{
       id: invoice._id,
       type: 'purchase_invoice',
       name: invoice.invoiceNumber || invoice._id,
       url: '',
     }],
+    ...financeScopeFromInvoice(invoice),
   };
 
   const doc = buildFinanceDocument(userId, movementData);
@@ -187,7 +197,10 @@ export async function reconcilePurchaseInvoiceFromOcr(req, userId, invoiceDoc, o
   let financeResult = null;
   if (options.createFinance !== false) {
     try {
-      financeResult = await createFinancePagoFromPurchaseInvoice(req, userId, invoiceDoc);
+      financeResult = await createFinancePagoFromPurchaseInvoice(req, userId, invoiceDoc, {
+        financeSource: options.financeSource,
+        entryMethod: options.entryMethod,
+      });
     } catch (err) {
       logger.warn({ tag: 'OCR-FINANCE', err: err?.message }, 'Finance pago creation failed');
     }

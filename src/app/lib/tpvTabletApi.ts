@@ -39,6 +39,8 @@ export interface TpvTabletBindingPayload {
   workCenterId: string;
   businessId: string;
   dataUserId: string;
+  /** Terminal TPV de sala cuando el login usa código SALA-* */
+  salaTerminalId?: string;
   /** Vertical del TPV fijado por el código (no depende del businessType). */
   tpvVertical?: 'delivery';
 }

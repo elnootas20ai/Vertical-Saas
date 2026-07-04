@@ -29,6 +29,7 @@ import {
   signRefreshToken,
 } from '../middleware/auth.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
+import { PLATFORM_CHANGELOG } from '../shared/platformChangelog.js';
 
 const SETTINGS_DB = 'settings';
 
@@ -780,90 +781,6 @@ function maskKey(key) {
 }
 
 // ─── ADM-08: Platform changelog ───────────────────────────────────────────────
-
-const PLATFORM_CHANGELOG = [
-  {
-    version: '2.8.0',
-    date: '2026-03-14',
-    tag: 'nuevo',
-    title: 'Panel de administración ampliado',
-    description: 'Impersonación de usuarios, personalización de marca, configuración de pipeline, plantillas de email, horarios laborales y portabilidad de datos.',
-    items: [
-      'ADM-01: Impersonación de tenants desde el panel superadmin',
-      'ADM-02: Personalización de logo, colores y dominio por concesionario',
-      'ADM-03: Renombrar y reordenar etapas del pipeline de ventas',
-      'ADM-05: Editor de plantillas de email desde la UI',
-      'ADM-06: Exportación e importación completa de datos del concesionario',
-      'ADM-07: Horarios laborales, festivos y zona horaria por sede',
-      'ADM-08: Log de novedades de la plataforma visible por los usuarios',
-    ],
-  },
-  {
-    version: '2.7.0',
-    date: '2026-02-28',
-    tag: 'mejora',
-    title: 'Taller y órdenes de trabajo mejoradas',
-    description: 'Vista de técnico, seguimiento de piezas y repuestos, y firma digital en órdenes de reparación.',
-    items: [
-      'Vista dedicada para técnicos de taller',
-      'Control de stock de piezas y repuestos',
-      'Firma digital en órdenes de trabajo',
-      'Estados avanzados: diagnóstico, en espera de piezas, listo para entrega',
-    ],
-  },
-  {
-    version: '2.6.0',
-    date: '2026-02-10',
-    tag: 'nuevo',
-    title: 'Grupos empresariales y multi-sede',
-    description: 'Gestión centralizada de grupos con KPIs consolidados, transferencia de vehículos entre sedes y usuarios multi-negocio.',
-    items: [
-      'Panel de grupos empresariales con KPIs consolidados',
-      'Transferencia de stock entre sedes del grupo',
-      'Usuario con acceso a múltiples negocios',
-      'Facturación y reporting unificado por grupo',
-    ],
-  },
-  {
-    version: '2.5.0',
-    date: '2026-01-20',
-    tag: 'mejora',
-    title: 'CRM y pipeline de ventas',
-    description: 'Pipeline Kanban con drag & drop, scoring de leads, workflows automáticos y portal del cliente.',
-    items: [
-      'Pipeline Kanban con drag & drop',
-      'Sistema de scoring de leads con IA',
-      'Workflows de seguimiento automático configurable',
-      'Portal del cliente con acceso a documentos',
-    ],
-  },
-  {
-    version: '2.4.0',
-    date: '2025-12-15',
-    tag: 'nuevo',
-    title: 'Módulo financiero completo',
-    description: 'Control de cobros, financiaciones, cash flow y panel financiero con gráficas.',
-    items: [
-      'Registro de cobros y pagos por operación',
-      'Gestión de financiaciones y tasaciones',
-      'Panel de cash flow mensual',
-      'Facturas de compra/venta con numeración personalizable',
-    ],
-  },
-  {
-    version: '2.3.0',
-    date: '2025-11-28',
-    tag: 'mejora',
-    title: 'Gestión de compras y proveedores',
-    description: 'Módulo de compras con órdenes de compra, recepción de stock y gestión de proveedores.',
-    items: [
-      'Órdenes de compra a proveedores',
-      'Recepción y control de stock entrante',
-      'Histórico de precios por proveedor',
-      'Integración con ANCOVE para vehículos de ocasión',
-    ],
-  },
-];
 
 // ─── Driver Cash Config ──────────────────────────────────────────────────────
 

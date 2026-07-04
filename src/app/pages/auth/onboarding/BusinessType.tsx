@@ -4,7 +4,7 @@ import {
   Car, Wrench, Truck, SprayCan, Dumbbell, Stethoscope,
   Hotel, HardHat, GraduationCap, Building2, Scale, Music,
   PartyPopper, Scissors, Container, Cog, CarTaxiFront,
-  Pill, Droplets, PawPrint, Cigarette, Beef,
+  Pill, Droplets, PawPrint, Cigarette, Beef, UtensilsCrossed,
 } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { ACCESO__SelectableCard } from '../../../components/design-system/ACCESO__SelectableCard';
@@ -13,16 +13,18 @@ import {
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding } from '../../../context/OnboardingContext';
+import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 
 const STEP_INDEX = 0;
 
-const ENABLED_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
+const ENABLED_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
 
 const BUSINESS_TYPES = [
   { id: 'events',        icon: PartyPopper,   title: 'Eventos',              description: 'Eventos' },
   { id: 'carDealership', icon: Car,           title: 'Compraventa',          description: 'Coches' },
   { id: 'workshop',      icon: Wrench,        title: 'Taller',                description: 'Mecánico' },
-  { id: 'delivery',      icon: Truck,         title: 'Delivery',              description: 'Entregas' },
+  { id: 'delivery',      icon: Truck,           title: 'Delivery',              description: 'Reparto y pedidos a domicilio' },
+  { id: 'restaurant',    icon: UtensilsCrossed, title: 'Bar/restaurante',       description: 'TPV, comandas, cocina y sala' },
   { id: 'cleaning',      icon: SprayCan,      title: 'Limpieza',             description: 'Limpieza' },
   { id: 'hairSalon',     icon: Scissors,      title: 'Peluquería',           description: 'Salón' },
   { id: 'gym',           icon: Dumbbell,      title: 'Gimnasio',             description: 'Fitness' },
@@ -61,6 +63,11 @@ export function BusinessType() {
       });
     }
     updateData('businessType', selectedType);
+    if (isRestaurantBusinessType(selectedType)) {
+      updateData('restaurantFormat', 'restaurant');
+    } else {
+      updateData('restaurantFormat', undefined);
+    }
     advanceStep(STEP_INDEX);
     navigate('/auth/onboarding/company');
   };
