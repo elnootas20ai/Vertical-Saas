@@ -6,6 +6,7 @@ import { OnboardingProvider, useOnboarding } from './context/OnboardingContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 /** Antes que `./routes`: evita ciclo routes → SaasRoot → AppContext → BusinessContext. */
 import { BusinessProvider } from './context/BusinessContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { router } from './routes';
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
@@ -92,7 +93,9 @@ export default function App() {
         <OnboardingProvider>
           <OnboardingUserSync />
           <BusinessProvider>
-            <RouterProvider router={router} />
+            <ErrorBoundary moduleName="Vertial">
+              <RouterProvider router={router} />
+            </ErrorBoundary>
           </BusinessProvider>
         </OnboardingProvider>
       </AuthProvider>

@@ -11,7 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
-import { seedRetailScopeCacheFromTabletLogin } from '../../lib/retailScopeCache';
+import { seedRetailScopeCacheFromTabletLogin } from '../../lib/tabletLoginStoreSeed';
 import {
   writeTpvTabletBinding,
   TPV_TABLET_DELIVERY_PATH,
@@ -91,6 +91,7 @@ export function Login() {
           businessId: business.business_id,
           pointOfSale: pdv,
           workCenterId: terminalBinding?.workCenterId,
+          business,
         });
       }
 

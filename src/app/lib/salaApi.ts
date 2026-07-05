@@ -16,20 +16,30 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await authFetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...getCouchHeaders(),
-      ...(init?.headers || {}),
-    },
-  });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado en sala API');
+async function request<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
+  try {
+    const response = await authFetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...getCouchHeaders(),
+        ...(init?.headers || {}),
+      },
+    });
+    const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Error inesperado en sala API');
+    }
+    return payload;
+  } catch (err) {
+    const isNetwork = err instanceof TypeError
+      || (err instanceof Error && /failed to fetch|network|load failed/i.test(err.message));
+    if (isNetwork && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      return request<T>(path, init, attempt + 1);
+    }
+    throw err;
   }
-  return payload;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -503,6 +513,53 @@ export async function mergeDiningOrdersRequest(
     { method: 'POST', body: JSON.stringify({ sourceOrderIds, targetOrderId }) },
   );
   return data;
+}
+
+// ─── Table ticket stats ──────────────────────────────────────────────────────
+
+export interface DiningTableTicketStatRow {
+  id: string;
+  tableId: string;
+  tableNumber: number;
+  tableName: string;
+  roomId: string;
+  pdvId: string;
+  salesPointName: string;
+  seatedAt: string;
+  ticketAt: string;
+  durationMinutes: number;
+  deliveryOrderId: string;
+  ticketNumber: string;
+  orderNumber: string;
+  amount: number;
+  itemCount: number;
+  guestCount: number;
+  calendarDay: string;
+  createdAt: string;
+}
+
+export async function listTableTicketStatsRequest(
+  userId: string,
+  filters: {
+    businessId?: string;
+    tableId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    pdvId?: string;
+  } = {},
+) {
+  const uid = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (filters.businessId) params.set('businessId', filters.businessId);
+  if (filters.tableId) params.set('tableId', filters.tableId);
+  if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+  if (filters.dateTo) params.set('dateTo', filters.dateTo);
+  if (filters.pdvId) params.set('pdvId', filters.pdvId);
+  const qs = params.toString();
+  const data = await request<{ stats: DiningTableTicketStatRow[] }>(
+    `/api/sala/table-stats/${uid}${qs ? `?${qs}` : ''}`,
+  );
+  return data.stats;
 }
 
 // ─── Pickup (Recogida local) ─────────────────────────────────────────────────

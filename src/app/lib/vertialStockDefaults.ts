@@ -220,10 +220,17 @@ export function isCatalogResaleStockProduct(item: {
   if (item.itemType && item.itemType !== 'product') return false;
   const cat = fold(item.category || '');
   const name = fold(item.name || '');
+  // Carta de bar/restaurante con escandallo — no tratar como reventa de stock envasado.
+  if (/tapas?|raciones?|pinchos?|montaditos?|kebab|principales|platos|cocina|carte/.test(cat)) {
+    return false;
+  }
   if (/bebida|refresco|cerveza|agua|zumo|postre|helado|dulce|complemento|side|guarnicion|patata|nugget|tequeño|entrante/.test(cat)) {
     return true;
   }
   if (/coca|pepsi|fanta|agua|cerveza|bebida|refresco|nestea|postre|tarta|helado|patata|nugget|tequeño/.test(name)) {
+    if (/tapas?|raciones?|pinchos?|bravas|iberico|ibérico|calamares|pulpo|gamba/.test(name)) {
+      return false;
+    }
     return true;
   }
   return item.stockCategory === 'beverage' || item.stockCategory === 'finished_product';

@@ -3530,6 +3530,9 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
 
   const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
 
+  const businessType = String(business.businessType || '').trim();
+  const tpvVertical = businessType === 'restaurant' ? 'restaurant' : 'delivery';
+
   return res.json({
     ok: true,
     user: sanitizeAccount(savedAccount),
@@ -3538,6 +3541,7 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
       name: business.name,
       logo: business.logo || '',
       owner_user_id: business.owner_user_id || '',
+      businessType,
     },
     pointOfSale: sanitizePointOfSale(pdv),
     terminalBinding: {
@@ -3546,7 +3550,7 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
       workCenterId: pdv.workCenterId || '',
       businessId: business.business_id,
       dataUserId: pdv.user_id,
-      tpvVertical: 'delivery',
+      tpvVertical,
       ...(resolved.salaTerminalId ? { salaTerminalId: resolved.salaTerminalId } : {}),
     },
     accessToken,

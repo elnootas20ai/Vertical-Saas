@@ -57,8 +57,10 @@ export function BusinessScopeUrlSync() {
       );
     }
   }, [
-    businessCtx,
+    businessCtx?.businessesFetchSettled,
+    businessCtx?.businesses,
     businessCtx?.currentBusiness?.business_id,
+    businessCtx?.switchBusiness,
     location.pathname,
     location.search,
     navigate,

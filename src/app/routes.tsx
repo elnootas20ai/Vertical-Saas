@@ -114,6 +114,7 @@ import InventoryPage from './pages/saas/InventoryPage';
 import { DealershipWorkers } from './pages/saas/DealershipWorkers';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
+import { TpvRouteShell } from './components/saas/TpvRouteShell';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
@@ -604,9 +605,9 @@ export const router = createBrowserRouter([
           { path: 'delivery-kitchen', element: <RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission> },
           { path: 'delivery-montaje', element: <RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission> },
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
-          { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'caja', element: <RequireBusinessOwner><RequirePdvTerminal><RestaurantCajaRouteEntry /></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'caja/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRapidoPage /></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'caja', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><RestaurantCajaRouteEntry /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
+          { path: 'caja/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
           { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireBusinessOwner> },
           { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><DeliveryReports /></RequireBusinessOwner> },

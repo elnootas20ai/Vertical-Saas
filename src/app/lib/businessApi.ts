@@ -106,15 +106,26 @@ const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env |
 const API_BASE = getApiBase();
 
 async function request(path: string, init?: RequestInit): Promise<BusinessEnvelope> {
-  const response = await authFetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(),
-      ...(init?.headers || {}),
-    },
-    credentials: 'include',
-    ...init,
-  });
+  const url = `${API_BASE}${path}`;
+  let response: Response;
+  try {
+    response = await authFetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+        ...(init?.headers || {}),
+      },
+      credentials: 'include',
+      ...init,
+    });
+  } catch (err) {
+    const hint = API_BASE
+      ? `No se pudo conectar con el servidor (${url}).`
+      : 'No se pudo conectar con el servidor. Comprueba que el backend esté en marcha (npm start, puerto 3001).';
+    throw new Error(
+      err instanceof Error && err.message.toLowerCase().includes('fetch') ? hint : (err instanceof Error ? err.message : hint),
+    );
+  }
 
   const payload = (await response.json().catch(() => ({}))) as BusinessEnvelope;
 

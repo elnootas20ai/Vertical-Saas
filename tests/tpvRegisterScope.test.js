@@ -38,11 +38,28 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
         dataUserId: 'owner-tablet',
       },
       authUser: { user_id: 'worker-1' },
+      pathname: '/saas/worker/tpv/delivery',
     });
     expect(r.scopeBusinessId).toBe('empresa-tablet');
     expect(r.effectiveDataUserId).toBe('owner-tablet');
     expect(r.isTabletSession).toBe(true);
     expect(r.shouldSyncBusinessFromTablet).toBe(true);
+  });
+
+  it('binding tablet en /saas/caja/tpv no activa sesión tablet (gerente restaurante)', () => {
+    const r = resolveTpvRegisterScope({
+      currentBusiness: { business_id: 'rest-1', id: 'rest-1', owner_user_id: 'owner-1' },
+      tabletBinding: {
+        pdvId: 'pdv-nueva',
+        businessId: 'empresa-tablet',
+        dataUserId: 'owner-tablet',
+      },
+      authUser: { user_id: 'owner-1' },
+      pathname: '/saas/caja/tpv',
+    });
+    expect(r.scopeBusinessId).toBe('rest-1');
+    expect(r.isTabletSession).toBe(false);
+    expect(r.shouldSyncBusinessFromTablet).toBe(false);
   });
 
   it('sin tablet usa currentBusiness y dataUserId del titular si es miembro', () => {

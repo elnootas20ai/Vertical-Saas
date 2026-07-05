@@ -30,6 +30,7 @@ export interface RestaurantReservation extends VerticalEntity {
   guestName: string;
   phone: string;
   email: string;
+  clientId: string;
   date: string;
   time: string;
   partySize: string;
@@ -132,6 +133,7 @@ export const EMPTY_FORM: ReservationFormData = {
   guestName: '',
   phone: '',
   email: '',
+  clientId: '',
   date: new Date().toISOString().slice(0, 10),
   time: '20:00',
   partySize: '2',

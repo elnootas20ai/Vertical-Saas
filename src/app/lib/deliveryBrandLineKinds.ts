@@ -124,7 +124,7 @@ export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
     shortCode: 'BAR',
     primaryColor: '#7C2D12',
     description: 'Tapas, raciones y carta de bar.',
-    typicalCategories: ['Tapas', 'Raciones', 'Bebidas', 'Complementos'],
+    typicalCategories: ['Tapas', 'Raciones', 'Bocadillos', 'Pinchos', 'Complementos', 'Bebidas'],
   },
   {
     id: 'sushi_asian',

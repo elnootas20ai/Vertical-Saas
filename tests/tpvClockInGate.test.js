@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateTpvClockInGate } from '../src/app/lib/tpvClockInGate.ts';
 
 describe('evaluateTpvClockInGate', () => {
-  it('blocks while loading', () => {
+  it('blocks while loading with no workers yet', () => {
     const r = evaluateTpvClockInGate({
       loading: true,
       clockedInWorkers: [],
@@ -12,6 +12,17 @@ describe('evaluateTpvClockInGate', () => {
     });
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe('loading');
+  });
+
+  it('allows during silent refresh when workers already visible', () => {
+    const r = evaluateTpvClockInGate({
+      loading: true,
+      clockedInWorkers: [{ id: 'u1', name: 'Ana', status: 'active' }],
+      selectedOrderTakerId: 'u1',
+      currentUserId: 'mgr',
+      isWorkerUser: false,
+    });
+    expect(r.allowed).toBe(true);
   });
 
   it('allows manager when someone is active', () => {

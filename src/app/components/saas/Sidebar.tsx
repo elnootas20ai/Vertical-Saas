@@ -227,7 +227,7 @@ const menuItemDefs = [
   { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
 
   // ── Clientes / CRM ──────────────────────────────────────────────────────────
-  { id: 'clients',     navKey: 'clients',     icon: <Users className="w-5 h-5" />,     path: '/saas/clients' },
+  { id: 'clients',     navKey: 'clients',     icon: <Users className="w-5 h-5" />,     path: '/saas/crm/clientes?tab=clients' },
   { id: 'quotes',     navKey: 'quotes',     icon: <ClipboardList className="w-5 h-5" />, path: '/saas/quotes' },
   { id: 'promotions', navKey: 'promotions', icon: <Megaphone className="w-5 h-5" />,      path: '/saas/promotions', isNew: true },
 
@@ -286,7 +286,7 @@ const menuItemDefs = [
   { id: 'tpv-locales',      navKey: 'tpvLocales',      icon: <Store className="w-5 h-5" />,    path: '/saas/tpv/locales' },
   { id: 'tpv-rapido',       navKey: 'tpvRapido',       icon: <Zap className="w-5 h-5" />,      path: '/saas/vertical/delivery/tpv' },
   { id: 'caja',             navKey: 'caja',            icon: <Banknote className="w-5 h-5" />,  path: '/saas/vertical/delivery/caja' },
-  { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/delivery-ops?panel=clients' },
+  { id: 'delivery-clients', navKey: 'deliverySidebarClients', icon: <Users className="w-5 h-5" />, path: '/saas/crm/clientes?tab=clients' },
   { id: 'web-orders',       navKey: 'webOrders',       icon: <Package className="w-5 h-5" />,  path: '/saas/web-orders' },
   { id: 'web-config',       navKey: 'webConfig',       icon: <Globe className="w-5 h-5" />,    path: '/saas/web-config' },
   { id: 'delivery-integrations', navKey: 'deliveryIntegrations', icon: <Plug className="w-5 h-5" />, path: '/saas/vertical/delivery/integraciones' },
@@ -455,7 +455,7 @@ const sidebarGroupDefs = [
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
-  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'delivery-clients', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
+  { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
   { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
@@ -480,7 +480,7 @@ const sidebarGroupDefs = [
 const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   carDealership: new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'commercial']),
   workshop:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'workshop']),
-  delivery:      new Set(['equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
+  delivery:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
   restaurant:    new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
   cleaning:      new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'cleaning']),
   gym:           new Set(['clientesCrm', 'equipo', 'finanzas', 'documentacion', 'gym']),
@@ -512,6 +512,9 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   restaurant: {
     clientesCrm: ['clients'],
     delivery: ['sala', 'reservas', 'lista-espera', 'caja'],
+  },
+  delivery: {
+    clientesCrm: ['clients', 'promotions'],
   },
 };
 
@@ -1179,7 +1182,7 @@ function SidebarInner({
       item.id === 'tpv-locales' ||
       item.id === 'caja';
     const deliveryOperational =
-      item.id === 'sala' || item.id === 'reservas' || item.id === 'lista-espera' || item.id === 'delivery-clients';
+      item.id === 'sala' || item.id === 'reservas' || item.id === 'lista-espera';
     const permission = permissionMap[item.id]
       || (item.id === 'catalog-stock' ? permissionMap.catalog : undefined)
       || (item.id === 'leads' ? permissionMap.clients : undefined)
@@ -1224,7 +1227,7 @@ function SidebarInner({
     (item.id === 'compraventa-compras' && location.pathname.startsWith('/saas/vertical/compraventa/compras')) ||
     (item.id === 'compraventa-tasaciones' && location.pathname.startsWith('/saas/vertical/compraventa/tasaciones')) ||
     (item.id === 'compraventa-entregas' && location.pathname.startsWith('/saas/vertical/compraventa/entregas')) ||
-    (item.id === 'clients' && location.pathname.startsWith('/saas/clients')) ||
+    (item.id === 'clients' && (location.pathname.startsWith('/saas/clients') || location.pathname.startsWith('/saas/crm/clientes'))) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
     (item.id === 'tpv' && location.pathname === '/saas/tpv') ||
@@ -1234,10 +1237,8 @@ function SidebarInner({
     (item.id === 'tpv-locales' && location.pathname === '/saas/tpv/locales') ||
     (item.id === 'delivery-ops'
       && location.pathname.startsWith('/saas/delivery-ops')
-      && new URLSearchParams(location.search).get('panel') !== 'clients') ||
-    (item.id === 'delivery-clients'
-      && (location.pathname.startsWith('/saas/clients')
-        || (location.pathname.startsWith('/saas/delivery-ops') && new URLSearchParams(location.search).get('panel') === 'clients'))) ||
+      && !['clients', 'promotions'].includes(new URLSearchParams(location.search).get('panel') || '')) ||
+    (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'caja' && (location.pathname.startsWith('/saas/caja') || location.pathname.startsWith('/saas/vertical/delivery/caja'))) ||
     (item.id === 'sala' && location.pathname.startsWith('/saas/sala')) ||
     (item.id === 'reservas' && location.pathname.startsWith('/saas/reservations')) ||
@@ -1305,11 +1306,10 @@ function SidebarInner({
   const visibleById = new Map(visibleMenuItems.map((item) => [item.id, item]));
   const COMMON_SIDEBAR_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
   const allowedGroupsList = sidebarGroups.filter((g) => allowedGroups.has(g.id));
-  const shouldHideCrmGroup = isDeliveryBusinessType(vertical);
   const filteredGroups: SidebarGroup[] = [
     HOME_GROUP,
-    ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
-    ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id) && !(shouldHideCrmGroup && g.id === 'clientesCrm')),
+    ...allowedGroupsList.filter((g) => !COMMON_SIDEBAR_GROUPS.has(g.id)),
+    ...allowedGroupsList.filter((g) => COMMON_SIDEBAR_GROUPS.has(g.id)),
   ];
   const workCentersSettingsPath = '/saas/settings/tienda';
   const workCentersAddPath = `${workCentersSettingsPath}?action=new-pdv`;

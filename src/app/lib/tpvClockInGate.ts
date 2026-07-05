@@ -16,7 +16,8 @@ export function evaluateTpvClockInGate(params: {
   isWorkerUser: boolean;
 }): { allowed: boolean; reason: TpvClockInBlockReason } {
   const { loading, clockedInWorkers, selectedOrderTakerId, currentUserId, isWorkerUser } = params;
-  if (loading) return { allowed: false, reason: 'loading' };
+  // Durante refresco silencioso, no bloquear si ya hay personal en pantalla.
+  if (loading && clockedInWorkers.length === 0) return { allowed: false, reason: 'loading' };
 
   const presentWorkers = clockedInWorkers.filter((w) => w.status === 'active' || w.status === 'break');
   const activeWorkers = clockedInWorkers.filter((w) => w.status === 'active');

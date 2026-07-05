@@ -57,6 +57,8 @@ import { DashboardViewProvider, useDashboardView } from '../../context/Dashboard
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
 import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { listFinanceMovements } from '../../lib/financeApi';
@@ -681,6 +683,7 @@ function UnifiedDashboard() {
   } | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
+  const isRestaurantVertical = vertical === 'restaurant' || isRestaurantBusinessType(currentBusiness?.businessType);
 
   useEffect(() => {
     if (!isDeliveryVertical || !authUser || !currentBusiness) {
@@ -1296,6 +1299,12 @@ function UnifiedDashboard() {
             </DraggableWidget>
           </div>
         )}
+
+        {isRestaurantVertical ? (
+          <div style={{ order: getWidgetOrder('kpis_main') + 0.5 }}>
+            <RestaurantLiveDashboardPanelFromContext />
+          </div>
+        ) : null}
 
         {/* ═══ ACCESOS RÁPIDOS ═══ */}
         {isVisible('quick_access') && (

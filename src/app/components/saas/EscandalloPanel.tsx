@@ -11,7 +11,7 @@ import {
 } from './SaasTabWorkspace';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
-import { isDeliveryBusinessType } from '../../lib/deliverySetup';
+import { isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
 import {
   dedupeCatalogItemsForDisplay,
   filterCatalogItemsForBusinessScope,
@@ -559,11 +559,11 @@ export function EscandalloPanel() {
     }
   }, [businessId, dataUserId, load, regeneratingEscandallo, user?.id]);
 
-  if (!isDeliveryBusinessType(businessType)) {
+  if (!isDeliveryOpsBusinessType(businessType)) {
     return (
       <SaasTabEmpty
-        title="Escandallo disponible en Delivery"
-        description="Cambia a tu empresa de delivery (Modomio) para ver pizzas, burgers, tacos y escandallos."
+        title="Escandallo no disponible"
+        description="El escandallo automático está disponible en empresas de delivery y bar/restaurante."
       />
     );
   }

@@ -1,9 +1,12 @@
+import { useMemo, useState } from 'react';
 import { useModalClose } from '../../../../hooks/useModalClose';
 import { X } from 'lucide-react';
 import type { ExtendedDiningTable, SalaRoom } from '../../../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../../../lib/salaStudioTypes';
-import { STATUS_LABELS } from './useSalaManager';
-import { tablesForRoom } from '../../../../lib/salaRooms';
+import { computeRoomStats, tablesForRoom } from '../../../../lib/salaRooms';
+import { resolveRestaurantTableLiveInfo } from '../../../../lib/restaurantTableDisplay';
+import { RestaurantTableGrid } from '../../restaurant/RestaurantTableGrid';
+import { RestaurantTpvZoneTabs } from '../../restaurant/RestaurantTpvZoneTabs';
 
 type Props = {
   open: boolean;
@@ -14,44 +17,86 @@ type Props = {
 
 export function SalaManagerPreviewModal({ open, onClose, rooms, tables }: Props) {
   useModalClose(open, onClose);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+
+  const visibleTables = useMemo(
+    () => tables.filter((t) => t.active !== false && t.status !== 'hidden'),
+    [tables],
+  );
+
+  const liveByTableId = useMemo(() => {
+    const live = new Map<string, ReturnType<typeof resolveRestaurantTableLiveInfo>>();
+    for (const table of visibleTables) {
+      live.set(table._id, resolveRestaurantTableLiveInfo(table, null, null));
+    }
+    return live;
+  }, [visibleTables]);
+
+  const roomStats = useMemo(
+    () => (roomId: string) => computeRoomStats(visibleTables, roomId),
+    [visibleTables],
+  );
+
+  const resolvedRoomId = activeRoomId || rooms[0]?.id || null;
+  const activeRoom = rooms.find((r) => r.id === resolvedRoomId) || rooms[0] || null;
+  const roomTables = activeRoom
+    ? tablesForRoom(visibleTables, activeRoom.id).sort((a, b) => a.number - b.number)
+    : [];
+
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div className="relative flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-950">
-        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
+      <div className="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-stone-100 shadow-2xl dark:bg-stone-950">
+        <div className="flex shrink-0 items-center justify-between border-b border-stone-200 bg-white px-5 py-4 dark:border-stone-800 dark:bg-stone-900">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Vista previa TPV</h2>
-            <p className="text-sm text-gray-500">Así verá el camarero las mesas</p>
+            <h2 className="text-lg font-semibold text-stone-900 dark:text-stone-50">Vista previa TPV</h2>
+            <p className="text-sm text-stone-500">Así verá el camarero las mesas en el TPV</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-2 hover:bg-gray-100 dark:hover:bg-gray-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-2 hover:bg-stone-100 dark:hover:bg-stone-800"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {rooms.map((room) => {
-            const roomTables = tablesForRoom(tables, room.id).sort((a, b) => a.number - b.number);
-            if (roomTables.length === 0) return null;
-            return (
-              <div key={room.id}>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{room.name}</h3>
-                <p className="text-xs text-gray-500">{SALA_ROOM_TYPE_LABELS[room.roomType]}</p>
-                <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                  {roomTables.map((t) => (
-                    <div
-                      key={t._id}
-                      className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-gray-50 py-3 dark:border-gray-700 dark:bg-gray-900"
-                    >
-                      <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{t.number}</span>
-                      <span className="text-[10px] text-gray-500">{t.capacity}p</span>
-                      <span className="mt-1 text-[9px] text-gray-400">{STATUS_LABELS[t.status]}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+
+        <RestaurantTpvZoneTabs
+          rooms={rooms}
+          activeRoomId={resolvedRoomId}
+          roomStats={roomStats}
+          onSelectRoom={setActiveRoomId}
+        />
+
+        {rooms.length <= 1 && activeRoom ? (
+          <div className="shrink-0 border-b border-stone-200 bg-white px-4 py-2 dark:border-stone-700 dark:bg-stone-900">
+            <p className="text-sm font-semibold text-stone-800 dark:text-stone-100">
+              {activeRoom.name}
+              <span className="ml-2 text-xs font-normal text-stone-500">
+                {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]}
+              </span>
+            </p>
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          {visibleTables.length === 0 ? (
+            <p className="py-12 text-center text-sm text-stone-500">No hay mesas visibles en esta sala.</p>
+          ) : (
+            <RestaurantTableGrid
+              tables={roomTables}
+              liveByTableId={liveByTableId}
+              onSelectTable={() => {}}
+              onSelectCounter={() => {}}
+              readOnly
+            />
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-stone-200 bg-white px-4 py-2 text-[11px] text-stone-500 dark:border-stone-800 dark:bg-stone-900">
+          Vista estática · en el TPV también verás cuentas abiertas y reservas del día
         </div>
       </div>
     </div>

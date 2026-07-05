@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportClientError } from '../lib/userFacingError';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
 
 interface Props {
@@ -27,7 +28,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     this.setState({ errorInfo });
-    // En producción aquí enviaríamos a Sentry / Datadog
+    reportClientError({
+      err: error,
+      context: this.props.moduleName || 'React',
+      page: typeof window !== 'undefined' ? window.location.pathname : '',
+    });
     if (import.meta.env.DEV) {
       console.error('[ErrorBoundary]', error, errorInfo);
     }
@@ -46,7 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (fallback) return fallback(error, this.reset);
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] p-8 text-center bg-red-50 dark:bg-red-950/30 rounded-2xl">
+      <div className="flex flex-col items-center justify-center min-h-[100svh] w-full p-8 text-center bg-gray-50 dark:bg-gray-950">
         <div className="w-16 h-16 bg-red-100 dark:bg-red-950 rounded-2xl flex items-center justify-center mb-4">
           <AlertTriangle className="w-8 h-8 text-red-500" />
         </div>
@@ -54,8 +59,8 @@ export class ErrorBoundary extends Component<Props, State> {
           {moduleName ? `Error en ${moduleName}` : 'Algo ha ido mal'}
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mb-6">
-          Se ha producido un error inesperado. Puedes intentar recargar el módulo
-          o volver al inicio.
+          Ha ocurrido un problema. Puedes reintentar o volver al inicio.
+          El detalle técnico queda registrado en Caja → Incidencias TPV.
         </p>
         {import.meta.env.DEV && (
           <pre className="mb-6 max-w-lg text-left text-xs bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400 rounded-xl p-4 overflow-auto">

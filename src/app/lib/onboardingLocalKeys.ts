@@ -13,6 +13,9 @@ export const ONBOARDING_TOUR_VERSION = '5';
 /** Disparado al crear empresa en sesión para abrir el tour sin recargar. */
 export const ONBOARDING_TOUR_ARM_EVENT = 'vertial:onboarding-tour-arm';
 
+/** Tour marcado como completado (mostrar check de confirmación una vez). */
+export const ONBOARDING_TOUR_COMPLETED_EVENT = 'vertial:onboarding-tour-completed';
+
 /** Checklist lateral: paso «Ir» / reinicio de tour cambió el paso activo. */
 export const ACTIVATION_IN_PROGRESS_CHANGED = 'vertial:activation-in-progress-changed';
 
@@ -70,6 +73,10 @@ export function onboardingTourStepKey(userId: string, businessId: string): strin
 
 export function onboardingTourActiveKey(userId: string, businessId: string): string {
   return `vertial_onboarding_active:${trimId(userId)}:${trimId(businessId)}`;
+}
+
+function onboardingTourCompleteAckKey(userId: string, businessId: string): string {
+  return `vertial_onboarding_tour_ack:${trimId(userId)}:${trimId(businessId)}`;
 }
 
 export function activationInProgressKey(userId: string, businessId: string): string {
@@ -358,6 +365,33 @@ export function setOnboardingTourActive(
   }
 }
 
+export function isTourCompleteAcknowledged(userId: string, businessId: string): boolean {
+  if (!userId || !businessId) return false;
+  try {
+    return localStorage.getItem(onboardingTourCompleteAckKey(userId, businessId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markTourCompleteAcknowledged(userId: string, businessId: string): void {
+  if (!userId || !businessId) return;
+  try {
+    localStorage.setItem(onboardingTourCompleteAckKey(userId, businessId), '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearTourCompleteAcknowledged(userId: string, businessId: string): void {
+  if (!userId || !businessId) return;
+  try {
+    localStorage.removeItem(onboardingTourCompleteAckKey(userId, businessId));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function markOnboardingTourCompleted(userId: string, businessId: string): void {
   if (!userId || !businessId) return;
   try {
@@ -368,6 +402,11 @@ export function markOnboardingTourCompleted(userId: string, businessId: string):
     localStorage.removeItem('vertial_onboarding_completed');
     sessionStorage.removeItem(onboardingTourStepKey(userId, businessId));
     sessionStorage.removeItem(onboardingTourActiveKey(userId, businessId));
+    window.dispatchEvent(
+      new CustomEvent(ONBOARDING_TOUR_COMPLETED_EVENT, {
+        detail: { userId: trimId(userId), businessId: trimId(businessId) },
+      }),
+    );
   } catch {
     /* ignore */
   }
@@ -385,6 +424,7 @@ export function clearOnboardingTourForBusiness(userId: string, businessId: strin
     localStorage.removeItem(onboardingTourCompletedKey(userId, businessId));
     localStorage.removeItem(onboardingTourCompletedLegacyKey(userId));
     localStorage.removeItem('vertial_onboarding_completed');
+    clearTourCompleteAcknowledged(userId, businessId);
     sessionStorage.removeItem(onboardingTourStepKey(userId, businessId));
     sessionStorage.removeItem(onboardingTourActiveKey(userId, businessId));
   } catch {

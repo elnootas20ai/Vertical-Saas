@@ -1,9 +1,10 @@
 import type { PointOfSale } from './deliveryApi';
 
-/** Vertical fijado por el código tablet TPV (hoy solo delivery). */
-export type TpvTabletVertical = 'delivery';
+/** Vertical fijado por el código tablet TPV según el negocio vinculado. */
+export type TpvTabletVertical = 'delivery' | 'restaurant';
 
 export const TPV_TABLET_VERTICAL_DELIVERY: TpvTabletVertical = 'delivery';
+export const TPV_TABLET_VERTICAL_RESTAURANT: TpvTabletVertical = 'restaurant';
 
 /** Ruta canónica del TPV operativo tras activar tablet con código de tienda. */
 export const TPV_TABLET_DELIVERY_PATH = '/saas/worker/tpv/delivery';

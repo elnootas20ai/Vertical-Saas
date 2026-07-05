@@ -5,10 +5,9 @@ import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
-import { useBusiness } from '../../context/BusinessContext';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
-import { seedRetailScopeCacheFromTabletLogin } from '../../lib/retailScopeCache';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   readTpvTabletBinding,
@@ -21,7 +20,7 @@ export function TpvTabletLogin() {
   const navigate = useNavigate();
   const location = useLocation();
   const { tpvTabletLogin } = useAuth();
-  const { switchBusiness, reloadBusinesses } = useBusiness();
+  const businessCtx = useBusinessOptional();
   const binding = readTpvTabletBinding();
 
   const [terminalCode, setTerminalCode] = useState(() => {
@@ -36,7 +35,8 @@ export function TpvTabletLogin() {
   const terminalRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setTimeout(() => terminalRef.current?.focus(), 80);
+    const timer = window.setTimeout(() => terminalRef.current?.focus(), 80);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const performLogin = async (e?: FormEvent) => {
@@ -87,10 +87,12 @@ export function TpvTabletLogin() {
     }
 
     if (business?.business_id && pdv) {
+      const { seedRetailScopeCacheFromTabletLogin } = await import('../../lib/tabletLoginStoreSeed');
       seedRetailScopeCacheFromTabletLogin({
         businessId: business.business_id,
         pointOfSale: pdv,
         workCenterId: terminalBinding?.workCenterId,
+        business,
       });
     }
 
@@ -111,8 +113,8 @@ export function TpvTabletLogin() {
     }
 
     try {
-      await reloadBusinesses();
-      if (business?.business_id) switchBusiness(business.business_id);
+      await businessCtx?.reloadBusinesses();
+      if (business?.business_id) businessCtx?.switchBusiness(business.business_id);
     } catch {
       // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
     }

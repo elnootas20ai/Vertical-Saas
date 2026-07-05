@@ -13,6 +13,7 @@ import { useDashboardViewOptional } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 
 import { OnboardingTour } from './OnboardingTour';
+import { OnboardingTourCompleteToast } from './OnboardingTourCompleteToast';
 import { GuidedStepsPopup } from './GuidedStepsPopup';
 import { ActivationPageCoach } from './ActivationPageCoach';
 import { ErrorBoundary } from '../ErrorBoundary';
@@ -325,6 +326,7 @@ function LayoutInner({
 
       {/* Global overlays */}
       <GlobalSearchModal isOpen={globalSearchOpen} onClose={() => setGlobalSearchOpen(false)} />
+      {!isWorkerAccount(user) ? <OnboardingTourCompleteToast /> : null}
       {!isWorkerAccount(user) ? <OnboardingTour /> : null}
       {!isWorkerAccount(user) ? <GuidedStepsPopup /> : null}
     </div>

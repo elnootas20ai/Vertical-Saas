@@ -32,6 +32,10 @@ function matchCostRules(rules: CostRule[], folded: string): number | undefined {
 
 /** Bebidas — mismo coste de referencia para todas las marcas (€ / unidad). */
 export const VERTIAL_UNIVERSAL_DRINK_COSTS: CostRule[] = [
+  { patterns: ['caña', 'cana', 'tubo', 'corto'], cost: 0.35 },
+  { patterns: ['clara', 'radler', 'lemon'], cost: 0.45 },
+  { patterns: ['jarra', 'litro', 'tercio'], cost: 1.05 },
+  { patterns: ['cubata', 'combinado', 'gintonic', 'gin tonic', 'mojito', 'copa'], cost: 0.85 },
   { patterns: ['coca', 'cola', 'pepsi', 'refresco'], cost: 0.65 },
   { patterns: ['sprite', 'fanta', 'schweppes', 'tonica', 'tónica', 'seven up'], cost: 0.5 },
   { patterns: ['agua'], cost: 0.22 },
@@ -39,6 +43,8 @@ export const VERTIAL_UNIVERSAL_DRINK_COSTS: CostRule[] = [
   { patterns: ['zumo', 'juice', 'nestea', 'aquarius', 'ice tea'], cost: 0.6 },
   { patterns: ['red bull', 'monster', 'energetica', 'energética'], cost: 0.85 },
   { patterns: ['vino', 'tinto', 'blanco', 'rosado'], cost: 1.2 },
+  { patterns: ['cafe solo', 'café solo', 'espresso', 'expresso'], cost: 0.12 },
+  { patterns: ['cafe con leche', 'café con leche', 'capuccino', 'cappuccino', 'latte'], cost: 0.28 },
   { patterns: ['bebida'], cost: 0.55 },
 ];
 
@@ -85,6 +91,50 @@ export const VERTIAL_LINE_INGREDIENT_COSTS: Partial<Record<DeliveryBrandLineKind
     { patterns: ['frijol', 'refrito'], cost: 4.0 },
     { patterns: ['arroz'], cost: 3.0 },
   ],
+  tapas_bar: [
+    { patterns: ['pan', 'regana', 'requena', 'picos'], cost: 0.25 },
+    { patterns: ['aceite', 'oliva'], cost: 8.0 },
+    { patterns: ['jamon', 'jamón', 'iberico', 'ibérico', 'serrano'], cost: 28.0 },
+    { patterns: ['queso', 'manchego', 'curado'], cost: 14.0 },
+    { patterns: ['patata', 'brava', 'frita'], cost: 2.0 },
+    { patterns: ['aceituna', 'oliva'], cost: 6.0 },
+    { patterns: ['pulpo', 'gallega'], cost: 16.0 },
+    { patterns: ['gamba', 'gambon', 'langostino'], cost: 18.0 },
+    { patterns: ['tortilla', 'patata'], cost: 3.5 },
+    { patterns: ['calamar', 'romana'], cost: 12.0 },
+    { patterns: ['chorizo', 'morcilla', 'salchicha'], cost: 10.0 },
+    { patterns: ['alioli', 'salsa', 'brava', 'mayonesa'], cost: 6.0 },
+    { patterns: ['anchoa', 'boqueron', 'boquerón'], cost: 14.0 },
+    { patterns: ['atun', 'atún', 'bonito'], cost: 12.0 },
+    { patterns: ['cerdo', 'lomo', 'solomillo'], cost: 9.0 },
+    { patterns: ['pollo', 'wings', 'alita'], cost: 7.5 },
+    { patterns: ['pimiento', 'padron', 'padrón'], cost: 4.0 },
+    { patterns: ['tomate', 'ensalada'], cost: 2.5 },
+    { patterns: ['huevo'], cost: 0.25 },
+    { patterns: ['pan barra', 'baguette'], cost: 0.35 },
+    { patterns: ['lomo', 'ternera'], cost: 9.0 },
+    { patterns: ['atun', 'atún'], cost: 12.0 },
+    { patterns: ['bechamel'], cost: 4.0 },
+    { patterns: ['pan rallado'], cost: 2.0 },
+    { patterns: ['limon', 'limón'], cost: 2.5 },
+  ],
+  kebab: [
+    { patterns: ['pan', 'pita', 'lavash'], cost: 0.35 },
+    { patterns: ['carne', 'kebab', 'doner', 'döner', 'cordero'], cost: 8.5 },
+    { patterns: ['pollo', 'chicken'], cost: 7.5 },
+    { patterns: ['lechuga', 'tomate', 'cebolla'], cost: 2.5 },
+    { patterns: ['salsa', 'yogur', 'tzatziki', 'alioli'], cost: 6.0 },
+    { patterns: ['patata', 'frita'], cost: 2.0 },
+  ],
+  cafe_bakery: [
+    { patterns: ['cafe', 'café', 'cafeina'], cost: 12.0 },
+    { patterns: ['leche', 'lactea', 'láctea'], cost: 1.2 },
+    { patterns: ['harina', 'masa'], cost: 1.5 },
+    { patterns: ['mantequilla', 'margarina'], cost: 6.0 },
+    { patterns: ['huevo'], cost: 0.25 },
+    { patterns: ['azucar', 'azúcar', 'chocolate'], cost: 3.0 },
+    { patterns: ['bolleria', 'bollería', 'croissant', 'napolitana'], cost: 0.55 },
+  ],
   mixed_restaurant: [
     { patterns: ['pollo', 'chicken'], cost: 7.5 },
     { patterns: ['cerdo', 'pork'], cost: 8.0 },
@@ -120,8 +170,8 @@ export function isDrinkCatalogProduct(
   const cat = foldCostName(item.category);
   const name = foldCostName(item.name);
   if (item.stockCategory === 'beverage') return true;
-  if (/bebida|refresco|cerveza|agua|zumo|cola|drink/.test(cat)) return true;
-  if (/bebida|refresco|cerveza|agua|zumo|cola|coca|fanta|sprite|nestea|pepsi/.test(name)) return true;
+  if (/bebida|refresco|cerveza|agua|zumo|cola|drink|caña|cana|clara|jarra|combinado|cubata/.test(cat)) return true;
+  if (/bebida|refresco|cerveza|agua|zumo|cola|coca|fanta|sprite|nestea|pepsi|caña|cana|clara|jarra|combinado/.test(name)) return true;
   return false;
 }
 

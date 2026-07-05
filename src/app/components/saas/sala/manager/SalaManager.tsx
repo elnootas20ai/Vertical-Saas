@@ -1,13 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { RefreshCw, Save, Undo2, Redo2, Eye, MonitorSmartphone, Check, Loader2, Store, ArrowRight } from 'lucide-react';
+import { RefreshCw, Save, Eye, MonitorSmartphone, Check, Loader2, Store, ArrowRight, ExternalLink } from 'lucide-react';
 import { Layout } from '../../Layout';
 import { useAuth } from '../../../../context/AuthContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import { useActiveStoreScope } from '../../../../context/ActiveStoreScopeContext';
-import { writeSalaTpvLaunch } from '../../../../lib/salaTpvLaunch';
+import { coerceSelectedPdvId } from '../../../../lib/deliveryOpsPdvSelection';
+import { resolveBusinessDataUserId } from '../../../../lib/tenantUserId';
 import { consumeSalaSetupPending, peekSalaSetupPending } from '../../../../lib/salaQuickSetup';
+import { writeSalaTpvLaunch } from '../../../../lib/salaTpvLaunch';
 import { useSalaManager } from './useSalaManager';
 import { SalaQuickSetupWizard } from './SalaQuickSetupWizard';
 import { SalaRoomListPanel } from './SalaRoomListPanel';
@@ -28,7 +30,13 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
     useActiveStoreScope();
   const userId = user?.user_id || '';
   const businessId = currentBusiness?.business_id || '';
-  const parentPdvId = activeSalesPointId || '';
+  const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+  const effectiveParentPdvId = useMemo(() => {
+    const pdvs = allPointsOfSale.filter((p) => p.active !== false);
+    if (pdvs.length === 0) return '';
+    return coerceSelectedPdvId(pdvs, activeSalesPointId) || '';
+  }, [allPointsOfSale, activeSalesPointId]);
+  const parentPdvId = effectiveParentPdvId;
   const setupAppliedRef = useRef(false);
   const [awaitingSetupPdv, setAwaitingSetupPdv] = useState(
     () => setupMode && Boolean(peekSalaSetupPending(businessId)),
@@ -37,6 +45,14 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [editTable, setEditTable] = useState<ExtendedDiningTable | null>(null);
+
+  useEffect(() => {
+    if (storeLoading || !businessId || !dataUserId) return;
+    const pdvs = allPointsOfSale.filter((p) => p.active !== false);
+    const pdvId = coerceSelectedPdvId(pdvs, activeSalesPointId);
+    if (!pdvId || activeSalesPointId === pdvId) return;
+    setActiveSalesPoint(pdvId);
+  }, [storeLoading, businessId, dataUserId, allPointsOfSale, activeSalesPointId, setActiveSalesPoint]);
 
   useEffect(() => {
     if (!setupMode || setupAppliedRef.current) return;
@@ -59,14 +75,14 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
     pointsOfSale: allPointsOfSale,
   });
 
-  const openTpv = (room = mgr.activeRoom) => {
-    const pdvId = String(room?.pdvId || parentPdvId || '').trim();
-    const terminalId = String(room?.terminalId || '').trim();
+  const openTpv = (tpv = mgr.activeRoomTpv) => {
+    const pdvId = String(tpv?.pdvId || mgr.activeRoom?.pdvId || parentPdvId || '').trim();
     if (!pdvId) {
       toast.error('Selecciona un centro de trabajo en la barra superior');
       return;
     }
-    if (terminalId) writeSalaTpvLaunch(terminalId);
+    const terminalId = String(tpv?.terminalId || '').trim();
+    writeSalaTpvLaunch(terminalId, pdvId);
     navigate('/saas/caja/tpv');
   };
 
@@ -115,7 +131,7 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
             </div>
             <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-50">Primero crea tu centro</h1>
             <p className="mt-2 text-sm text-gray-500">
-              Las salas y mesas se configuran después, enlazadas a un único PDV con varios terminales TPV.
+              Las salas y mesas se configuran después, enlazadas a un único TPV por tienda.
             </p>
             <button
               type="button"
@@ -155,24 +171,22 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
 
           <div className="flex flex-wrap items-center gap-2">
             {mgr.dirty ? (
-              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300">
                 Cambios sin guardar
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
-                <Check className="h-3 w-3" />
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300">
+                <Check className="h-3 w-3" aria-hidden />
                 Guardado
               </span>
             )}
 
-            <TopBtn icon={Undo2} label="Deshacer" onClick={mgr.undo} disabled={!mgr.canUndo} />
-            <TopBtn icon={Redo2} label="Rehacer" onClick={mgr.redo} disabled={!mgr.canRedo} />
             <TopBtn icon={Eye} label="Vista previa" onClick={() => setShowPreview(true)} />
             <button
               type="button"
               onClick={mgr.persist}
               disabled={mgr.saving || !mgr.dirty}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium disabled:opacity-40 dark:border-gray-700"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
             >
               {mgr.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Guardar
@@ -180,10 +194,11 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
             <button
               type="button"
               onClick={() => openTpv()}
-              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-gray-900"
+              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-black dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
             >
               <MonitorSmartphone className="h-4 w-4" />
               Abrir TPV
+              <ExternalLink className="h-3.5 w-3.5 opacity-70" />
             </button>
           </div>
         </header>
@@ -201,6 +216,8 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
           <SalaRoomDetailPanel
             room={mgr.activeRoom}
             tables={mgr.activeRoomTables}
+            tpv={mgr.activeRoomTpv}
+            onOpenTpv={() => openTpv()}
             onEditName={handleEditRoomName}
             onEditType={handleEditRoomType}
             onDuplicate={() => mgr.activeRoom && mgr.duplicateRoomById(mgr.activeRoom.id)}
@@ -208,13 +225,16 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
             onTableCountChange={(count) => mgr.activeRoom && mgr.setRoomTableCount(mgr.activeRoom.id, count)}
             onEditTable={setEditTable}
             onTableSizeChange={(tableId, sizePreset) => mgr.updateTable(tableId, { sizePreset })}
+            onTableCapacityChange={(tableId, capacity) => mgr.updateTable(tableId, { capacity })}
+            onTableActiveChange={(tableId, active) => mgr.updateTable(tableId, { visible: active })}
+            onDeleteTable={mgr.deleteTable}
             onAddTable={() => mgr.activeRoom && mgr.addTableToRoom(mgr.activeRoom.id)}
           />
 
           <SalaSummaryPanel
             summary={mgr.summary}
             lastModified={mgr.lastModified}
-            onOpenTpv={() => openTpv()}
+            storeTpv={mgr.storeTpv}
           />
         </div>
       </div>

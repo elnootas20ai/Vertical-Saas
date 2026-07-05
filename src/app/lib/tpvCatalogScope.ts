@@ -108,6 +108,25 @@ export function filterTpvCatalogItems(
     return items;
   }
 
+  // Restaurante: incluir productos importados sin vertical estricta si pertenecen a la cuenta.
+  if (isRestaurantBusinessType(scope.activeBusinessType)) {
+    const bid = scope.catalogBusinessId;
+    const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
+    const relaxed = rawItems.filter((item) => {
+      const v = String(item.vertical || '').trim().toLowerCase();
+      if (v === 'delivery') return false;
+      if (v === 'restaurant') return true;
+      const itemBid = String(item.business_id || (item as { businessId?: string }).businessId || '')
+        .replace(/^business:/, '')
+        .trim();
+      if (itemBid && itemBid === bid) return true;
+      const itemBrandIds = (item.brandIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+      if (itemBrandIds.some((id) => brandIds.has(id))) return true;
+      return !v && brandIds.size === 0 && !itemBid;
+    });
+    if (relaxed.length > 0) return relaxed;
+  }
+
   // Legacy sin business_id: conservar productos cuya línea comercial pertenece a esta cuenta.
   const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
   return rawItems.filter((item) =>

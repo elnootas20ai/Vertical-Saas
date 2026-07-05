@@ -1,5 +1,7 @@
 import logger from '../services/logger.js';
 import { sendEmail } from '../services/email.js';
+import { pushClientError, listClientErrors } from '../services/clientErrorLog.js';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
 const lastReportAtByUser = new Map();
 const MIN_INTERVAL_MS = 30_000;
@@ -169,5 +171,71 @@ export async function submitBugReport(req, res) {
       ok: false,
       error: error?.message || 'No se pudo enviar el reporte. Inténtalo de nuevo.',
     });
+  }
+}
+
+const clientErrorRateLimit = new Map();
+const CLIENT_ERROR_MIN_MS = 500;
+
+export async function logClientError(req, res) {
+  try {
+    const authUser = req.authUser || {};
+    const userId = String(authUser.userId || authUser.user_id || '').trim();
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'Sesión no válida' });
+    }
+
+    const now = Date.now();
+    const last = clientErrorRateLimit.get(userId) || 0;
+    if (now - last < CLIENT_ERROR_MIN_MS) {
+      return res.json({ ok: true, skipped: true });
+    }
+    clientErrorRateLimit.set(userId, now);
+
+    const {
+      message = '',
+      technical = '',
+      context = '',
+      page = '',
+      businessId = '',
+      businessName = '',
+    } = req.body || {};
+
+    const row = pushClientError({
+      userId,
+      userEmail: String(authUser.email || '').trim(),
+      userName: String(authUser.fullName || authUser.name || '').trim(),
+      businessId: String(businessId || '').trim(),
+      businessName: String(businessName || '').trim(),
+      context: String(context || '').trim().slice(0, 120),
+      page: String(page || req.headers.referer || '').trim().slice(0, 500),
+      message: String(message || 'Error').trim().slice(0, 500),
+      technical: String(technical || '').trim().slice(0, 4000),
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+    });
+
+    return res.json({ ok: true, id: row.id });
+  } catch (error) {
+    logger.error({ tag: 'CLIENT_ERROR', err: error?.message }, 'Fallo registrando error cliente');
+    return res.status(500).json({ ok: false, error: 'No se pudo registrar' });
+  }
+}
+
+export async function getClientErrors(req, res) {
+  try {
+    const authUser = req.authUser || {};
+    const userId = String(authUser.userId || authUser.user_id || '').trim();
+    const email = String(authUser.email || '').trim();
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'Sesión no válida' });
+    }
+
+    const limit = Number(req.query.limit) || 50;
+    const all = isVertialSuperAdminEmail(email);
+    const errors = listClientErrors({ userId, limit, all });
+
+    return res.json({ ok: true, errors, all });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || 'Error al listar' });
   }
 }

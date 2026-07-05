@@ -46,9 +46,14 @@ import {
 } from '../../lib/pdvScope';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
-import { readRetailScopeCache, writeRetailScopeCache } from '../../lib/retailScopeCache';
-import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import {
+  loadRetailStoresForBusiness,
+  readRetailScopeCacheForBusiness,
+  writeRetailScopeCacheForBusiness,
+} from '../../verticals/retailScopeRegistry';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { checkRestaurantRegisterClose } from '../../lib/restaurantCloseWarnings';
+import { resolveRestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
 import type { Business } from '../../lib/businessApi';
 import {
@@ -227,13 +232,13 @@ function CashCountGrid({ counts, onChange, compact = false }: {
 
   return (
     <div className={compact ? 'space-y-2' : 'space-y-4'}>
-      <div className={`grid grid-cols-1 ${compact ? 'gap-2' : 'sm:grid-cols-2 gap-4'}`}>
-        <div>
-          <h5 className={`font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><Banknote className="w-3 h-3" /> Billetes</h5>
+      <div className={`grid grid-cols-2 ${compact ? 'gap-x-2 gap-y-1' : 'gap-4'}`}>
+        <div className="min-w-0">
+          <h5 className={`font-bold text-green-700 dark:text-green-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><Banknote className="w-3 h-3 shrink-0" /> Billetes</h5>
           <div className={compact ? 'space-y-1' : 'space-y-1.5'}>{bills.map(renderRow)}</div>
         </div>
-        <div>
-          <h5 className={`font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><DollarSign className="w-3 h-3" /> Monedas</h5>
+        <div className="min-w-0">
+          <h5 className={`font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider mb-1.5 flex items-center gap-1 ${compact ? 'text-[10px]' : 'text-xs mb-2'}`}><DollarSign className="w-3 h-3 shrink-0" /> Monedas</h5>
           <div className={compact ? 'space-y-1' : 'space-y-1.5'}>{coins.map(renderRow)}</div>
         </div>
       </div>
@@ -261,6 +266,7 @@ export interface TpvRegisterContextType {
   selectedOrderTakerId: string | null;
   setSelectedOrderTakerId: (workerId: string) => void;
   refreshClockedInWorkers: () => Promise<void>;
+  requestClockIn: () => void;
 }
 
 /** null = sin caja abierta (o fuera del gate) · objeto = caja activa */
@@ -453,7 +459,6 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     lastRestrictedPdvRef.current = restrictedToPdvId;
     setSelectedPdvId(restrictedToPdvId);
     if (pdvChanged && !isTabletMode) setSelectedTerminalId('');
-    if (pdvChanged) onOpeningPdvChangeRef.current?.(restrictedToPdvId);
   }, [restrictedToPdvId, isTabletMode]);
 
   // Autoseleccionar el único PDV activo cuando solo hay uno (cuentas nuevas).
@@ -1190,11 +1195,12 @@ function TpvGatePortal({ children }: { children: ReactNode }) {
 
 // ─── Closing Screen ─────────────────────────────────────────────────────────
 
-function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
+function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [] }: {
   session: TpvRegisterSession;
   dataUserId: string;
   onClose: (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[]) => void;
   onCancel: () => void;
+  restaurantWarnings?: string[];
 }) {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
@@ -1258,6 +1264,21 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel }: {
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-5">
+          {restaurantWarnings.length > 0 ? (
+            <div className="rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-600 p-4 space-y-1">
+              <p className="text-sm font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> Sala con actividad pendiente
+              </p>
+              <ul className="text-xs text-amber-800 dark:text-amber-200 list-disc pl-5 space-y-0.5">
+                {restaurantWarnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300 pt-1">
+                Puedes cerrar la caja igualmente; revisa que no queden cuentas sin cobrar.
+              </p>
+            </div>
+          ) : null}
           {/* Summary KPIs */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
@@ -1822,31 +1843,38 @@ function RegisterStatusBar({
   const expected = calcTpvExpectedCash(session);
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
-  const actionBtn = minimal
-    ? 'shrink-0 p-1.5 min-h-[28px] min-w-[28px] rounded-md font-semibold transition-colors flex items-center justify-center touch-manipulation'
+  const opsBtn = minimal
+    ? 'shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-stone-200 bg-white text-stone-700 transition-colors touch-manipulation hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700'
     : isTabletMode
-      ? 'shrink-0 px-2.5 py-1.5 min-h-[36px] rounded-lg font-semibold text-[11px] transition-colors flex items-center gap-1 touch-manipulation whitespace-nowrap'
-      : 'px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1';
+      ? 'shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg border border-stone-200 bg-white text-stone-700 text-[11px] font-semibold transition-colors touch-manipulation whitespace-nowrap hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700'
+      : 'px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-stone-700 font-semibold transition-colors flex items-center gap-1 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200';
+  const closeBtn = minimal
+    ? 'shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border-2 border-red-300 bg-red-50 text-red-700 transition-colors touch-manipulation hover:bg-red-100 ml-1.5 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60'
+    : isTabletMode
+      ? 'shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-700 text-[11px] font-bold transition-colors touch-manipulation whitespace-nowrap hover:bg-red-100 ml-2 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+      : 'px-4 py-1.5 rounded-lg border-2 border-red-300 bg-red-50 text-red-700 font-bold transition-colors flex items-center gap-1 hover:bg-red-100 ml-2 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300';
+  const actionBtn = opsBtn;
 
   if (minimal) {
     return (
-      <div className="relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 flex items-center gap-1.5 text-[10px] min-h-[30px]">
-        <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
-          <CheckCircle2 className="w-3 h-3" />
+      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-2 text-[11px] min-h-[52px]">
+        <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span className="hidden xs:inline">Caja</span>
         </span>
         {session.pointOfSaleName && (
-          <span className="text-gray-600 dark:text-gray-400 truncate max-w-[5rem] shrink min-w-0" title={session.pointOfSaleName}>
+          <span className="text-stone-600 dark:text-stone-400 truncate max-w-[6rem] shrink min-w-0 font-medium" title={session.pointOfSaleName}>
             {session.pointOfSaleName}
           </span>
         )}
-        <span className="font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">{expected.toFixed(2)}€</span>
+        <span className="font-bold text-stone-900 dark:text-stone-100 tabular-nums shrink-0">{expected.toFixed(2)}€</span>
         {incidentCount > 0 && (
-          <span className="text-red-600 font-semibold flex items-center shrink-0" title={`${incidentCount} incidencia(s)`}>
-            <AlertTriangle className="w-3 h-3" />
+          <span className="text-amber-600 font-semibold flex items-center shrink-0" title={`${incidentCount} incidencia(s)`}>
+            <AlertTriangle className="w-3.5 h-3.5" />
           </span>
         )}
         <div className="flex-1 min-w-0" />
-        <div className="flex items-center gap-0.5 shrink-0 overflow-x-auto scrollbar-hide">
+        <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-hide">
           <ClockedInWorkerBubbles
             workers={clockedInWorkers}
             selectedId={selectedOrderTakerId}
@@ -1855,23 +1883,23 @@ function RegisterStatusBar({
             compact
             ultraCompact
           />
-          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={`${actionBtn} bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400`}>
-            <LogIn className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={actionBtn}>
+            <LogIn className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={`${actionBtn} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400`}>
-            <Banknote className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={actionBtn}>
+            <Banknote className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestPrinter} title="Impresora de tickets" className={`${actionBtn} bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300`}>
-            <Printer className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestPrinter} title="Impresora de tickets" className={actionBtn}>
+            <Printer className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestCashCount} title="Arqueo" className={`${actionBtn} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400`}>
-            <Calculator className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestCashCount} title="Arqueo" className={actionBtn}>
+            <Calculator className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestIncident} title="Incidencia" className={`${actionBtn} bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400`}>
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestIncident} title="Incidencia" className={actionBtn}>
+            <AlertTriangle className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestClose} title="Cerrar caja" className={`${actionBtn} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400`}>
-            <Lock className="w-3.5 h-3.5 shrink-0" />
+          <button type="button" onClick={onRequestClose} title="Cerrar caja" className={closeBtn}>
+            <Lock className="w-4 h-4 shrink-0" />
           </button>
         </div>
       </div>
@@ -1879,17 +1907,39 @@ function RegisterStatusBar({
   }
 
   return (
-    <div className={`relative z-20 bg-emerald-50 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800 flex flex-col gap-1.5 text-xs ${isTabletMode ? 'px-2 py-1.5' : 'px-3 sm:px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2'}`}>
-      <div className={`flex items-center gap-3 sm:gap-4 flex-wrap min-w-0 ${isTabletMode ? 'text-[11px] sm:text-xs' : ''}`}>
-        <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta</span>
-        {session.pointOfSaleName && <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1 min-w-0"><MapPin className="w-3 h-3 shrink-0" /> <span className="truncate">{session.pointOfSaleName}</span></span>}
-        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><Monitor className="w-3 h-3" /> {session.terminalName}</span>
-        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-        {txCount > 0 && <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1"><BarChart3 className="w-3 h-3" /> {txCount} ops</span>}
-        <span className="font-semibold text-emerald-700 dark:text-emerald-400"><Banknote className="w-3 h-3 inline mr-0.5" />{expected.toFixed(2)}€</span>
-        {incidentCount > 0 && <span className="text-red-600 font-semibold flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {incidentCount}</span>}
+    <div className={`relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 flex flex-col gap-2 text-xs ${isTabletMode ? 'px-2 py-2' : 'px-3 sm:px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3'}`}>
+      <div className={`flex items-center gap-2 sm:gap-3 flex-wrap min-w-0 ${isTabletMode ? 'text-[11px]' : ''}`}>
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta
+        </span>
+        {session.pointOfSaleName && (
+          <span className="text-stone-600 dark:text-stone-400 flex items-center gap-1 min-w-0 font-medium">
+            <MapPin className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate max-w-[140px] sm:max-w-none">{session.pointOfSaleName}</span>
+          </span>
+        )}
+        <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1">
+          <Monitor className="w-3.5 h-3.5" /> {session.terminalName}
+        </span>
+        <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1 tabular-nums">
+          <Clock className="w-3.5 h-3.5" /> {new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+        </span>
+        {txCount > 0 && (
+          <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1">
+            <BarChart3 className="w-3.5 h-3.5" /> {txCount} ops
+          </span>
+        )}
+        <span className="font-bold text-stone-900 dark:text-stone-100 tabular-nums">
+          <Banknote className="w-3.5 h-3.5 inline mr-0.5 text-stone-500" />
+          {expected.toFixed(2)}€
+        </span>
+        {incidentCount > 0 && (
+          <span className="text-amber-700 font-semibold flex items-center gap-1 dark:text-amber-400">
+            <AlertTriangle className="w-3.5 h-3.5" /> {incidentCount}
+          </span>
+        )}
       </div>
-      <div className={`flex items-center gap-2 min-w-0 ${isTabletMode ? 'overflow-x-auto scrollbar-hide -mx-1 px-1 pb-0.5' : 'flex-wrap'}`}>
+      <div className={`flex items-center gap-1.5 min-w-0 ${isTabletMode ? 'overflow-x-auto scrollbar-hide -mx-1 px-1' : 'flex-wrap'}`}>
         <ClockedInWorkerBubbles
           workers={clockedInWorkers}
           selectedId={selectedOrderTakerId}
@@ -1898,23 +1948,23 @@ function RegisterStatusBar({
           compact
           label="En tienda"
         />
-        <button type="button" onClick={onRequestClockIn} title="Fichar entrada del resto del equipo" className={`${actionBtn} bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-900/50`}>
-          <LogIn className="w-3.5 h-3.5 shrink-0" /> Fichar equipo
+        <button type="button" onClick={onRequestClockIn} title="Fichar entrada del resto del equipo" className={actionBtn}>
+          <LogIn className="w-4 h-4 shrink-0" /> {isTabletMode ? 'Fichar' : 'Fichar equipo'}
         </button>
-        <button type="button" onClick={onRequestCashOps} className={`${actionBtn} bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50`}>
-          <Banknote className="w-3.5 h-3.5 shrink-0" /> Mov. caja
+        <button type="button" onClick={onRequestCashOps} className={actionBtn}>
+          <Banknote className="w-4 h-4 shrink-0" /> Mov. caja
         </button>
-        <button type="button" onClick={onRequestPrinter} className={`${actionBtn} bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700/80`}>
-          <Printer className="w-3.5 h-3.5 shrink-0" /> Impresora
+        <button type="button" onClick={onRequestPrinter} className={actionBtn}>
+          <Printer className="w-4 h-4 shrink-0" /> Impresora
         </button>
-        <button type="button" onClick={onRequestCashCount} className={`${actionBtn} bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50`}>
-          <Calculator className="w-3.5 h-3.5 shrink-0" /> Arqueo
+        <button type="button" onClick={onRequestCashCount} className={actionBtn}>
+          <Calculator className="w-4 h-4 shrink-0" /> Arqueo
         </button>
-        <button type="button" onClick={onRequestIncident} className={`${actionBtn} bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50`}>
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Incidencia
+        <button type="button" onClick={onRequestIncident} className={actionBtn}>
+          <AlertTriangle className="w-4 h-4 shrink-0" /> Incidencia
         </button>
-        <button type="button" onClick={onRequestClose} className={`${actionBtn} bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50`}>
-          <Lock className="w-3.5 h-3.5 shrink-0" /> Cerrar caja
+        <button type="button" onClick={onRequestClose} className={closeBtn}>
+          <Lock className="w-4 h-4 shrink-0" /> Cerrar caja
         </button>
       </div>
     </div>
@@ -2173,8 +2223,13 @@ export function TpvRegisterGate({
   );
 
   const registerScope = useMemo(
-    () => resolveTpvRegisterScope({ currentBusiness, tabletBinding, authUser: user }),
-    [currentBusiness, tabletBinding, user],
+    () => resolveTpvRegisterScope({
+      currentBusiness,
+      tabletBinding,
+      authUser: user,
+      pathname: location.pathname,
+    }),
+    [currentBusiness, tabletBinding, user, location.pathname],
   );
 
   const isTabletSession = registerScope.isTabletSession;
@@ -2216,7 +2271,9 @@ export function TpvRegisterGate({
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
+  const [restaurantCloseWarnings, setRestaurantCloseWarnings] = useState<string[]>([]);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showCashOps, setShowCashOps] = useState(false);
   const [showClockIn, setShowClockIn] = useState(false);
@@ -2227,6 +2284,8 @@ export function TpvRegisterGate({
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
+  const clockedInWorkersRef = useRef<TpvClockedInWorker[]>([]);
+  clockedInWorkersRef.current = clockedInWorkers;
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
@@ -2234,6 +2293,10 @@ export function TpvRegisterGate({
   const txQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionsRef = useRef<TpvRegisterSession[]>(sessions);
   sessionsRef.current = sessions;
+  const pointsOfSaleRef = useRef(pointsOfSale);
+  pointsOfSaleRef.current = pointsOfSale;
+  const workCentersRef = useRef(workCenters);
+  workCentersRef.current = workCenters;
   const hasDisplayedStoresRef = useRef(false);
   const userRef = useRef(user);
   userRef.current = user;
@@ -2256,10 +2319,20 @@ export function TpvRegisterGate({
 
   useEffect(() => {
     if (!tabletBinding?.businessId || !businessesFetchSettled) return;
-    if (registerScope.shouldSyncBusinessFromTablet) {
-      switchBusiness(tabletBinding.businessId!);
-    }
-  }, [tabletBinding, businessesFetchSettled, registerScope.shouldSyncBusinessFromTablet, switchBusiness]);
+    if (!registerScope.shouldSyncBusinessFromTablet) return;
+    const norm = resolveBusinessScopeId({ business_id: tabletBinding.businessId });
+    const exists = businesses.some(
+      (b) => resolveBusinessScopeId(b) === norm,
+    );
+    if (!exists) return;
+    switchBusiness(tabletBinding.businessId!);
+  }, [
+    tabletBinding?.businessId,
+    businessesFetchSettled,
+    registerScope.shouldSyncBusinessFromTablet,
+    switchBusiness,
+    businesses,
+  ]);
 
   useEffect(() => {
     if (!isTabletSession || !tabletRestrictedPdvId) return;
@@ -2274,7 +2347,10 @@ export function TpvRegisterGate({
 
   const openingWorkerOptions = useMemo(() => {
     if (isTabletSession || !isWorkerUser) {
-      const members = (currentBusiness?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
+      const memberSource = scopeBusiness?.members?.length
+        ? scopeBusiness
+        : businesses.find((b) => resolveBusinessScopeId(b) === scopeBusinessId) || currentBusiness;
+      const members = (memberSource?.members || []).map((m: { user_id?: string; id?: string; fullName?: string; email?: string }) => ({
         id: String(m.user_id || m.id || '').trim(),
         name: String(m.fullName || m.email || 'Trabajador').trim(),
       })).filter((m) => m.id && m.name);
@@ -2301,6 +2377,9 @@ export function TpvRegisterGate({
   }, [
     isTabletSession,
     isWorkerUser,
+    scopeBusiness,
+    scopeBusinessId,
+    businesses,
     currentBusiness?.members,
     user?.user_id,
     user?.id,
@@ -2361,6 +2440,11 @@ export function TpvRegisterGate({
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, syncManagerPdvFromStorage);
   }, [isWorkerUser, isTabletSession, currentBusiness, dataUserId, pointsOfSale]);
 
+  const pointsOfSaleScopeKey = useMemo(
+    () => pointsOfSale.map((p) => p._id).join(','),
+    [pointsOfSale],
+  );
+
   useEffect(() => {
     if (!dataUserId) return;
     const refreshSessions = () => {
@@ -2375,8 +2459,8 @@ export function TpvRegisterGate({
                 const pid = String(s.pointOfSaleId || '').trim();
                 return !pid || pid === tabletPdvId;
               });
-            } else if (pointsOfSale.length > 0) {
-              next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale, bid));
+            } else if (pointsOfSaleRef.current.length > 0) {
+              next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSaleRef.current, bid));
             }
             if (next.length === 0 && prev.length > 0) return prev;
             return next;
@@ -2391,7 +2475,7 @@ export function TpvRegisterGate({
       window.clearInterval(interval);
       window.removeEventListener('focus', refreshSessions);
     };
-  }, [dataUserId, pointsOfSale, scopeBusinessId]);
+  }, [dataUserId, pointsOfSaleScopeKey, scopeBusinessId]);
 
   const activeSession = useMemo(() => {
     const open = sessions.filter((s) => isTpvRegisterSessionOpen(s));
@@ -2463,7 +2547,7 @@ export function TpvRegisterGate({
     }
     const ownerUserId = String(scopeBusiness?.owner_user_id || currentBusiness?.owner_user_id || '').trim();
     const silent = options?.silent ?? false;
-    if (!silent) setClockedInWorkersLoading(true);
+    if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkersLoading(true);
     try {
       const workers = await loadClockedInStoreWorkers(
         businessId,
@@ -2480,9 +2564,9 @@ export function TpvRegisterGate({
         return pickDefaultOrderTakerForSession(activeSession, workers);
       });
     } catch {
-      if (!silent) setClockedInWorkers([]);
+      if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkers([]);
     } finally {
-      if (!silent) setClockedInWorkersLoading(false);
+      if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkersLoading(false);
     }
   }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession]);
 
@@ -2498,6 +2582,9 @@ export function TpvRegisterGate({
   }, [activeSession?._id, activeSession?.workerId, activeSession?.workerName, activeSession?.openedAt, clockedInWorkers]);
 
   useEffect(() => {
+    if (!isTpvRegisterSessionOpen(activeSession)) {
+      return;
+    }
     if (!activeStoreScope.pdvId) {
       setClockedInWorkers([]);
       setSelectedOrderTakerId(null);
@@ -2506,7 +2593,7 @@ export function TpvRegisterGate({
     void refreshClockedInWorkers();
     const interval = setInterval(() => void refreshClockedInWorkers({ silent: true }), 60000);
     return () => clearInterval(interval);
-  }, [activeStoreScope.pdvId, activeSession?._id, refreshClockedInWorkers]);
+  }, [activeStoreScope.pdvId, activeSession?._id, activeSession?.status, refreshClockedInWorkers]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) {
@@ -2519,9 +2606,41 @@ export function TpvRegisterGate({
 
   const scopeBusinessRef = useRef(scopeBusiness);
   scopeBusinessRef.current = scopeBusiness;
+  const layoutScopeKeyRef = useRef('');
+
+  const buildRetailScopeCtx = useCallback(
+    () => ({
+      business: scopeBusinessRef.current,
+      businesses: businessesRef.current,
+      accountBusinessCount: accountBusinessCountRef.current,
+    }),
+    [],
+  );
+
+  const applyScopedStoreRows = useCallback((
+    pdvs: PointOfSale[],
+    workCenters: WorkCenter[],
+  ) => {
+    const activePdvs = mergeTabletBindingPdv(
+      pdvs.filter((p) => p.active !== false),
+      isTabletSessionRef.current ? tabletBindingRef.current : null,
+    );
+    const retail = workCenters.filter(
+      (wc) =>
+        !wc.deletedAt &&
+        wc.active !== false &&
+        (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+    );
+    setPointsOfSale(activePdvs);
+    setWorkCenters(retail);
+    hasDisplayedStoresRef.current = activePdvs.length > 0 || retail.length > 0;
+  }, []);
 
   useLayoutEffect(() => {
-    loadInflightRef.current = null;
+    const scopeKey = `${scopeBusinessId}|${isTabletSession ? 'tablet' : 'mgr'}`;
+    const scopeChanged = layoutScopeKeyRef.current !== scopeKey;
+    layoutScopeKeyRef.current = scopeKey;
+
     if (!scopeBusinessId) {
       hasDisplayedStoresRef.current = false;
       setPointsOfSale([]);
@@ -2529,36 +2648,28 @@ export function TpvRegisterGate({
       setLoading(false);
       return;
     }
-    const cached = readRetailScopeCache(scopeBusinessId, {
-      accountBusinessCount,
-    });
-    if (cached) {
-      hasDisplayedStoresRef.current = true;
-      const activePdvs = mergeTabletBindingPdv(
-        cached.allPointsOfSale.filter((p) => p.active !== false),
-        isTabletSession ? tabletBindingRef.current : null,
-      );
-      const retail = cached.retailWorkCenters.filter(
-        (wc) =>
-          !wc.deletedAt &&
-          wc.active !== false &&
-          (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-      );
-      setPointsOfSale(activePdvs);
-      setWorkCenters(retail);
-      setLoading(false);
-    } else {
-      hasDisplayedStoresRef.current = false;
-      if (isTabletSession && tabletBindingRef.current?.pdvId) {
+
+    if (scopeChanged) {
+      loadInflightRef.current = null;
+      if (!isTabletSession) {
+        hasDisplayedStoresRef.current = false;
+      }
+    }
+
+    if (!hasDisplayedStoresRef.current) {
+      const cached = readRetailScopeCacheForBusiness(scopeBusinessId, buildRetailScopeCtx());
+      if (cached && (cached.allPointsOfSale.length > 0 || cached.retailWorkCenters.length > 0)) {
+        applyScopedStoreRows(cached.allPointsOfSale, cached.retailWorkCenters);
+      } else if (isTabletSession && tabletBindingRef.current?.pdvId) {
         const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
         setPointsOfSale(stubPdvs);
         setWorkCenters([]);
         hasDisplayedStoresRef.current = stubPdvs.length > 0;
-        setLoading(false);
-      } else {
+      } else if (scopeChanged) {
         setLoading(true);
       }
     }
+
     if (!isTabletSession) {
       if (initialManagerPdvId) {
         const id = String(initialManagerPdvId).trim();
@@ -2566,12 +2677,18 @@ export function TpvRegisterGate({
           setManagerPdvPickId(id);
           skipManagerAutoPdvRef.current = true;
         }
-      } else {
+      } else if (scopeChanged) {
         setManagerPdvPickId(null);
         skipManagerAutoPdvRef.current = false;
       }
     }
-  }, [scopeBusinessId, isTabletSession, initialManagerPdvId]);
+  }, [
+    scopeBusinessId,
+    isTabletSession,
+    initialManagerPdvId,
+    applyScopedStoreRows,
+    buildRetailScopeCtx,
+  ]);
 
   const loadData = useCallback(async () => {
     if (loadInflightRef.current) {
@@ -2594,7 +2711,12 @@ export function TpvRegisterGate({
         return;
       }
 
-      if (!hasDisplayedStoresRef.current) setLoading(true);
+      if (!hasDisplayedStoresRef.current) {
+        const tabletPdv = String(tabletBindingRef.current?.pdvId || '').trim();
+        if (!(isTabletSessionRef.current && tabletPdv)) {
+          setLoading(true);
+        }
+      }
 
       const loadOpts = {
         accountBusinessCount: accountBusinessCountRef.current,
@@ -2604,13 +2726,18 @@ export function TpvRegisterGate({
       try {
         const workerUser = isInvitedWorkerUser(authUser);
         const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
-        const tabletCacheReady =
-          isTabletSessionRef.current && hasDisplayedStoresRef.current && Boolean(tabletPdvId);
+        const tabletFastPath = isTabletSessionRef.current && Boolean(tabletPdvId);
 
         let sessData: TpvRegisterSession[];
         let storeState: Awaited<ReturnType<typeof loadRetailStoresForBusiness>>;
 
-        if (tabletCacheReady) {
+        if (tabletFastPath) {
+          if (!hasDisplayedStoresRef.current) {
+            const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
+            setPointsOfSale(stubPdvs);
+            setWorkCenters([]);
+            hasDisplayedStoresRef.current = stubPdvs.length > 0;
+          }
           sessData = await listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined });
           storeState = {
             dataUserId: uid,
@@ -2620,13 +2747,21 @@ export function TpvRegisterGate({
         } else {
           const bizList = businessesRef.current;
           const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
+          const isRestaurant = isRestaurantBusinessType(biz?.businessType);
           [sessData, storeState] = await Promise.all([
             listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined }),
-            loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
-              ...loadOpts,
-              knownBusinessIds,
-              tpvBootstrap: workerUser,
-            }),
+            hasDisplayedStoresRef.current
+              ? Promise.resolve({
+                  dataUserId: uid,
+                  workCenters: workCentersRef.current,
+                  pointsOfSale: pointsOfSaleRef.current,
+                })
+              : loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
+                  ...loadOpts,
+                  knownBusinessIds,
+                  // Restaurante: sin bootstrap pesado al abrir TPV (ya hecho en Ajustes / scope global).
+                  tpvBootstrap: workerUser && !isRestaurant,
+                }),
           ]);
         }
 
@@ -2642,7 +2777,7 @@ export function TpvRegisterGate({
           return;
         }
 
-        if (tabletCacheReady) {
+        if (tabletFastPath) {
           setSessions(
             sessData.filter((s) => {
               const pid = String(s.pointOfSaleId || '').trim();
@@ -2668,17 +2803,22 @@ export function TpvRegisterGate({
             scopedWorkCenters = scoped.workCenters;
           }
 
-          setWorkCenters(scopedWorkCenters);
-          setPointsOfSale(
-            mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
-          );
+          if (scopedPdvs.length > 0 || scopedWorkCenters.length > 0) {
+            setWorkCenters(scopedWorkCenters);
+            setPointsOfSale(
+              mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
+            );
+            writeRetailScopeCacheForBusiness(
+              bidAtStart,
+              {
+                retailWorkCenters: scopedWorkCenters,
+                allPointsOfSale: scopedPdvs,
+              },
+              buildRetailScopeCtx(),
+            );
+            hasDisplayedStoresRef.current = true;
+          }
           setSessions(sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)));
-
-          writeRetailScopeCache(bidAtStart, {
-            retailWorkCenters: scopedWorkCenters,
-            allPointsOfSale: scopedPdvs,
-          });
-          hasDisplayedStoresRef.current = true;
         }
       } catch {
         if (seq === loadSeqRef.current && !hasDisplayedStoresRef.current) {
@@ -2714,6 +2854,15 @@ export function TpvRegisterGate({
     }
     void loadData();
   }, [businessLoading, businessesFetchSettled, dataUserId, scopeBusinessId, loadData, isTabletSession]);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadTimedOut(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setLoadTimedOut(true), 12000);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
@@ -2802,14 +2951,26 @@ export function TpvRegisterGate({
       }).catch((error) => { console.error('Error creating tpv open notification:', error); });
     } catch (err) {
       if (err instanceof TpvRegisterSessionConflictError) {
+        const existing = err.existingSession;
+        const pdvId = String(data.pointOfSaleId || existing.pointOfSaleId || '').trim();
         setSessions((prev) => {
-          const exists = prev.some((s) => s._id === err.existingSession._id);
+          const exists = prev.some((s) => s._id === existing._id);
           if (exists) {
-            return prev.map((s) => (s._id === err.existingSession._id ? err.existingSession : s));
+            return prev.map((s) => (s._id === existing._id ? existing : s));
           }
-          return [err.existingSession, ...prev];
+          return [existing, ...prev];
         });
-        toast.info(err.message);
+        setPostCloseSession(null);
+        if (!isWorkerUser && pdvId) {
+          const bid = resolveBusinessScopeId(currentBusiness);
+          if (bid && dataUserId) {
+            writeDeliveryOpsSelectedPdvId(bid, dataUserId, pdvId);
+          }
+          setManagerPdvPickId(pdvId);
+          skipManagerAutoPdvRef.current = false;
+        }
+        window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
+        toast.info(`Continuando con la caja ya abierta en ${existing.pointOfSaleName || 'esta tienda'}`);
         return;
       }
       toast.error(err instanceof Error ? err.message : 'Error al abrir la caja');
@@ -3039,8 +3200,32 @@ export function TpvRegisterGate({
   const isRestaurantVertical = isRestaurantBusinessType(
     scopeBusiness?.businessType || currentBusiness?.businessType,
   );
+  const restaurantTpvPermissions = useMemo(() => resolveRestaurantTpvPermissions(user), [user]);
   const cajaHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/vertical/delivery/caja';
   const opsHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/delivery-ops';
+
+  const handleRequestClose = useCallback(async () => {
+    if (isRestaurantVertical && !restaurantTpvPermissions.canCloseRegister) {
+      toast.error('Solo encargado o gerente puede cerrar la caja');
+      return;
+    }
+    if (isRestaurantVertical && dataUserId) {
+      try {
+        const check = await checkRestaurantRegisterClose(dataUserId);
+        setRestaurantCloseWarnings(check.warnings);
+        if (check.warnings.length > 0) {
+          toast.warning('Hay mesas o cuentas abiertas en sala', { duration: 5000 });
+        }
+      } catch {
+        setRestaurantCloseWarnings([]);
+      }
+    } else {
+      setRestaurantCloseWarnings([]);
+    }
+    setShowClosing(true);
+  }, [isRestaurantVertical, restaurantTpvPermissions.canCloseRegister, dataUserId]);
+
+  const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
   const registerContextValue = useMemo((): TpvRegisterContextType | null => {
     if (!isTpvRegisterSessionOpen(activeSession)) return null;
@@ -3049,7 +3234,7 @@ export function TpvRegisterGate({
       addTransaction,
       performCashCount,
       addIncident,
-      requestClose: () => setShowClosing(true),
+      requestClose: () => void handleRequestClose(),
       requestCashCount: () => setShowCashCount(true),
       requestIncident: () => setShowIncident(true),
       expectedCash: calcTpvExpectedCash(activeSession),
@@ -3057,7 +3242,8 @@ export function TpvRegisterGate({
       clockedInWorkersLoading,
       selectedOrderTakerId,
       setSelectedOrderTakerId,
-      refreshClockedInWorkers,
+      refreshClockedInWorkers: () => refreshClockedInWorkers({ silent: true }),
+      requestClockIn,
     };
   }, [
     activeSession,
@@ -3068,6 +3254,8 @@ export function TpvRegisterGate({
     clockedInWorkersLoading,
     selectedOrderTakerId,
     refreshClockedInWorkers,
+    handleRequestClose,
+    requestClockIn,
   ]);
 
   const wrapRegisterContext = (body: ReactNode) => (
@@ -3099,10 +3287,10 @@ export function TpvRegisterGate({
         pdvId={clockInStoreScope.pdvId}
         workCenterId={clockInStoreScope.workCenterId}
         sessionOpenedAt={activeSession?.openedAt}
-        onChanged={() => void refreshClockedInWorkers()}
+        onChanged={() => void refreshClockedInWorkers({ silent: true })}
         onCancel={() => {
           setShowClockIn(false);
-          void refreshClockedInWorkers();
+          void refreshClockedInWorkers({ silent: true });
         }}
       />
     </TpvGatePortal>
@@ -3155,8 +3343,33 @@ export function TpvRegisterGate({
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
         <div className="text-center max-w-sm">
-          <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full mx-auto mb-3" />
-          <p className="text-sm text-gray-500">Cargando caja...</p>
+          {loadTimedOut ? (
+            <>
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                No se pudo cargar la caja
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                El servidor puede estar ocupado o sin conexión. Reintenta en unos segundos.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoadTimedOut(false);
+                  setLoading(true);
+                  void loadData();
+                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Reintentar
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full mx-auto mb-3" />
+              <p className="text-sm text-gray-500">Cargando caja...</p>
+            </>
+          )}
         </div>
       </div>,
     );
@@ -3342,7 +3555,7 @@ export function TpvRegisterGate({
         <RegisterStatusBar
           session={activeSession}
           onRequestClockIn={() => setShowClockIn(true)}
-          onRequestClose={() => setShowClosing(true)}
+          onRequestClose={() => void handleRequestClose()}
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
           onRequestCashOps={() => setShowCashOps(true)}
@@ -3363,7 +3576,7 @@ export function TpvRegisterGate({
             </span>
             <button
               type="button"
-              onClick={() => setShowClosing(true)}
+              onClick={() => void handleRequestClose()}
               className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700"
             >
               Cerrar caja
@@ -3372,7 +3585,7 @@ export function TpvRegisterGate({
         )}
         {!compactRegisterChrome && <RegisterCashOpsStrip session={activeSession} />}
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
-          {!clockInGate.allowed && (
+          {!clockInGate.allowed && !showClockIn && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">
               <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
                 <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center mx-auto">
@@ -3409,6 +3622,7 @@ export function TpvRegisterGate({
             dataUserId={dataUserId}
             onClose={handleClose}
             onCancel={() => setShowClosing(false)}
+            restaurantWarnings={restaurantCloseWarnings}
           />
         </TpvGatePortal>
       )}

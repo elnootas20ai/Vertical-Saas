@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowRight, X } from 'lucide-react';
-import { AuthRouteLoading } from '../AuthRouteLoading';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
@@ -107,8 +106,6 @@ export function RequirePdvTerminal({ children }: { children: React.ReactNode }) 
   const okPdv = pdvs ? hasActiveTerminal(pdvs) : true;
   const okHours = retailStoresOk !== false;
   const missing = okPdv && retailStoresOk === false;
-
-  if (businessLoading) return <AuthRouteLoading label="Cargando tiendas…" />;
 
   return (
     <>

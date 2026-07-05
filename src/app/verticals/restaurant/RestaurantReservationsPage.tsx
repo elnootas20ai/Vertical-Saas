@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useModalClose } from '../../hooks/useModalClose';
+import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
+import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import type { Client } from '../../context/AppContext';
 import {
   listDiningTablesRequest,
   getFloorConfigRequest,
@@ -41,6 +45,14 @@ import {
   type ReservationStatus,
 } from '../../lib/restaurantReservationTypes';
 import {
+  diningTableDisplayName,
+  diningTableStatusLabel,
+  formatDiningTablePickerLabel,
+  groupDiningTablesByZone,
+  isDiningTablePickable,
+  sortDiningTablesForPicker,
+} from '../../lib/restaurantTableSelectUi';
+import {
   Search,
   Plus,
   X,
@@ -60,8 +72,16 @@ import {
   Armchair,
   AlertCircle,
   Settings2,
+  ExternalLink,
 } from 'lucide-react';
+import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
 import { toast } from 'sonner';
+
+function formatClientPhone(client: Client): string {
+  const prefix = client.phonePrefix || '+34';
+  const phone = client.phone || '';
+  return phone ? `${prefix} ${phone}`.trim() : '';
+}
 
 function loadAutomationSettings(): ReservationAutomationSettings {
   try {
@@ -106,6 +126,12 @@ export function RestaurantReservationsPage() {
   const userId = user?.user_id || user?.id || '';
   const userName = user?.name || user?.email || 'Usuario';
   const businessId = currentBusiness?.business_id || '';
+  const businessScopeId = resolveBusinessScopeId(currentBusiness);
+  const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
+  const clientScope = useMemo(
+    () => ({ businessId, searchBusinessId: clientSearchBusinessId }),
+    [businessId, clientSearchBusinessId],
+  );
 
   const [reservations, setReservations] = useState<RestaurantReservation[]>([]);
   const [tables, setTables] = useState<DiningTable[]>([]);
@@ -126,11 +152,34 @@ export function RestaurantReservationsPage() {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
   });
+  const [clientLookup, setClientLookup] = useState('');
+  const [clientEditing, setClientEditing] = useState(true);
+
+  const {
+    results: clientResults,
+    isSearching: isClientSearching,
+    searchError: clientSearchError,
+    selectedClient,
+    selectClient,
+    clearSelection,
+    clearResults,
+  } = useClientPhoneSearch({
+    userId,
+    phone: clientLookup,
+    businessId: clientSearchBusinessId,
+    enabled: showModal,
+    matchByName: true,
+    minQueryLength: 2,
+  });
 
   useModalClose(showModal, () => {
     setShowModal(false);
     setEditing(null);
     setForm({ ...EMPTY_FORM, date: selectedDate });
+    setClientLookup('');
+    setClientEditing(true);
+    clearSelection();
+    clearResults();
   });
   useModalClose(showAssignModal, () => setShowAssignModal(false));
   useModalClose(showAutomation, () => setShowAutomation(false));
@@ -237,7 +286,31 @@ export function RestaurantReservationsPage() {
   const openCreate = () => {
     setEditing(null);
     setForm({ ...EMPTY_FORM, date: selectedDate });
+    setClientLookup('');
+    setClientEditing(true);
+    clearSelection();
+    clearResults();
     setShowModal(true);
+  };
+
+  const applyClient = (client: Client) => {
+    selectClient(client);
+    setForm((prev) => ({
+      ...prev,
+      clientId: client.id,
+      guestName: client.name || client.fullName || prev.guestName,
+      phone: formatClientPhone(client) || prev.phone,
+      email: client.email || prev.email,
+    }));
+    setClientLookup('');
+    setClientEditing(false);
+  };
+
+  const clearLinkedClient = () => {
+    clearSelection();
+    setForm((prev) => ({ ...prev, clientId: '' }));
+    setClientLookup('');
+    setClientEditing(true);
   };
 
   const openEdit = (item: RestaurantReservation) => {
@@ -246,6 +319,7 @@ export function RestaurantReservationsPage() {
       guestName: item.guestName,
       phone: item.phone,
       email: item.email,
+      clientId: item.clientId || '',
       date: item.date,
       time: item.time,
       partySize: item.partySize,
@@ -256,6 +330,10 @@ export function RestaurantReservationsPage() {
       notes: item.notes,
       status: item.status,
     });
+    setClientLookup('');
+    setClientEditing(!item.clientId);
+    clearSelection();
+    clearResults();
     setShowModal(true);
   };
 
@@ -267,16 +345,32 @@ export function RestaurantReservationsPage() {
     setSaving(true);
     try {
       if (editing) {
-        const item = await updateReservation(userId, editing, form, actor, tables, reservations);
-        toast.success('Reserva actualizada');
+        const item = await updateReservation(userId, editing, form, actor, tables, reservations, clientScope);
+        toast.success(item.clientId ? 'Reserva actualizada · Cliente en CRM' : 'Reserva actualizada');
         setSelected(item);
       } else {
-        const { item, tableAssigned } = await createReservation(userId, form, actor, tables, reservations);
-        toast.success(
-          tableAssigned
-            ? 'Reserva creada correctamente · Mesa asignada automáticamente'
-            : 'Reserva creada correctamente',
+        const { item, tableAssigned, clientLinked } = await createReservation(
+          userId,
+          form,
+          actor,
+          tables,
+          reservations,
+          clientScope,
         );
+        const phoneDigits = form.phone.replace(/\D/g, '');
+        if (tableAssigned && clientLinked) {
+          toast.success('Reserva creada · Mesa asignada · Cliente guardado en CRM');
+        } else if (tableAssigned) {
+          toast.success('Reserva creada · Mesa asignada automáticamente');
+        } else if (clientLinked) {
+          toast.success('Reserva creada · Cliente guardado en CRM');
+        } else if (phoneDigits.length > 0 && phoneDigits.length < 9) {
+          toast.success('Reserva creada · Teléfono incompleto para CRM (mín. 9 dígitos)');
+        } else if (!phoneDigits.length) {
+          toast.success('Reserva creada · Añade teléfono para guardar en CRM');
+        } else {
+          toast.success('Reserva creada correctamente');
+        }
         setSelected(item);
       }
       setShowModal(false);
@@ -306,10 +400,10 @@ export function RestaurantReservationsPage() {
   const handleSeat = async (item: RestaurantReservation) => {
     setSaving(true);
     try {
-      const { tableId } = await seatGuest(userId, item, actor, businessId);
+      const { tableId, orderId } = await seatGuest(userId, item, actor, businessId);
       toast.success('Cliente sentado · Abriendo TPV');
-      sessionStorage.setItem('sala_open_table_id', tableId);
-      navigate('/saas/sala');
+      writeSalaTpvOpenTable({ tableId, orderId });
+      navigate('/saas/caja/tpv');
       await loadData();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo sentar al cliente');
@@ -339,8 +433,18 @@ export function RestaurantReservationsPage() {
   const availableTablesForAssign = useMemo(() => {
     if (!selected) return [];
     const partySize = parseInt(selected.partySize, 10) || 2;
-    return tables.filter((t) => t.active && t.capacity >= partySize && t.status !== 'hidden');
+    return sortDiningTablesForPicker(
+      tables.filter((t) => t.active && t.capacity >= partySize && t.status !== 'hidden'),
+    );
   }, [selected, tables]);
+
+  const pickableTablesForForm = useMemo(
+    () =>
+      groupDiningTablesByZone(
+        tables.filter((t) => t.active && t.status !== 'hidden'),
+      ),
+    [tables],
+  );
 
   return (
     <Layout title="Reservas">
@@ -606,7 +710,18 @@ export function RestaurantReservationsPage() {
                 <div className="border-b border-gray-100 px-4 py-4 dark:border-gray-800">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{selected.guestName}</h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{selected.guestName}</h2>
+                        {selected.clientId ? (
+                          <Link
+                            to={`/saas/clients/${encodeURIComponent(selected.clientId)}`}
+                            className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300"
+                          >
+                            CRM
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        ) : null}
+                      </div>
                       <span className={`mt-1 inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_CFG[selected.status]?.bg} ${STATUS_CFG[selected.status]?.text}`}>
                         {STATUS_CFG[selected.status]?.label}
                       </span>
@@ -730,7 +845,10 @@ export function RestaurantReservationsPage() {
                     <button
                       type="button"
                       disabled={saving}
-                      onClick={() => void runAction(() => duplicateReservation(userId, selected, actor, tables, reservations), 'Reserva duplicada')}
+                      onClick={() => void runAction(
+                        () => duplicateReservation(userId, selected, actor, tables, reservations, clientScope),
+                        'Reserva duplicada',
+                      )}
                       className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2 text-xs font-medium dark:border-gray-700"
                     >
                       <Copy className="h-3.5 w-3.5" />Duplicar
@@ -783,17 +901,96 @@ export function RestaurantReservationsPage() {
               <button type="button" onClick={() => setShowModal(false)}><X className="h-5 w-5 text-gray-400" /></button>
             </div>
             <div className="space-y-3">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-400">
+                  Cliente CRM (teléfono o nombre)
+                </label>
+                {selectedClient || form.clientId ? (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-950/30">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        {selectedClient?.name || form.guestName}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Se guardará en Clientes (/saas/clients)
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearLinkedClient}
+                      className="shrink-0 rounded-lg p-1.5 text-violet-700 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-900/40"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      <input
+                        value={clientLookup}
+                        onChange={(e) => {
+                          setClientLookup(e.target.value);
+                          setClientEditing(true);
+                          setForm((prev) => ({ ...prev, clientId: '' }));
+                          clearSelection();
+                        }}
+                        placeholder="Buscar cliente existente…"
+                        className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-10 text-sm dark:border-gray-700 dark:bg-gray-800"
+                        autoComplete="off"
+                      />
+                      {isClientSearching ? (
+                        <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-400" />
+                      ) : null}
+                    </div>
+                    {clientSearchError ? (
+                      <p className="mt-1 text-xs text-red-500">{clientSearchError}</p>
+                    ) : null}
+                    {clientEditing && clientResults.length > 0 ? (
+                      <div className="mt-2 overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+                        {clientResults.map((client) => (
+                          <button
+                            key={client.id}
+                            type="button"
+                            onClick={() => applyClient(client)}
+                            className="flex w-full items-center justify-between gap-3 border-b border-gray-100 px-3 py-2.5 text-left last:border-b-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                                {client.name || client.fullName || 'Cliente'}
+                              </p>
+                              <p className="text-xs text-gray-500">{formatClientPhone(client) || client.email || '—'}</p>
+                            </div>
+                            <span className="shrink-0 text-xs font-bold text-violet-600">Vincular</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    <p className="mt-1.5 text-[11px] text-gray-500">
+                      Si no existe, se crea al guardar (teléfono mín. 9 dígitos).
+                    </p>
+                  </>
+                )}
+              </div>
               <input
                 value={form.guestName}
-                onChange={(e) => setForm((p) => ({ ...p, guestName: e.target.value }))}
+                onChange={(e) => {
+                  setClientEditing(true);
+                  clearSelection();
+                  setForm((p) => ({ ...p, guestName: e.target.value, clientId: '' }));
+                }}
                 placeholder="Nombre *"
                 className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
               />
               <div className="grid grid-cols-2 gap-3">
                 <input
                   value={form.phone}
-                  onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-                  placeholder="Teléfono"
+                  onChange={(e) => {
+                    setClientEditing(true);
+                    clearSelection();
+                    setForm((p) => ({ ...p, phone: e.target.value, clientId: '' }));
+                  }}
+                  placeholder="Teléfono (para CRM)"
                   className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
                 />
                 <input
@@ -850,10 +1047,14 @@ export function RestaurantReservationsPage() {
                 className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm dark:border-gray-700 dark:bg-gray-800"
               >
                 <option value="">Mesa (opcional — auto-asignación)</option>
-                {tables.filter((t) => t.active).map((t) => (
-                  <option key={t._id} value={t._id}>
-                    Mesa {t.number} · {t.zone} · {t.capacity}p · {t.status}
-                  </option>
+                {pickableTablesForForm.map(([zone, zoneTables]) => (
+                  <optgroup key={zone} label={zone}>
+                    {zoneTables.map((t) => (
+                      <option key={t._id} value={t._id} disabled={!isDiningTablePickable(t.status)}>
+                        {formatDiningTablePickerLabel(t)}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
               <textarea
@@ -895,18 +1096,22 @@ export function RestaurantReservationsPage() {
                   <button
                     key={t._id}
                     type="button"
-                    disabled={saving}
+                    disabled={saving || !isDiningTablePickable(t.status)}
                     onClick={() => void runAction(async () => {
                       const item = await assignTable(userId, selected, t, actor, tables, reservations);
                       setShowAssignModal(false);
                       return item;
                     }, 'Mesa asignada')}
-                    className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-colors hover:border-violet-400 ${
+                    className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-colors hover:border-violet-400 disabled:cursor-not-allowed disabled:opacity-50 ${
                       selected.tableId === t._id ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/20' : 'border-gray-200 dark:border-gray-700'
                     }`}
                   >
-                    <span className="font-semibold">Mesa {t.number}</span>
-                    <span className="text-xs text-gray-500">{t.zone} · {t.capacity}p · {t.status}</span>
+                    <span className="font-semibold text-gray-900 dark:text-gray-100">
+                      {diningTableDisplayName(t)}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {t.zone} · {t.capacity} pers. · {diningTableStatusLabel(t.status)}
+                    </span>
                   </button>
                 ))
               )}

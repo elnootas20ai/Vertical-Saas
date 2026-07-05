@@ -34,14 +34,16 @@ describe('salaRoomPdv', () => {
     expect(stripSalaRoomNoteFromWorkCenter('sala_room:room_1\nTienda real')).toBe('Tienda real');
   });
 
-  it('encuentra terminal por id o código', () => {
+  it('encuentra terminal por id, salaRoomId o código', () => {
     const pdv = {
       _id: 'pdv1',
       terminals: [
         { id: 't1', code: 'K7M2NP', name: 'Salón', active: true, salaRoomId: 'room_1' },
+        { id: 't-legacy', code: 'SALA-ROOM_ABC', name: 'Salón', active: true },
       ],
     };
     expect(findTerminalForRoom(pdv, { id: 'room_1', terminalCode: 'K7M2NP' })).toMatchObject({ id: 't1' });
     expect(findTerminalForRoom(pdv, { id: 'room_x', terminalId: 't1', terminalCode: 'K7M2NP' })).toMatchObject({ id: 't1' });
+    expect(findTerminalForRoom(pdv, { id: 'room_1', terminalCode: 'OLD' })).toMatchObject({ id: 't1' });
   });
 });

@@ -62,7 +62,7 @@ import {
   Timer,
   Hourglass,
 } from 'lucide-react';
-import { impersonateUser } from '../../lib/settingsApi';
+import { TpvIncidentsPanel } from '../../components/saas/restaurant/TpvIncidentsPanel';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
@@ -137,6 +137,7 @@ const TABS = [
   { id: 'affiliate_requests', label: 'Solicitudes afiliados', icon: HandshakeIcon },
   { id: 'backup', label: 'Backup CouchDB', icon: Database },
   { id: 'audit', label: 'Auditoría', icon: Activity },
+  { id: 'incidents', label: 'Incidencias TPV', icon: AlertTriangle },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -3333,6 +3334,14 @@ export function AdminPanel() {
             usersMap={usersMap}
             onViewUser={(u) => setSelectedAccount(u)}
           />
+        )}
+        {activeTab === 'incidents' && (
+          <div className="max-w-3xl">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              Errores registrados desde TPV y caja (superadmin ve todas las cuentas).
+            </p>
+            <TpvIncidentsPanel />
+          </div>
         )}
       </div>
       {selectedAccount && (

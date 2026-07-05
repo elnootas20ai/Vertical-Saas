@@ -71,40 +71,6 @@ export function writeRetailScopeCache(
   }
 }
 
-/** Tras login tablet: pintar la caja al instante sin esperar al fetch completo de tiendas. */
-export function seedRetailScopeCacheFromTabletLogin(params: {
-  businessId: string;
-  pointOfSale?: PointOfSale | null;
-  workCenterId?: string;
-}): void {
-  const bid = normalizeBusinessScopeId(params.businessId);
-  const pdv = params.pointOfSale;
-  if (!bid || !pdv?._id) return;
-
-  const wcId =
-    String(params.workCenterId || pdv.workCenterId || '').trim() ||
-    `wc-tablet-${pdv._id}`;
-  const pdvForCache: PointOfSale = {
-    ...pdv,
-    workCenterId: String(pdv.workCenterId || wcId).trim(),
-    active: pdv.active !== false,
-  };
-  const retailWorkCenters: WorkCenter[] = [
-    {
-      _id: wcId,
-      name: pdv.name || 'Tienda',
-      centerType: 'punto_de_venta',
-      businessId: bid,
-      active: true,
-    } as WorkCenter,
-  ];
-
-  writeRetailScopeCache(bid, {
-    retailWorkCenters,
-    allPointsOfSale: [pdvForCache],
-  });
-}
-
 /** Tras alta/edición de tienda + PDV: actualiza caché al instante (gate Marca / sidebar). */
 export function mergeRetailScopeCacheEntry(
   businessId: string,

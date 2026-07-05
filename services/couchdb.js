@@ -5459,6 +5459,7 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     salesPointId: String(data.salesPointId || existing?.salesPointId || ''),
     salesPointName: String(data.salesPointName || existing?.salesPointName || ''),
     tableNumber: data.tableNumber != null ? Number(data.tableNumber) : (existing?.tableNumber ?? null),
+    tableId: String(data.tableId || existing?.tableId || '').trim() || null,
 
     takenBy: String(data.takenBy || existing?.takenBy || ''),
     takenByName: String(data.takenByName || existing?.takenByName || ''),
@@ -5539,6 +5540,7 @@ export function sanitizeDeliveryOrder(doc) {
     salesPointId: doc.salesPointId || '',
     salesPointName: doc.salesPointName || '',
     tableNumber: doc.tableNumber ?? null,
+    tableId: doc.tableId || null,
 
     takenBy: doc.takenBy || '',
     takenByName: doc.takenByName || '',

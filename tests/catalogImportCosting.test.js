@@ -13,6 +13,7 @@ import { productCostingStatus, readProductRecipeLines } from '../src/app/lib/cat
 const brands = [
   { _id: 'brand-pizza', deliveryLineKind: 'pizza' },
   { _id: 'brand-burger', deliveryLineKind: 'burger_fastfood' },
+  { _id: 'brand-bar', deliveryLineKind: 'tapas_bar' },
 ];
 
 const storeIngredients = [
@@ -21,6 +22,11 @@ const storeIngredients = [
   { id: 'ing-bacon', name: 'Bacon', brandIds: ['brand-pizza', 'brand-burger'], baseCost: 12 },
   { id: 'ing-pan', name: 'Pan brioche', brandIds: ['brand-burger'], baseCost: 0.45 },
   { id: 'ing-carne', name: 'Carne burger', brandIds: ['brand-burger'], baseCost: 8.5 },
+  { id: 'ing-aceite', name: 'Aceite de oliva', brandIds: ['brand-bar'], baseCost: 8 },
+  { id: 'ing-patata', name: 'Patata', brandIds: ['brand-bar'], baseCost: 2 },
+  { id: 'ing-jamon', name: 'Jamón ibérico', brandIds: ['brand-bar'], baseCost: 28 },
+  { id: 'ing-pan-bar', name: 'Pan', brandIds: ['brand-bar'], baseCost: 0.25 },
+  { id: 'ing-sal', name: 'Sal', brandIds: ['brand-bar'], baseCost: 1 },
 ];
 
 test('findStoreIngredientForCosting matches by name within brand', () => {
@@ -58,6 +64,45 @@ test('applyVertialAutoCostingToCatalogItem builds recipe for pizza with ingredie
   assert.equal(mode, 'recipe');
   assert.equal(productCostingStatus(next), 'recipe');
   assert.ok(next.costPrice > 0);
+});
+
+test('inferImportCostingLineKind detects tapas from category', () => {
+  assert.equal(
+    inferImportCostingLineKind({ category: 'Tapas', brandIds: [], name: 'Patatas bravas' }, brands),
+    'tapas_bar',
+  );
+});
+
+test('applyVertialAutoCostingToCatalogItem builds recipe for tapas with ingredients', () => {
+  const item = {
+    _id: 't1',
+    name: 'Patatas bravas',
+    category: 'Tapas',
+    brandIds: ['brand-bar'],
+    unitPrice: 5.5,
+    costPrice: 0,
+    customFields: { ingredients: 'Patata, Aceite, Pimentón' },
+  };
+  const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands);
+  assert.equal(mode, 'recipe');
+  assert.equal(productCostingStatus(next), 'recipe');
+  assert.ok(next.costPrice > 0);
+  assert.ok(readProductRecipeLines(next).length >= 2);
+});
+
+test('applyVertialAutoCostingToCatalogItem builds recipe for tapas without ingredients column', () => {
+  const item = {
+    _id: 't2',
+    name: 'Jamón ibérico',
+    category: 'Raciones',
+    brandIds: ['brand-bar'],
+    unitPrice: 14,
+    costPrice: 0,
+    customFields: {},
+  };
+  const { item: next, mode } = applyVertialAutoCostingToCatalogItem(item, storeIngredients, brands);
+  assert.equal(mode, 'recipe');
+  assert.ok(readProductRecipeLines(next).length >= 2);
 });
 
 test('applyVertialAutoCostingToCatalogItem fixed cost for drinks', () => {

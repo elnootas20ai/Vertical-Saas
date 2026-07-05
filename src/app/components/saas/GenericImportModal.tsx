@@ -555,9 +555,6 @@ export function GenericImportModal({
                     Puede tardar 1–2 minutos con muchos productos. No cierres esta ventana.
                   </p>
                 )}
-                <p className="text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
-                  La app espera a que termine — es normal que no puedas usar otras pantallas ahora.
-                </p>
               </div>
             </div>
           )}

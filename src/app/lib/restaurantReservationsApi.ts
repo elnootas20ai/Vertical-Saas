@@ -16,8 +16,14 @@ import {
   type RestaurantReservation,
   type ReservationStatus,
 } from './restaurantReservationTypes';
+import { ensureReservationCrmClient } from './restaurantReservationClientSync';
 
 const api = createVerticalApi<RestaurantReservation>('restaurant', 'reservations');
+
+type ReservationClientScope = {
+  businessId?: string;
+  searchBusinessId?: string;
+};
 
 export function listReservations(userId: string) {
   return api.list(userId);
@@ -122,7 +128,8 @@ export async function createReservation(
   actor: { userId: string; userName: string },
   tables: DiningTable[],
   existing: RestaurantReservation[],
-): Promise<{ item: RestaurantReservation; tableAssigned: boolean }> {
+  clientScope: ReservationClientScope = {},
+): Promise<{ item: RestaurantReservation; tableAssigned: boolean; clientLinked: boolean }> {
   let tableId = form.tableId;
   let tableName = form.tableName;
   let tableNumber = form.tableNumber;
@@ -153,8 +160,20 @@ export async function createReservation(
     },
   ]);
 
+  const clientId = await ensureReservationCrmClient({
+    userId,
+    businessId: clientScope.businessId,
+    searchBusinessId: clientScope.searchBusinessId,
+    guestName: form.guestName,
+    phone: form.phone,
+    email: form.email,
+    clientId: form.clientId,
+    actorName: actor.userName,
+  }).catch(() => '');
+
   const item = await api.create(userId, {
     ...form,
+    clientId,
     tableId,
     tableName,
     tableNumber,
@@ -166,7 +185,7 @@ export async function createReservation(
     await syncTableReserved(userId, tableId, form.guestName, true);
   }
 
-  return { item, tableAssigned };
+  return { item, tableAssigned, clientLinked: Boolean(clientId) };
 }
 
 export async function updateReservation(
@@ -176,6 +195,7 @@ export async function updateReservation(
   actor: { userId: string; userName: string },
   tables: DiningTable[],
   allReservations: RestaurantReservation[],
+  clientScope: ReservationClientScope = {},
 ): Promise<RestaurantReservation> {
   const nextTableId = form.tableId !== undefined ? form.tableId : reservation.tableId;
   const nextDate = form.date ?? reservation.date;
@@ -201,7 +221,19 @@ export async function updateReservation(
     details: form.tableId && form.tableId !== oldTableId ? 'Cambio de mesa' : undefined,
   });
 
-  const item = await api.update(userId, reservation._id, { ...form, history });
+  const mergedForm = { ...reservation, ...form };
+  const clientId = await ensureReservationCrmClient({
+    userId,
+    businessId: clientScope.businessId,
+    searchBusinessId: clientScope.searchBusinessId,
+    guestName: mergedForm.guestName,
+    phone: mergedForm.phone,
+    email: mergedForm.email,
+    clientId: mergedForm.clientId || reservation.clientId,
+    actorName: actor.userName,
+  }).catch(() => reservation.clientId || '');
+
+  const item = await api.update(userId, reservation._id, { ...form, clientId, history });
 
   if (oldTableId && oldTableId !== nextTableId) {
     await syncTableReserved(userId, oldTableId, reservation.guestName, false);
@@ -276,6 +308,7 @@ export async function duplicateReservation(
   actor: { userId: string; userName: string },
   tables: DiningTable[],
   allReservations: RestaurantReservation[],
+  clientScope: ReservationClientScope = {},
 ): Promise<RestaurantReservation> {
   const { item } = await createReservation(
     userId,
@@ -283,6 +316,7 @@ export async function duplicateReservation(
       guestName: reservation.guestName,
       phone: reservation.phone,
       email: reservation.email,
+      clientId: reservation.clientId || '',
       date: reservation.date,
       time: reservation.time,
       partySize: reservation.partySize,
@@ -296,6 +330,7 @@ export async function duplicateReservation(
     actor,
     tables,
     allReservations,
+    clientScope,
   );
   return item;
 }

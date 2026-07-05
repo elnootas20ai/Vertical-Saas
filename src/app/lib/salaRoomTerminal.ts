@@ -55,7 +55,7 @@ export function stripSalaRoomNoteFromWorkCenter(notes: string | undefined): stri
     .trim();
 }
 
-function isSalaTerminal(terminal: TerminalConfig): boolean {
+export function isSalaManagedTerminal(terminal: TerminalConfig): boolean {
   if (String(terminal.salaRoomId || '').trim()) return true;
   const code = String(terminal.code || '').trim().toUpperCase();
   if (code.startsWith(SALA_TERMINAL_CODE_PREFIX)) return true;
@@ -73,6 +73,13 @@ export function findTerminalForRoom(
     const byId = terminals.find((t) => t.id === tid);
     if (byId) return byId;
   }
+  const roomId = String(room.id || '').trim();
+  if (roomId) {
+    const bySalaRoom = terminals.find(
+      (t) => t.active !== false && String(t.salaRoomId || '').trim() === roomId,
+    );
+    if (bySalaRoom) return bySalaRoom;
+  }
   const roomCode = String(room.terminalCode || '').trim().toUpperCase();
   if (roomCode) {
     const byCode = terminals.find(
@@ -87,7 +94,7 @@ export function findTerminalForRoom(
 }
 
 export function countSalaTerminals(pdv: Pick<PointOfSale, 'terminals'>): number {
-  return (pdv.terminals || []).filter((t) => t.active !== false && isSalaTerminal(t)).length;
+  return (pdv.terminals || []).filter((t) => t.active !== false && isSalaManagedTerminal(t)).length;
 }
 
 export const MAX_SALA_TERMINALS_PER_PDV = 12;

@@ -18,12 +18,18 @@ export function getWorkerInitials(name: string): string {
   return (parts[0]?.[0] || '?').toUpperCase();
 }
 
-/** Burbujas TPV: una burbuja por cada persona fichada hoy en tienda. */
+/** Burbujas TPV: fichados en tienda + quien abrió caja si aún no aparece en nómina. */
 export function buildTpvActiveStaff(
-  _session: { workerId?: string; workerName?: string } | null | undefined,
+  session: { workerId?: string; workerName?: string } | null | undefined,
   storeClockins: TpvClockedInWorker[],
 ): TpvClockedInWorker[] {
-  return [...storeClockins].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  const list = [...storeClockins];
+  const openerId = normalizeClockinUserId(session?.workerId);
+  const openerName = String(session?.workerName || '').trim();
+  if (openerId && openerName && !list.some((w) => clockinIdsMatch(w.id, openerId))) {
+    list.push({ id: openerId, name: openerName, status: 'active' });
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 export function pickDefaultOrderTaker(workers: TpvClockedInWorker[]): string | null {

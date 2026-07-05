@@ -133,6 +133,7 @@ import {
   isCancelledDeliveryOrder,
 } from '../shared/clients/deliveryClientMatch.js';
 import { syncClientAfterDeliveryOrder } from '../services/deliveryClientSync.js';
+import { recordDiningTableTicketStat } from '../services/salaService.js';
 
 /** Reglas mínimas para operar TPV / delivery con un PDV identificable. */
 function validatePointOfSaleTerminals(terminals) {
@@ -580,10 +581,18 @@ export async function createDeliveryOrder(req, res) {
       metadata: { status: doc.status, channel: doc.channel },
     });
     const sanitized = sanitizeDeliveryOrder(savedDoc);
+    let tableTicketStat = null;
+    if (channel === 'tpv' && (savedDoc.tableId || savedDoc.tableNumber)) {
+      try {
+        tableTicketStat = await recordDiningTableTicketStat(req, userId, savedDoc);
+      } catch (statErr) {
+        logger.warn({ err: statErr, orderId: savedDoc._id }, 'No se pudo registrar estadística de mesa');
+      }
+    }
     broadcastDeliveryOrderSse(account, userId, 'created', savedDoc);
     syncClientAfterDeliveryOrder(req, userId, savedDoc).catch(() => null);
     triggerReactiveAlert(userId, 'order_created', { orderId: doc._id, newStatus: doc.status }).catch(() => null);
-    return res.status(201).json({ ok: true, order: sanitized, cajaRegistration });
+    return res.status(201).json({ ok: true, order: sanitized, cajaRegistration, tableTicketStat });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear pedido delivery' });
   }

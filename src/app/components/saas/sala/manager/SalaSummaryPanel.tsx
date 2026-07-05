@@ -1,13 +1,16 @@
-import { MonitorSmartphone, Building2, LayoutGrid, Users, Clock } from 'lucide-react';
+import { Building2, LayoutGrid, Users, Clock } from 'lucide-react';
 import type { RestaurantSummary } from '../../../../lib/salaStudioTypes';
+import type { SalaTpvDisplay } from '../../../../lib/salaStoreTpv';
+import { SalaManagerStat } from './SalaManagerStat';
+import { SalaTpvStatusBlock } from './SalaTpvStatusBlock';
 
 type Props = {
   summary: RestaurantSummary;
   lastModified: string | null;
-  onOpenTpv: () => void;
+  storeTpv: SalaTpvDisplay | null;
 };
 
-export function SalaSummaryPanel({ summary, lastModified, onOpenTpv }: Props) {
+export function SalaSummaryPanel({ summary, lastModified, storeTpv }: Props) {
   const formattedDate = lastModified
     ? new Date(lastModified).toLocaleString('es-ES', {
         day: 'numeric',
@@ -24,52 +27,18 @@ export function SalaSummaryPanel({ summary, lastModified, onOpenTpv }: Props) {
         <p className="mt-0.5 text-xs text-gray-500">Tu restaurante</p>
       </div>
 
-      <div className="flex-1 space-y-3 p-4">
-        <SummaryRow icon={Building2} label="Total salas" value={summary.roomCount} />
-        <SummaryRow icon={LayoutGrid} label="Total mesas" value={summary.tableCount} />
-        <SummaryRow icon={Users} label="Capacidad total" value={`${summary.capacity} pers.`} />
-        <SummaryRow icon={Clock} label="Última modificación" value={formattedDate} small />
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <SalaManagerStat icon={Building2} label="Total salas" value={summary.roomCount} />
+        <SalaManagerStat icon={LayoutGrid} label="Total mesas" value={summary.tableCount} />
+        <SalaManagerStat icon={Users} label="Capacidad total" value={`${summary.capacity} pers.`} />
+        <SalaManagerStat icon={Clock} label="Última modificación" value={formattedDate} compact />
       </div>
 
-      <div className="border-t border-gray-200/80 p-4 dark:border-gray-800">
-        <button
-          type="button"
-          onClick={onOpenTpv}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
-        >
-          <MonitorSmartphone className="h-4 w-4" />
-          Abrir TPV
-        </button>
-        <p className="mt-2 text-center text-[11px] text-gray-400">
-          Abre el terminal de la sala activa en el TPV
-        </p>
-      </div>
+      {storeTpv?.terminalCode ? (
+        <div className="border-t border-gray-200/80 p-4 dark:border-gray-800">
+          <SalaTpvStatusBlock tpv={storeTpv} variant="minimal" />
+        </div>
+      ) : null}
     </aside>
-  );
-}
-
-function SummaryRow({
-  icon: Icon,
-  label,
-  value,
-  small,
-}: {
-  icon: typeof Building2;
-  label: string;
-  value: string | number;
-  small?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-gray-100 bg-gray-50/50 px-3 py-3 dark:border-gray-800 dark:bg-gray-900/40">
-      <div className="rounded-lg bg-white p-2 shadow-sm dark:bg-gray-800">
-        <Icon className="h-4 w-4 text-gray-500" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-gray-500">{label}</p>
-        <p className={`mt-0.5 font-semibold text-gray-900 dark:text-gray-100 ${small ? 'text-xs' : 'text-lg tabular-nums'}`}>
-          {value}
-        </p>
-      </div>
-    </div>
   );
 }

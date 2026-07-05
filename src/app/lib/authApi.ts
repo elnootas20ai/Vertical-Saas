@@ -443,23 +443,35 @@ async function tryRefreshToken(): Promise<boolean> {
 export async function authFetch(
   input: string,
   init?: RequestInit,
-  _retried = false,
+  attempt = 0,
+  authRetried = false,
 ): Promise<Response> {
   const headers = new Headers(init?.headers || {});
   if (_inMemoryToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${_inMemoryToken}`);
   }
 
-  const response = await fetch(input, {
-    ...init,
-    credentials: 'include',
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(input, {
+      ...init,
+      credentials: 'include',
+      headers,
+    });
+  } catch (err) {
+    const isNetwork = err instanceof TypeError
+      || (err instanceof Error && /failed to fetch|network|load failed/i.test(err.message));
+    if (isNetwork && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      return authFetch(input, init, attempt + 1, authRetried);
+    }
+    throw err;
+  }
 
-  if (response.status === 401 && !_retried) {
+  if (response.status === 401 && !authRetried) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
-      return authFetch(input, init, true);
+      return authFetch(input, init, attempt, true);
     }
     _onUnauthorized?.();
   }
@@ -485,6 +497,7 @@ async function request<T>(
   path: string,
   init?: RequestInit,
   _retried = false,
+  _networkAttempt = 0,
 ): Promise<ApiEnvelope<T>> {
   const extraHeaders: Record<string, string> = {};
   if (_inMemoryToken) {
@@ -504,6 +517,12 @@ async function request<T>(
       ...init,
     });
   } catch (err) {
+    const isNetwork = err instanceof TypeError
+      || (err instanceof Error && /failed to fetch|network|load failed/i.test(err.message));
+    if (isNetwork && _networkAttempt < 2) {
+      await new Promise((r) => setTimeout(r, 400 * (_networkAttempt + 1)));
+      return request<T>(path, init, _retried, _networkAttempt + 1);
+    }
     const hint =
       API_BASE
         ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
@@ -529,7 +548,7 @@ async function request<T>(
     if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
       const refreshed = await tryRefreshToken();
       if (refreshed) {
-        return request<T>(path, init, true);
+        return request<T>(path, init, true, _networkAttempt);
       }
     }
     _onUnauthorized?.();

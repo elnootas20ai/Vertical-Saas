@@ -98,7 +98,13 @@ const CATEGORY_PRODUCT_EXAMPLES: Record<string, string> = {
   Combos: 'Menú Estándar',
   Extras: 'Extra queso',
   Otros: 'Producto varios',
-  Café: 'Café solo',
+  Tapas: 'Patatas bravas',
+  Raciones: 'Jamón ibérico',
+  Pinchos: 'Pincho moruno',
+  Montaditos: 'Montadito de lomo',
+  Kebab: 'Döner kebab',
+  Bocadillos: 'Bocadillo mixto',
+  Cafés: 'Café con leche',
   Bollería: 'Croissant',
 };
 
@@ -166,13 +172,40 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
 
     cats.forEach((cat, i) => {
       const isPizza = /pizza/i.test(cat);
+      const isTapas = /tapa|racion|pincho|montadito/i.test(cat);
+      const isKebab = /kebab/i.test(cat);
+      const isBocadillo = /bocadillo|bocata|sandwich/i.test(cat);
+      const isComplemento = /complemento/i.test(cat);
+      const isBebida = /bebida|cerveza|vino/i.test(cat);
+      const ingredients = isPizza
+        ? 'Tomate, Mozzarella, Albahaca'
+        : isBocadillo
+          ? 'Pan barra, Tomate, Jamón serrano'
+          : isTapas
+            ? 'Patata, Aceite, Pimentón'
+            : isKebab
+              ? 'Carne kebab, Lechuga, Salsa yogur'
+              : isComplemento
+                ? 'Patata, Aceite, Sal'
+                : '';
+      const price = isBebida
+        ? (4.5).toFixed(2)
+        : isBocadillo
+          ? (5.5).toFixed(2)
+          : isTapas
+            ? (4.5).toFixed(2)
+            : isKebab
+              ? (6.5).toFixed(2)
+              : isComplemento
+                ? (3.0).toFixed(2)
+                : (9.5 + i * 0.5).toFixed(2);
       rows.push([
         exampleProductName(cat, lineName, i),
         `${prefix}-${String(skuN++).padStart(3, '0')}`,
         cat,
         lineName,
-        (9.5 + i * 0.5).toFixed(2),
-        isPizza ? 'Tomate, Mozzarella, Albahaca' : '',
+        price,
+        ingredients,
         i === 0 ? `Ejemplo · borra y pon tus productos · linea=${lineName}` : '',
       ]);
     });
@@ -207,10 +240,11 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
 
   if (lines.length === 0) {
     return [
-      ['Pizza Margarita', 'PIZ-001', 'Pizzas', 'modomio', '9.50', 'Tomate, Mozzarella, Albahaca', 'Crea marcas en Ajustes → Marca y vuelve a descargar'],
-      ['Agua 50cl', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía = pestaña compartida TPV'],
-      ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', ''],
-      ['Tiramisú', 'POS-001', 'Postres', '', '4.50', '', ''],
+      ['Patatas bravas', 'TAP-001', 'Tapas', 'Bar', '4.50', 'Patata, Aceite, Pimentón', 'Ejemplo bar · escandallo auto'],
+      ['Bocadillo mixto', 'BOC-001', 'Bocadillos', 'Bar', '5.50', 'Pan barra, Jamón serrano, Queso', ''],
+      ['Caña', 'BEB-001', 'Bebidas', '', '1.80', '', 'linea vacía · coste ~0,35€'],
+      ['Patatas fritas', 'COM-001', 'Complementos', '', '3.00', '', 'coste ~1,15€'],
+      ['Tarta de queso', 'POS-001', 'Postres', '', '4.50', '', ''],
     ];
   }
 
@@ -273,8 +307,14 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '',
     'OBLIGATORIO por producto:',
     '  · nombre — nombre en TPV',
-    '  · categoria — Pizzas, Burgers, Combos, Bebidas…',
+    '  · categoria — Pizzas, Tapas, Raciones, Burgers, Bebidas…',
     '  · precio — número (14.50)',
+    '',
+    'BAR / TAPAS / RESTAURANTE:',
+    '  · categorias habituales: Tapas, Raciones, Bocadillos, Pinchos, Complementos, Bebidas',
+    '  · ingredientes — tapas/raciones/bocatas: Patata, Aceite, Jamón, Pan barra (escandallo auto)',
+    '  · sin ingredientes — Vertial aplica coste aprox por categoría (caña ~0,35€, tapa ~2,20€…)',
+    '  · complementos y bebidas: coste fijo auto aunque la columna ingredientes esté vacía',
     '',
     'MENÚS / COMBOS (categoria = Combos):',
     '  · linea obligatoria (modomio, BlackBurger…)',
@@ -285,7 +325,7 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '  · codigo — referencia única por producto (PIZ-001). Opcional. Mismo código = actualiza sin duplicar',
     '  · linea — pestaña TPV: ' + namesText,
     '  · linea VACÍA en Bebidas, Complementos y Postres',
-    '  · ingredientes — solo pizzas/burgers: Tomate, Mozzarella, Jamón',
+    '  · ingredientes — pizzas/burgers/tapas: Tomate, Mozzarella, Jamón, Patata…',
     '',
     'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
   ];

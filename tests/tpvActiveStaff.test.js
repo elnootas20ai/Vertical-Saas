@@ -9,12 +9,14 @@ import {
 } from '../src/app/lib/clockinHistoryUtils.ts';
 
 describe('buildTpvActiveStaff', () => {
-  it('only shows real clockins, not session opener without fichaje', () => {
+  it('includes session opener when not yet in clockins list', () => {
     const staff = buildTpvActiveStaff(
       { workerId: 'account:u1', workerName: 'Ana' },
       [],
     );
-    expect(staff.length).toBe(0);
+    expect(staff.length).toBe(1);
+    expect(staff[0].name).toBe('Ana');
+    expect(staff[0].status).toBe('active');
   });
 
   it('merges store clockins without duplicates', () => {

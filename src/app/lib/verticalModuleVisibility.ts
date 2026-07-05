@@ -6,7 +6,7 @@ import { isRestaurantBusinessType } from './deliveryOpsTypes';
  * Ej.: delivery no usa comisiones por venta; los consumos de equipo van en Equipo → Consumos.
  */
 export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly string[]>> = {
-  delivery: ['commissions', 'web-orders'],
+  delivery: ['commissions', 'web-orders', 'delivery-clients'],
   restaurant: [
     'delivery-ops',
     'delivery-clients',

@@ -2,7 +2,7 @@ import { Plus, CheckCircle2, CircleDashed } from 'lucide-react';
 import type { SalaRoom } from '../../../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../../../lib/salaStudioTypes';
 import { roomSetupStatus } from './useSalaManager';
-import { SalaTpvCodeBadge } from './SalaTpvCodeBadge';
+import { SalaManagerStat } from './SalaManagerStat';
 
 type Props = {
   rooms: SalaRoom[];
@@ -25,38 +25,37 @@ export function SalaRoomListPanel({ rooms, activeRoomId, statsForRoom, onSelect,
           const stats = statsForRoom(room.id);
           const status = roomSetupStatus(stats.tableCount);
           const active = room.id === activeRoomId;
+          const configured = status === 'configured';
+
           return (
             <button
               key={room.id}
               type="button"
               onClick={() => onSelect(room.id)}
-              className={`w-full rounded-2xl border p-4 text-left transition-all ${
+              className={`w-full rounded-xl border p-3.5 text-left transition-all ${
                 active
                   ? 'border-gray-900 bg-white shadow-sm dark:border-white dark:bg-gray-900'
-                  : 'border-transparent bg-white hover:border-gray-200 hover:shadow-sm dark:bg-gray-900/60 dark:hover:border-gray-700'
+                  : 'border-gray-200/80 bg-white hover:border-gray-300 hover:shadow-sm dark:border-gray-800 dark:bg-gray-900/60 dark:hover:border-gray-600'
               }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <p className="font-semibold text-gray-900 dark:text-gray-100">{room.name}</p>
-                {status === 'configured' ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                {configured ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
                     <CheckCircle2 className="h-3 w-3" />
                     Configurada
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
                     <CircleDashed className="h-3 w-3" />
-                    Pendiente
+                    Incompleta
                   </span>
                 )}
               </div>
               <p className="mt-1 text-xs text-gray-500">{SALA_ROOM_TYPE_LABELS[room.roomType]}</p>
-              <div className="mt-2">
-                <SalaTpvCodeBadge code={room.terminalCode} compact />
-              </div>
-              <div className="mt-3 flex gap-4 text-xs text-gray-600 dark:text-gray-400">
-                <span><strong className="font-semibold text-gray-900 dark:text-gray-100">{stats.tableCount}</strong> mesas</span>
-                <span><strong className="font-semibold text-gray-900 dark:text-gray-100">{stats.capacity}</strong> personas</span>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <SalaManagerStat label="Mesas" value={stats.tableCount} compact />
+                <SalaManagerStat label="Capacidad" value={`${stats.capacity} p.`} compact />
               </div>
             </button>
           );
@@ -65,7 +64,7 @@ export function SalaRoomListPanel({ rooms, activeRoomId, statsForRoom, onSelect,
         <button
           type="button"
           onClick={onNewRoom}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-gray-300 py-4 text-sm font-medium text-gray-500 transition hover:border-gray-400 hover:bg-white hover:text-gray-700 dark:border-gray-600 dark:hover:border-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 py-4 text-sm font-medium text-gray-500 transition hover:border-gray-400 hover:bg-white hover:text-gray-700 dark:border-gray-600 dark:hover:border-gray-500 dark:hover:bg-gray-900 dark:hover:text-gray-300"
         >
           <Plus className="h-4 w-4" />
           Nueva sala

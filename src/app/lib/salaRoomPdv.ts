@@ -13,12 +13,9 @@ import {
 } from '../verticals/restaurant/loadRestaurantStores';
 import type { RestaurantBusinessRef } from '../verticals/restaurant/retailScope';
 import {
-  countSalaTerminals,
-  findTerminalForRoom,
-  generateSalaTerminalLoginCode,
+  isSalaManagedTerminal,
   isSalaManagedWorkCenter,
-  MAX_SALA_TERMINALS_PER_PDV,
-  needsLegacyTerminalCodeMigration,
+  stripSalaRoomNoteFromWorkCenter,
 } from './salaRoomTerminal';
 
 export {
@@ -56,8 +53,7 @@ async function resolveParentPdv(
   const linkedPdvId = String(room.pdvId || '').trim();
   if (!linkedPdvId) return null;
   const linked = pointsOfSale.find((p) => p._id === linkedPdvId && p.active !== false);
-  if (!linked || !findTerminalForRoom(linked, room)) return null;
-  return linked;
+  return linked || null;
 }
 
 async function persistPdvTerminals(
@@ -73,20 +69,77 @@ async function persistPdvTerminals(
   }
 }
 
-function buildLinkedRoom(
-  room: SalaRoom,
+const STORE_SALA_TERMINALS_PURGED_PREFIX = 'vertial.sala.storeTerminalsPurged:';
+
+function storeSalaTerminalsPurgedKey(pdvId: string): string {
+  return `${STORE_SALA_TERMINALS_PURGED_PREFIX}${String(pdvId || '').trim()}`;
+}
+
+function isStoreSalaTerminalsPurged(pdvId: string): boolean {
+  if (!pdvId || typeof localStorage === 'undefined') return false;
+  try {
+    return localStorage.getItem(storeSalaTerminalsPurgedKey(pdvId)) === '1';
+  } catch {
+    return true;
+  }
+}
+
+function markStoreSalaTerminalsPurged(pdvId: string): void {
+  if (!pdvId || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(storeSalaTerminalsPurgedKey(pdvId), '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+function pdvHasActiveSalaTerminals(pdv: PointOfSale): boolean {
+  return (pdv.terminals || []).some(
+    (t) => t.active !== false && isSalaManagedTerminal(t),
+  );
+}
+
+async function deactivateSalaTerminalsOnStorePdv(
+  userId: string,
   pdv: PointOfSale,
-  terminal: TerminalConfig,
-): SalaRoom {
+): Promise<PointOfSale> {
+  const terminals = Array.isArray(pdv.terminals) ? pdv.terminals : [];
+  if (!pdvHasActiveSalaTerminals(pdv)) return pdv;
+  const next = terminals.map((t) =>
+    t.active !== false && isSalaManagedTerminal(t) ? { ...t, active: false } : t,
+  );
+  return persistPdvTerminals(userId, pdv, next);
+}
+
+/** Migra terminales sala → 1 TPV tienda (una sola vez por PDV). */
+async function maybeDeactivateSalaTerminalsOnStorePdv(
+  userId: string,
+  pdv: PointOfSale,
+): Promise<void> {
+  const pdvId = String(pdv._id || '').trim();
+  if (!pdvId || !userId) return;
+  if (!pdvHasActiveSalaTerminals(pdv)) {
+    markStoreSalaTerminalsPurged(pdvId);
+    return;
+  }
+  if (isStoreSalaTerminalsPurged(pdvId)) return;
+  try {
+    await deactivateSalaTerminalsOnStorePdv(userId, pdv);
+    markStoreSalaTerminalsPurged(pdvId);
+  } catch {
+    /* reintenta en la próxima carga */
+  }
+}
+
+function buildStoreLinkedRoom(room: SalaRoom, pdv: PointOfSale): SalaRoom {
   const wcId = String(pdv.workCenterId || '').trim() || undefined;
-  const termCode = String(terminal.code || '').trim().toUpperCase();
   return {
     ...room,
     pdvId: pdv._id,
     workCenterId: wcId,
-    terminalId: terminal.id,
-    terminalLabel: termCode || String(terminal.name || '').trim() || room.terminalLabel,
-    terminalCode: termCode || room.terminalCode,
+    terminalId: undefined,
+    terminalLabel: undefined,
+    terminalCode: undefined,
   };
 }
 
@@ -125,15 +178,9 @@ function markLegacyCleanupDone(businessId: string): void {
   }
 }
 
-function roomAlreadySynced(room: SalaRoom, pdv: PointOfSale): boolean {
-  const terminal = findTerminalForRoom(pdv, room);
-  if (!terminal) return false;
-  if (String(room.pdvId || '').trim() !== pdv._id) return false;
-  if (String(room.terminalId || '').trim() !== terminal.id) return false;
-  if (needsLegacyTerminalCodeMigration(terminal)) return false;
-  const termCode = String(terminal.code || '').trim().toUpperCase();
-  if (String(room.terminalCode || '').trim().toUpperCase() !== termCode) return false;
-  return terminal.name === room.name;
+function roomAlreadySynced(room: SalaRoom, pdvId: string): boolean {
+  if (String(room.pdvId || '').trim() !== pdvId) return false;
+  return !String(room.terminalId || '').trim() && !String(room.terminalCode || '').trim();
 }
 
 async function maybeCleanupLegacySalaRetail(
@@ -161,14 +208,14 @@ async function maybeCleanupLegacySalaRetail(
   return cleanup;
 }
 
-export type EnsureRoomTpvError = 'no_parent_pdv' | 'max_terminals';
+export type EnsureRoomTpvError = 'no_parent_pdv';
 
 export type EnsureRoomTpvResult = {
   room: SalaRoom;
   error?: EnsureRoomTpvError;
 };
 
-/** Enlaza 1 terminal TPV dentro del PDV activo (idempotente; no crea PDV por sala). */
+/** Enlaza la sala al PDV activo de la tienda (1 TPV por tienda; sin terminales por sala). */
 export async function ensureRoomTpvDetailed(
   userId: string,
   _businessId: string,
@@ -177,73 +224,18 @@ export async function ensureRoomTpvDetailed(
 ): Promise<EnsureRoomTpvResult> {
   if (!userId || !room?.id) return { room };
 
-  const pointsOfSale =
-    options?.pointsOfSale ?? (await listPointsOfSaleRequest(userId).catch(() => []));
-  const parent = await resolveParentPdv(userId, { ...options, pointsOfSale }, room);
+  const parent = await resolveParentPdv(userId, options, room);
   if (!parent) {
     const waitingForStore = !String(options?.parentPdvId || '').trim() && !String(room.pdvId || '').trim();
     if (waitingForStore) return { room };
     return { room, error: 'no_parent_pdv' };
   }
 
-  let pdv = pointsOfSale.find((p) => p._id === parent._id) || parent;
-  const terminals = Array.isArray(pdv.terminals) ? [...pdv.terminals] : [];
-  let terminal = findTerminalForRoom(pdv, room);
-
-  if (terminal && roomAlreadySynced(room, pdv)) {
-    return { room: buildLinkedRoom(room, pdv, terminal) };
+  if (roomAlreadySynced(room, parent._id)) {
+    return { room: buildStoreLinkedRoom(room, parent) };
   }
 
-  if (!terminal) {
-    if (countSalaTerminals(pdv) >= MAX_SALA_TERMINALS_PER_PDV) {
-      return { room, error: 'max_terminals' };
-    }
-    const termId =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    terminal = {
-      id: termId,
-      code: generateSalaTerminalLoginCode(),
-      name: room.name,
-      salaRoomId: room.id,
-      datafonName: '',
-      printerName: '',
-      scaleDeviceId: '',
-      scaleName: '',
-      active: true,
-    };
-    terminals.push(terminal);
-    pdv = await persistPdvTerminals(userId, pdv, terminals);
-  } else {
-    const idx = terminals.findIndex((t) => t.id === terminal!.id);
-    if (idx >= 0) {
-      let updated = { ...terminals[idx] };
-      let dirty = false;
-      if (updated.name !== room.name) {
-        updated = { ...updated, name: room.name };
-        dirty = true;
-      }
-      if (needsLegacyTerminalCodeMigration(updated)) {
-        updated = {
-          ...updated,
-          code: generateSalaTerminalLoginCode(),
-          salaRoomId: room.id,
-        };
-        dirty = true;
-      } else if (!String(updated.salaRoomId || '').trim()) {
-        updated = { ...updated, salaRoomId: room.id };
-        dirty = true;
-      }
-      if (dirty) {
-        terminals[idx] = updated;
-        pdv = await persistPdvTerminals(userId, pdv, terminals);
-        terminal = updated;
-      }
-    }
-  }
-
-  return { room: buildLinkedRoom(room, pdv, terminal!) };
+  return { room: buildStoreLinkedRoom(room, parent) };
 }
 
 export async function ensureRoomTpv(
@@ -371,9 +363,12 @@ export async function ensureAllRoomsTpv(
 
   const parentPdvId = String(options?.parentPdvId || '').trim();
   const parentPdv = parentPdvId ? pointsOfSale.find((p) => p._id === parentPdvId) : null;
+  if (parentPdv) {
+    await maybeDeactivateSalaTerminalsOnStorePdv(userId, parentPdv);
+  }
   if (
     parentPdv &&
-    rooms.every((r) => r.terminalId && roomAlreadySynced(r, parentPdv)) &&
+    rooms.every((r) => roomAlreadySynced(r, parentPdvId)) &&
     isLegacyCleanupDone(businessId)
   ) {
     return { rooms, changed: false, errors: [] };
@@ -409,25 +404,11 @@ export async function ensureAllRoomsTpv(
   };
 }
 
-/** Desactiva el terminal TPV de una sala al eliminarla (no borra el PDV compartido). */
+/** Obsoleto: 1 TPV por tienda; ya no hay terminales TPV por sala. */
 export async function deactivateRoomTerminal(
-  userId: string,
-  room: SalaRoom,
-  options?: Pick<EnsureRoomTpvOptions, 'pointsOfSale'>,
+  _userId: string,
+  _room: SalaRoom,
+  _options?: Pick<EnsureRoomTpvOptions, 'pointsOfSale'>,
 ): Promise<void> {
-  const pdvId = String(room.pdvId || '').trim();
-  const terminalId = String(room.terminalId || '').trim();
-  if (!userId || !pdvId || !terminalId) return;
-
-  const pointsOfSale =
-    options?.pointsOfSale ?? (await listPointsOfSaleRequest(userId).catch(() => []));
-  const pdv = pointsOfSale.find((p) => p._id === pdvId);
-  if (!pdv) return;
-
-  const terminals = Array.isArray(pdv.terminals) ? [...pdv.terminals] : [];
-  const idx = terminals.findIndex((t) => t.id === terminalId);
-  if (idx < 0 || terminals[idx].active === false) return;
-
-  terminals[idx] = { ...terminals[idx], active: false };
-  await persistPdvTerminals(userId, pdv, terminals);
+  /* no-op */
 }

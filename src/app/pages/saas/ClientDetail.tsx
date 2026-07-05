@@ -999,11 +999,6 @@ export function ClientDetail() {
   };
 
   const backToClients = () => {
-    const st = (location.state || {}) as any;
-    if (st?.returnToOps) {
-      navigate('/saas/delivery-ops?panel=clients', { replace: true });
-      return;
-    }
     navigate('/saas/crm/clientes?tab=clients');
   };
 

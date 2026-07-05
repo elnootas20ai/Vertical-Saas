@@ -223,6 +223,9 @@ export function OnboardingTour({ onComplete }: Props) {
         setOnboardingTourActive(accountUserId, businessId, true);
         showLockRef.current = false;
         setPausedThisSession(true);
+      } else if (accountUserId && businessId) {
+        setOnboardingTourActive(accountUserId, businessId, false);
+        showLockRef.current = false;
       }
 
       setExiting(true);

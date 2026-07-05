@@ -220,11 +220,20 @@ export function clearAllRetailScopeCaches(businessId?: string): void {
 export function shouldLoadRetailStoresForBusiness(
   ctx: RetailScopeContext,
   bidAtStart: string,
-  hints?: { hasDisplayedStores?: boolean },
+  hints?: { hasDisplayedStores?: boolean; tabletBoundStore?: boolean },
 ): boolean {
   if (!ctx.business) return false;
+  if (hints?.tabletBoundStore) return false;
   const kind = resolveRetailScopeKind(ctx.business.businessType);
-  if (kind === 'restaurant') return true;
+  if (kind === 'restaurant') {
+    if (hints?.hasDisplayedStores) return false;
+    const bid = normalizeBusinessScopeId(ctx.business.business_id);
+    const cached = readRestaurantRetailCache(bid, ctx.business, ctx.businesses);
+    if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
+      return false;
+    }
+    return true;
+  }
 
   return shouldUseDeliveryStores(
     { business: ctx.business as Business, businesses: ctx.businesses as Business[] },

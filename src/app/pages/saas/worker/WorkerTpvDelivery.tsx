@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
@@ -39,6 +39,8 @@ import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../.
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
+import { RestaurantTpvPage } from '../restaurant/RestaurantTpvPage';
+import { isRestaurantBusinessType, resolveRestaurantVerticalFromContext, isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
 import {
@@ -924,9 +926,10 @@ export function WorkerTpvDelivery({
   onChangeStore,
 }: WorkerTpvDeliveryProps = {}) {
   const { user } = useAuth();
-  const { currentBusiness, businesses } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
+  const location = useLocation();
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -940,18 +943,42 @@ export function WorkerTpvDelivery({
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(false);
 
-  useTpvSuppressBottomBar(view !== 'board');
-
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const registerScope = useMemo(
-    () => resolveTpvRegisterScope({ currentBusiness, tabletBinding, authUser: user }),
-    [currentBusiness, tabletBinding, user],
+    () => resolveTpvRegisterScope({
+      currentBusiness,
+      tabletBinding,
+      authUser: user,
+      pathname: location.pathname,
+    }),
+    [currentBusiness, tabletBinding, user, location.pathname],
   );
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
   const register = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
   const registerOpen = boardReady || Boolean(register && isTpvRegisterSessionOpen(register.session));
+
+  const isRestaurant = useMemo(
+    () => resolveRestaurantVerticalFromContext({
+      currentBusiness,
+      businesses,
+      scopeBusinessId: registerScope.scopeBusinessId,
+    }),
+    [currentBusiness, businesses, registerScope.scopeBusinessId],
+  );
+
+  const tpvVerticalPending = useMemo(
+    () => isTpvOpsVerticalPending({
+      currentBusiness,
+      businesses,
+      scopeBusinessId: registerScope.scopeBusinessId,
+      businessesFetchSettled,
+    }),
+    [currentBusiness, businesses, registerScope.scopeBusinessId, businessesFetchSettled],
+  );
+
+  useTpvSuppressBottomBar(isRestaurant ? true : view !== 'board');
   const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
@@ -1377,11 +1404,24 @@ export function WorkerTpvDelivery({
 
   const visibleCount = assemblyOrders.length + deliveryOrders.length;
 
-  if (view === 'new-order') {
+  if (tpvVerticalPending) {
     return (
-      <TpvRapidoOrderFlow
-        tabletMode
-        onBack={backToBoard}
+      <div className="flex flex-col items-center justify-center gap-3 p-8 min-h-[40vh] text-center">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+        <p className="text-sm text-gray-600 dark:text-gray-400">Preparando TPV…</p>
+      </div>
+    );
+  }
+
+  if (isRestaurant) {
+    return (
+      <RestaurantTpvPage
+        tabletMode={isTabletUi || ceoMode}
+        ceoMode={ceoMode}
+        pdvName={scopedPdvName}
+        forcedPdvId={scopedPdvId}
+        onChangeStore={onChangeStore}
+        staffConsumptionEnabled={staffConsumptionEnabled}
       />
     );
   }
@@ -1410,6 +1450,15 @@ export function WorkerTpvDelivery({
         register={register}
         salesPointId={scopedPdvId}
         salesPointName={scopedPdvName}
+      />
+    );
+  }
+
+  if (view === 'new-order') {
+    return (
+      <TpvRapidoOrderFlow
+        tabletMode
+        onBack={backToBoard}
       />
     );
   }

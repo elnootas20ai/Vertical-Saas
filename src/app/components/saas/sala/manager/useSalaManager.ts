@@ -26,8 +26,18 @@ import {
 import type { ExtendedDiningTable, SalaRoom, SalaRoomType } from '../../../../lib/salaStudioTypes';
 import type { TableSizePreset } from '../../../../lib/salaTableSize';
 import { applyTableSizePreset } from '../../../../lib/salaTableSize';
-import { ensureAllRoomsTpv, ensureRoomTpvDetailed, deactivateRoomTerminal, type EnsureRoomTpvOptions } from '../../../../lib/salaRoomPdv';
-import type { PointOfSale } from '../../../../lib/deliveryApi';
+import { ensureAllRoomsTpv, ensureRoomTpvDetailed, type EnsureRoomTpvOptions } from '../../../../lib/salaRoomPdv';
+import {
+  TPV_SESSION_SYNC_EVENT,
+  listTpvRegisterSessionsRequest,
+  type PointOfSale,
+  type TpvRegisterSession,
+} from '../../../../lib/deliveryApi';
+import {
+  resolveParentPdvFromScope,
+  resolveSalaTpvDisplay,
+  type SalaTpvDisplay,
+} from '../../../../lib/salaStoreTpv';
 import type { WorkCenter } from '../../../../lib/workCentersApi';
 import { isSalaQuickSetupComplete, type SalaQuickSetupRoomDraft } from '../../../../lib/salaQuickSetup';
 import { SALA_ROOM_COLORS } from '../../../../lib/salaStudioTypes';
@@ -104,6 +114,7 @@ export function useSalaManager(
   const [activeRoomId, setActiveRoomId] = useState('');
   const [history, setHistory] = useState<ManagerSnapshot[]>([]);
   const [future, setFuture] = useState<ManagerSnapshot[]>([]);
+  const [tpvSessions, setTpvSessions] = useState<TpvRegisterSession[]>([]);
 
   const businessIdRef = useRef(businessId);
   businessIdRef.current = businessId;
@@ -157,7 +168,7 @@ export function useSalaManager(
       tpvSync.rooms.length > 0 &&
       tpvSync.errors.includes('no_parent_pdv')
     ) {
-      toast.message('Selecciona un centro de trabajo arriba para enlazar terminales TPV');
+      toast.message('Selecciona un centro de trabajo arriba para enlazar las salas');
     }
     if (
       !silent &&
@@ -178,9 +189,9 @@ export function useSalaManager(
       saveFloorConfigRequest(userId, nextConfig).catch(() => undefined);
       setFloorConfig(nextConfig);
       floorConfigRef.current = nextConfig;
+      setRooms(tpvSync.rooms);
+      roomsRef.current = tpvSync.rooms;
     }
-    setRooms(tpvSync.rooms);
-    roomsRef.current = tpvSync.rooms;
   }, [userId]);
 
   const syncRoomsTpv = useCallback(async (
@@ -201,7 +212,7 @@ export function useSalaManager(
       );
       applyTpvSyncResult(tpvSync, config, silent);
     } catch {
-      if (!silent) toast.error('Error al sincronizar terminales TPV');
+      if (!silent) toast.error('Error al sincronizar la tienda');
     }
   }, [userId, applyTpvSyncResult]);
 
@@ -289,10 +300,10 @@ export function useSalaManager(
     void syncRoomsTpv(roomsRef.current, config, true);
   }, [userId, parentPdvId, loading, syncRoomsTpv]);
 
-  /** PDV listo: centro activo arriba o al menos una sala ya enlazada a terminal TPV. */
+  /** PDV listo: centro activo arriba, primera tienda disponible o sala ya enlazada. */
   const pdvLinked = useMemo(() => {
     if (String(parentPdvId || '').trim()) return true;
-    return rooms.some((r) => String(r.pdvId || '').trim() && String(r.terminalId || '').trim());
+    return rooms.some((r) => String(r.pdvId || '').trim());
   }, [rooms, parentPdvId]);
 
   const needsQuickSetup = useMemo(() => {
@@ -324,7 +335,7 @@ export function useSalaManager(
         const result = await ensureRoomTpvDetailed(userId, businessId, room, buildTpvOptions());
         room = result.room;
         if (result.error) {
-          toast.error('No se pudo enlazar algún terminal TPV');
+          toast.error('No se pudo enlazar la sala a la tienda');
         }
         newRooms.push(room);
       }
@@ -401,7 +412,7 @@ export function useSalaManager(
       const roomsToSave = tpvSync.rooms;
       if (tpvSync.changed) setRooms(roomsToSave);
       if (tpvSync.errors.includes('no_parent_pdv')) {
-        toast.error('Selecciona un centro de trabajo antes de guardar los terminales TPV');
+        toast.error('Selecciona un centro de trabajo antes de guardar');
       }
       if (tpvSync.cleanup && (tpvSync.cleanup.archivedWorkCenters > 0 || tpvSync.cleanup.removedPdvs > 0)) {
         notifyRetailScopeRefresh(businessId);
@@ -480,12 +491,10 @@ export function useSalaManager(
       const result = await ensureRoomTpvDetailed(userId, businessId, room, buildTpvOptions());
       room = result.room;
       if (result.error === 'no_parent_pdv') {
-        toast.error('Selecciona un centro de trabajo arriba antes de crear salas con TPV');
-      } else if (result.error === 'max_terminals') {
-        toast.error('Este PDV ya tiene el máximo de terminales TPV permitidos');
+        toast.error('Selecciona un centro de trabajo arriba antes de crear salas');
       }
     } catch {
-      toast.error('Sala creada, pero no se pudo enlazar el terminal TPV');
+      toast.error('Sala creada, pero no se pudo enlazar a la tienda');
     }
     let num = nextTableNumber(tables);
     const newTables: ExtendedDiningTable[] = Array.from({ length: tableCount }, (_, i) => ({
@@ -521,8 +530,7 @@ export function useSalaManager(
         salaSetupVersion: SALA_SETUP_VERSION,
       }).then(setFloorConfig).catch(() => undefined);
     }
-    const tpvLabel = room.terminalLabel ? ` · ${room.terminalLabel}` : '';
-    toast.success(`${name} creada con ${tableCount} mesas${tpvLabel}`);
+    toast.success(`${name} creada con ${tableCount} mesas`);
   }, [pushHistory, rooms, tables, businessId, userId, floorConfig, parentPdvId]);
 
   const updateRoom = useCallback((roomId: string, patch: Partial<SalaRoom>) => {
@@ -542,11 +550,11 @@ export function useSalaManager(
     try {
       const result = await ensureRoomTpvDetailed(userId, businessId, copy, buildTpvOptions());
       copy = result.room;
-      if (result.error === 'max_terminals') {
-        toast.error('Este PDV ya tiene el máximo de terminales TPV permitidos');
+      if (result.error === 'no_parent_pdv') {
+        toast.error('Selecciona un centro de trabajo arriba');
       }
     } catch {
-      toast.error('Sala duplicada, pero no se pudo enlazar el terminal TPV');
+      toast.error('Sala duplicada, pero no se pudo enlazar a la tienda');
     }
     const sourceTables = tablesForRoom(tables, roomId);
     let num = nextTableNumber(tables);
@@ -574,17 +582,13 @@ export function useSalaManager(
         salaSetupVersion: SALA_SETUP_VERSION,
       }).then(setFloorConfig).catch(() => undefined);
     }
-    toast.success(copy.terminalLabel ? `Sala duplicada · ${copy.terminalLabel}` : 'Sala duplicada');
+    toast.success('Sala duplicada');
   }, [pushHistory, rooms, tables, businessId, userId, floorConfig, parentPdvId]);
 
   const deleteRoomById = useCallback(async (roomId: string) => {
     if (rooms.length <= 1) {
       toast.error('Debe existir al menos una sala');
       return;
-    }
-    const room = rooms.find((r) => r.id === roomId);
-    if (room) {
-      await deactivateRoomTerminal(userId, room).catch(() => undefined);
     }
     pushHistory();
     const toRemove = tablesForRoom(tables, roomId);
@@ -707,6 +711,48 @@ export function useSalaManager(
 
   const roomStatsFor = useCallback((roomId: string) => computeRoomStats(tables, roomId), [tables]);
 
+  const parentPdv = useMemo(
+    () => resolveParentPdvFromScope(parentPdvId, rooms, retailScope?.pointsOfSale || []),
+    [parentPdvId, rooms, retailScope?.pointsOfSale],
+  );
+
+  const refreshTpvSessions = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const bid = String(businessIdRef.current || '').trim();
+      const sessions = await listTpvRegisterSessionsRequest(userId, bid ? { businessId: bid } : undefined);
+      setTpvSessions(sessions);
+    } catch {
+      /* ignore */
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    void refreshTpvSessions();
+  }, [refreshTpvSessions, parentPdvId]);
+
+  useEffect(() => {
+    const onSessionSync = () => { void refreshTpvSessions(); };
+    window.addEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
+    return () => window.removeEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
+  }, [refreshTpvSessions]);
+
+  const storeTpv = useMemo((): SalaTpvDisplay | null => {
+    if (!parentPdv) return null;
+    return resolveSalaTpvDisplay(parentPdv, null, tpvSessions);
+  }, [parentPdv, tpvSessions]);
+
+  const tpvForRoom = useCallback((roomId: string): SalaTpvDisplay | null => {
+    if (!parentPdv) return null;
+    const room = rooms.find((r) => r.id === roomId) || null;
+    return resolveSalaTpvDisplay(parentPdv, room, tpvSessions);
+  }, [parentPdv, rooms, tpvSessions]);
+
+  const activeRoomTpv = useMemo((): SalaTpvDisplay | null => {
+    if (!parentPdv || !activeRoomId) return storeTpv;
+    return tpvForRoom(activeRoomId);
+  }, [parentPdv, activeRoomId, storeTpv, tpvForRoom]);
+
   return {
     loading,
     saving,
@@ -722,6 +768,10 @@ export function useSalaManager(
     pdvLinked,
     needsQuickSetup,
     parentPdvId,
+    parentPdv,
+    storeTpv,
+    activeRoomTpv,
+    tpvForRoom,
     applyQuickSetup,
     canUndo: history.length > 0,
     canRedo: future.length > 0,

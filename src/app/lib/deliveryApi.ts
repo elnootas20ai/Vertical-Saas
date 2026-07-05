@@ -90,6 +90,8 @@ export interface DeliveryOrder {
 
   salesPointId: string;
   salesPointName: string;
+  tableNumber?: number | null;
+  tableId?: string | null;
 
   items: DeliveryOrderItem[];
   itemsSubtotal?: number;
@@ -1814,11 +1816,20 @@ export async function listTpvRegisterSessionsRequest(
 
 export async function createTpvRegisterSessionRequest(userId: string, data: Partial<TpvRegisterSession>): Promise<TpvRegisterSession> {
   const id = normalizeUserId(userId);
-  const response = await authFetch(`${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
-    body: JSON.stringify({ session: data }),
-  });
+  const url = `${API_BASE}/api/delivery/tpv-sessions/${encodeURIComponent(id)}`;
+  let response: Response;
+  try {
+    response = await authFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getCouchHeaders() },
+      body: JSON.stringify({ session: data }),
+    });
+  } catch (err) {
+    const hint = API_BASE
+      ? `No se pudo conectar con el servidor (${url}).`
+      : 'No se pudo conectar con el servidor. Comprueba que el backend esté en marcha (npm start, puerto 3001).';
+    throw new Error(err instanceof Error && err.message.includes('fetch') ? hint : (err instanceof Error ? err.message : hint));
+  }
   const payload = (await response.json().catch(() => ({}))) as {
     ok?: boolean;
     session?: TpvRegisterSession;

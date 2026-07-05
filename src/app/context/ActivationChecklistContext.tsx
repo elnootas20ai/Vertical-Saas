@@ -281,7 +281,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
             catalog,
             businessId,
             brands,
-            { accountBusinessCount: businessesCount, activeBusinessType: 'delivery' },
+            { accountBusinessCount: businessesCount, activeBusinessType: businessType || 'delivery' },
           );
           const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 

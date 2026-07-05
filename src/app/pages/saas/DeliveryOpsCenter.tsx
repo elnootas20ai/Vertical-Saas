@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } fr
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
-import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -59,8 +58,6 @@ import {
   Globe,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
-import { ClientsPage } from './ClientsPage';
-import { PromotionsPage } from './PromotionsPage';
 
 const STATUS_CFG: Record<string, { label: string; bg: string; border: string; text: string; icon: typeof Clock }> = {
   nuevo:      { label: 'Nuevos',      bg: 'bg-amber-50 dark:bg-amber-950/30',   border: 'border-amber-200 dark:border-amber-800',   text: 'text-amber-700 dark:text-amber-400',   icon: Clock },
@@ -1087,59 +1084,35 @@ function RevenueBreakdownW({
   );
 }
 
-type OpsPanelId = 'operativa' | 'clients' | 'promotions';
-
-function opsPanelFromSearch(panelParam: string | null): OpsPanelId {
-  const p = panelParam?.trim();
-  if (p === 'clients' || p === 'promotions') return p;
-  return 'operativa';
-}
-
-/* ═══ MAIN PAGE ══════════════════════════════════════════════════════════════ */
-
 export function DeliveryOpsCenter() {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const opsPanel = opsPanelFromSearch(searchParams.get('panel'));
 
-  const setOpsPanel = useCallback((next: OpsPanelId) => {
-    setSearchParams((prev) => {
-      const p = new URLSearchParams(prev);
-      if (next === 'operativa') p.delete('panel');
-      else p.set('panel', next);
-      return p;
-    }, { replace: true });
-  }, [setSearchParams]);
+  useEffect(() => {
+    const panel = searchParams.get('panel')?.trim();
+    if (panel === 'clients') {
+      navigate('/saas/crm/clientes?tab=clients', { replace: true });
+      return;
+    }
+    if (panel === 'promotions') {
+      navigate('/saas/promotions', { replace: true });
+      return;
+    }
+    if (panel && panel !== 'operativa') {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('panel');
+        return next;
+      }, { replace: true });
+    }
+  }, [searchParams, navigate, setSearchParams]);
 
   const navFromOps = useCallback((path: string) => {
     navigate(path, { state: { returnToOps: true } });
   }, [navigate]);
-
-  const onDeliveryOpsSectionTab = useCallback(
-    (id: string) => {
-      if (id === 'clients') setOpsPanel('clients');
-      else if (id === 'promotions') setOpsPanel('promotions');
-      else setOpsPanel('operativa');
-    },
-    [setOpsPanel],
-  );
-
-  useEffect(() => {
-    const p = searchParams.get('panel');
-    const allowed = new Set(['clients', 'promotions']);
-    if (p === 'pedidos' || (p !== null && p !== '' && !allowed.has(p))) {
-      setSearchParams((prev) => {
-        const n = new URLSearchParams(prev);
-        n.delete('panel');
-        return n;
-      }, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-
-  const sectionTabActive = opsPanel;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1361,12 +1334,6 @@ export function DeliveryOpsCenter() {
     [navFromOps],
   );
 
-  const deliveryOpsTabs = useMemo(() => [
-    { id: 'operativa', label: 'Operativa' },
-    { id: 'clients', label: 'Clientes' },
-    { id: 'promotions', label: 'Promociones' },
-  ], []);
-
   const load = useCallback(async () => {
     if (!authUserId || !opsPdvFilterReady) return;
     const seq = ++loadSeqRef.current;
@@ -1498,16 +1465,9 @@ export function DeliveryOpsCenter() {
     activeStoreScope.displayLabelForActive,
   ]);
 
-  const layoutSecondaryLine =
-    opsPanel === 'clients'
-      ? 'Clientes en Ops'
-      : opsPanel === 'promotions'
-        ? 'Promociones en Ops'
-        : subtitle;
-
   const layoutSubtitle = effectiveOpsPdvLabel
-    ? `${effectiveOpsPdvLabel} · ${layoutSecondaryLine}`
-    : layoutSecondaryLine;
+    ? `${effectiveOpsPdvLabel} · ${subtitle}`
+    : subtitle;
 
   return (
     <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
@@ -1539,32 +1499,9 @@ export function DeliveryOpsCenter() {
           </div>
         </div>
 
-        {opsPanel === 'clients' ? (
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
-              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
-              <ClientsPage embedDeliveryOps />
-            </div>
-          </div>
-        ) : opsPanel === 'promotions' ? (
-          <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-            <div className="shrink-0 px-2 pt-2 pb-1.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 [&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
-              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
-            </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 bg-gray-50/70 dark:bg-gray-900/35">
-              <PromotionsPage embedDeliveryOps />
-            </div>
-          </div>
-        ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">
 
             <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={opsPdvs} sticky={false} />
-
-            <div className="[&_button]:py-2.5 [&_button]:px-4 [&_button]:text-sm [&>div]:rounded-lg [&>div]:border-gray-200 [&>div]:dark:border-gray-700">
-              <Tabs tabs={deliveryOpsTabs} activeTab={sectionTabActive} onChange={onDeliveryOpsSectionTab} />
-            </div>
 
             {data?.alerts && data.alerts.length > 0 && (
               <Alerts
@@ -1652,7 +1589,6 @@ export function DeliveryOpsCenter() {
               )}
             </div>
           </div>
-        )}
       </div>
       </div>
     </Layout>

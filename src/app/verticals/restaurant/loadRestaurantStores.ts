@@ -88,11 +88,13 @@ export async function loadRestaurantStores(
     }
   }
 
-  pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
-  pointsOfSale = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(pointsOfSale, retail),
-    dedupeOpts,
-  );
+  if (options?.tpvBootstrap) {
+    pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
+    pointsOfSale = dedupePointsOfSale(
+      filterPointsOfSaleForWorkCenters(pointsOfSale, retail),
+      dedupeOpts,
+    );
+  }
 
   return {
     dataUserId,

@@ -508,3 +508,165 @@ export function shouldAutoTransitionTable(order) {
 
   return null;
 }
+
+// ─── TABLE TICKET TIMING (estadísticas por mesa) ─────────────────────────────
+
+function calendarDayFromIso(iso) {
+  const s = String(iso || '').trim();
+  if (s.length >= 10) return s.slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
+}
+
+function minutesBetweenIso(fromIso, toIso) {
+  const a = new Date(fromIso).getTime();
+  const b = new Date(toIso).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, Math.round((b - a) / 60000));
+}
+
+export function buildDiningTableTicketStatDocument(userId, data = {}) {
+  const now = new Date().toISOString();
+  const ticketAt = String(data.ticketAt || now);
+  const seatedAt = String(data.seatedAt || ticketAt);
+  const durationMinutes = data.durationMinutes != null
+    ? Number(data.durationMinutes)
+    : minutesBetweenIso(seatedAt, ticketAt);
+
+  return {
+    _id: `dining_table_ticket_stat:${uuidv4()}`,
+    type: 'dining_table_ticket_stat',
+    user_id: userId,
+    businessId: String(data.businessId || ''),
+    tableId: String(data.tableId || ''),
+    tableNumber: Number(data.tableNumber || 0),
+    tableName: String(data.tableName || ''),
+    roomId: String(data.roomId || ''),
+    pdvId: String(data.pdvId || data.salesPointId || ''),
+    salesPointName: String(data.salesPointName || ''),
+    seatedAt,
+    ticketAt,
+    durationMinutes: durationMinutes ?? 0,
+    deliveryOrderId: String(data.deliveryOrderId || ''),
+    ticketNumber: String(data.ticketNumber || ''),
+    orderNumber: String(data.orderNumber || ''),
+    amount: Number(data.amount || 0),
+    itemCount: Number(data.itemCount || 0),
+    guestCount: Number(data.guestCount || 0),
+    takenBy: String(data.takenBy || ''),
+    takenByName: String(data.takenByName || ''),
+    calendarDay: String(data.calendarDay || calendarDayFromIso(ticketAt)),
+    createdAt: now,
+  };
+}
+
+export function sanitizeDiningTableTicketStat(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    id: doc._id,
+    type: 'dining_table_ticket_stat',
+    userId: doc.user_id,
+    businessId: doc.businessId || '',
+    tableId: doc.tableId || '',
+    tableNumber: doc.tableNumber || 0,
+    tableName: doc.tableName || '',
+    roomId: doc.roomId || '',
+    pdvId: doc.pdvId || '',
+    salesPointName: doc.salesPointName || '',
+    seatedAt: doc.seatedAt || '',
+    ticketAt: doc.ticketAt || '',
+    durationMinutes: doc.durationMinutes ?? 0,
+    deliveryOrderId: doc.deliveryOrderId || '',
+    ticketNumber: doc.ticketNumber || '',
+    orderNumber: doc.orderNumber || '',
+    amount: doc.amount || 0,
+    itemCount: doc.itemCount || 0,
+    guestCount: doc.guestCount || 0,
+    takenBy: doc.takenBy || '',
+    takenByName: doc.takenByName || '',
+    calendarDay: doc.calendarDay || '',
+    createdAt: doc.createdAt || '',
+  };
+}
+
+export async function listDiningTableTicketStatsByUser(req, userId, filters = {}) {
+  const db = getSalaDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  let rows = docs.filter(
+    (doc) => doc?.type === 'dining_table_ticket_stat' && !doc?.deletedAt && doc?.user_id === userId,
+  );
+
+  if (filters.businessId) {
+    const bid = String(filters.businessId).trim();
+    rows = rows.filter((r) => !r.businessId || r.businessId === bid);
+  }
+  if (filters.tableId) {
+    rows = rows.filter((r) => r.tableId === filters.tableId);
+  }
+  if (filters.dateFrom) {
+    rows = rows.filter((r) => String(r.calendarDay || r.ticketAt || '') >= String(filters.dateFrom).slice(0, 10));
+  }
+  if (filters.dateTo) {
+    rows = rows.filter((r) => String(r.calendarDay || r.ticketAt || '') <= String(filters.dateTo).slice(0, 10));
+  }
+  if (filters.pdvId) {
+    rows = rows.filter((r) => r.pdvId === filters.pdvId);
+  }
+
+  return rows
+    .sort((a, b) => String(b.ticketAt || '').localeCompare(String(a.ticketAt || '')))
+    .map(sanitizeDiningTableTicketStat);
+}
+
+export async function recordDiningTableTicketStat(req, userId, orderDoc) {
+  const channel = String(orderDoc?.channel || '').toLowerCase();
+  if (channel !== 'tpv') return null;
+
+  const tableId = String(orderDoc?.tableId || '').trim();
+  const tableNumber = Number(orderDoc?.tableNumber || 0);
+  if (!tableId && !tableNumber) return null;
+  if (tableNumber === 0 && !tableId) return null;
+
+  const db = getSalaDbName();
+  await ensureDatabase(req, db);
+
+  let table = null;
+  if (tableId) {
+    table = await getDocument(req, db, tableId);
+    if (table?.type !== 'dining_table' || table.user_id !== userId) table = null;
+  }
+  if (!table && tableNumber > 0) {
+    const tables = await listDiningTablesByUser(req, userId);
+    table = tables.find((t) => Number(t.number) === tableNumber) || null;
+  }
+
+  const ticketAt = String(orderDoc.paidAt || orderDoc.createdAt || new Date().toISOString());
+  const seatedAt = String(table?.occupiedAt || ticketAt);
+  const itemCount = Array.isArray(orderDoc.items)
+    ? orderDoc.items.reduce((s, i) => s + Number(i.quantity || 0), 0)
+    : 0;
+
+  const doc = buildDiningTableTicketStatDocument(userId, {
+    businessId: orderDoc.businessId || table?.businessId || '',
+    tableId: table?._id || tableId,
+    tableNumber: table?.number ?? tableNumber,
+    tableName: table?.name || (tableNumber ? `Mesa ${tableNumber}` : ''),
+    roomId: table?.roomId || '',
+    pdvId: orderDoc.salesPointId || '',
+    salesPointName: orderDoc.salesPointName || '',
+    seatedAt,
+    ticketAt,
+    deliveryOrderId: orderDoc._id || orderDoc.id || '',
+    ticketNumber: orderDoc.ticketNumber || '',
+    orderNumber: orderDoc.orderNumber || '',
+    amount: Number(orderDoc.totalAmount || 0),
+    itemCount,
+    guestCount: Number(table?.currentGuests || 0),
+    takenBy: orderDoc.takenBy || '',
+    takenByName: orderDoc.takenByName || '',
+  });
+
+  const saved = await putDocument(req, db, doc._id, doc);
+  return sanitizeDiningTableTicketStat({ ...doc, _rev: saved.rev });
+}

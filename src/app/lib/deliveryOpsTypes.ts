@@ -49,3 +49,55 @@ export function isStrictDeliveryBusinessType(businessType?: string | null): bool
 export function isRestaurantBusinessType(businessType?: string | null): boolean {
   return String(businessType || '').trim() === 'restaurant';
 }
+
+type BusinessScopeRef = {
+  businessType?: string | null;
+  business_id?: string;
+  id?: string;
+};
+
+function normalizeScopeBusinessId(value?: string | null): string {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+function businessTypeForScopeId(
+  scopeBusinessId: string,
+  businesses: BusinessScopeRef[],
+): string | null {
+  const scopeId = normalizeScopeBusinessId(scopeBusinessId);
+  if (!scopeId) return null;
+  const match = businesses.find(
+    (b) => normalizeScopeBusinessId(b.business_id || b.id) === scopeId,
+  );
+  return match?.businessType ? String(match.businessType).trim() : null;
+}
+
+/** Fuente única: ¿TPV operativo en modo sala/mesas? Usa la empresa del scope (tablet/caja), no solo el selector global. */
+export function resolveRestaurantVerticalFromContext(params: {
+  currentBusiness?: BusinessScopeRef | null;
+  businesses?: BusinessScopeRef[];
+  scopeBusinessId?: string | null;
+}): boolean {
+  const businesses = params.businesses || [];
+  const scopeId = normalizeScopeBusinessId(params.scopeBusinessId);
+  if (scopeId && businesses.length > 0) {
+    const scopedType = businessTypeForScopeId(scopeId, businesses);
+    if (scopedType) return isRestaurantBusinessType(scopedType);
+  }
+  return isRestaurantBusinessType(params.currentBusiness?.businessType);
+}
+
+/** Mientras no sepamos el vertical del scope, no montar tablero delivery (evita flash en tablet). */
+export function isTpvOpsVerticalPending(params: {
+  currentBusiness?: BusinessScopeRef | null;
+  businesses?: BusinessScopeRef[];
+  scopeBusinessId?: string | null;
+  businessesFetchSettled?: boolean;
+}): boolean {
+  if (params.businessesFetchSettled === false) return true;
+  const businesses = params.businesses || [];
+  const scopeId = normalizeScopeBusinessId(params.scopeBusinessId);
+  if (!scopeId) return false;
+  if (businesses.length === 0) return true;
+  return !businessTypeForScopeId(scopeId, businesses);
+}

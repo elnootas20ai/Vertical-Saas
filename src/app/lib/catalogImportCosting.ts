@@ -20,6 +20,14 @@ import {
   resolveProductPackagingLines,
 } from './vertialStockDefaults.ts';
 import { buildInventoryLookupMaps } from './inventorySyncLogic.ts';
+import {
+  BAR_ESCANDALLO_BASE_INGREDIENTS,
+  BOCATA_QUANTITY_RULES,
+  isBarBocataCategory,
+  resolveBarEscandalloDefaultIngredients,
+  resolveBarEscandalloFixedCost,
+  shouldUseBarEscandalloPresets,
+} from './barEscandalloPresets.ts';
 
 type CostingStoreIngredient = {
   id: string;
@@ -72,6 +80,76 @@ const TACO_QUANTITY_RULES: QuantityRule[] = [
   { patterns: ['arroz', 'rice'], quantity: 0.06, unit: 'kg' },
 ];
 
+const TAPAS_BAR_QUANTITY_RULES: QuantityRule[] = [
+  { patterns: ['pan', 'regana', 'requena', 'picos'], quantity: 1, unit: 'ud' },
+  { patterns: ['aceite', 'oliva'], quantity: 0.015, unit: 'kg' },
+  { patterns: ['jamon', 'jamón', 'iberico', 'ibérico', 'serrano', 'lomo'], quantity: 0.04, unit: 'kg' },
+  { patterns: ['queso', 'manchego', 'curado'], quantity: 0.035, unit: 'kg' },
+  { patterns: ['patata', 'brava', 'frita'], quantity: 0.15, unit: 'kg' },
+  { patterns: ['aceituna', 'oliva'], quantity: 0.05, unit: 'kg' },
+  { patterns: ['pulpo', 'gallega'], quantity: 0.12, unit: 'kg' },
+  { patterns: ['gamba', 'gambon', 'langostino'], quantity: 0.08, unit: 'kg' },
+  { patterns: ['tortilla', 'patata'], quantity: 0.15, unit: 'kg' },
+  { patterns: ['calamar', 'romana'], quantity: 0.1, unit: 'kg' },
+  { patterns: ['chorizo', 'morcilla', 'salchicha'], quantity: 0.05, unit: 'kg' },
+  { patterns: ['alioli', 'salsa', 'brava', 'mayonesa'], quantity: 0.025, unit: 'kg' },
+  { patterns: ['huevo'], quantity: 1, unit: 'ud' },
+  { patterns: ['anchoa', 'boqueron', 'boquerón'], quantity: 0.03, unit: 'kg' },
+  { patterns: ['atun', 'atún', 'bonito'], quantity: 0.05, unit: 'kg' },
+  { patterns: ['cerdo', 'solomillo'], quantity: 0.09, unit: 'kg' },
+  { patterns: ['pollo', 'wings', 'alita'], quantity: 0.1, unit: 'kg' },
+  { patterns: ['pimiento', 'padron', 'padrón'], quantity: 0.08, unit: 'kg' },
+  { patterns: ['tomate', 'ensalada'], quantity: 0.06, unit: 'kg' },
+];
+
+const KEBAB_QUANTITY_RULES: QuantityRule[] = [
+  { patterns: ['pan', 'pita', 'lavash', 'tortilla'], quantity: 1, unit: 'ud' },
+  { patterns: ['carne', 'kebab', 'doner', 'döner', 'cordero'], quantity: 0.15, unit: 'kg' },
+  { patterns: ['pollo', 'chicken'], quantity: 0.14, unit: 'kg' },
+  { patterns: ['lechuga', 'tomate', 'cebolla'], quantity: 0.03, unit: 'kg' },
+  { patterns: ['salsa', 'yogur', 'tzatziki', 'alioli'], quantity: 0.025, unit: 'kg' },
+  { patterns: ['patata', 'frita'], quantity: 0.12, unit: 'kg' },
+];
+
+const PREPARED_MEAL_QUANTITY_RULES: QuantityRule[] = [
+  { patterns: ['pollo', 'chicken'], quantity: 0.18, unit: 'kg' },
+  { patterns: ['cerdo', 'pork', 'lomo'], quantity: 0.18, unit: 'kg' },
+  { patterns: ['ternera', 'vacuno', 'carne'], quantity: 0.18, unit: 'kg' },
+  { patterns: ['pescado', 'salmon', 'salmón', 'merluza'], quantity: 0.16, unit: 'kg' },
+  { patterns: ['arroz', 'pasta', 'fideua', 'fideuá'], quantity: 0.12, unit: 'kg' },
+  { patterns: ['verdura', 'ensalada', 'verde'], quantity: 0.08, unit: 'kg' },
+  { patterns: ['salsa', 'guarnicion', 'guarnición'], quantity: 0.04, unit: 'kg' },
+  { patterns: ['huevo'], quantity: 1, unit: 'ud' },
+];
+
+type DeliveryBrandLineKindId =
+  | 'pizza'
+  | 'burger_fastfood'
+  | 'tacos_mexican'
+  | 'kebab'
+  | 'tapas_bar'
+  | 'mixed_restaurant'
+  | 'prepared_meals'
+  | 'cafe_bakery'
+  | 'drinks_desserts'
+  | string;
+
+/** Líneas con escandallo Vertial automático al importar (sin tocar delivery puro ni compraventa). */
+const FOOD_RECIPE_LINE_KINDS = new Set<string>([
+  'pizza',
+  'burger_fastfood',
+  'tacos_mexican',
+  'tapas_bar',
+  'kebab',
+  'prepared_meals',
+  'mixed_restaurant',
+  'cafe_bakery',
+]);
+
+function isFoodRecipeLineKind(lineKind: DeliveryBrandLineKindId | 'generic'): boolean {
+  return lineKind !== 'generic' && FOOD_RECIPE_LINE_KINDS.has(lineKind);
+}
+
 /** Máximo de toppings del Excel en escandallo auto (evita costes absurdos). */
 const MAX_EXCEL_TOPPING_LINES = 8;
 
@@ -79,6 +157,9 @@ const DEFAULT_TOPPING_QTY = {
   pizza: { quantity: 0.045, unit: 'kg' },
   burger: { quantity: 0.03, unit: 'kg' },
   taco: { quantity: 0.025, unit: 'kg' },
+  tapas: { quantity: 0.035, unit: 'kg' },
+  kebab: { quantity: 0.03, unit: 'kg' },
+  prepared: { quantity: 0.04, unit: 'kg' },
 };
 
 const COMBO_SLOT_DEFAULT_COST: Record<ComboSlotKind, number> = {
@@ -115,18 +196,18 @@ const CATEGORY_FIXED_FALLBACK: Record<string, number> = {
   complementos: 1.15,
   sides: 1.15,
   entrantes: 1.5,
+  tapas: 2.2,
+  tapa: 2.2,
+  raciones: 3.5,
+  racion: 3.5,
+  pinchos: 2.0,
+  pincho: 2.0,
+  montaditos: 2.5,
+  montadito: 2.5,
+  kebab: 2.8,
+  principales: 4.2,
+  principal: 4.2,
 };
-
-type DeliveryBrandLineKindId =
-  | 'pizza'
-  | 'burger_fastfood'
-  | 'tacos_mexican'
-  | 'kebab'
-  | 'tapas_bar'
-  | 'mixed_restaurant'
-  | 'prepared_meals'
-  | 'drinks_desserts'
-  | string;
 
 function foldName(value: string): string {
   return String(value || '')
@@ -168,6 +249,23 @@ function normalizeImportCategoryLocal(value: string): string {
     complementos: 'Complementos',
     sides: 'Complementos',
     side: 'Complementos',
+    tapas: 'Tapas',
+    tapa: 'Tapas',
+    raciones: 'Raciones',
+    racion: 'Raciones',
+    pinchos: 'Pinchos',
+    pincho: 'Pinchos',
+    montaditos: 'Montaditos',
+    montadito: 'Montaditos',
+    kebab: 'Kebab',
+    principales: 'Principales',
+    principal: 'Principales',
+    bocadillos: 'Bocadillos',
+    bocadillo: 'Bocadillos',
+    bocatas: 'Bocadillos',
+    bocata: 'Bocadillos',
+    sandwiches: 'Bocadillos',
+    sandwich: 'Bocadillos',
   };
   return aliases[key] || raw;
 }
@@ -231,8 +329,14 @@ function matchesQuantityRule(folded: string, rule: QuantityRule): boolean {
 function resolveQuantityRule(
   ingredientName: string,
   lineKind: DeliveryBrandLineKindId | 'generic',
+  category = '',
 ): { quantity: number; unit: string } {
   const folded = foldName(ingredientName);
+  if (isBarBocataCategory(category) || /bocadillo|bocata|sandwich/.test(foldName(category))) {
+    for (const rule of BOCATA_QUANTITY_RULES) {
+      if (matchesQuantityRule(folded, rule)) return { quantity: rule.quantity, unit: rule.unit };
+    }
+  }
   const rules =
     lineKind === 'pizza' || /pizza|calzone/.test(folded)
       ? PIZZA_QUANTITY_RULES
@@ -240,7 +344,15 @@ function resolveQuantityRule(
         ? BURGER_QUANTITY_RULES
         : lineKind === 'tacos_mexican' || /taco|burrito|quesadilla|pastor|carnitas/.test(folded)
           ? TACO_QUANTITY_RULES
-          : PIZZA_QUANTITY_RULES;
+          : lineKind === 'tapas_bar' || /tapa|racion|pincho|montadito|bravas|iberico|ibérico/.test(folded)
+            ? TAPAS_BAR_QUANTITY_RULES
+            : lineKind === 'kebab' || /kebab|doner|döner|pita/.test(folded)
+              ? KEBAB_QUANTITY_RULES
+              : lineKind === 'prepared_meals' ||
+                  lineKind === 'mixed_restaurant' ||
+                  /principal|entrante|plato/.test(folded)
+                ? PREPARED_MEAL_QUANTITY_RULES
+                : PIZZA_QUANTITY_RULES;
 
   for (const rule of rules) {
     if (matchesQuantityRule(folded, rule)) return { quantity: rule.quantity, unit: rule.unit };
@@ -251,7 +363,13 @@ function resolveQuantityRule(
       ? DEFAULT_TOPPING_QTY.burger
       : lineKind === 'tacos_mexican'
         ? DEFAULT_TOPPING_QTY.taco
-        : DEFAULT_TOPPING_QTY.pizza;
+        : lineKind === 'tapas_bar'
+          ? DEFAULT_TOPPING_QTY.tapas
+          : lineKind === 'kebab'
+            ? DEFAULT_TOPPING_QTY.kebab
+            : lineKind === 'prepared_meals' || lineKind === 'mixed_restaurant'
+              ? DEFAULT_TOPPING_QTY.prepared
+              : DEFAULT_TOPPING_QTY.pizza;
   return topping;
 }
 
@@ -271,6 +389,23 @@ export function inferImportCostingLineKind(
   }
   if (/taco|burrito|quesadilla|mexican|pastor|carnitas/.test(cat) || /taco|burrito|quesadilla/.test(name)) {
     return 'tacos_mexican';
+  }
+  if (/tapa|racion|raciones|pincho|montadito|bocadillo|bocata|sandwich|taberna|cerveceria|cervecería/.test(cat) ||
+      /tapa|pincho|racion|montadito|bocadillo|bocata|bravas|iberico|ibérico/.test(name)) {
+    return 'tapas_bar';
+  }
+  if (/complemento|bebida|postre/.test(cat)) {
+    return 'tapas_bar';
+  }
+  if (/kebab|doner|döner|wrap|durum/.test(cat) || /kebab|doner|döner|durum/.test(name)) {
+    return 'kebab';
+  }
+  if (/cafe|café|bolleria|bollería|desayuno|panaderia|panadería/.test(cat) ||
+      /cafe|café|croissant|capuccino|cappuccino/.test(name)) {
+    return 'cafe_bakery';
+  }
+  if (/entrante|principal|plato|cocina|carte/.test(cat) || /plato|menu del dia|menú del día/.test(name)) {
+    return 'prepared_meals';
   }
   return 'generic';
 }
@@ -349,16 +484,22 @@ export function needsVertialFoodEscandalloRepair(
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
 ): boolean {
   const lk = inferImportCostingLineKind(item, brands);
-  if (lk !== 'pizza' && lk !== 'burger_fastfood' && lk !== 'tacos_mexican') return false;
+  if (!isFoodRecipeLineKind(lk)) return false;
   return explicitProductCostingStatus(item) !== 'recipe';
 }
 
 function enrichRecipeIngredientNames(
   names: string[],
   lineKind: DeliveryBrandLineKindId | 'generic',
+  category = '',
+  productName = '',
 ): string[] {
   const out = [...names];
   const folded = names.map(foldName);
+
+  if (out.length === 0 && shouldUseBarEscandalloPresets(lineKind, category)) {
+    out.push(...resolveBarEscandalloDefaultIngredients(category, productName));
+  }
 
   if (lineKind === 'pizza') {
     if (!folded.some((f) => /masa|harina|base/.test(f))) out.unshift('Masa');
@@ -371,26 +512,47 @@ function enrichRecipeIngredientNames(
     if (!folded.some((f) => /tortilla|maiz|maíz/.test(f))) out.unshift('Tortilla maíz');
     if (!folded.some((f) => /carne|pastor|carnitas|pollo|barbacoa/.test(f))) out.unshift('Carne al pastor');
     if (!folded.some((f) => /cebolla|cilantro/.test(f))) out.push('Cebolla y cilantro');
+  } else if (lineKind === 'tapas_bar') {
+    if (!folded.some((f) => /aceite|oliva/.test(f))) out.unshift('Aceite de oliva');
+    if (!folded.some((f) => /pan|regana|requena|picos/.test(f))) out.push('Pan');
+    if (!folded.some((f) => /sal/.test(f))) out.push('Sal');
+  } else if (lineKind === 'kebab') {
+    if (!folded.some((f) => /pan|pita|lavash/.test(f))) out.unshift('Pan pita');
+    if (!folded.some((f) => /carne|kebab|doner|döner|pollo/.test(f))) out.unshift('Carne kebab');
+  } else if (lineKind === 'prepared_meals' || lineKind === 'mixed_restaurant') {
+    if (!folded.some((f) => /aceite|oliva/.test(f))) out.unshift('Aceite de oliva');
+    if (!folded.some((f) => /sal/.test(f))) out.push('Sal');
+  } else if (lineKind === 'cafe_bakery') {
+    if (!folded.some((f) => /cafe|café/.test(f))) out.unshift('Café');
+    if (!folded.some((f) => /leche/.test(f))) out.push('Leche');
   }
 
   return [...new Set(out.map((n) => n.trim()).filter(Boolean))];
 }
 
 function buildRecipeLinesFromIngredients(
-  item: Pick<CatalogItem, 'customFields' | 'brandIds'>,
+  item: Pick<CatalogItem, 'customFields' | 'brandIds' | 'category' | 'name'>,
   storeIngredients: CostingStoreIngredient[],
   brands: Array<{ _id: string; deliveryLineKind?: string }>,
   lineKind: DeliveryBrandLineKindId | 'generic',
 ): ProductRecipeLine[] {
   const text = String(item.customFields?.ingredients || '').trim();
-  const parsed = text ? parseImportIngredientNames(text) : [];
+  let parsed = text ? parseImportIngredientNames(text) : [];
+  const category = String(item.category || '');
+  const productName = String(item.name || '');
   const useVertialDefaults =
     parsed.length === 0 &&
-    (lineKind === 'pizza' || lineKind === 'burger_fastfood' || lineKind === 'tacos_mexican');
+    (isFoodRecipeLineKind(lineKind) || shouldUseBarEscandalloPresets(lineKind, category));
+  if (parsed.length === 0 && useVertialDefaults) {
+    parsed = resolveBarEscandalloDefaultIngredients(category, productName);
+  }
   if (parsed.length === 0 && !useVertialDefaults) return [];
 
   const brandIds = (item.brandIds ?? []).map((id) => String(id || '').trim()).filter(Boolean);
-  const names = limitRecipeIngredientNames(enrichRecipeIngredientNames(parsed, lineKind), lineKind);
+  const names = limitRecipeIngredientNames(
+    enrichRecipeIngredientNames(parsed, lineKind, category, productName),
+    lineKind,
+  );
   const lines: ProductRecipeLine[] = [];
   const usedIds = new Set<string>();
 
@@ -400,7 +562,7 @@ function buildRecipeLinesFromIngredients(
       findStoreIngredientForCosting(rawName, storeIngredients, []);
     if (!ing || usedIds.has(ing.id)) continue;
     usedIds.add(ing.id);
-    const qty = resolveQuantityRule(rawName, lineKind);
+    const qty = resolveQuantityRule(rawName, lineKind, category);
     lines.push({
       storeIngredientId: ing.id,
       name: ing.name,
@@ -493,6 +655,17 @@ function isBaseRecipeIngredientName(name: string, lineKind: DeliveryBrandLineKin
   if (lineKind === 'tacos_mexican') {
     return /tortilla|maiz|maíz|carne|pastor|carnitas|pollo|barbacoa/.test(folded);
   }
+  if (lineKind === 'tapas_bar') {
+    return /pan|aceite|oliva|jamon|jamón|queso|patata|aceituna|pulpo|gamba|tortilla|calamar|chorizo|alioli|salsa/.test(
+      folded,
+    );
+  }
+  if (lineKind === 'kebab') {
+    return /pan|pita|carne|kebab|doner|döner|pollo/.test(folded);
+  }
+  if (lineKind === 'prepared_meals' || lineKind === 'mixed_restaurant' || lineKind === 'cafe_bakery') {
+    return /aceite|oliva|sal|pollo|carne|pescado|arroz|pasta|cafe|café|leche|harina/.test(folded);
+  }
   return false;
 }
 
@@ -532,6 +705,9 @@ function resolveCategoryFixedFallback(
   item: Pick<CatalogItem, 'category' | 'name'>,
   lineKind: DeliveryBrandLineKindId | 'generic',
 ): number | null {
+  const barCost = resolveBarEscandalloFixedCost(item.category || '', item.name || '');
+  if (barCost != null) return barCost;
+
   const cat = foldName(normalizeImportCategoryLocal(item.category || ''));
   if (CATEGORY_FIXED_FALLBACK[cat] != null) return CATEGORY_FIXED_FALLBACK[cat];
 
@@ -544,6 +720,11 @@ function resolveCategoryFixedFallback(
   if (lineKind === 'pizza') return CATEGORY_FIXED_FALLBACK.pizzas;
   if (lineKind === 'burger_fastfood') return CATEGORY_FIXED_FALLBACK.burgers;
   if (lineKind === 'tacos_mexican') return CATEGORY_FIXED_FALLBACK.tacos;
+  if (lineKind === 'tapas_bar') return CATEGORY_FIXED_FALLBACK.tapas;
+  if (lineKind === 'kebab') return CATEGORY_FIXED_FALLBACK.kebab;
+  if (lineKind === 'prepared_meals' || lineKind === 'mixed_restaurant') {
+    return CATEGORY_FIXED_FALLBACK.principales;
+  }
   return null;
 }
 
@@ -663,6 +844,11 @@ const VERTIAL_ESCANDALLO_BASE_NAMES: Partial<Record<DeliveryBrandLineKindId, str
   pizza: ['Masa', 'Salsa tomate', 'Mozzarella'],
   burger_fastfood: ['Pan brioche', 'Carne burger'],
   tacos_mexican: ['Tortilla maíz', 'Carne al pastor', 'Cebolla y cilantro'],
+  tapas_bar: ['Aceite de oliva', 'Sal', 'Pan', 'Pan barra', 'Tomate', 'Jamón serrano'],
+  kebab: ['Pan pita', 'Carne kebab', 'Salsa yogur'],
+  prepared_meals: ['Aceite de oliva', 'Sal'],
+  mixed_restaurant: ['Aceite de oliva', 'Sal'],
+  cafe_bakery: ['Café', 'Leche'],
 };
 
 export function ensureVertialEscandalloBaseStoreIngredients(
@@ -695,6 +881,30 @@ export function ensureVertialEscandalloBaseStoreIngredients(
   addForKind('pizza', VERTIAL_ESCANDALLO_BASE_NAMES.pizza ?? []);
   addForKind('burger_fastfood', VERTIAL_ESCANDALLO_BASE_NAMES.burger_fastfood ?? []);
   addForKind('tacos_mexican', VERTIAL_ESCANDALLO_BASE_NAMES.tacos_mexican ?? []);
+  addForKind('tapas_bar', VERTIAL_ESCANDALLO_BASE_NAMES.tapas_bar ?? []);
+  addForKind('kebab', VERTIAL_ESCANDALLO_BASE_NAMES.kebab ?? []);
+  addForKind('prepared_meals', VERTIAL_ESCANDALLO_BASE_NAMES.prepared_meals ?? []);
+  addForKind('mixed_restaurant', VERTIAL_ESCANDALLO_BASE_NAMES.mixed_restaurant ?? []);
+  addForKind('cafe_bakery', VERTIAL_ESCANDALLO_BASE_NAMES.cafe_bakery ?? []);
+
+  const tapasBrandIds = brands.filter((b) => b.deliveryLineKind === 'tapas_bar').map((b) => b._id);
+  if (tapasBrandIds.length > 0) {
+    const scopeIds = tapasBrandIds;
+    for (const name of BAR_ESCANDALLO_BASE_INGREDIENTS) {
+      const exists =
+        findStoreIngredientForCosting(name, merged, scopeIds) ??
+        findStoreIngredientForCosting(name, merged, []);
+      if (exists) continue;
+      merged.push({
+        id: `ing-vertial-bar-${foldName(name)}`,
+        name,
+        role: 'escandallo',
+        brandIds: scopeIds,
+        baseCost: resolveVertialDefaultBaseCost(name, 'tapas_bar'),
+      });
+      added += 1;
+    }
+  }
 
   const prepared = applyVertialDefaultsToStoreIngredients(merged, brands);
   return { items: prepared.items, added };
@@ -761,7 +971,12 @@ export function applyVertialAutoCostingToCatalogItem(
         mode: 'recipe',
       };
     }
-    const fixedCost = resolveVertialDefaultRetailCost(item);
+    let fixedCost = resolveBarEscandalloFixedCost(item.category || '', item.name || '');
+    if (fixedCost == null) fixedCost = resolveVertialDefaultRetailCost(item);
+    if (!(fixedCost > 0)) {
+      fixedCost =
+        resolveCategoryFixedFallback(item, inferImportCostingLineKind(item, brands)) ?? 0;
+    }
     return {
       item: withProductCosting(
         item,

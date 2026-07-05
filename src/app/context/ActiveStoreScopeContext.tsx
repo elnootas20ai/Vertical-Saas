@@ -43,6 +43,11 @@ import {
   writeRetailScopeCacheForBusiness,
   type RetailScopeContext,
 } from '../verticals/retailScopeRegistry';
+import {
+  isTpvTabletWorkerPath,
+  mergeTabletBindingPdv,
+  readTpvTabletBinding,
+} from '../lib/tpvTabletSession';
 
 export interface ActiveStoreScopeValue {
   pointsOfSale: PointOfSale[];
@@ -117,18 +122,52 @@ function scopeFromLoadState(
 
 type StoreLoadOptions = { force?: boolean };
 
+function resolveTabletBoundStoreScope(
+  pathname: string,
+  businessId: string,
+): ReturnType<typeof readTpvTabletBinding> | null {
+  const binding = readTpvTabletBinding();
+  if (!binding?.pdvId || !binding?.businessId) return null;
+  if (!isTpvTabletWorkerPath(pathname)) return null;
+  if (resolveBusinessScopeId({ business_id: binding.businessId }) !== businessId) return null;
+  return binding;
+}
+
+function buildTabletScopeRows(binding: NonNullable<ReturnType<typeof readTpvTabletBinding>>): {
+  retail: WorkCenter[];
+  allPdvs: PointOfSale[];
+} {
+  const pdvs = mergeTabletBindingPdv([], binding);
+  const pdv = pdvs[0];
+  const wcId = String(binding.workCenterId || pdv?.workCenterId || `wc-tablet-${binding.pdvId}`).trim();
+  const retail: WorkCenter[] = [
+    {
+      _id: wcId,
+      name: binding.pdvName || pdv?.name || 'Tienda',
+      centerType: 'punto_de_venta',
+      businessId: binding.businessId,
+      active: true,
+    } as WorkCenter,
+  ];
+  return { retail, allPdvs: pdvs };
+}
+
 function resolveShouldLoadStores(
   biz: BusinessContextType['currentBusiness'],
   businesses: BusinessContextType['businesses'],
   bidAtStart: string,
   hasDisplayedStores: boolean,
   accountBusinessCount?: number,
+  pathname?: string,
 ): boolean {
   if (!biz) return false;
+  const tabletBoundStore = Boolean(
+    pathname && resolveTabletBoundStoreScope(pathname, bidAtStart),
+  );
   return shouldLoadRetailStoresForBusiness(
     buildRetailScopeCtx(biz, businesses, accountBusinessCount),
     bidAtStart,
-    { hasDisplayedStores },
+    { hasDisplayedStores, tabletBoundStore },
   );
 }
 
@@ -252,31 +291,55 @@ function ActiveStoreScopeProviderImpl({
     [applyStores],
   );
 
+  const storeScopeKeyRef = useRef('');
+
   useLayoutEffect(() => {
+    const scopeKey = `${businessId}|${accountBusinessCount ?? ''}`;
+    const scopeChanged = storeScopeKeyRef.current !== scopeKey;
+    storeScopeKeyRef.current = scopeKey;
+
     setInitialLoading(false);
-    emptyRetryDoneRef.current = false;
-    hasDisplayedStoresRef.current = false;
 
     if (!businessId) {
+      emptyRetryDoneRef.current = false;
+      hasDisplayedStoresRef.current = false;
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
       return;
     }
 
+    // Solo resetear tiendas al cambiar de empresa — no en cada re-render del contexto.
+    if (!scopeChanged && hasDisplayedStoresRef.current) {
+      return;
+    }
+
+    emptyRetryDoneRef.current = false;
+    hasDisplayedStoresRef.current = false;
     setPointsOfSale([]);
     setAllPointsOfSale([]);
     setRetailWorkCenters([]);
-
     loadInflightRef.current = null;
-    const cacheCtx = buildRetailScopeCtx(currentBusiness, businesses, accountBusinessCount);
+
+    const cacheCtx = buildRetailScopeCtx(
+      currentBusinessRef.current,
+      businessesRef.current,
+      accountBusinessCount,
+    );
     const cached = readRetailScopeCacheForBusiness(businessId, cacheCtx);
     if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
       hasDisplayedStoresRef.current = true;
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
       return;
     }
-  }, [businessId, accountBusinessCount, currentBusiness, businesses, applyStores]);
+
+    const tabletBinding = resolveTabletBoundStoreScope(location.pathname, businessId);
+    if (tabletBinding) {
+      const { retail, allPdvs } = buildTabletScopeRows(tabletBinding);
+      hasDisplayedStoresRef.current = allPdvs.length > 0 || retail.length > 0;
+      applyStores(retail, allPdvs);
+    }
+  }, [businessId, accountBusinessCount, applyStores, location.pathname]);
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -298,6 +361,10 @@ function ActiveStoreScopeProviderImpl({
         return;
       }
 
+      const accountN = businessesFetchSettledRef.current
+        ? (accountBusinessCountRef.current ?? businessesRef.current.length)
+        : 1;
+
       if (
         !resolveShouldLoadStores(
           biz,
@@ -305,6 +372,7 @@ function ActiveStoreScopeProviderImpl({
           bidAtStart,
           hasDisplayedStoresRef.current,
           accountN,
+          pathnameRef.current,
         )
       ) {
         return;
@@ -313,9 +381,6 @@ function ActiveStoreScopeProviderImpl({
       const showInitialSpinner = !hasDisplayedStoresRef.current;
       if (showInitialSpinner) setInitialLoading(true);
 
-      const accountN = businessesFetchSettledRef.current
-        ? (accountBusinessCountRef.current ?? businessesRef.current.length)
-        : 1;
       const loadOpts = {
         accountBusinessCount: accountN,
         knownBusinessIds: knownBusinessIdsFromList(businessesRef.current),
@@ -326,7 +391,7 @@ function ActiveStoreScopeProviderImpl({
           authUser,
           biz as Business,
           businessesRef.current,
-          { ...loadOpts, includeInactivePdvs: true, tpvBootstrap: true },
+          { ...loadOpts, includeInactivePdvs: true, tpvBootstrap: false },
         );
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
@@ -389,6 +454,8 @@ function ActiveStoreScopeProviderImpl({
         businesses,
         businessId,
         hasDisplayedStoresRef.current,
+        undefined,
+        location.pathname,
       )
     ) {
       return;
@@ -411,6 +478,7 @@ function ActiveStoreScopeProviderImpl({
     currentBusiness,
     businesses,
     load,
+    location.pathname,
   ]);
 
   useEffect(() => {
@@ -436,6 +504,8 @@ function ActiveStoreScopeProviderImpl({
         businesses,
         businessId,
         hasDisplayedStoresRef.current,
+        accountBusinessCount,
+        location.pathname,
       )
     ) {
       return;

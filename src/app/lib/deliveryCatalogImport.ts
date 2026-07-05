@@ -48,6 +48,34 @@ import {
 } from './catalogComboSlots';
 import { buildStableImportCatalogSku, catalogLooseIdentityKey } from '../../../shared/catalog/catalogItemIdentity.js';
 
+function inferInventoryBusinessType(
+  brands: Array<{ deliveryLineKind?: string }>,
+  fallback = 'delivery',
+): string {
+  const kinds = brands.map((b) => String(b.deliveryLineKind || '').trim());
+  if (kinds.includes('tapas_bar') || kinds.includes('cafe_bakery')) return 'restaurant';
+  return fallback;
+}
+
+async function syncInventoryFromStoreIngredients(
+  userId: string,
+  businessId: string,
+  storeIngredients: ReturnType<typeof normalizeStoreIngredients>,
+  brands: Array<{ _id: string; deliveryLineKind?: string }>,
+  businessType?: string,
+): Promise<void> {
+  try {
+    await syncInventoryCatalogFromSources(userId, {
+      businessType: businessType || inferInventoryBusinessType(brands),
+      businessId,
+      storeIngredients,
+      brands,
+    });
+  } catch {
+    /* inventario best-effort */
+  }
+}
+
 export type { ImportBrandLike } from './deliveryCatalogImportLogic';
 export {
   allCommercialLineBrands,
@@ -254,12 +282,7 @@ export async function syncStoreIngredientsFromCatalogImport(
   }
 
   try {
-    await syncInventoryCatalogFromSources(uid, {
-      businessType: 'delivery',
-      businessId: bid,
-      storeIngredients: normalizeStoreIngredients(merged),
-      brands,
-    });
+    await syncInventoryFromStoreIngredients(uid, bid, normalizeStoreIngredients(merged), brands);
   } catch {
     /* inventario best-effort */
   }
@@ -301,7 +324,7 @@ export async function syncAutoCostingAfterCatalogImport(
   }
 
   const result = await runVertialStockAutomationPipeline(uid, {
-    businessType: 'delivery',
+    businessType: inferInventoryBusinessType(brands),
     businessId: bid,
     storeIngredients: withBases,
     brands,
@@ -310,6 +333,8 @@ export async function syncAutoCostingAfterCatalogImport(
     mode: 'costing',
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
+
+  await syncInventoryFromStoreIngredients(uid, bid, withBases, brands);
 
   return result.costing;
 }
@@ -342,9 +367,10 @@ export async function repairVertialFoodEscandallo(
     notifyDeliveryConfigChanged();
   }
 
+  const inventoryBusinessType = inferInventoryBusinessType(brands);
   const catalog = await listCatalogItemsRequest(uid).catch(() => [] as CatalogItem[]);
   const scoped = filterCatalogItemsForBusinessScope(catalog, bid, brands, {
-    activeBusinessType: 'delivery',
+    activeBusinessType: inventoryBusinessType,
   });
   const menuItems = scoped.filter(
     (item) => (item.module || 'catalog') === 'catalog' && item.itemType !== 'service' && item.active !== false,
@@ -353,11 +379,12 @@ export async function repairVertialFoodEscandallo(
     ? menuItems
     : scoped.filter((item) => needsVertialFoodEscandalloRepair(item, brands));
   if (repairTargets.length === 0) {
+    await syncInventoryFromStoreIngredients(uid, bid, withBases, brands, inventoryBusinessType);
     return { updated: 0, recipe: 0, fixed: 0, basesAdded };
   }
 
   const result = await runVertialStockAutomationPipeline(uid, {
-    businessType: 'delivery',
+    businessType: inventoryBusinessType,
     businessId: bid,
     storeIngredients: withBases,
     brands,
@@ -367,6 +394,8 @@ export async function repairVertialFoodEscandallo(
     mode: 'costing',
     updateCatalogItem: (item) => updateCatalogItemRequest(uid, item),
   });
+
+  await syncInventoryFromStoreIngredients(uid, bid, withBases, brands, inventoryBusinessType);
 
   return {
     updated: result.costing.updated,

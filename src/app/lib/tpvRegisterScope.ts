@@ -1,5 +1,6 @@
 import type { Business } from './businessApi';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import { isTpvTabletWorkerPath } from './tpvTabletSession';
 import { resolveBusinessDataUserId } from './tenantUserId';
 
 export interface TpvTabletBindingRef {
@@ -70,9 +71,17 @@ export function shouldAutoSwitchToDeliveryBusiness(
   return deliveryId;
 }
 
-/** Sesión tablet TPV activa (código de tienda vinculado). */
+/** Binding tablet válido (código de tienda vinculado). */
 export function isTpvTabletSession(binding?: TpvTabletBindingRef | null): boolean {
   return Boolean(String(binding?.pdvId || '').trim() && String(binding?.businessId || '').trim());
+}
+
+/** Tablet operativa: binding + ruta worker/tablet (no aplica en /saas/caja/tpv del gerente). */
+export function isActiveTpvTabletSession(
+  binding?: TpvTabletBindingRef | null,
+  pathname?: string | null,
+): boolean {
+  return isTpvTabletSession(binding) && isTpvTabletWorkerPath(String(pathname || ''));
 }
 
 /** Id de empresa a partir del binding tablet — siempre pasar `{ business_id }`, nunca el string suelto. */
@@ -90,14 +99,16 @@ export function resolveTpvRegisterScope(params: {
   currentBusiness: Business | null;
   tabletBinding?: TpvTabletBindingRef | null;
   authUser: AuthLike;
+  /** Ruta actual: la sesión tablet solo aplica en /saas/worker/tpv*. */
+  pathname?: string | null;
 }): {
   scopeBusinessId: string;
   effectiveDataUserId: string;
   isTabletSession: boolean;
   shouldSyncBusinessFromTablet: boolean;
 } {
-  const { currentBusiness, tabletBinding, authUser } = params;
-  const tablet = isTpvTabletSession(tabletBinding);
+  const { currentBusiness, tabletBinding, authUser, pathname } = params;
+  const tablet = isActiveTpvTabletSession(tabletBinding, pathname);
   const tabletBid = businessScopeIdFromTabletBinding(tabletBinding);
   const activeBid = resolveBusinessScopeId(currentBusiness);
 

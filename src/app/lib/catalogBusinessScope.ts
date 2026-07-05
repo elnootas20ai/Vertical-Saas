@@ -74,6 +74,7 @@ export function catalogItemBelongsToBusinessScope(
   if (universalCategory) {
     if (activeType && !isDeliveryOpsBusinessType(activeType)) return false;
     if (multiAccount) return isDeliveryOpsBusinessType(activeType);
+    if (isRestaurantBusinessType(activeType)) return true;
     return brandIds.size > 0;
   }
 

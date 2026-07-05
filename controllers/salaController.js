@@ -16,6 +16,8 @@ import {
   addComandaToOrder,
   updateComandaInOrder,
   shouldAutoTransitionTable,
+  listDiningTableTicketStatsByUser,
+  sanitizeDiningTableTicketStat,
 } from '../services/salaService.js';
 import {
   ensureDatabase,
@@ -869,6 +871,27 @@ export async function updateComandaStatus(req, res) {
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar estado de comanda' });
+  }
+}
+
+// ─── TABLE TICKET STATS ──────────────────────────────────────────────────────
+
+export async function listTableTicketStats(req, res) {
+  try {
+    const { userId } = req.params;
+    const { businessId, tableId, dateFrom, dateTo, pdvId } = req.query || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const stats = await listDiningTableTicketStatsByUser(req, userId, {
+      businessId: businessId ? String(businessId) : '',
+      tableId: tableId ? String(tableId) : '',
+      dateFrom: dateFrom ? String(dateFrom) : '',
+      dateTo: dateTo ? String(dateTo) : '',
+      pdvId: pdvId ? String(pdvId) : '',
+    });
+    return res.json({ ok: true, stats });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al cargar estadísticas de mesa' });
   }
 }
 
